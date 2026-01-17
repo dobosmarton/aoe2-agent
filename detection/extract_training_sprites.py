@@ -180,126 +180,144 @@ SPRITE_CONFIG = [
     ], 2, "Korean UU"),
 
     # =========================================================================
-    # BUILDINGS - ECONOMY (Western European / Mediterranean style)
-    # Using west/medi civs for generic European look (Franks, Britons, etc.)
+    # BUILDINGS - ECONOMY (All ages: Dark, Feudal, Castle, Imperial)
+    # Using dark/west/medi civs for generic European look
     # =========================================================================
     ("town_center", [
-        "b_west_town_center_age2_x1.sld",
-        "b_west_town_center_age3_x1.sld",
+        # Dark Age (age1) - no TC in Dark Age, starts in Feudal
+        "b_west_town_center_age2_x1.sld",   # Feudal
+        "b_west_town_center_age3_x1.sld",   # Castle
+        "b_west_town_center_age4_x1.sld",   # Imperial
         "b_medi_town_center_age2_x1.sld",
         "b_medi_town_center_age3_x1.sld",
-    ], 4, "Town Center"),
+    ], 5, "Town Center (all ages)"),
 
     ("house", [
-        "b_west_house_age2_x1.sld",
-        "b_west_house_age3_x1.sld",
+        "b_dark_house_age1_x1.sld",         # Dark Age
+        "b_west_house_age2_x1.sld",         # Feudal
+        "b_west_house_age3_x1.sld",         # Castle
         "b_medi_house_age2_x1.sld",
         "b_medi_house_age3_x1.sld",
-    ], 4, "Houses"),
+    ], 5, "Houses (all ages)"),
 
     ("mill", [
-        "b_west_mill_age2_x1.sld",
-        "b_west_mill_age3_x1.sld",
+        "b_dark_mill_age1_x1.sld",          # Dark Age
+        "b_west_mill_age2_x1.sld",          # Feudal
+        "b_west_mill_age3_x1.sld",          # Castle
         "b_medi_mill_age2_x1.sld",
-    ], 3, "Mill"),
+    ], 4, "Mill (all ages)"),
 
     ("lumber_camp", [
-        "b_west_lumber_camp_age2_x1.sld",
-        "b_west_lumber_camp_age3_x1.sld",
+        "b_dark_lumber_camp_age1_x1.sld",   # Dark Age
+        "b_west_lumber_camp_age2_x1.sld",   # Feudal
+        "b_west_lumber_camp_age3_x1.sld",   # Castle
         "b_medi_lumber_camp_age2_x1.sld",
-    ], 3, "Lumber Camp"),
+    ], 4, "Lumber Camp (all ages)"),
 
     ("mining_camp", [
-        "b_west_mining_camp_age2_x1.sld",
-        "b_west_mining_camp_age3_x1.sld",
+        "b_dark_mining_camp_age1_x1.sld",   # Dark Age
+        "b_west_mining_camp_age2_x1.sld",   # Feudal
+        "b_west_mining_camp_age3_x1.sld",   # Castle
         "b_medi_mining_camp_age2_x1.sld",
-    ], 3, "Mining Camp"),
+    ], 4, "Mining Camp (all ages)"),
 
     # Farm buildings are terrain textures in a different format, skipping
 
     ("market", [
-        "b_west_market_age2_x1.sld",
-        "b_west_market_age3_x1.sld",
+        "b_west_market_age2_x1.sld",        # Feudal
+        "b_west_market_age3_x1.sld",        # Castle
+        "b_west_market_age4_x1.sld",        # Imperial
         "b_medi_market_age2_x1.sld",
-    ], 3, "Market"),
+    ], 4, "Market (all ages)"),
 
     ("blacksmith", [
-        "b_west_blacksmith_age2_x1.sld",
-        "b_west_blacksmith_age3_x1.sld",
+        "b_dark_blacksmith_age1_x1.sld",    # Dark Age
+        "b_west_blacksmith_age2_x1.sld",    # Feudal
+        "b_west_blacksmith_age3_x1.sld",    # Castle
         "b_medi_blacksmith_age2_x1.sld",
-    ], 3, "Blacksmith"),
+    ], 4, "Blacksmith (all ages)"),
 
     # =========================================================================
-    # BUILDINGS - MILITARY (Western European / Mediterranean style)
+    # BUILDINGS - MILITARY (All ages)
     # =========================================================================
     ("barracks", [
-        "b_west_barracks_age2_x1.sld",
-        "b_west_barracks_age3_x1.sld",
+        "b_dark_barracks_age1_x1.sld",      # Dark Age
+        "b_west_barracks_age2_x1.sld",      # Feudal
+        "b_west_barracks_age3_x1.sld",      # Castle
         "b_medi_barracks_age2_x1.sld",
-    ], 3, "Barracks"),
+    ], 4, "Barracks (all ages)"),
 
     ("archery_range", [
-        "b_west_archery_range_age2_x1.sld",
-        "b_west_archery_range_age3_x1.sld",
+        "b_west_archery_range_age2_x1.sld", # Feudal
+        "b_west_archery_range_age3_x1.sld", # Castle
         "b_medi_archery_range_age2_x1.sld",
-    ], 3, "Archery Range"),
+        "b_medi_archery_range_age3_x1.sld",
+    ], 4, "Archery Range (all ages)"),
 
     ("stable", [
-        "b_west_stable_age2_x1.sld",
-        "b_west_stable_age3_x1.sld",
+        "b_west_stable_age2_x1.sld",        # Feudal
+        "b_west_stable_age3_x1.sld",        # Castle
         "b_medi_stable_age2_x1.sld",
-    ], 3, "Stable"),
+        "b_medi_stable_age3_x1.sld",
+    ], 4, "Stable (all ages)"),
 
     ("siege_workshop", [
-        "b_west_siege_workshop_age3_x1.sld",
+        "b_west_siege_workshop_age3_x1.sld", # Castle
         "b_medi_siege_workshop_age3_x1.sld",
     ], 2, "Siege Workshop"),
 
     ("monastery", [
-        "b_west_monastery_age3_x1.sld",
+        "b_west_monastery_age3_x1.sld",     # Castle
         "b_medi_monastery_age3_x1.sld",
     ], 2, "Monastery"),
 
     ("castle", [
-        "b_west_castle_age3_x1.sld",
+        "b_west_castle_age3_x1.sld",        # Castle
         "b_medi_castle_age3_x1.sld",
     ], 2, "Castle"),
 
     # Krepost is Bulgarian unique - skipping for generic training
 
     # =========================================================================
-    # BUILDINGS - DEFENSE (Western European / Mediterranean style)
+    # BUILDINGS - DEFENSE (All ages)
     # =========================================================================
     ("tower", [
-        "b_west_watch_tower_age2_x1.sld",
-        "b_west_guard_tower_age3_x1.sld",
-        "b_west_keep_age4_x1.sld",
+        "b_dark_outpost_age1_x1.sld",       # Dark Age outpost
+        "b_west_watch_tower_age2_x1.sld",   # Feudal
+        "b_west_guard_tower_age3_x1.sld",   # Castle
+        "b_west_keep_age4_x1.sld",          # Imperial
+        "b_west_tower_age4_x1.sld",
         "b_medi_watch_tower_age2_x1.sld",
-    ], 4, "Towers"),
+    ], 6, "Towers (all ages)"),
 
     ("wall", [
+        "b_dark_palisade_wall_x1.sld",      # Dark Age palisade
         "b_archaic_palisade_wall_x1.sld",
-        "b_west_stone_wall_age3_x1.sld",
-        "b_west_fortified_wall_age4_x1.sld",
-    ], 3, "Walls"),
+        "b_west_stone_wall_age3_x1.sld",    # Castle
+        "b_west_fortified_wall_age4_x1.sld", # Imperial
+    ], 4, "Walls (all ages)"),
 
     ("gate", [
+        "b_dark_gate_palisade_e_closed_x1.sld",  # Dark Age
         "b_west_gate_palisade_e_closed_x1.sld",
-        "b_west_gate_stone_e_closed_x1.sld",
-    ], 2, "Gates"),
+        "b_west_gate_stone_e_closed_x1.sld",     # Castle
+        "b_west_gate_fortified_e_closed_x1.sld", # Imperial
+    ], 4, "Gates (all ages)"),
 
     # =========================================================================
-    # BUILDINGS - OTHER (Western European / Mediterranean style)
+    # BUILDINGS - OTHER (All ages)
     # =========================================================================
     ("dock", [
-        "b_west_dock_age2_x1.sld",
-        "b_west_dock_age3_x1.sld",
-    ], 2, "Dock"),
+        "b_dark_dock_age1_x1.sld",          # Dark Age
+        "b_west_dock_age2_x1.sld",          # Feudal
+        "b_west_dock_age3_x1.sld",          # Castle
+    ], 3, "Dock (all ages)"),
 
     ("university", [
-        "b_west_university_age3_x1.sld",
+        "b_west_university_age3_x1.sld",    # Castle
+        "b_west_university_age4_x1.sld",    # Imperial
         "b_medi_university_age3_x1.sld",
-    ], 2, "University"),
+    ], 3, "University (all ages)"),
 
     ("wonder", [
         "b_west_wonder_britons_x1.sld",

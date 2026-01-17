@@ -341,11 +341,19 @@ class SLDExtractor:
             use_content_length: If True, trust content_length field instead of calculating
             check_marker: If True, check for optional 2-byte 0x0000 marker before content_length
         """
+        # Ensure we're 4-byte aligned before reading layer
+        if self.offset % 4 != 0:
+            self.offset = (self.offset + 3) & ~3
+
         if check_marker:
             # Check if there's a 0x0000 marker before content_length
+            # Only treat as marker if next 4 bytes look like a reasonable content_length
             marker = struct.unpack('< H', self.data[self.offset:self.offset+2])[0]
             if marker == 0:
-                self._read('< H')  # Skip the marker
+                potential_len = struct.unpack('< I', self.data[self.offset+2:self.offset+6])[0]
+                # Only skip marker if the resulting content_length is reasonable (<1MB)
+                if 0 < potential_len < 1000000:
+                    self._read('< H')  # Skip the marker
 
         content_length = self._read('< I')[0]
         layer_start = self.offset
@@ -354,6 +362,9 @@ class SLDExtractor:
             # Some layers have different formats, just skip by content_length
             # Note: content_length includes the 4-byte length field itself, so subtract 4
             self.offset = layer_start + content_length - 4
+            # Ensure 4-byte alignment after skip
+            if self.offset % 4 != 0:
+                self.offset = (self.offset + 3) & ~3
             return
 
         if is_mask_layer:
