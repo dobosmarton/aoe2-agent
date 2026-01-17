@@ -11,3 +11,7 @@ __pycache__/
 .DS_Store
 .env.*
 logs.*
+
+game_graphics/
+training_data/
+tmp/

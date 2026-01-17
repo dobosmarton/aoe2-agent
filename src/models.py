@@ -1,26 +1,56 @@
 """Pydantic models for action validation."""
 
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ClickAction(BaseModel):
-    """Left click action."""
+    """Left click action.
+
+    Can specify either:
+    - x, y coordinates directly
+    - target_id referencing a detected entity (resolved to coordinates at execution)
+    """
 
     type: Literal["click"]
-    x: int = Field(ge=0, le=7680)  # Support up to 8K resolution
-    y: int = Field(ge=0, le=4320)
+    x: Optional[int] = Field(default=None, ge=0, le=7680)
+    y: Optional[int] = Field(default=None, ge=0, le=4320)
+    target_id: Optional[str] = Field(default=None, description="Entity ID from detection, e.g. 'sheep_0'")
     intent: str = ""
+
+    @model_validator(mode='after')
+    def check_coords_or_target(self):
+        """Ensure either coordinates or target_id is provided."""
+        has_coords = self.x is not None and self.y is not None
+        has_target = self.target_id is not None
+        if not has_coords and not has_target:
+            raise ValueError("Must provide either (x, y) coordinates or target_id")
+        return self
 
 
 class RightClickAction(BaseModel):
-    """Right click action."""
+    """Right click action.
+
+    Can specify either:
+    - x, y coordinates directly
+    - target_id referencing a detected entity (resolved to coordinates at execution)
+    """
 
     type: Literal["right_click"]
-    x: int = Field(ge=0, le=7680)  # Support up to 8K resolution
-    y: int = Field(ge=0, le=4320)
+    x: Optional[int] = Field(default=None, ge=0, le=7680)
+    y: Optional[int] = Field(default=None, ge=0, le=4320)
+    target_id: Optional[str] = Field(default=None, description="Entity ID from detection, e.g. 'sheep_0'")
     intent: str = ""
+
+    @model_validator(mode='after')
+    def check_coords_or_target(self):
+        """Ensure either coordinates or target_id is provided."""
+        has_coords = self.x is not None and self.y is not None
+        has_target = self.target_id is not None
+        if not has_coords and not has_target:
+            raise ValueError("Must provide either (x, y) coordinates or target_id")
+        return self
 
 
 class PressAction(BaseModel):

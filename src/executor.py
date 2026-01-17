@@ -1,7 +1,7 @@
 """Action executor module for AoE2 LLM Agent."""
 
 import asyncio
-from typing import Any
+from typing import Any, Optional
 
 import pyautogui
 import structlog
@@ -18,6 +18,49 @@ pyautogui.PAUSE = 0.02  # Reduce default pause between actions (default is 0.1)
 
 # Cache window position (updated before action batches)
 _window_offset: tuple[int, int] = (0, 0)
+
+# Cache detected entities for target_id resolution
+_detected_entities: list[dict] = []
+
+
+def set_detected_entities(entities: list) -> None:
+    """Set the detected entities for target_id resolution.
+
+    Should be called before execute_actions with the results from EntityDetector.
+
+    Args:
+        entities: List of DetectedEntity objects or dicts with 'id' and 'center' keys
+    """
+    global _detected_entities
+    # Convert to dicts if they have to_dict method
+    _detected_entities = [
+        e.to_dict() if hasattr(e, 'to_dict') else e
+        for e in entities
+    ]
+    log.debug("detected_entities_set", count=len(_detected_entities))
+
+
+def resolve_target_id(target_id: str) -> Optional[tuple[int, int]]:
+    """Resolve a target_id to (x, y) coordinates.
+
+    Args:
+        target_id: Entity ID (e.g., 'sheep_0', 'villager_1')
+
+    Returns:
+        (x, y) tuple if found, None otherwise
+    """
+    for entity in _detected_entities:
+        if entity.get("id") == target_id:
+            center = entity.get("center")
+            if center:
+                return (int(center[0]), int(center[1]))
+    return None
+
+
+def clear_detected_entities() -> None:
+    """Clear the cached detected entities."""
+    global _detected_entities
+    _detected_entities = []
 
 
 async def execute_action(action: dict[str, Any] | Action) -> bool:
@@ -52,17 +95,44 @@ async def execute_action(action: dict[str, Any] | Action) -> bool:
         def translate(x: int, y: int) -> tuple[int, int]:
             return (x + _window_offset[0], y + _window_offset[1])
 
+        # Helper to resolve coordinates (handles target_id if present)
+        def get_coords(action_dict: dict) -> tuple[int, int] | None:
+            """Get (x, y) from action, resolving target_id if needed."""
+            target_id = action_dict.get("target_id")
+            if target_id:
+                coords = resolve_target_id(target_id)
+                if coords is None:
+                    log.warning("target_id_not_found", target_id=target_id)
+                return coords
+            x = action_dict.get("x")
+            y = action_dict.get("y")
+            if x is not None and y is not None:
+                return (x, y)
+            return None
+
         if action_type == "click":
-            x, y = action_dict["x"], action_dict["y"]
+            coords = get_coords(action_dict)
+            if coords is None:
+                log.warning("click_no_coords", action=action_dict)
+                return False
+            x, y = coords
             screen_x, screen_y = translate(x, y)
             pyautogui.click(screen_x, screen_y)
-            log.info("click", x=x, y=y, screen_x=screen_x, screen_y=screen_y, intent=intent)
+            target_info = action_dict.get("target_id", "")
+            log.info("click", x=x, y=y, screen_x=screen_x, screen_y=screen_y,
+                     target_id=target_info, intent=intent)
 
         elif action_type == "right_click":
-            x, y = action_dict["x"], action_dict["y"]
+            coords = get_coords(action_dict)
+            if coords is None:
+                log.warning("right_click_no_coords", action=action_dict)
+                return False
+            x, y = coords
             screen_x, screen_y = translate(x, y)
             pyautogui.rightClick(screen_x, screen_y)
-            log.info("right_click", x=x, y=y, screen_x=screen_x, screen_y=screen_y, intent=intent)
+            target_info = action_dict.get("target_id", "")
+            log.info("right_click", x=x, y=y, screen_x=screen_x, screen_y=screen_y,
+                     target_id=target_info, intent=intent)
 
         elif action_type == "press":
             key = action_dict["key"]
