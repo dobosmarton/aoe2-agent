@@ -1,0 +1,22 @@
+# AoE2 LLM Agent Dependencies
+
+# Screen capture
+mss>=9.0.0
+Pillow>=10.0.0
+
+# Input automation
+pyautogui>=0.9.54
+pygetwindow>=0.0.9
+
+# LLM providers
+anthropic>=0.40.0
+
+# Data validation
+pydantic>=2.5.0
+
+# Logging
+structlog>=24.1.0
+colorama>=0.4.6  # Required for colored output on Windows
+
+# Retry logic
+tenacity>=8.2.0
