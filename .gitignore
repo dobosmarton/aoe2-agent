@@ -13,5 +13,12 @@ __pycache__/
 logs.*
 
 game_graphics/
-training_data/
 tmp/
+
+# Detection data (large files)
+detection/training_data/
+detection/real_screenshots/
+
+# Model weights
+**/models/*.pt
+**/models/*.onnx

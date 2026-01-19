@@ -1,4 +1,4 @@
 # AoE2 Entity Detection
-from .detector import EntityDetector, DetectedEntity
+from .inference.detector import EntityDetector, DetectedEntity, get_detector
 
-__all__ = ["EntityDetector", "DetectedEntity"]
+__all__ = ["EntityDetector", "DetectedEntity", "get_detector"]

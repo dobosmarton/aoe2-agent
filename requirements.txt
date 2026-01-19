@@ -22,4 +22,5 @@ colorama>=0.4.6  # Required for colored output on Windows
 tenacity>=8.2.0
 
 # Object detection (YOLO)
-ultralytics>=8.0.0  # YOLOv8 for entity detection
+ultralytics>=8.0.0
+numpy<2  # Required for torch/ultralytics compatibility

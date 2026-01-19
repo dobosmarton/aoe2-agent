@@ -1,0 +1,149 @@
+# AoE2 Detection Classes - Single Source of Truth
+# Used by: YOLO training, CVAT import, detector inference
+#
+# Guidelines:
+# - Use "_line" suffix for unit upgrade paths (militia_line = militia → champion)
+# - Use "unique_" prefix for civilization-specific units grouped by type
+# - Order: Resources → Buildings → Units
+
+classes:
+  # Resources & Nature (9)
+  - id: 0
+    name: tree
+  - id: 1
+    name: gold_mine
+  - id: 2
+    name: stone_mine
+  - id: 3
+    name: berry_bush
+  - id: 4
+    name: relic
+  - id: 5
+    name: deer
+  - id: 6
+    name: boar
+  - id: 7
+    name: wolf
+  - id: 8
+    name: sheep
+
+  # Economy Buildings (8)
+  - id: 9
+    name: town_center
+  - id: 10
+    name: house
+  - id: 11
+    name: lumber_camp
+  - id: 12
+    name: mining_camp
+  - id: 13
+    name: mill
+  - id: 14
+    name: market
+  - id: 15
+    name: dock
+  - id: 16
+    name: farm
+
+  # Military Buildings (8)
+  - id: 17
+    name: barracks
+  - id: 18
+    name: archery_range
+  - id: 19
+    name: stable
+  - id: 20
+    name: blacksmith
+  - id: 21
+    name: siege_workshop
+  - id: 22
+    name: monastery
+  - id: 23
+    name: castle
+  - id: 24
+    name: university
+
+  # Defensive (3)
+  - id: 25
+    name: gate
+  - id: 26
+    name: wall
+  - id: 27
+    name: tower
+
+  # Special Buildings (2)
+  - id: 28
+    name: wonder
+  - id: 29
+    name: krepost
+
+  # Civilian Units (3)
+  - id: 30
+    name: villager
+  - id: 31
+    name: trade_cart
+  - id: 32
+    name: fishing_ship
+
+  # Scout & Cavalry (4)
+  - id: 33
+    name: scout_line
+  - id: 34
+    name: knight_line
+  - id: 35
+    name: camel_line
+  - id: 36
+    name: battle_elephant
+
+  # Archer Units (4)
+  - id: 37
+    name: archer_line
+  - id: 38
+    name: skirmisher_line
+  - id: 39
+    name: cavalry_archer
+  - id: 40
+    name: hand_cannoneer
+
+  # Infantry (3)
+  - id: 41
+    name: militia_line
+  - id: 42
+    name: spearman_line
+  - id: 43
+    name: eagle_line
+
+  # Siege (4)
+  - id: 44
+    name: ram
+  - id: 45
+    name: mangonel_line
+  - id: 46
+    name: scorpion
+  - id: 47
+    name: trebuchet
+
+  # Monks & Special (2)
+  - id: 48
+    name: monk
+  - id: 49
+    name: king
+
+  # Unique Units - Grouped by Type (5)
+  - id: 50
+    name: unique_archer
+    examples: [Longbowman, Plumed Archer, Chu Ko Nu, Mangudai, Camel Archer]
+  - id: 51
+    name: unique_cavalry
+    examples: [Cataphract, Boyar, Leitis, Keshik, Konnik, Tarkan]
+  - id: 52
+    name: unique_infantry
+    examples: [Berserk, Samurai, Teutonic Knight, Jaguar Warrior, Huskarl]
+  - id: 53
+    name: unique_siege
+    examples: [War Wagon, Organ Gun, Ballista Elephant, War Elephant]
+  - id: 54
+    name: unique_ship
+    examples: [Longboat, Caravel, Turtle Ship, Thirisadai]
+
+# Total: 55 classes

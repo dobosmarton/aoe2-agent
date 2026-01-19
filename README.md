@@ -75,25 +75,55 @@ save_screenshot(screenshot_bytes, "test.jpg")
 
 ```
 agent/
-├── src/
-│   ├── main.py         # Entry point, CLI argument parsing
-│   ├── game_loop.py    # Main capture→think→act loop
-│   ├── screen.py       # Screenshot capture (targets game window)
-│   ├── executor.py     # Mouse/keyboard action execution
-│   ├── config.py       # Settings via Pydantic
-│   ├── window.py       # AoE2 window detection and focus
-│   ├── memory.py       # Agent memory and game state tracking
-│   ├── models.py       # Pydantic models for action validation
+├── src/                        # Core agent implementation
+│   ├── main.py                 # Entry point, CLI argument parsing
+│   ├── game_loop.py            # Main capture→think→act loop
+│   ├── screen.py               # Screenshot capture (targets game window)
+│   ├── executor.py             # Mouse/keyboard action execution
+│   ├── config.py               # Settings via Pydantic
+│   ├── window.py               # AoE2 window detection and focus
+│   ├── memory.py               # Agent memory and game state tracking
+│   ├── models.py               # Pydantic models for action validation
 │   └── providers/
-│       ├── base.py     # Provider interface (BaseLLMProvider)
-│       └── claude.py   # Anthropic Claude implementation
+│       ├── base.py             # Provider interface (BaseLLMProvider)
+│       └── claude.py           # Anthropic Claude implementation
+├── detection/                  # YOLO entity detection system
+│   ├── inference/              # Runtime detection (detector.py, models/)
+│   ├── training/               # Training pipeline & config
+│   ├── extraction/             # Sprite & screenshot extraction
+│   ├── testing/                # Validation scripts
+│   └── docs/                   # Detection documentation
+├── data/                       # Game knowledge database
+│   ├── game_knowledge.py       # Structured AoE2 game rules
+│   └── aoe2.db                 # SQLite database
 ├── prompts/
-│   └── system.md       # System prompt with game knowledge
-├── logs/               # Screenshots saved here
+│   └── system.md               # System prompt with game knowledge
+├── logs/                       # Screenshots saved here
 └── requirements.txt
 ```
 
+See [detection/README.md](detection/README.md) for details on the entity detection system.
+
 ## Architecture
+
+### Entity Detection (Optional)
+
+When available, YOLO-based detection provides structured game understanding:
+
+```python
+from detection import get_detector
+
+detector = get_detector()
+entities = detector.detect(screenshot_bytes)
+# Returns: [{"id": "sheep_0", "class": "sheep", "center": (x, y), "confidence": 0.95}, ...]
+```
+
+The LLM can reference entities by ID instead of pixel coordinates:
+```json
+{"type": "right_click", "target_id": "sheep_0"}
+```
+
+The executor automatically resolves IDs to screen coordinates.
 
 ### Memory System
 

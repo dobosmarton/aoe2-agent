@@ -18,7 +18,7 @@ log = structlog.get_logger()
 
 # Optional detection module (graceful fallback if not available)
 try:
-    from detection.detector import EntityDetector, get_detector
+    from detection.inference.detector import EntityDetector, get_detector
     DETECTION_AVAILABLE = True
 except ImportError:
     DETECTION_AVAILABLE = False
@@ -48,9 +48,13 @@ async def game_loop(
     detector = None
     if use_detection and DETECTION_AVAILABLE:
         try:
-            # Use mock mode if model not available
-            detector = get_detector(use_mock=True)
-            log.info("detector_initialized", mode="mock" if detector.use_mock else "yolo")
+            # Use real YOLO detection (falls back to mock if model not found)
+            # Prefers v2 model (hybrid training) over v1 (synthetic only)
+            detector = get_detector(use_mock=False)
+            backend = "mock" if detector.use_mock else detector.backend or "yolo"
+            log.info("detector_initialized",
+                     mode=backend,
+                     confidence_threshold=detector.confidence_threshold)
         except Exception as e:
             log.warning("detector_init_failed", error=str(e))
             detector = None
@@ -202,7 +206,7 @@ async def run_single_iteration(
     detected_entities = []
     if use_detection and DETECTION_AVAILABLE:
         try:
-            detector = get_detector(use_mock=True)
+            detector = get_detector(use_mock=False)
             detected_entities = detector.detect(screenshot)
             set_detected_entities(detected_entities)
         except Exception as e:
