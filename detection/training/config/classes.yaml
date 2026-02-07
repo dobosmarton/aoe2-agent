@@ -146,4 +146,18 @@ classes:
     name: unique_ship
     examples: [Longboat, Caravel, Turtle Ship, Thirisadai]
 
-# Total: 55 classes
+  # Naval & Water (2)
+  - id: 55
+    name: fish
+  - id: 56
+    name: galley
+    examples: [Galley, War Galley, Galleon]
+  - id: 57
+    name: fire_galley
+    examples: [Fire Galley, Fire Ship, Fast Fire Ship]
+
+  # Additional Siege (1)
+  - id: 58
+    name: siege_tower
+
+# Total: 59 classes

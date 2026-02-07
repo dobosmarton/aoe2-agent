@@ -1,0 +1,130 @@
+{
+  "archer": {
+    "strong_vs": [
+      "infantry",
+      "spearman"
+    ],
+    "weak_vs": [
+      "skirmisher",
+      "mangonel",
+      "cavalry",
+      "eagle_warrior"
+    ],
+    "notes": "Kite infantry; vulnerable to high pierce armor units"
+  },
+  "cavalry": {
+    "strong_vs": [
+      "archer",
+      "siege",
+      "monk",
+      "skirmisher"
+    ],
+    "weak_vs": [
+      "spearman",
+      "camel",
+      "monk_large_groups"
+    ],
+    "notes": "Mobile; raid economy; avoid pike/camel masses"
+  },
+  "infantry": {
+    "strong_vs": [
+      "building",
+      "eagle_warrior",
+      "trash_unit"
+    ],
+    "weak_vs": [
+      "archer",
+      "hand_cannoneer",
+      "cavalry"
+    ],
+    "notes": "Cost-effective; good for raiding and building destruction"
+  },
+  "spearman": {
+    "strong_vs": [
+      "cavalry",
+      "camel",
+      "elephant"
+    ],
+    "weak_vs": [
+      "archer",
+      "infantry",
+      "mangonel"
+    ],
+    "notes": "Cheap anti-cavalry; always pair with ranged units"
+  },
+  "skirmisher": {
+    "strong_vs": [
+      "archer",
+      "spearman"
+    ],
+    "weak_vs": [
+      "cavalry",
+      "infantry",
+      "mangonel"
+    ],
+    "notes": "Trash counter to archers; useless vs melee"
+  },
+  "knight": {
+    "strong_vs": [
+      "archer",
+      "siege",
+      "villager",
+      "monk"
+    ],
+    "weak_vs": [
+      "pikeman",
+      "camel",
+      "halberdier"
+    ],
+    "notes": "Power unit; high HP and attack; expensive"
+  },
+  "siege": {
+    "strong_vs": [
+      "infantry",
+      "archer",
+      "building"
+    ],
+    "weak_vs": [
+      "cavalry",
+      "bombard_cannon"
+    ],
+    "notes": "Area damage; needs protection; slow"
+  },
+  "monk": {
+    "strong_vs": [
+      "knight",
+      "elephant",
+      "expensive_units"
+    ],
+    "weak_vs": [
+      "light_cavalry",
+      "eagle_warrior",
+      "archer_mass"
+    ],
+    "notes": "Convert high-value targets; fragile; need micro"
+  },
+  "camel": {
+    "strong_vs": [
+      "cavalry",
+      "knight"
+    ],
+    "weak_vs": [
+      "archer",
+      "infantry",
+      "monk"
+    ],
+    "notes": "Anti-cavalry specialist; no building bonus"
+  },
+  "eagle_warrior": {
+    "strong_vs": [
+      "monk",
+      "siege",
+      "archer"
+    ],
+    "weak_vs": [
+      "infantry",
+      "cavalry"
+    ],
+    "notes": "Meso-American cavalry replacement; fast; good raid unit"
+  }
+}

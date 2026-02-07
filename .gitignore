@@ -17,7 +17,9 @@ tmp/
 
 # Detection data (large files)
 detection/training_data/
+detection/training_data_v2/
 detection/real_screenshots/
+detection/labeling/output/
 
 # Model weights
 **/models/*.pt
