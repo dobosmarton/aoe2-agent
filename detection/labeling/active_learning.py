@@ -45,7 +45,7 @@ from .class_mapping import (
 
 # Paths
 _DETECTION_DIR = Path(__file__).parent.parent
-_DEFAULT_MODEL = _DETECTION_DIR / "inference" / "models" / "aoe2_yolo26.pt"
+_DEFAULT_MODEL = _DETECTION_DIR / "inference" / "models" / "aoe2_yolo_v2.pt"
 _DEFAULT_RAW_DIR = _DETECTION_DIR / "real_screenshots" / "raw"
 _DEFAULT_OUTPUT_DIR = _DETECTION_DIR / "labeling" / "output" / "active_learning"
 _TRAINING_DATA_DIR = _DETECTION_DIR / "training_data"

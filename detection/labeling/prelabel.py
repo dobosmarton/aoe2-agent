@@ -46,7 +46,7 @@ from .class_mapping import (
 
 # Paths
 _DETECTION_DIR = Path(__file__).parent.parent
-_DEFAULT_MODEL = _DETECTION_DIR / "inference" / "models" / "aoe2_yolo26.pt"
+_DEFAULT_MODEL = _DETECTION_DIR / "inference" / "models" / "aoe2_yolo_v2.pt"
 _DEFAULT_RAW_DIR = _DETECTION_DIR / "real_screenshots" / "raw"
 _DEFAULT_OUTPUT_DIR = _DETECTION_DIR / "labeling" / "output" / "prelabeled"
 
@@ -130,14 +130,23 @@ def prelabel(
     model = YOLO(str(model_path))
 
     # Build class mapping
-    v1_classes = load_dataset_yaml()
     v2_classes = load_classes_yaml()
 
     if schema == "v2":
-        id_mapping = build_v1_to_v2_mapping(v1_classes, v2_classes)
+        # Check if the model is already v2 (59 classes) or v1 (46 classes)
+        model_nc = getattr(model.model, "nc", None) or len(getattr(model, "names", {}))
+        if model_nc == len(v2_classes):
+            # v2 model outputs v2 IDs natively - identity mapping
+            id_mapping = {i: i for i in v2_classes}
+            print(f"Using v2 model ({model_nc} classes), no remapping needed")
+        else:
+            # v1 model needs remapping
+            v1_classes = load_dataset_yaml()
+            id_mapping = build_v1_to_v2_mapping(v1_classes, v2_classes)
+            print(f"Using v1 model ({model_nc} classes), mapped {len(id_mapping)} to v2 schema")
         output_classes = v2_classes
-        print(f"Using v2 schema ({len(v2_classes)} classes), mapped {len(id_mapping)} from v1")
     else:
+        v1_classes = load_dataset_yaml()
         id_mapping = {i: i for i in v1_classes}  # identity
         output_classes = v1_classes
         print(f"Using v1 schema ({len(v1_classes)} classes)")

@@ -41,64 +41,82 @@ class DetectedEntity:
         }
 
 
-# Default class names for AoE2 detection (46 classes - matches trained YOLO26 model)
+# Default class names for AoE2 detection (59 classes - matches v2 hybrid model)
+# Source of truth: detection/training/config/classes.yaml
 DEFAULT_CLASSES = [
-    # Resources (0-4)
-    "tree",            # 0 - Wood resource
-    "gold_mine",       # 1 - Gold resource
-    "stone_mine",      # 2 - Stone resource
-    "berry_bush",      # 3 - Food source
-    "relic",           # 4 - Relic for monks
-    # Economy Buildings (5-11)
-    "town_center",     # 5 - Main building
-    "house",           # 6 - Population building
-    "lumber_camp",     # 7 - Wood drop-off
-    "mining_camp",     # 8 - Gold/stone drop-off
-    "blacksmith",      # 9 - Upgrades
-    "dock",            # 10 - Naval building
-    "university",      # 11 - Tech building
-    # Military Buildings (12-18)
-    "barracks",        # 12 - Infantry
-    "archery_range",   # 13 - Archers
-    "stable",          # 14 - Cavalry
-    "monastery",       # 15 - Monks
-    "castle",          # 16 - Unique units
-    "wonder",          # 17 - Victory building
-    "gate",            # 18 - Wall gate
-    # Animals (19-22)
-    "sheep",           # 19 - Food source
-    "deer",            # 20 - Food source
-    "boar",            # 21 - Food source (dangerous)
-    "wolf",            # 22 - Hostile animal
-    # Economic Units (23-25)
-    "villager",        # 23 - Worker unit
-    "trade_cart",      # 24 - Gold generation
-    "fishing_ship",    # 25 - Naval food
-    # Cavalry (26-29)
-    "scout_line",      # 26 - Scout/Light Cavalry/Hussar
-    "knight_line",     # 27 - Knight/Cavalier/Paladin
-    "camel_line",      # 28 - Camel Rider/Heavy Camel
-    "battle_elephant", # 29 - Battle/War Elephant
-    # Archers (30-33)
-    "archer_line",     # 30 - Archer/Crossbow/Arbalester
-    "skirmisher_line", # 31 - Skirmisher/Elite Skirmisher
-    "cavalry_archer",  # 32 - Cavalry Archer/Heavy CA
-    "hand_cannoneer",  # 33 - Hand Cannoneer
-    # Infantry (34-36)
-    "militia_line",    # 34 - Militia→Champion
-    "spearman_line",   # 35 - Spearman/Pikeman/Halberdier
-    "eagle_line",      # 36 - Eagle Scout/Warrior/Elite
-    # Siege (37-40)
-    "ram",             # 37 - Battering/Capped/Siege Ram
-    "mangonel_line",   # 38 - Mangonel/Onager/Siege Onager
-    "scorpion",        # 39 - Scorpion/Heavy Scorpion
-    "trebuchet",       # 40 - Trebuchet
-    # Special Units (41-45)
-    "monk",            # 41 - Monk
-    "king",            # 42 - King (regicide)
-    "longbowman",      # 43 - Britons unique unit
-    "mangudai",        # 44 - Mongols unique unit
-    "war_wagon",       # 45 - Koreans unique unit
+    # Resources & Nature (0-8)
+    "tree",            # 0
+    "gold_mine",       # 1
+    "stone_mine",      # 2
+    "berry_bush",      # 3
+    "relic",           # 4
+    "deer",            # 5
+    "boar",            # 6
+    "wolf",            # 7
+    "sheep",           # 8
+    # Economy Buildings (9-16)
+    "town_center",     # 9
+    "house",           # 10
+    "lumber_camp",     # 11
+    "mining_camp",     # 12
+    "mill",            # 13
+    "market",          # 14
+    "dock",            # 15
+    "farm",            # 16
+    # Military Buildings (17-24)
+    "barracks",        # 17
+    "archery_range",   # 18
+    "stable",          # 19
+    "blacksmith",      # 20
+    "siege_workshop",  # 21
+    "monastery",       # 22
+    "castle",          # 23
+    "university",      # 24
+    # Defensive (25-27)
+    "gate",            # 25
+    "wall",            # 26
+    "tower",           # 27
+    # Special Buildings (28-29)
+    "wonder",          # 28
+    "krepost",         # 29
+    # Civilian Units (30-32)
+    "villager",        # 30
+    "trade_cart",      # 31
+    "fishing_ship",    # 32
+    # Cavalry (33-36)
+    "scout_line",      # 33
+    "knight_line",     # 34
+    "camel_line",      # 35
+    "battle_elephant", # 36
+    # Archers (37-40)
+    "archer_line",     # 37
+    "skirmisher_line", # 38
+    "cavalry_archer",  # 39
+    "hand_cannoneer",  # 40
+    # Infantry (41-43)
+    "militia_line",    # 41
+    "spearman_line",   # 42
+    "eagle_line",      # 43
+    # Siege (44-47)
+    "ram",             # 44
+    "mangonel_line",   # 45
+    "scorpion",        # 46
+    "trebuchet",       # 47
+    # Monks & Special (48-49)
+    "monk",            # 48
+    "king",            # 49
+    # Unique Units (50-54)
+    "unique_archer",   # 50
+    "unique_cavalry",  # 51
+    "unique_infantry", # 52
+    "unique_siege",    # 53
+    "unique_ship",     # 54
+    # Naval (55-57)
+    "fish",            # 55
+    "galley",          # 56
+    "fire_galley",     # 57
+    # Additional Siege (58)
+    "siege_tower",     # 58
 ]
 
 
