@@ -2,12 +2,17 @@
 Prepare hybrid training dataset by merging CVAT-labeled real screenshots
 with synthetic training data.
 
-Takes a CVAT export (COCO 1.0 or YOLO 1.1) and combines it with the existing
-synthetic dataset to create a unified training set for fine-tuning.
+Takes one or more CVAT exports (COCO 1.0 or YOLO 1.1) and combines them with
+the existing synthetic dataset to create a unified training set for fine-tuning.
 
 Usage:
-    # Merge CVAT export into training dataset (auto-detects COCO or YOLO format)
+    # Single CVAT export (auto-detects COCO or YOLO format)
     python -m detection.labeling.prepare_training --cvat-export /path/to/cvat/export
+
+    # Multiple CVAT exports (e.g. separate annotation batches)
+    python -m detection.labeling.prepare_training \
+        --cvat-export /path/to/batch1 \
+        --cvat-export /path/to/batch2
 
     # Dry run (show what would happen without copying)
     python -m detection.labeling.prepare_training --cvat-export /path/to/export --dry-run
@@ -245,50 +250,17 @@ def count_labels(label_path: Path) -> int:
     return len(text.split("\n"))
 
 
-def prepare_training(
-    cvat_export_dir: str | Path,
-    output_dir: str | Path = _DEFAULT_OUTPUT,
-    synthetic_dir: str | Path = _SYNTHETIC_DIR,
-    images_dir: str | Path | None = None,
-    val_split: float = 0.15,
-    include_synthetic: bool = True,
-    dry_run: bool = False,
-) -> dict:
-    """Merge CVAT real labels with synthetic data into a training dataset.
-
-    Supports labels-only CVAT exports by matching label filenames against
-    images in a local directory (default: real_screenshots/raw/).
-
-    Args:
-        cvat_export_dir: Path to unzipped CVAT YOLO export.
-        output_dir: Where to write the merged dataset.
-        synthetic_dir: Path to existing synthetic training data.
-        images_dir: Local directory with source images. If None, uses
-                    real_screenshots/raw/ as default.
-        val_split: Fraction of real images to use for validation.
-        include_synthetic: Whether to include synthetic data in the merge.
-        dry_run: If True, just report what would happen.
+def _extract_labels_from_export(
+    cvat_export_dir: Path,
+    local_images: dict[str, Path],
+    output_dir: Path,
+    tmp_suffix: str = "",
+) -> tuple[list[tuple[Path, Path, int]], list[str]]:
+    """Extract real image-label pairs from a single CVAT export.
 
     Returns:
-        Summary dict with counts.
+        Tuple of (real_pairs, missing_images).
     """
-    cvat_export_dir = Path(cvat_export_dir)
-    output_dir = Path(output_dir)
-    synthetic_dir = Path(synthetic_dir)
-    if images_dir is None:
-        images_dir = _DETECTION_DIR / "real_screenshots" / "raw"
-    images_dir = Path(images_dir)
-
-    # Build index of local images by stem name for fast lookup
-    print(f"Scanning images directory: {images_dir}")
-    image_extensions = {".png", ".jpg", ".jpeg", ".bmp"}
-    local_images = {}
-    for img_path in images_dir.iterdir():
-        if img_path.suffix.lower() in image_extensions:
-            local_images[img_path.stem] = img_path
-    print(f"  Found {len(local_images)} images locally")
-
-    # Auto-detect export format and extract labels
     print(f"\nScanning CVAT export: {cvat_export_dir}")
     export_format = detect_export_format(cvat_export_dir)
     print(f"  Detected format: {export_format.upper()}")
@@ -297,9 +269,8 @@ def prepare_training(
     missing_images = []
 
     if export_format == "coco":
-        # Convert COCO annotations to YOLO labels in a temp directory
         v2_classes = load_classes_yaml()
-        _tmp_labels = output_dir / "_tmp_coco_labels"
+        _tmp_labels = output_dir / f"_tmp_coco_labels{tmp_suffix}"
         coco_results = convert_coco_to_yolo_labels(cvat_export_dir, _tmp_labels, v2_classes)
 
         for file_name, label_path, n_labels in coco_results:
@@ -309,7 +280,6 @@ def prepare_training(
             else:
                 missing_images.append(stem)
     else:
-        # YOLO format - find label files directly
         try:
             cvat_labels_dir = find_cvat_labels(cvat_export_dir)
         except FileNotFoundError as e:
@@ -335,7 +305,70 @@ def prepare_training(
         if len(missing_images) > 5:
             print(f"    ... and {len(missing_images) - 5} more")
 
-    print(f"Found {len(real_pairs)} labeled real images")
+    print(f"  Found {len(real_pairs)} labeled real images")
+    return real_pairs, missing_images
+
+
+def prepare_training(
+    cvat_export_dirs: list[str | Path],
+    output_dir: str | Path = _DEFAULT_OUTPUT,
+    synthetic_dir: str | Path = _SYNTHETIC_DIR,
+    images_dir: str | Path | None = None,
+    val_split: float = 0.15,
+    include_synthetic: bool = True,
+    dry_run: bool = False,
+) -> dict:
+    """Merge CVAT real labels with synthetic data into a training dataset.
+
+    Supports labels-only CVAT exports by matching label filenames against
+    images in a local directory (default: real_screenshots/raw/).
+
+    Args:
+        cvat_export_dirs: List of paths to unzipped CVAT exports (COCO 1.0 or YOLO 1.1).
+        output_dir: Where to write the merged dataset.
+        synthetic_dir: Path to existing synthetic training data.
+        images_dir: Local directory with source images. If None, uses
+                    real_screenshots/raw/ as default.
+        val_split: Fraction of real images to use for validation.
+        include_synthetic: Whether to include synthetic data in the merge.
+        dry_run: If True, just report what would happen.
+
+    Returns:
+        Summary dict with counts.
+    """
+    output_dir = Path(output_dir)
+    synthetic_dir = Path(synthetic_dir)
+    if images_dir is None:
+        images_dir = _DETECTION_DIR / "real_screenshots" / "raw"
+    images_dir = Path(images_dir)
+
+    # Build index of local images by stem name for fast lookup
+    print(f"Scanning images directory: {images_dir}")
+    image_extensions = {".png", ".jpg", ".jpeg", ".bmp"}
+    local_images = {}
+    for img_path in images_dir.iterdir():
+        if img_path.suffix.lower() in image_extensions:
+            local_images[img_path.stem] = img_path
+    print(f"  Found {len(local_images)} images locally")
+
+    # Process each CVAT export and collect all real pairs
+    real_pairs = []
+    seen_stems = set()
+
+    for i, export_dir in enumerate(cvat_export_dirs):
+        export_dir = Path(export_dir)
+        pairs, _ = _extract_labels_from_export(
+            export_dir, local_images, output_dir, tmp_suffix=f"_{i}",
+        )
+        # Deduplicate by image stem (later exports override earlier ones)
+        for img_path, label_path, n_labels in pairs:
+            if img_path.stem not in seen_stems:
+                seen_stems.add(img_path.stem)
+                real_pairs.append((img_path, label_path, n_labels))
+            else:
+                print(f"  NOTE: Duplicate image '{img_path.stem}' from export {i+1}, using first occurrence")
+
+    print(f"\nTotal: {len(real_pairs)} unique labeled real images from {len(cvat_export_dirs)} export(s)")
 
     # Split real data into train/val
     random.seed(42)
@@ -430,17 +463,16 @@ def prepare_training(
     print(f"  Classes: {len(classes)}")
 
     # Clean up temp COCO labels if created
-    _tmp_labels = output_dir / "_tmp_coco_labels"
-    if _tmp_labels.exists():
-        shutil.rmtree(_tmp_labels)
+    for tmp_dir in output_dir.glob("_tmp_coco_labels*"):
+        shutil.rmtree(tmp_dir)
 
     # Save summary
     summary_path = output_dir / "merge_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2) + "\n")
 
     print(f"\nNext step: Upload to Lambda Labs and train:")
-    print(f"  tar -czf training_data_v2.tar.gz -C {output_dir.parent} {output_dir.name}")
-    print(f"  scp training_data_v2.tar.gz ubuntu@<LAMBDA_IP>:/home/ubuntu/")
+    print(f"  tar -czf {output_dir.name}.tar.gz -C {output_dir.parent} {output_dir.name}")
+    print(f"  scp {output_dir.name}.tar.gz ubuntu@<LAMBDA_IP>:/home/ubuntu/")
 
     return summary
 
@@ -490,8 +522,9 @@ def main():
         epilog=__doc__,
     )
     parser.add_argument(
-        "--cvat-export", type=str, required=True,
-        help="Path to unzipped CVAT export directory (COCO 1.0 or YOLO 1.1)",
+        "--cvat-export", type=str, required=True, action="append",
+        help="Path to unzipped CVAT export directory (COCO 1.0 or YOLO 1.1). "
+             "Can be specified multiple times to merge several exports.",
     )
     parser.add_argument(
         "--output", type=str, default=str(_DEFAULT_OUTPUT),
@@ -520,7 +553,7 @@ def main():
     args = parser.parse_args()
 
     prepare_training(
-        cvat_export_dir=args.cvat_export,
+        cvat_export_dirs=args.cvat_export,
         output_dir=args.output,
         synthetic_dir=args.synthetic,
         images_dir=args.images_dir,

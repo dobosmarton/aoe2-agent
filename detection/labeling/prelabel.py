@@ -86,6 +86,33 @@ def _get_color(class_name: str) -> tuple[int, int, int]:
         return _CATEGORY_COLORS["unit"]
 
 
+def _find_labeled_stems(training_dir: Path | None = None) -> set[str]:
+    """Find image stems that already have manual annotations in training data.
+
+    Scans training_data_v*/train/labels/ and val/labels/ for real_*.txt files
+    and extracts the original image stems.
+    """
+    labeled = set()
+    if training_dir is None:
+        # Auto-detect: find all training_data_v* directories
+        detection_dir = Path(__file__).parent.parent
+        training_dirs = sorted(detection_dir.glob("training_data_v*"))
+    else:
+        training_dirs = [Path(training_dir)]
+
+    for td in training_dirs:
+        for split in ("train", "val"):
+            labels_dir = td / split / "labels"
+            if not labels_dir.exists():
+                continue
+            for f in labels_dir.glob("real_*.txt"):
+                # Strip "real_" prefix to get original image stem
+                stem = f.stem.removeprefix("real_")
+                labeled.add(stem)
+
+    return labeled
+
+
 def prelabel(
     model_path: str | Path = _DEFAULT_MODEL,
     screenshots_dir: str | Path = _DEFAULT_RAW_DIR,
@@ -93,6 +120,7 @@ def prelabel(
     conf_threshold: float = 0.25,
     schema: str = "v2",
     save_preview: bool = True,
+    skip_labeled: bool = False,
 ) -> dict:
     """Run YOLO model on screenshots and export YOLO-format labels.
 
@@ -103,6 +131,7 @@ def prelabel(
         conf_threshold: Minimum confidence for detections.
         schema: "v1" to keep model IDs, "v2" to map to classes.yaml.
         save_preview: Whether to save annotated preview images.
+        skip_labeled: Skip images that already have manual annotations.
 
     Returns:
         Summary dict with per-class detection counts.
@@ -172,6 +201,13 @@ def prelabel(
         if p.suffix.lower() in image_extensions
     ])
     print(f"Found {len(images)} screenshots in {screenshots_dir}")
+
+    # Skip already-labeled images if requested
+    if skip_labeled:
+        labeled_stems = _find_labeled_stems()
+        before = len(images)
+        images = [img for img in images if img.stem not in labeled_stems]
+        print(f"Skipping {before - len(images)} already-labeled images, {len(images)} remaining")
 
     # Process each image
     summary: dict[str, int] = {}
@@ -337,6 +373,10 @@ def main():
         "--no-preview", action="store_true",
         help="Skip generating preview images",
     )
+    parser.add_argument(
+        "--skip-labeled", action="store_true",
+        help="Skip images that already have manual annotations in training data",
+    )
     args = parser.parse_args()
 
     prelabel(
@@ -346,6 +386,7 @@ def main():
         conf_threshold=args.conf,
         schema=args.schema,
         save_preview=not args.no_preview,
+        skip_labeled=args.skip_labeled,
     )
 
 
