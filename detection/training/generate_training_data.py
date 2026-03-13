@@ -413,13 +413,26 @@ class TrainingDataGenerator:
                     f"{config.class_id} {x_center:.6f} {y_center:.6f} {norm_w:.6f} {norm_h:.6f}"
                 )
 
-        # Apply augmentations
-        bg = self._augment(bg)
+        # Apply augmentations (non-spatial, but may occlude regions)
+        bg, occluded = self._augment(bg)
+
+        # Filter labels hidden by fog/UI overlays
+        labels = self._filter_occluded_labels(labels, occluded)
+
+        # Apply scale zoom (spatial — needs label update)
+        if self.enable_enhanced_augmentations:
+            bg, labels = self._apply_scale_zoom(bg, labels)
 
         return bg, labels
 
-    def _augment(self, image: Image.Image) -> Image.Image:
-        """Apply random augmentations including enhanced game-realistic effects."""
+    def _augment(
+        self, image: Image.Image
+    ) -> tuple[Image.Image, list[tuple[int, int, int, int]]]:
+        """Apply random augmentations including enhanced game-realistic effects.
+
+        Returns:
+            Tuple of (augmented image, list of occluded pixel rectangles).
+        """
         # Basic augmentations (always applied)
         # Brightness
         if random.random() < 0.5:
@@ -441,16 +454,24 @@ class TrainingDataGenerator:
             image = image.filter(ImageFilter.GaussianBlur(radius=0.5))
 
         # Enhanced augmentations (for v2 training)
+        occluded_rects: list[tuple[int, int, int, int]] = []
         if self.enable_enhanced_augmentations:
-            image = self._apply_enhanced_augmentations(image)
+            image, occluded_rects = self._apply_enhanced_augmentations(image)
 
-        return image
+        return image, occluded_rects
 
-    def _apply_enhanced_augmentations(self, image: Image.Image) -> Image.Image:
+    def _apply_enhanced_augmentations(
+        self, image: Image.Image
+    ) -> tuple[Image.Image, list[tuple[int, int, int, int]]]:
         """Apply realistic game-like augmentations.
 
         Includes fog of war, UI elements, compression artifacts, and scale variation.
+
+        Returns:
+            Tuple of (augmented image, list of occluded pixel rects as (x1,y1,x2,y2)).
         """
+        occluded_rects: list[tuple[int, int, int, int]] = []
+
         # Ensure we're working with RGB for augmentations
         if image.mode == 'RGBA':
             # Create a composite with white background
@@ -476,6 +497,10 @@ class TrainingDataGenerator:
                 opacity = random.randint(80, 150)
                 fog_draw.rectangle([x, y, x + w, y + h], fill=(0, 0, 0, opacity))
 
+                # Track high-opacity patches that truly hide objects
+                if opacity >= 120:
+                    occluded_rects.append((x, y, x + w, y + h))
+
             image = Image.alpha_composite(image.convert('RGBA'), fog_overlay)
             image = image.convert('RGB')
 
@@ -487,18 +512,25 @@ class TrainingDataGenerator:
             minimap_size = random.randint(130, 180)
             if random.random() < 0.5:
                 # Bottom-right
+                mm_rect = (
+                    image.width - minimap_size, image.height - minimap_size,
+                    image.width, image.height,
+                )
                 draw.rectangle(
-                    [image.width - minimap_size, image.height - minimap_size,
-                     image.width, image.height],
+                    [mm_rect[0], mm_rect[1], mm_rect[2], mm_rect[3]],
                     fill=(30, 30, 30)
                 )
             else:
                 # Top-right (for some UI configs)
+                mm_rect = (
+                    image.width - minimap_size, 0,
+                    image.width, minimap_size,
+                )
                 draw.rectangle(
-                    [image.width - minimap_size, 0,
-                     image.width, minimap_size],
+                    [mm_rect[0], mm_rect[1], mm_rect[2], mm_rect[3]],
                     fill=(25, 25, 25)
                 )
+            occluded_rects.append(mm_rect)
 
             # Simulate resource bar (top of screen)
             if random.random() < 0.5:
@@ -507,6 +539,7 @@ class TrainingDataGenerator:
                     [0, 0, image.width, bar_height],
                     fill=(20, 20, 20)
                 )
+                occluded_rects.append((0, 0, image.width, bar_height))
 
         # 3. Compression artifacts (simulate JPEG compression)
         if random.random() < 0.3:
@@ -516,26 +549,7 @@ class TrainingDataGenerator:
             buffer.seek(0)
             image = Image.open(buffer).convert('RGB')
 
-        # 4. Scale variation (simulate zoom levels)
-        if random.random() < 0.3:
-            scale = random.uniform(0.7, 1.3)
-            new_w = int(image.width * scale)
-            new_h = int(image.height * scale)
-            image = image.resize((new_w, new_h), Image.Resampling.LANCZOS)
-
-            # Crop or pad back to original size
-            if scale > 1:
-                # Crop center
-                left = (new_w - self.image_size[0]) // 2
-                top = (new_h - self.image_size[1]) // 2
-                image = image.crop((left, top, left + self.image_size[0], top + self.image_size[1]))
-            else:
-                # Pad with terrain-like color
-                padded = Image.new('RGB', self.image_size, (45, 80, 45))
-                left = (self.image_size[0] - new_w) // 2
-                top = (self.image_size[1] - new_h) // 2
-                padded.paste(image, (left, top))
-                image = padded
+        # 4. Scale variation — moved to _apply_scale_zoom() for label-aware transform
 
         # 5. Color temperature shift (simulates different map types)
         if random.random() < 0.2:
@@ -568,7 +582,121 @@ class TrainingDataGenerator:
             image = Image.composite(image, Image.new('RGB', image.size, (0, 0, 0)),
                                     vignette)
 
-        return image
+        return image, occluded_rects
+
+    def _filter_occluded_labels(
+        self,
+        labels: list[str],
+        occluded_rects: list[tuple[int, int, int, int]],
+    ) -> list[str]:
+        """Remove labels where >50% of bbox is covered by fog/UI overlays."""
+        if not occluded_rects:
+            return labels
+
+        W, H = self.image_size
+        filtered = []
+        for label in labels:
+            parts = label.split()
+            xc, yc, w, h = (
+                float(parts[1]),
+                float(parts[2]),
+                float(parts[3]),
+                float(parts[4]),
+            )
+
+            # Convert YOLO normalized to pixel coords
+            bx1 = (xc - w / 2) * W
+            by1 = (yc - h / 2) * H
+            bx2 = (xc + w / 2) * W
+            by2 = (yc + h / 2) * H
+            box_area = (bx2 - bx1) * (by2 - by1)
+
+            # Sum intersection with all occluded rects
+            total_occluded = 0.0
+            for ox1, oy1, ox2, oy2 in occluded_rects:
+                ix1 = max(bx1, ox1)
+                iy1 = max(by1, oy1)
+                ix2 = min(bx2, ox2)
+                iy2 = min(by2, oy2)
+                if ix1 < ix2 and iy1 < iy2:
+                    total_occluded += (ix2 - ix1) * (iy2 - iy1)
+
+            if box_area > 0 and total_occluded / box_area < 0.5:
+                filtered.append(label)
+
+        return filtered
+
+    def _apply_scale_zoom(
+        self, image: Image.Image, labels: list[str]
+    ) -> tuple[Image.Image, list[str]]:
+        """Apply scale zoom to both image and labels.
+
+        Unlike other augmentations, scale zoom is spatial and must transform
+        the YOLO labels to match the new object positions.
+        """
+        if random.random() >= 0.3:
+            return image, labels
+
+        scale = random.uniform(0.7, 1.3)
+        new_w = int(image.width * scale)
+        new_h = int(image.height * scale)
+        image = image.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+        if scale > 1:
+            # Crop center
+            left = (new_w - self.image_size[0]) // 2
+            top = (new_h - self.image_size[1]) // 2
+            image = image.crop(
+                (left, top, left + self.image_size[0], top + self.image_size[1])
+            )
+        else:
+            # Pad with terrain-like color
+            padded = Image.new("RGB", self.image_size, (45, 80, 45))
+            left = (self.image_size[0] - new_w) // 2
+            top = (self.image_size[1] - new_h) // 2
+            padded.paste(image, (left, top))
+            image = padded
+
+        # Transform labels: new_coord = coord * scale + (1 - scale) / 2
+        offset = (1 - scale) / 2
+        new_labels = []
+        for label in labels:
+            parts = label.split()
+            class_id = parts[0]
+            xc = float(parts[1])
+            yc = float(parts[2])
+            w = float(parts[3])
+            h = float(parts[4])
+
+            xc_new = xc * scale + offset
+            yc_new = yc * scale + offset
+            w_new = w * scale
+            h_new = h * scale
+
+            # Clip box to [0, 1]
+            x1 = max(0.0, xc_new - w_new / 2)
+            y1 = max(0.0, yc_new - h_new / 2)
+            x2 = min(1.0, xc_new + w_new / 2)
+            y2 = min(1.0, yc_new + h_new / 2)
+
+            visible_w = x2 - x1
+            visible_h = y2 - y1
+
+            # Skip if box is outside frame or less than 30% visible
+            if visible_w <= 0 or visible_h <= 0:
+                continue
+            if (visible_w * visible_h) / (w_new * h_new) < 0.3:
+                continue
+
+            # Recompute center from clipped box
+            xc_clipped = (x1 + x2) / 2
+            yc_clipped = (y1 + y2) / 2
+            new_labels.append(
+                f"{class_id} {xc_clipped:.6f} {yc_clipped:.6f} "
+                f"{visible_w:.6f} {visible_h:.6f}"
+            )
+
+        return image, new_labels
 
     def generate_dataset(
         self,
