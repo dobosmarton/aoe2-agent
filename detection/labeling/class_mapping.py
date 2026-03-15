@@ -1,9 +1,9 @@
 """
-Class ID mapping between different AoE2 detection class schemes.
+Class ID mapping utilities for AoE2 detection class scheme.
 
-The v1 YOLO model was trained on a 46-class scheme (dataset.yaml),
-while the target schema is the 55-class scheme (classes.yaml).
-This module handles bidirectional mapping between them.
+The canonical class scheme is defined in classes.yaml (60 classes).
+This module provides utilities for loading class definitions,
+converting label files, and generating CVAT-compatible class lists.
 """
 
 import yaml
@@ -45,53 +45,28 @@ def build_v1_to_v2_mapping(
     v1_classes: dict[int, str] | None = None,
     v2_classes: dict[int, str] | None = None,
 ) -> dict[int, int]:
-    """Build mapping from v1 model class IDs to v2 (classes.yaml) IDs.
+    """Build mapping from model class IDs to classes.yaml IDs.
 
-    Maps by matching class names between the two schemas.
-    Handles special cases where v1 specific unique units map to
-    v2 grouped unique classes (e.g., longbowman -> unique_archer).
+    Maps by matching class names between the model's dataset.yaml
+    and the canonical classes.yaml scheme. For v5+ models that use
+    classes.yaml IDs directly, this returns an identity mapping.
 
     Returns:
-        Dict mapping v1_class_id -> v2_class_id.
+        Dict mapping model_class_id -> classes_yaml_id.
     """
     if v1_classes is None:
         v1_classes = load_dataset_yaml()
     if v2_classes is None:
         v2_classes = load_classes_yaml()
 
-    # Invert v2 to get name -> id
     v2_name_to_id = {name: cid for cid, name in v2_classes.items()}
-
-    # Special mapping for v1 unique units -> v2 grouped unique classes
-    _UNIQUE_MAP = {
-        "longbowman": "unique_archer",
-        "mangudai": "unique_archer",
-        "war_wagon": "unique_siege",
-    }
 
     mapping = {}
     for v1_id, v1_name in v1_classes.items():
         if v1_name in v2_name_to_id:
             mapping[v1_id] = v2_name_to_id[v1_name]
-        elif v1_name in _UNIQUE_MAP:
-            mapped_name = _UNIQUE_MAP[v1_name]
-            if mapped_name in v2_name_to_id:
-                mapping[v1_id] = v2_name_to_id[mapped_name]
 
     return mapping
-
-
-def build_v2_to_v1_mapping(
-    v1_classes: dict[int, str] | None = None,
-    v2_classes: dict[int, str] | None = None,
-) -> dict[int, int]:
-    """Build mapping from v2 (classes.yaml) IDs to v1 model IDs.
-
-    Returns:
-        Dict mapping v2_class_id -> v1_class_id.
-    """
-    forward = build_v1_to_v2_mapping(v1_classes, v2_classes)
-    return {v2_id: v1_id for v1_id, v2_id in forward.items()}
 
 
 def get_classes_for_cvat(schema: str = "v2") -> list[str]:
@@ -160,24 +135,8 @@ def convert_label_file(
 
 
 if __name__ == "__main__":
-    # Print mapping summary
-    v1 = load_dataset_yaml()
-    v2 = load_classes_yaml()
-    mapping = build_v1_to_v2_mapping(v1, v2)
-
-    print(f"V1 classes: {len(v1)}")
-    print(f"V2 classes: {len(v2)}")
-    print(f"Mapped: {len(mapping)}")
-    print()
-
-    print("Mapping (v1 -> v2):")
-    for v1_id, v2_id in sorted(mapping.items()):
-        print(f"  {v1_id:3d} ({v1[v1_id]:20s}) -> {v2_id:3d} ({v2[v2_id]})")
-
-    # Show v2 classes not in v1
-    mapped_v2_ids = set(mapping.values())
-    unmapped = {cid: name for cid, name in v2.items() if cid not in mapped_v2_ids}
-    if unmapped:
-        print(f"\nV2 classes NOT in v1 model ({len(unmapped)}):")
-        for cid, name in sorted(unmapped.items()):
-            print(f"  {cid:3d}: {name}")
+    # Print class scheme summary
+    classes = load_classes_yaml()
+    print(f"Classes (classes.yaml): {len(classes)}")
+    for cid, name in sorted(classes.items()):
+        print(f"  {cid:3d}: {name}")

@@ -16,8 +16,7 @@ game_graphics/
 tmp/
 
 # Detection data (large files)
-detection/training_data/
-detection/training_data_v2/
+detection/**/training_data*/
 detection/real_screenshots/
 detection/labeling/output/
 

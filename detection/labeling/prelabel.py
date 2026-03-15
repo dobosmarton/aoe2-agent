@@ -113,6 +113,63 @@ def _find_labeled_stems(training_dir: Path | None = None) -> set[str]:
     return labeled
 
 
+def _run_standard_detection(
+    model, img_path: Path, conf_threshold: float,
+) -> list[dict]:
+    """Run standard YOLO inference on a single image."""
+    results = model(str(img_path), conf=conf_threshold, verbose=False)
+
+    if results[0].boxes is None or len(results[0].boxes) == 0:
+        return []
+
+    boxes = results[0].boxes
+    img_w, img_h = results[0].orig_shape[1], results[0].orig_shape[0]
+
+    detections = []
+    for box, cls_id, conf in zip(boxes.xyxy, boxes.cls, boxes.conf):
+        detections.append({
+            "bbox": tuple(box.tolist()),
+            "class_id": int(cls_id.item()),
+            "confidence": float(conf.item()),
+            "img_size": (img_w, img_h),
+        })
+    return detections
+
+
+def _run_sahi_detection(
+    sahi_model, img_path: Path, conf_threshold: float,
+) -> list[dict]:
+    """Run SAHI sliced inference on a single image."""
+    from sahi.predict import get_sliced_prediction
+
+    result = get_sliced_prediction(
+        str(img_path),
+        sahi_model,
+        slice_height=640,
+        slice_width=640,
+        overlap_height_ratio=0.2,
+        overlap_width_ratio=0.2,
+        verbose=0,
+    )
+
+    if not result.object_prediction_list:
+        return []
+
+    img = Image.open(img_path)
+    img_w, img_h = img.size
+
+    detections = []
+    for pred in result.object_prediction_list:
+        bbox = pred.bbox
+        detections.append({
+            "bbox": (bbox.minx, bbox.miny, bbox.maxx, bbox.maxy),
+            "class_id": pred.category.id,
+            "confidence": pred.score.value,
+            "img_size": (img_w, img_h),
+        })
+    return detections
+
+
 def prelabel(
     model_path: str | Path = _DEFAULT_MODEL,
     screenshots_dir: str | Path = _DEFAULT_RAW_DIR,
@@ -121,6 +178,7 @@ def prelabel(
     schema: str = "v2",
     save_preview: bool = True,
     skip_labeled: bool = False,
+    use_sahi: bool = False,
 ) -> dict:
     """Run YOLO model on screenshots and export YOLO-format labels.
 
@@ -132,6 +190,7 @@ def prelabel(
         schema: "v1" to keep model IDs, "v2" to map to classes.yaml.
         save_preview: Whether to save annotated preview images.
         skip_labeled: Skip images that already have manual annotations.
+        use_sahi: Use SAHI sliced inference for better small object detection.
 
     Returns:
         Summary dict with per-class detection counts.
@@ -141,6 +200,22 @@ def prelabel(
     except ImportError:
         print("ERROR: ultralytics is required. Install with: pip install ultralytics")
         sys.exit(1)
+
+    sahi_model = None
+    if use_sahi:
+        try:
+            from sahi import AutoDetectionModel
+            sahi_model = AutoDetectionModel.from_pretrained(
+                model_type="yolov8",
+                model_path=str(model_path),
+                confidence_threshold=conf_threshold,
+                device="cpu",
+            )
+            print("SAHI sliced inference enabled (640x640 tiles, 20% overlap)")
+        except ImportError:
+            print("WARNING: sahi not installed. Install with: pip install sahi")
+            print("Falling back to standard inference.")
+            use_sahi = False
 
     model_path = Path(model_path)
     screenshots_dir = Path(screenshots_dir)
@@ -214,10 +289,17 @@ def prelabel(
     total_detections = 0
 
     for i, img_path in enumerate(images):
-        # Run detection
-        results = model(str(img_path), conf=conf_threshold, verbose=False)
+        # Run detection (SAHI or standard)
+        if use_sahi and sahi_model is not None:
+            raw_detections = _run_sahi_detection(
+                sahi_model, img_path, conf_threshold,
+            )
+        else:
+            raw_detections = _run_standard_detection(
+                model, img_path, conf_threshold,
+            )
 
-        if results[0].boxes is None or len(results[0].boxes) == 0:
+        if not raw_detections:
             # No detections - write empty label file
             label_name = img_path.stem + ".txt"
             (labels_dir / label_name).write_text("")
@@ -225,15 +307,14 @@ def prelabel(
             print(f"  [{i+1}/{len(images)}] {img_path.name}: 0 detections")
             continue
 
-        boxes = results[0].boxes
-        img_w, img_h = results[0].orig_shape[1], results[0].orig_shape[0]
+        img_w, img_h = raw_detections[0]["img_size"]
 
         # Convert to YOLO labels
         labels = []
         detections_for_preview = []
 
-        for box, cls_id, conf in zip(boxes.xyxy, boxes.cls, boxes.conf):
-            v1_id = int(cls_id.item())
+        for det in raw_detections:
+            v1_id = det["class_id"]
 
             # Map class ID
             if v1_id not in id_mapping:
@@ -242,7 +323,7 @@ def prelabel(
             class_name = output_classes.get(mapped_id, f"class_{mapped_id}")
 
             # Convert to YOLO normalized format
-            x1, y1, x2, y2 = box.tolist()
+            x1, y1, x2, y2 = det["bbox"]
             x_center = ((x1 + x2) / 2) / img_w
             y_center = ((y1 + y2) / 2) / img_h
             w = (x2 - x1) / img_w
@@ -254,7 +335,7 @@ def prelabel(
             detections_for_preview.append({
                 "bbox": (x1, y1, x2, y2),
                 "class_name": class_name,
-                "confidence": float(conf.item()),
+                "confidence": det["confidence"],
             })
 
             summary[class_name] = summary.get(class_name, 0) + 1
@@ -377,6 +458,10 @@ def main():
         "--skip-labeled", action="store_true",
         help="Skip images that already have manual annotations in training data",
     )
+    parser.add_argument(
+        "--sahi", action="store_true",
+        help="Use SAHI sliced inference (640x640 tiles) for better small object detection",
+    )
     args = parser.parse_args()
 
     prelabel(
@@ -387,6 +472,7 @@ def main():
         schema=args.schema,
         save_preview=not args.no_preview,
         skip_labeled=args.skip_labeled,
+        use_sahi=args.sahi,
     )
 
 

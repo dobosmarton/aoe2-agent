@@ -37,7 +37,7 @@ import sys
 import yaml
 from pathlib import Path
 
-from .class_mapping import build_v1_to_v2_mapping, convert_label_file, load_classes_yaml, load_dataset_yaml
+from .class_mapping import load_classes_yaml
 
 # Paths
 _DETECTION_DIR = Path(__file__).parent.parent
@@ -422,14 +422,14 @@ def prepare_training(
     for d in [train_images, train_labels, val_images, val_labels]:
         d.mkdir(parents=True, exist_ok=True)
 
-    # Copy synthetic data (if including) with class ID remapping
+    # Copy synthetic data (if including)
+    # Synthetic labels now use classes.yaml IDs directly — no remapping needed
     if include_synthetic and synthetic_dir.exists():
-        print("\nCopying synthetic data (remapping v1 -> v2 class IDs)...")
-        v1_to_v2 = build_v1_to_v2_mapping()
+        print("\nCopying synthetic data...")
         _copy_dir_contents(synthetic_dir / "train" / "images", train_images)
-        _remap_labels(synthetic_dir / "train" / "labels", train_labels, v1_to_v2)
+        _copy_dir_contents(synthetic_dir / "train" / "labels", train_labels)
         _copy_dir_contents(synthetic_dir / "val" / "images", val_images)
-        _remap_labels(synthetic_dir / "val" / "labels", val_labels, v1_to_v2)
+        _copy_dir_contents(synthetic_dir / "val" / "labels", val_labels)
 
     # Copy real training data
     print("Copying real training data...")
@@ -488,17 +488,6 @@ def _copy_dir_contents(src: Path, dst: Path) -> int:
             count += 1
     return count
 
-
-def _remap_labels(src: Path, dst: Path, mapping: dict[int, int]) -> int:
-    """Copy label files from src to dst, remapping class IDs."""
-    if not src.exists():
-        return 0
-    count = 0
-    for f in src.iterdir():
-        if f.is_file() and f.suffix == ".txt":
-            convert_label_file(f, dst / f.name, mapping, skip_unmapped=True)
-            count += 1
-    return count
 
 
 def _copy_pair(
