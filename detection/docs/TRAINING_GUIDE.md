@@ -49,20 +49,20 @@ The detection system enables an AI agent to identify game entities (units, build
 **Model:** YOLO26n (2.5M parameters, 5.9 GFLOPs)
 
 **Training Configuration:**
-- Dataset: 3000 synthetic images (2400 train / 600 val)
-- Epochs: 100
+- Dataset: 8,520 images (5,520 real tiles + 3,000 synthetic)
+- Epochs: 150
 - Image size: 640x640
-- Batch size: 32
-- Classes: 55 (see `training/config/classes.yaml`)
+- Batch size: 16
+- Classes: 60 (see `training/config/classes.yaml`)
 
-**Final Metrics:**
+**Final Metrics (v4):**
 
 | Metric | Value |
 |--------|-------|
-| **mAP50** | **86.0%** |
-| **mAP50-95** | **71.9%** |
-| Precision | 86.7% |
-| Recall | 77.8% |
+| **mAP50** | **86.8%** |
+| **mAP50-95** | **72.3%** |
+| Precision | 87.1% |
+| Recall | 78.5% |
 | Inference speed | 7.1ms/image |
 
 **Per-Class Performance (Top 10):**
@@ -70,9 +70,9 @@ The detection system enables an AI agent to identify game entities (units, build
 | Class | mAP50 | Class | mAP50 |
 |-------|-------|-------|-------|
 | trade_cart | 97.4% | castle | 96.9% |
-| war_wagon | 97.1% | wonder | 96.8% |
+| unique_siege | 97.1% | wonder | 96.8% |
 | knight_line | 95.8% | fishing_ship | 94.4% |
-| mangudai | 94.6% | camel_line | 95.1% |
+| unique_archer | 94.6% | camel_line | 95.1% |
 | town_center | 92.9% | battle_elephant | 95.3% |
 
 **Training Time:** ~1 hour on Lambda Labs A100
@@ -131,26 +131,30 @@ Extracts curated game sprites organized by gameplay-relevant categories.
 - `knight_line` = Knight + Cavalier + Paladin
 - `militia_line` = Militia + Man-at-Arms + Long Swordsman + Two-Handed + Champion
 
-**Civilization Filtering**: Uses Western European (`b_west_*`) and Mediterranean (`b_medi_*`) building styles with multi-age variants (Dark, Feudal, Castle, Imperial).
+**Architecture Diversity**: Uses wildcard patterns (`b_*_{building}_age{N}_x1.sld`) to extract all 17+ architecture styles (African, Asian, Eastern European, Mediterranean, Western European, etc.) with multi-age variants.
 
-**Exclusions**: Destruction animations, rubble sprites, civilization-specific unique buildings.
+**Exclusions**: Destruction animations, rubble sprites, shadow sprites, construction states, and multi-part building components are filtered via `EXCLUDE_SUBSTRINGS`.
 
-### Classes (55 total)
+### Classes (60 total)
 
-> **Note:** Class definitions are now maintained in `training/config/classes.yaml` as the single source of truth.
+> **Note:** Class definitions are maintained in `training/config/classes.yaml` as the single source of truth. All synthetic data, prelabels, and CVAT annotations use these IDs directly.
 
 | Category | Classes |
 |----------|---------|
-| Resources | tree, gold_mine, stone_mine, berry_bush, relic |
-| Economy Buildings | town_center, house, lumber_camp, mining_camp, blacksmith, dock, university |
-| Military Buildings | barracks, archery_range, stable, monastery, castle, wonder, gate |
-| Animals | sheep, deer, boar, wolf |
-| Economic Units | villager, trade_cart, fishing_ship |
+| Resources & Nature | tree, gold_mine, stone_mine, berry_bush, relic, deer, boar, wolf, sheep |
+| Economy Buildings | town_center, house, lumber_camp, mining_camp, mill, market, dock, farm |
+| Military Buildings | barracks, archery_range, stable, blacksmith, siege_workshop, monastery, castle, university |
+| Defensive | gate, wall, tower |
+| Special Buildings | wonder, krepost |
+| Civilian Units | villager, trade_cart, fishing_ship |
 | Cavalry | scout_line, knight_line, camel_line, battle_elephant |
 | Archers | archer_line, skirmisher_line, cavalry_archer, hand_cannoneer |
 | Infantry | militia_line, spearman_line, eagle_line |
-| Siege | ram, mangonel_line, scorpion, trebuchet |
-| Special | monk, king, longbowman, mangudai, war_wagon |
+| Siege | ram, mangonel_line, scorpion, trebuchet, siege_tower |
+| Monks & Special | monk, king |
+| Unique Units | unique_archer, unique_cavalry, unique_infantry, unique_siege, unique_ship |
+| Naval | fish, galley, fire_galley |
+| Animals | goose |
 
 ### Usage
 ```bash
@@ -236,47 +240,61 @@ names:
   2: stone_mine
   3: berry_bush
   4: relic
-  5: town_center
-  6: house
-  7: lumber_camp
-  8: mining_camp
-  9: blacksmith
-  10: dock
-  11: university
-  12: barracks
-  13: archery_range
-  14: stable
-  15: monastery
-  16: castle
-  17: wonder
-  18: gate
-  19: sheep
-  20: deer
-  21: boar
-  22: wolf
-  23: villager
-  24: trade_cart
-  25: fishing_ship
-  26: scout_line
-  27: knight_line
-  28: camel_line
-  29: battle_elephant
-  30: archer_line
-  31: skirmisher_line
-  32: cavalry_archer
-  33: hand_cannoneer
-  34: militia_line
-  35: spearman_line
-  36: eagle_line
-  37: ram
-  38: mangonel_line
-  39: scorpion
-  40: trebuchet
-  41: monk
-  42: king
-  43: longbowman
-  44: mangudai
-  45: war_wagon
+  5: deer
+  6: boar
+  7: wolf
+  8: sheep
+  9: town_center
+  10: house
+  11: lumber_camp
+  12: mining_camp
+  13: mill
+  14: market
+  15: dock
+  16: farm
+  17: barracks
+  18: archery_range
+  19: stable
+  20: blacksmith
+  21: siege_workshop
+  22: monastery
+  23: castle
+  24: university
+  25: gate
+  26: wall
+  27: tower
+  28: wonder
+  29: krepost
+  30: villager
+  31: trade_cart
+  32: fishing_ship
+  33: scout_line
+  34: knight_line
+  35: camel_line
+  36: battle_elephant
+  37: archer_line
+  38: skirmisher_line
+  39: cavalry_archer
+  40: hand_cannoneer
+  41: militia_line
+  42: spearman_line
+  43: eagle_line
+  44: ram
+  45: mangonel_line
+  46: scorpion
+  47: trebuchet
+  48: monk
+  49: king
+  50: unique_archer
+  51: unique_cavalry
+  52: unique_infantry
+  53: unique_siege
+  54: unique_ship
+  55: fish
+  56: galley
+  57: fire_galley
+  58: siege_tower
+  59: goose
 EOF
 ```
 
@@ -356,17 +374,9 @@ from ultralytics import YOLO
 class EntityDetector:
     def __init__(self, model_path="detection/inference/models/aoe2_yolo26.pt"):
         self.model = YOLO(model_path)
-        self.class_names = [
-            "tree", "gold_mine", "stone_mine", "berry_bush", "relic",
-            "town_center", "house", "lumber_camp", "mining_camp", "blacksmith",
-            "dock", "university", "barracks", "archery_range", "stable",
-            "monastery", "castle", "wonder", "gate", "sheep", "deer", "boar",
-            "wolf", "villager", "trade_cart", "fishing_ship", "scout_line",
-            "knight_line", "camel_line", "battle_elephant", "archer_line",
-            "skirmisher_line", "cavalry_archer", "hand_cannoneer", "militia_line",
-            "spearman_line", "eagle_line", "ram", "mangonel_line", "scorpion",
-            "trebuchet", "monk", "king", "longbowman", "mangudai", "war_wagon"
-        ]
+        # Class names loaded from classes.yaml (60 classes)
+        # See detection/training/config/classes.yaml for the full list
+        self.class_names = DEFAULT_CLASSES  # from detector.py
 
     def detect(self, screenshot, conf=0.5) -> list[dict]:
         results = self.model(screenshot, conf=conf)
@@ -416,7 +426,7 @@ detection/
 │   ├── generate_training_data.py # Synthetic data generator
 │   ├── synthetic_data.py        # Data generation utilities
 │   └── config/
-│       └── classes.yaml         # Class definitions (55 classes)
+│       └── classes.yaml         # Class definitions (60 classes)
 ├── extraction/                  # Sprite extraction
 │   ├── sld_extractor.py         # SLD format parser
 │   ├── extract_sprites.py       # Batch sprite extraction

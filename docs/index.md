@@ -71,7 +71,7 @@ Dashed lines indicate optional dependencies. The agent runs without YOLO detecti
 
 | # | Chapter | Description | Key Files |
 |---|---------|-------------|-----------|
-| 07 | [Detector Architecture](./part3-entity-detection/07-detector-architecture.md) | EntityDetector, PyTorch/ONNX/Mock backends, 59-class taxonomy | `detection/inference/detector.py` |
+| 07 | [Detector Architecture](./part3-entity-detection/07-detector-architecture.md) | EntityDetector, PyTorch/ONNX/Mock backends, 60-class taxonomy | `detection/inference/detector.py` |
 | 08 | [Training Pipeline](./part3-entity-detection/08-training-pipeline.md) | Synthetic data generation, augmentations, YOLO11n training | `training/generate_training_data.py`, `training/train_yolo.py` |
 | 09 | [Labeling & Active Learning](./part3-entity-detection/09-labeling-and-active-learning.md) | CVAT workflow, COCO/YOLO conversion, class remapping | `labeling/prepare_training.py`, `labeling/class_mapping.py` |
 
@@ -87,7 +87,7 @@ Dashed lines indicate optional dependencies. The agent runs without YOLO detecti
 | # | Chapter | Description | Key Files |
 |---|---------|-------------|-----------|
 | 12 | [Cloud Training](./part5-operations/12-cloud-training.md) | Lambda Labs workflow, dataset packaging, cost analysis | `tmp/train_v2_lambda.sh` |
-| 13 | [Class Schema Evolution](./part5-operations/13-class-schema-evolution.md) | v1-to-v2 migration, 46-to-59 classes, remapping system | `labeling/class_mapping.py`, `training/config/classes.yaml` |
+| 13 | [Class Schema Evolution](./part5-operations/13-class-schema-evolution.md) | Schema history, unified 60-class taxonomy, legacy mapping | `labeling/class_mapping.py`, `training/config/classes.yaml` |
 
 ---
 
@@ -96,8 +96,8 @@ Dashed lines indicate optional dependencies. The agent runs without YOLO detecti
 - [Game loop entry point](./part1-architecture/02-game-loop-pipeline.md#the-iteration-cycle) -- the core capture-think-act cycle
 - [Action types reference](./part1-architecture/03-action-model-and-execution.md#the-five-action-types) -- click, right_click, press, drag, wait
 - [System prompt](./part2-llm-integration/05-prompt-engineering.md) -- what the LLM knows about the game
-- [59-class taxonomy](./part3-entity-detection/07-detector-architecture.md#the-59-class-taxonomy) -- all detectable entity types
-- [Class ID mapping](./part5-operations/13-class-schema-evolution.md) -- the v1/v2 mismatch and remapping
+- [60-class taxonomy](./part3-entity-detection/07-detector-architecture.md#the-60-class-taxonomy) -- all detectable entity types
+- [Class schema evolution](./part5-operations/13-class-schema-evolution.md) -- schema history and unified class IDs
 
 ---
 

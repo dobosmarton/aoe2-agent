@@ -9,11 +9,11 @@ flowchart LR
     SLD["SLD Game Files<br/>(game assets)"] -->|sld_extractor.py| PNG["Sprite PNGs<br/>(RGBA, per-class)"]
     BG["Real Screenshots<br/>(blurred backgrounds)"] --> GEN
     PNG -->|generate_training_data.py| GEN["Synthetic Dataset<br/>(2400 train / 600 val)"]
-    CVAT["CVAT Labeled<br/>Real Screenshots<br/>(58 images)"] -->|prepare_training.py| MERGE["Hybrid Dataset v2<br/>(2450 train / 608 val)"]
-    GEN -->|"merge + remap v1→v2"| MERGE
-    MERGE -->|train_yolo.py| MODEL["YOLO v2 Model<br/>(59 classes)"]
-    MODEL -->|export| ONNX["aoe2_yolo_v2.onnx"]
-    MODEL -->|copy| PT["aoe2_yolo_v2.pt"]
+    CVAT["CVAT Labeled<br/>Real Screenshots"] -->|prepare_training.py| MERGE["Hybrid Dataset<br/>(classes.yaml IDs)"]
+    GEN -->|"copy (same IDs)"| MERGE
+    MERGE -->|train_yolo.py| MODEL["YOLO Model<br/>(60 classes)"]
+    MODEL -->|export| ONNX["aoe2_yolo.onnx"]
+    MODEL -->|copy| PT["aoe2_yolo.pt"]
 ```
 
 ## 8.2 Synthetic Data Generation
@@ -22,11 +22,11 @@ flowchart LR
 
 ### Sprite Configurations
 
-46 sprite configurations define how each entity type appears in generated images. Each config specifies:
+53 sprite configurations define how each entity type appears in generated images. Each config specifies:
 
 | Field | Example | Purpose |
 |-------|---------|---------|
-| `class_id` | `8` | YOLO class ID (v1 schema during generation) |
+| `class_id` | `8` | YOLO class ID (matches classes.yaml directly) |
 | `class_name` | `"sheep"` | Human-readable name |
 | `sprite_patterns` | `["u_sheep_idle*_x1.sld"]` | Glob patterns for sprite files |
 | `scale_range` | `(0.8, 1.2)` | Random size variation |
@@ -68,7 +68,7 @@ Three background types, selected randomly per image:
 
 2. **Synthetic backgrounds** -- pre-generated terrain images.
 
-3. **Procedural terrain** -- generated at runtime with 20 random green-toned elliptical patches (200-500px) and Gaussian blur (radius=3).
+3. **Procedural terrain** -- generated at runtime with biome-aware color palettes. A biome is selected randomly (weighted) from 9 types: grass (25%), desert (15%), snow (10%), autumn (10%), jungle (10%), dirt (10%), mixed (10%), water_shore (5%), dark_forest (5%). Each biome defines 5 terrain colors used for 20 elliptical patches (200-500px) with Gaussian blur (radius=3). The "mixed" biome merges colors from 2-3 random biomes.
 
 ## 8.3 Augmentation Pipeline
 
@@ -133,14 +133,14 @@ Tuned for isometric game graphics:
 ### Dataset Structure
 
 ```
-training_data_v2/
+training_data/
 ├── train/
-│   ├── images/   # 2450 images (2400 synthetic + 50 real)
+│   ├── images/   # hybrid: synthetic + real tiles
 │   └── labels/   # YOLO .txt files (class_id cx cy w h)
 ├── val/
-│   ├── images/   # 608 images (600 synthetic + 8 real)
+│   ├── images/
 │   └── labels/
-└── dataset.yaml  # Paths + class names
+└── dataset.yaml  # Paths + 60 class names (classes.yaml IDs)
 ```
 
 ### Output
@@ -152,17 +152,17 @@ Training produces:
 
 ### Results
 
-v1 model (synthetic only): **86% mAP50** on synthetic validation data, 46 classes.
-v2 model (hybrid): 59 classes with real data integration. See [Chapter 12](../part5-operations/12-cloud-training.md) for cloud training details.
+v4 model (hybrid): **86.8% mAP50** on validation data, 60 classes. Trained on 8,520 images (5,520 real tiles + 3,000 synthetic). See [Chapter 12](../part5-operations/12-cloud-training.md) for cloud training details.
 
 ---
 
 ## Summary
 
-- Synthetic data: sprite compositing with z-order, overlap management, 3 background types
+- Synthetic data: sprite compositing with z-order, overlap management, 3 background types with 9 biome palettes
+- 53 sprite configs using classes.yaml IDs directly (no remapping needed)
+- 17+ architecture styles per building via wildcard patterns
 - 6 enhanced augmentations simulating real game conditions (fog, UI, compression, zoom, temperature, vignette)
 - YOLO11 nano model: 150 epochs, isometric-tuned hyperparameters
-- Hybrid dataset: 2450 train (2400 synthetic + 50 real) / 608 val
 
 ## Related Topics
 

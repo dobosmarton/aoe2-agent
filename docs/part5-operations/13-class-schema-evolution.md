@@ -1,111 +1,76 @@
 # Chapter 13: Class Schema Evolution
 
-The detection system has two class schemas with different ID assignments. Mixing them without remapping corrupts training data. This chapter explains why two schemas exist, how they differ, and where remapping occurs.
+The detection system uses a single class schema defined in `classes.yaml` with 60 classes. This chapter explains the schema history, the current unified approach, and where legacy mapping still exists.
 
-## 13.1 Why Two Schemas
+## 13.1 Schema History
 
-### v1 Schema (46 classes)
+### v1 Schema (46 classes) — Legacy
 
-The original training schema, defined in `detection/training_data/dataset.yaml`. Created when the first synthetic dataset was generated. Class IDs were assigned in a different order than the final taxonomy:
+The original training schema, defined in `detection/training_data/dataset.yaml`. Created when the first synthetic dataset was generated. Class IDs were assigned in a different order than the final taxonomy, and unique units were individual classes (longbowman, mangudai, war_wagon).
 
-| ID | Class | ID | Class |
-|----|-------|----|-------|
-| 0 | tree | 19 | sheep |
-| 1 | gold_mine | 5 | town_center |
-| 2 | stone_mine | 43 | longbowman |
-| 3 | berry_bush | 44 | mangudai |
-| 4 | relic | 45 | war_wagon |
+### v2/Current Schema (60 classes)
 
-The v1 model was trained on this schema and achieved 86% mAP50 on synthetic data.
+The reorganized schema, defined in `detection/training/config/classes.yaml` (source of truth). Key changes from v1:
 
-### v2 Schema (59 classes)
+1. **Reordered IDs** — classes organized by category (resources 0-8, economy buildings 9-16, military buildings 17-24, etc.)
+2. **Unique unit grouping** — individual unique units replaced with 5 type-based groups: unique_archer, unique_cavalry, unique_infantry, unique_siege, unique_ship
+3. **14 new classes** added over time, including fish (55), galley (56), fire_galley (57), siege_tower (58), goose (59)
 
-The reorganized target schema, defined in `detection/training/config/classes.yaml` (source of truth). Key changes:
+### Unified Class IDs
 
-1. **Reordered IDs** -- classes reorganized by category (resources 0-8, economy buildings 9-16, military buildings 17-24, etc.)
-2. **Unique unit grouping** -- v1 had individual unique units (longbowman, mangudai, war_wagon); v2 groups them by combat type (unique_archer, unique_cavalry, unique_siege)
-3. **New classes** -- 13 classes added that weren't in v1, including 4 added in Feb 2026:
-   - `fish` (55), `galley` (56), `fire_galley` (57), `siege_tower` (58)
+As of v5, all data sources use `classes.yaml` IDs directly:
 
-### Example ID Mismatches
+- **Synthetic training data** — `generate_training_data.py` SPRITE_CONFIGS use classes.yaml IDs (e.g., sheep=8, town_center=9)
+- **CVAT annotations** — labeled with classes.yaml names, converted by name-matching
+- **Pre-labels** — `prelabel.py` maps model output to classes.yaml IDs before writing CVAT-compatible labels
+- **Merged datasets** — `prepare_training.py` copies synthetic labels directly (no remapping needed)
 
-| Entity | v1 ID | v2 ID |
-|--------|-------|-------|
-| sheep | 19 | 8 |
-| town_center | 5 | 9 |
-| barracks | 14 | 17 |
-| villager | 17 | 30 |
-| scout_line | 18 | 33 |
-| longbowman | 43 | *(mapped to unique_archer=50)* |
-
-If synthetic labels (v1 IDs) are mixed with real labels (v2 IDs) without remapping, the model learns incorrect class assignments. For example, what the v1 schema calls class 19 (sheep) the v2 schema calls class 19 (stable) -- a completely different entity.
-
-> **Key Insight**: The class ID mismatch between v1 and v2 is the most dangerous data integrity issue in the project. If synthetic labels are mixed with real labels without remapping, the model will learn completely wrong class assignments. The `prepare_training.py` merge script handles this automatically, but any manual label manipulation must account for which schema is in use.
+This eliminates the v1/v2 ID mismatch that previously required remapping during dataset merges.
 
 ## 13.2 The Mapping Utility
 
-`detection/labeling/class_mapping.py` provides bidirectional mapping.
+`detection/labeling/class_mapping.py` provides utilities for class schema operations.
 
 ### Core Functions
 
-**`load_classes_yaml()`** (`class_mapping.py:18-28`) -- loads the v2 59-class schema. Returns `{id: name}` dict.
+**`load_classes_yaml()`** — loads the 60-class schema. Returns `{id: name}` dict.
 
-**`load_dataset_yaml()`** (`class_mapping.py:31-41`) -- loads the v1 46-class schema. Returns `{id: name}` dict.
+**`load_dataset_yaml()`** — loads the legacy v1 46-class schema. Returns `{id: name}` dict.
 
-**`build_v1_to_v2_mapping()`** (`class_mapping.py:44-81`) -- builds the mapping:
+**`build_v1_to_v2_mapping()`** — builds mapping from legacy model class IDs to classes.yaml IDs. Used only by `prelabel.py` when running inference with older models (v1-v4) that output v1-era class IDs. Maps by matching class names between schemas.
 
-1. Creates a `name → id` reverse lookup for v2
-2. For each v1 class, looks up the same name in v2
-3. Special handling via `_UNIQUE_MAP` for unique units:
-
-```python
-_UNIQUE_MAP = {
-    "longbowman": "unique_archer",    # v1:43 → v2:50
-    "mangudai": "unique_archer",       # v1:44 → v2:50
-    "war_wagon": "unique_siege",       # v1:45 → v2:53
-}
-```
-
-Result: ~42 classes map directly by name, 3 unique units map via `_UNIQUE_MAP`, 4 v1 classes have no v2 equivalent (dropped).
-
-**`build_v2_to_v1_mapping()`** (`class_mapping.py:84-94`) -- inverse mapping. Note: unique units collapse (unique_archer maps to whichever v1 unique was processed last).
-
-**`convert_label_file()`** (`class_mapping.py:126-159`) -- rewrites a YOLO `.txt` label file, replacing class IDs per the mapping. Lines with unmappable classes are skipped.
+**`convert_label_file()`** — rewrites a YOLO `.txt` label file, replacing class IDs per a mapping. Lines with unmappable classes are skipped.
 
 ### CVAT Support
 
-**`get_classes_for_cvat(schema)`** (`class_mapping.py:97-112`) -- generates an ordered class name list for CVAT project import. Supports both v1 and v2 schemas.
+**`get_classes_for_cvat(schema)`** — generates an ordered class name list for CVAT project import.
 
-**`write_classes_txt()`** (`class_mapping.py:115-123`) -- writes the `classes.txt` file that CVAT needs when importing YOLO labels.
+**`write_classes_txt()`** — writes the `classes.txt` file that CVAT needs when importing YOLO labels.
 
-## 13.3 Where Remapping Occurs
+## 13.3 Data Flow
 
 ```mermaid
 flowchart TD
-    SYN["Synthetic Labels<br/>(v1 class IDs)"] -->|"build_v1_to_v2_mapping()"| REMAP["Remapped Labels<br/>(v2 class IDs)"]
-    REAL["Real Labels<br/>(already v2 IDs)"] --> MERGE["Merged Dataset"]
-    REMAP --> MERGE
-    MERGE --> TRAIN["YOLO Training<br/>(v2 schema)"]
+    YAML["classes.yaml<br/>(60 classes, source of truth)"] --> SPRITES["SPRITE_CONFIGS<br/>(classes.yaml IDs)"]
+    SPRITES --> SYN["Synthetic Labels<br/>(classes.yaml IDs)"]
+    SYN --> MERGE["Merged Dataset"]
 
-    PRE["Pre-labeling<br/>(model outputs v2)"] -->|"write_classes_txt(v2)"| CVAT["CVAT Import"]
-    CVAT -->|"COCO export"| CONVERT["COCO → YOLO<br/>(name-matched to v2)"]
-    CONVERT --> REAL
+    YAML --> CVAT_IMPORT["CVAT Import<br/>(write_classes_txt)"]
+    CVAT_IMPORT --> ANNOTATE["Manual Annotation"]
+    ANNOTATE --> CVAT_EXPORT["CVAT Export<br/>(COCO format)"]
+    CVAT_EXPORT -->|"name-matched to classes.yaml"| REAL["Real Labels<br/>(classes.yaml IDs)"]
+    REAL --> MERGE
+
+    MERGE --> TRAIN["YOLO Training<br/>(60-class schema)"]
 ```
 
 ### In prepare_training.py
 
-During the hybrid merge (`detection/labeling/prepare_training.py`), synthetic labels are remapped on copy:
-
-1. Builds v1→v2 mapping via `build_v1_to_v2_mapping()`
-2. For each synthetic label file:
-   - Reads each line
-   - Replaces the class ID using the mapping
-   - Writes to the output directory
-3. Real labels (already in v2 schema) are copied unchanged
+During the hybrid merge, synthetic labels are copied directly (no remapping needed since they already use classes.yaml IDs). Real labels from CVAT exports are converted by name-matching.
 
 ### In prelabel.py
 
-When pre-labeling raw screenshots for CVAT import, the current model's output class IDs are used directly (already v2 if using v2 model). The `classes.txt` is generated from the v2 schema.
+When pre-labeling screenshots with older models (v1-v4), the model outputs legacy class IDs. `build_v1_to_v2_mapping()` maps these to classes.yaml IDs before writing CVAT-compatible labels. For v5+ models trained on classes.yaml IDs directly, this mapping is an identity operation.
 
 ### In COCO conversion
 
@@ -115,10 +80,11 @@ CVAT COCO exports use 1-indexed category IDs with names. The conversion matches 
 
 `detection/training/config/classes.yaml` is the single source of truth for the class taxonomy:
 
-- **YOLO training** -- `dataset.yaml` references these class names
-- **CVAT import** -- `get_classes_for_cvat()` reads from this file
-- **Detector inference** -- `DEFAULT_CLASSES` in `detector.py` mirrors this file
-- **Pre-labeling** -- `write_classes_txt()` generates CVAT-compatible format from this file
+- **YOLO training** — `dataset.yaml` references these class names
+- **Synthetic data** — `SPRITE_CONFIGS` in `generate_training_data.py` uses these IDs directly
+- **CVAT import** — `get_classes_for_cvat()` reads from this file
+- **Detector inference** — `DEFAULT_CLASSES` in `detector.py` mirrors this file
+- **Pre-labeling** — `write_classes_txt()` generates CVAT-compatible format from this file
 
 Any class additions, removals, or renamings must update `classes.yaml` first. All other code derives from it.
 
@@ -127,26 +93,22 @@ Any class additions, removals, or renamings must update `classes.yaml` first. Al
 1. Add the new class to `classes.yaml` with the next available ID
 2. Update `DEFAULT_CLASSES` in `detector.py` to match
 3. Extract sprites for the new class (if generating synthetic data)
-4. Add sprite config to `generate_training_data.py`
+4. Add sprite config to `generate_training_data.py` using the classes.yaml ID
 5. Regenerate synthetic dataset
 6. Re-merge with real data via `prepare_training.py`
 7. Retrain the model
-
-Recent additions (Feb 2026): fish (55), galley (56), fire_galley (57), siege_tower (58).
 
 ---
 
 ## Summary
 
-- Two schemas: v1 (46 classes, original IDs) and v2 (59 classes, reorganized)
-- Name-based mapping handles ID mismatches between schemas
-- Unique units collapsed: longbowman/mangudai → unique_archer, war_wagon → unique_siege
-- Remapping happens automatically in `prepare_training.py` during dataset merge
+- Single schema: 60 classes defined in `classes.yaml`, used directly by all data sources
+- Legacy v1 mapping exists only for running inference with older models in `prelabel.py`
+- Unique units grouped by combat type: unique_archer, unique_cavalry, unique_infantry, unique_siege, unique_ship
 - `classes.yaml` is the single source of truth for the taxonomy
-- Mixing schemas without remapping corrupts training data
 
 ## Related Topics
 
-- [Chapter 7: Detector Architecture](../part3-entity-detection/07-detector-architecture.md) -- the 59-class taxonomy at runtime
-- [Chapter 9: Labeling & Active Learning](../part3-entity-detection/09-labeling-and-active-learning.md) -- where remapping integrates with CVAT exports
-- [Chapter 8: Training Pipeline](../part3-entity-detection/08-training-pipeline.md) -- how the remapped dataset is used for training
+- [Chapter 7: Detector Architecture](../part3-entity-detection/07-detector-architecture.md) — the 60-class taxonomy at runtime
+- [Chapter 9: Labeling & Active Learning](../part3-entity-detection/09-labeling-and-active-learning.md) — where class mapping integrates with CVAT exports
+- [Chapter 8: Training Pipeline](../part3-entity-detection/08-training-pipeline.md) — how the dataset is used for training

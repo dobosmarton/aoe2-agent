@@ -165,4 +165,4 @@ These PNGs are consumed by `generate_training_data.py` (see [Chapter 8](../part3
 ## Related Topics
 
 - [Chapter 8: Training Pipeline](../part3-entity-detection/08-training-pipeline.md) -- how sprites become training data
-- [Chapter 7: Detector Architecture](../part3-entity-detection/07-detector-architecture.md) -- the 59-class taxonomy these sprites map to
+- [Chapter 7: Detector Architecture](../part3-entity-detection/07-detector-architecture.md) -- the 60-class taxonomy these sprites map to

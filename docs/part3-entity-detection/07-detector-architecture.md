@@ -1,6 +1,6 @@
 # Chapter 7: Detector Architecture
 
-The entity detection system runs YOLO inference on game screenshots, producing labeled bounding boxes with semantic IDs like `sheep_0` or `town_center_0`. It supports three backends (PyTorch, ONNX, Mock) and a 59-class taxonomy covering resources, buildings, and military units.
+The entity detection system runs YOLO inference on game screenshots, producing labeled bounding boxes with semantic IDs like `sheep_0` or `town_center_0`. It supports three backends (PyTorch, ONNX, Mock) and a 60-class taxonomy covering resources, buildings, and military units.
 
 ## 7.1 DetectedEntity
 
@@ -19,9 +19,9 @@ class DetectedEntity:
 
 `to_dict()` converts to a flat dict for the LLM context and executor cache. The `id` field follows the pattern `{class_name}_{counter}`, where counters reset on each `detect()` call. IDs are only valid within a single iteration.
 
-## 7.2 The 59-Class Taxonomy
+## 7.2 The 60-Class Taxonomy
 
-Defined in `detection/training/config/classes.yaml` (source of truth) and mirrored in `detection/inference/detector.py:46-120` as `DEFAULT_CLASSES`:
+Defined in `detection/training/config/classes.yaml` (source of truth) and mirrored in `detection/inference/detector.py` as `DEFAULT_CLASSES`:
 
 | Range | Category | Classes |
 |-------|----------|---------|
@@ -39,6 +39,7 @@ Defined in `detection/training/config/classes.yaml` (source of truth) and mirror
 | 50-54 | Unique Units | unique_archer, unique_cavalry, unique_infantry, unique_siege, unique_ship |
 | 55-57 | Naval | fish, galley, fire_galley |
 | 58 | Additional Siege | siege_tower |
+| 59 | Animals | goose |
 
 The `_line` suffix denotes unit upgrade paths (e.g., `militia_line` covers Militia through Champion). The `unique_` prefix groups civilization-specific units by combat type rather than by civilization -- there are too many unique units to have a class per civ.
 
@@ -50,7 +51,7 @@ Defined at `detection/inference/detector.py:123+`. Key initialization parameters
 |-----------|---------|---------|
 | `model_path` | auto-detect | Path to .pt or .onnx model file |
 | `confidence_threshold` | `0.35` | Minimum confidence for detections |
-| `class_names` | `DEFAULT_CLASSES` | 59-class name list |
+| `class_names` | `DEFAULT_CLASSES` | 60-class name list |
 | `use_mock` | `False` | Use mock detections for testing |
 
 ### Model Loading
@@ -152,9 +153,9 @@ The game loop calls `get_detector()` once during initialization. The same instan
 
 ## Summary
 
-- 59-class taxonomy organized by category (resources, buildings, units, siege, naval)
+- 60-class taxonomy organized by category (resources, buildings, units, siege, naval, animals)
 - Three backends: PyTorch (ultralytics), ONNX Runtime, Mock
-- Auto-detects model file with v2 preferred over v1
+- Auto-detects model file with latest version preferred
 - ONNX handles two output formats transparently
 - Entity IDs (`sheep_0`) are per-iteration, used for target_id action resolution
 
@@ -162,4 +163,4 @@ The game loop calls `get_detector()` once during initialization. The same instan
 
 - [Chapter 3: Action Model & Execution](../part1-architecture/03-action-model-and-execution.md) -- how detections become click targets
 - [Chapter 8: Training Pipeline](./08-training-pipeline.md) -- how the model is created
-- [Chapter 13: Class Schema Evolution](../part5-operations/13-class-schema-evolution.md) -- the v1/v2 class taxonomy history
+- [Chapter 13: Class Schema Evolution](../part5-operations/13-class-schema-evolution.md) -- the class taxonomy history and unified schema

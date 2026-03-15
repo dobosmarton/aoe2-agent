@@ -13,10 +13,9 @@ Raw Screenshots              Pre-label with YOLO         CVAT
                             (with classes.txt)                  ↓
                                                      prepare_training.py
                                                         (COCO → YOLO +
-                                                         remap v1→v2 +
                                                          merge with synthetic)
                                                               ↓
-                                                      training_data_v2/
+                                                      training_data/
 ```
 
 ## 9.2 Pre-Labeling
@@ -71,19 +70,13 @@ The code handles multiple CVAT export directory layouts:
 - `labels/` -- alternative layout
 - `.txt` files at root level
 
-## 9.4 Class Schema Remapping
+## 9.4 Class Schema
 
-When merging synthetic (v1 schema) and real (v2 schema) data, class IDs must be remapped. See [Chapter 13](../part5-operations/13-class-schema-evolution.md) for the full schema story.
+All data sources now use `classes.yaml` IDs directly (60 classes). See [Chapter 13](../part5-operations/13-class-schema-evolution.md) for schema history.
 
-`detection/labeling/class_mapping.py` provides the mapping utilities:
+`detection/labeling/class_mapping.py` provides utilities:
 
-**`build_v1_to_v2_mapping()`** -- builds a dict mapping v1 class IDs to v2 IDs by matching class names. Special handling for unique units:
-
-| v1 Name | v1 ID | v2 Name | v2 ID |
-|---------|-------|---------|-------|
-| longbowman | 43 | unique_archer | 50 |
-| mangudai | 44 | unique_archer | 50 |
-| war_wagon | 45 | unique_siege | 53 |
+**`build_v1_to_v2_mapping()`** -- maps legacy model class IDs to classes.yaml IDs. Only needed when running inference with older models (v1-v4) in `prelabel.py`.
 
 **`convert_label_file()`** -- rewrites a YOLO `.txt` file replacing each class ID with its mapped counterpart. Lines with unmappable classes are dropped with a warning.
 
@@ -96,20 +89,20 @@ When merging synthetic (v1 schema) and real (v2 schema) data, class IDs must be 
 3. **Convert COCO to YOLO** -- if COCO format, generates temp YOLO label files
 4. **Match labels to images** -- pairs each label file with its corresponding image
 5. **Split real data** -- 85/15 train/val split with `seed=42` for reproducibility
-6. **Copy synthetic data** -- copies synthetic images and **remaps v1 labels to v2 IDs** during copy
+6. **Copy synthetic data** -- copies synthetic images and labels directly (both use classes.yaml IDs)
 7. **Copy real data** -- copies real images with `real_` prefix to avoid filename collisions
-8. **Generate dataset.yaml** -- writes the YOLO training config with all 59 classes
+8. **Generate dataset.yaml** -- writes the YOLO training config with all 60 classes
 
 Output structure:
 ```
-training_data_v2/
+training_data/
 ├── train/
 │   ├── images/
 │   │   ├── img_00000.jpg          # synthetic
 │   │   ├── real_screenshot_001.jpg # real
 │   └── labels/
-│       ├── img_00000.txt          # remapped v1→v2
-│       ├── real_screenshot_001.txt # already v2
+│       ├── img_00000.txt          # classes.yaml IDs
+│       ├── real_screenshot_001.txt # classes.yaml IDs
 ├── val/
 │   └── ...
 ├── dataset.yaml
@@ -160,12 +153,11 @@ After manual correction in CVAT, `integrate()` copies the corrected labels into 
 
 - CVAT labels exported as COCO 1.0 (not YOLO, which drops polygons)
 - Automatic COCO-to-YOLO conversion with name-based class mapping
-- v1-to-v2 class ID remapping during synthetic data merge
+- All data sources use classes.yaml IDs directly (no remapping needed for v5+ synthetic data)
 - Active learning scores unlabeled images by model uncertainty
-- Hybrid dataset: 2450 train (2400 synthetic + 50 real), 608 val
 
 ## Related Topics
 
 - [Chapter 8: Training Pipeline](./08-training-pipeline.md) -- synthetic data generation and YOLO training
-- [Chapter 13: Class Schema Evolution](../part5-operations/13-class-schema-evolution.md) -- the v1/v2 mapping in depth
+- [Chapter 13: Class Schema Evolution](../part5-operations/13-class-schema-evolution.md) -- schema history and unified class IDs
 - [Chapter 7: Detector Architecture](./07-detector-architecture.md) -- how the trained model runs at inference time

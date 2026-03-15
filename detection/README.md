@@ -11,10 +11,10 @@ Screenshot → YOLO Model → Detected Entities (class, bbox, confidence)
 ```
 
 **Key Features:**
-- 55 entity classes (units, buildings, resources, animals)
+- 60 entity classes (units, buildings, resources, animals)
 - Real-time inference (~7ms/image)
-- 86% mAP50 accuracy on synthetic data
-- Trained on 3000 synthetic images
+- 86.8% mAP50 accuracy (v4 model, hybrid dataset)
+- Trained on 8,520 images (5,520 real tiles + 3,000 synthetic)
 
 ## Quick Start
 
@@ -54,8 +54,8 @@ detection/
 ├── inference/                   # Runtime detection
 │   ├── detector.py              # EntityDetector class
 │   └── models/
-│       ├── aoe2_yolo26.pt       # PyTorch model weights
-│       └── aoe2_yolo26.onnx     # ONNX model (optional)
+│       ├── aoe2_yolo_v4.pt      # PyTorch model weights
+│       └── aoe2_yolo_v4.onnx    # ONNX model (optional)
 │
 ├── training/                    # Training pipeline
 │   ├── train_yolo.py            # YOLO training script
@@ -86,26 +86,28 @@ detection/
 |----------|---------|
 | [TRAINING_GUIDE.md](docs/TRAINING_GUIDE.md) | Complete guide for the detection pipeline: sprite extraction, synthetic data generation, cloud training on Lambda Labs, and inference integration. Includes training results, cost comparisons, and troubleshooting. |
 | [SLD_FORMAT.md](docs/SLD_FORMAT.md) | Technical specification for AoE2:DE's SLD (SLDX) sprite file format. Documents the binary structure, DXT1 compression, and layer parsing. Essential for understanding or modifying the sprite extractor. |
-| [classes.yaml](training/config/classes.yaml) | Single source of truth for all 55 detection classes. Organized by category with IDs and examples for unique unit groups. |
+| [classes.yaml](training/config/classes.yaml) | Single source of truth for all 60 detection classes. Organized by category with IDs and examples for unique unit groups. |
 
-## Entity Classes (55 total)
+## Entity Classes (60 total)
 
 Classes are organized by gameplay category. See `training/config/classes.yaml` for the complete list.
 
 | Category | Count | Examples |
 |----------|-------|----------|
-| Resources & Nature | 9 | tree, gold_mine, stone_mine, berry_bush, sheep, boar |
-| Economy Buildings | 8 | town_center, house, lumber_camp, mill, market, farm |
-| Military Buildings | 8 | barracks, archery_range, stable, castle, university |
+| Resources & Nature | 9 | tree, gold_mine, stone_mine, berry_bush, sheep, boar, wolf |
+| Economy Buildings | 8 | town_center, house, lumber_camp, mill, market, dock, farm |
+| Military Buildings | 8 | barracks, archery_range, stable, blacksmith, siege_workshop, castle |
 | Defensive | 3 | gate, wall, tower |
 | Special Buildings | 2 | wonder, krepost |
 | Civilian Units | 3 | villager, trade_cart, fishing_ship |
 | Cavalry | 4 | scout_line, knight_line, camel_line, battle_elephant |
-| Archers | 4 | archer_line, skirmisher_line, cavalry_archer |
+| Archers | 4 | archer_line, skirmisher_line, cavalry_archer, hand_cannoneer |
 | Infantry | 3 | militia_line, spearman_line, eagle_line |
-| Siege | 4 | ram, mangonel_line, scorpion, trebuchet |
+| Siege | 5 | ram, mangonel_line, scorpion, trebuchet, siege_tower |
 | Monks & Special | 2 | monk, king |
 | Unique Units | 5 | unique_archer, unique_cavalry, unique_infantry, unique_siege, unique_ship |
+| Naval | 3 | fish, galley, fire_galley |
+| Animals | 1 | goose |
 
 **Note:** Unit upgrade lines are grouped (e.g., `militia_line` includes militia through champion). Civilization-specific unique units are categorized by type rather than individually.
 
@@ -150,14 +152,14 @@ python -m detection.extraction.capture_replay --count 200 --interval 5
 3. Run the capture script
 4. Move camera around during capture for diverse angles
 
-## Model Performance
+## Model Performance (v4)
 
 | Metric | Value |
 |--------|-------|
-| mAP50 | 86.0% |
-| mAP50-95 | 71.9% |
-| Precision | 86.7% |
-| Recall | 77.8% |
+| mAP50 | 86.8% |
+| mAP50-95 | 72.3% |
+| Precision | 87.1% |
+| Recall | 78.5% |
 | Inference | 7.1ms/image |
 
 **Top Performing Classes:** trade_cart (97.4%), castle (96.9%), knight_line (95.8%), town_center (92.9%)
