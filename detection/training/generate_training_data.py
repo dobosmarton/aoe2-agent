@@ -41,9 +41,49 @@ class SpriteConfig:
     min_spacing: int = 20  # Minimum pixels between same-class sprites
 
 
-# Sprite configurations matching our extracted files (46 classes with sprites)
+# Biome terrain color palettes for diverse synthetic backgrounds
+BIOME_PALETTES = {
+    "grass": {
+        "colors": [(34, 89, 34), (46, 102, 46), (58, 115, 58), (72, 99, 52), (85, 107, 47)],
+        "weight": 0.25,
+    },
+    "desert": {
+        "colors": [(194, 178, 128), (210, 190, 140), (180, 160, 110), (220, 200, 150), (170, 150, 100)],
+        "weight": 0.15,
+    },
+    "snow": {
+        "colors": [(220, 225, 230), (200, 210, 220), (235, 238, 240), (190, 200, 210), (210, 215, 225)],
+        "weight": 0.10,
+    },
+    "autumn": {
+        "colors": [(120, 100, 40), (140, 110, 50), (100, 85, 35), (130, 95, 45), (110, 90, 38)],
+        "weight": 0.10,
+    },
+    "jungle": {
+        "colors": [(20, 70, 20), (30, 80, 25), (15, 60, 15), (25, 75, 22), (35, 85, 30)],
+        "weight": 0.10,
+    },
+    "dirt": {
+        "colors": [(139, 110, 72), (150, 120, 80), (125, 100, 65), (160, 130, 90), (145, 115, 75)],
+        "weight": 0.10,
+    },
+    "water_shore": {
+        "colors": [(60, 100, 120), (50, 90, 110), (70, 110, 130), (45, 85, 105), (55, 95, 115)],
+        "weight": 0.05,
+    },
+    "dark_forest": {
+        "colors": [(20, 50, 20), (30, 60, 30), (15, 45, 18), (25, 55, 25), (18, 48, 22)],
+        "weight": 0.05,
+    },
+    "mixed": {
+        "colors": None,  # Randomly merges 2-3 other biome palettes
+        "weight": 0.10,
+    },
+}
+
+
+# Sprite configurations using classes.yaml IDs directly (60 classes)
 # Organized by category with appropriate z-order and spawn rates
-# Only includes classes that have successfully extracted sprites
 SPRITE_CONFIGS = [
     # =========================================================================
     # RESOURCES & NATURE (rendered first, bottom layer)
@@ -60,129 +100,147 @@ SPRITE_CONFIGS = [
                  scale_range=(0.9, 1.1), count_range=(0, 1), z_order=0),
 
     # =========================================================================
-    # ECONOMY BUILDINGS (low z-order)
+    # ANIMALS (z_order 0 - ground layer)
     # =========================================================================
-    SpriteConfig(class_id=5, class_name="town_center", sprite_patterns=["town_center_*.png"],
+    SpriteConfig(class_id=5, class_name="deer", sprite_patterns=["deer_*.png"],
+                 scale_range=(0.9, 1.1), count_range=(0, 3), z_order=0),
+    SpriteConfig(class_id=6, class_name="boar", sprite_patterns=["boar_*.png"],
+                 scale_range=(0.9, 1.1), count_range=(0, 2), z_order=0),
+    SpriteConfig(class_id=7, class_name="wolf", sprite_patterns=["wolf_*.png"],
+                 scale_range=(0.9, 1.1), count_range=(0, 2), z_order=0),
+    SpriteConfig(class_id=8, class_name="sheep", sprite_patterns=["sheep_*.png"],
+                 scale_range=(0.9, 1.1), count_range=(2, 5), z_order=0),
+
+    # =========================================================================
+    # ECONOMY BUILDINGS (z_order 1)
+    # =========================================================================
+    SpriteConfig(class_id=9, class_name="town_center", sprite_patterns=["town_center_*.png"],
                  scale_range=(0.9, 1.1), count_range=(1, 1), z_order=1),
-    SpriteConfig(class_id=6, class_name="house", sprite_patterns=["house_*.png"],
+    SpriteConfig(class_id=10, class_name="house", sprite_patterns=["house_*.png"],
                  scale_range=(0.85, 1.15), count_range=(0, 4), z_order=1),
-    SpriteConfig(class_id=7, class_name="lumber_camp", sprite_patterns=["lumber_camp_*.png"],
+    SpriteConfig(class_id=11, class_name="lumber_camp", sprite_patterns=["lumber_camp_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 1), z_order=1),
-    SpriteConfig(class_id=8, class_name="mining_camp", sprite_patterns=["mining_camp_*.png"],
+    SpriteConfig(class_id=12, class_name="mining_camp", sprite_patterns=["mining_camp_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 1), z_order=1),
-    SpriteConfig(class_id=9, class_name="blacksmith", sprite_patterns=["blacksmith_*.png"],
+    SpriteConfig(class_id=13, class_name="mill", sprite_patterns=["mill_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 1), z_order=1),
-    SpriteConfig(class_id=10, class_name="dock", sprite_patterns=["dock_*.png"],
+    SpriteConfig(class_id=14, class_name="market", sprite_patterns=["market_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 1), z_order=1),
-    SpriteConfig(class_id=11, class_name="university", sprite_patterns=["university_*.png"],
+    SpriteConfig(class_id=15, class_name="dock", sprite_patterns=["dock_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 1), z_order=1),
 
     # =========================================================================
     # MILITARY BUILDINGS
     # =========================================================================
-    SpriteConfig(class_id=12, class_name="barracks", sprite_patterns=["barracks_*.png"],
+    SpriteConfig(class_id=17, class_name="barracks", sprite_patterns=["barracks_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 1), z_order=1),
-    SpriteConfig(class_id=13, class_name="archery_range", sprite_patterns=["archery_range_*.png"],
+    SpriteConfig(class_id=18, class_name="archery_range", sprite_patterns=["archery_range_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 1), z_order=1),
-    SpriteConfig(class_id=14, class_name="stable", sprite_patterns=["stable_*.png"],
+    SpriteConfig(class_id=19, class_name="stable", sprite_patterns=["stable_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 1), z_order=1),
-    SpriteConfig(class_id=15, class_name="monastery", sprite_patterns=["monastery_*.png"],
+    SpriteConfig(class_id=20, class_name="blacksmith", sprite_patterns=["blacksmith_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 1), z_order=1),
-    SpriteConfig(class_id=16, class_name="castle", sprite_patterns=["castle_*.png"],
+    SpriteConfig(class_id=21, class_name="siege_workshop", sprite_patterns=["siege_workshop_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 1), z_order=1),
-    SpriteConfig(class_id=17, class_name="wonder", sprite_patterns=["wonder_*.png"],
+    SpriteConfig(class_id=22, class_name="monastery", sprite_patterns=["monastery_*.png"],
+                 scale_range=(0.9, 1.1), count_range=(0, 1), z_order=1),
+    SpriteConfig(class_id=23, class_name="castle", sprite_patterns=["castle_*.png"],
+                 scale_range=(0.9, 1.1), count_range=(0, 1), z_order=1),
+    SpriteConfig(class_id=24, class_name="university", sprite_patterns=["university_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 1), z_order=1),
 
     # =========================================================================
     # DEFENSE STRUCTURES
     # =========================================================================
-    SpriteConfig(class_id=18, class_name="gate", sprite_patterns=["gate_*.png"],
+    SpriteConfig(class_id=25, class_name="gate", sprite_patterns=["gate_*.png"],
+                 scale_range=(0.9, 1.1), count_range=(0, 1), z_order=1),
+    SpriteConfig(class_id=26, class_name="wall", sprite_patterns=["wall_*.png"],
+                 scale_range=(0.9, 1.1), count_range=(0, 2), z_order=1),
+    SpriteConfig(class_id=27, class_name="tower", sprite_patterns=["tower_*.png"],
+                 scale_range=(0.9, 1.1), count_range=(0, 2), z_order=1),
+
+    # =========================================================================
+    # SPECIAL BUILDINGS
+    # =========================================================================
+    SpriteConfig(class_id=28, class_name="wonder", sprite_patterns=["wonder_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 1), z_order=1),
 
     # =========================================================================
-    # ANIMALS (z_order 2 - middle layer)
+    # CIVILIAN UNITS (z_order 3 - top layer)
     # =========================================================================
-    SpriteConfig(class_id=19, class_name="sheep", sprite_patterns=["sheep_*.png"],
-                 scale_range=(0.9, 1.1), count_range=(2, 5), z_order=2),
-    SpriteConfig(class_id=20, class_name="deer", sprite_patterns=["deer_*.png"],
-                 scale_range=(0.9, 1.1), count_range=(0, 3), z_order=2),
-    SpriteConfig(class_id=21, class_name="boar", sprite_patterns=["boar_*.png"],
-                 scale_range=(0.9, 1.1), count_range=(0, 2), z_order=2),
-    SpriteConfig(class_id=22, class_name="wolf", sprite_patterns=["wolf_*.png"],
-                 scale_range=(0.9, 1.1), count_range=(0, 2), z_order=2),
-
-    # =========================================================================
-    # ECONOMIC UNITS
-    # =========================================================================
-    SpriteConfig(class_id=23, class_name="villager", sprite_patterns=["villager_*.png"],
+    SpriteConfig(class_id=30, class_name="villager", sprite_patterns=["villager_*.png"],
                  scale_range=(0.9, 1.1), count_range=(3, 8), z_order=3),
-    SpriteConfig(class_id=24, class_name="trade_cart", sprite_patterns=["trade_cart_*.png"],
+    SpriteConfig(class_id=31, class_name="trade_cart", sprite_patterns=["trade_cart_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 2), z_order=3),
-    SpriteConfig(class_id=25, class_name="fishing_ship", sprite_patterns=["fishing_ship_*.png"],
+    SpriteConfig(class_id=32, class_name="fishing_ship", sprite_patterns=["fishing_ship_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 1), z_order=3),
 
     # =========================================================================
     # CAVALRY UNITS
     # =========================================================================
-    SpriteConfig(class_id=26, class_name="scout_line", sprite_patterns=["scout_line_*.png"],
+    SpriteConfig(class_id=33, class_name="scout_line", sprite_patterns=["scout_line_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 1), z_order=3),
-    SpriteConfig(class_id=27, class_name="knight_line", sprite_patterns=["knight_line_*.png"],
+    SpriteConfig(class_id=34, class_name="knight_line", sprite_patterns=["knight_line_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 3), z_order=3),
-    SpriteConfig(class_id=28, class_name="camel_line", sprite_patterns=["camel_line_*.png"],
+    SpriteConfig(class_id=35, class_name="camel_line", sprite_patterns=["camel_line_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 2), z_order=3),
-    SpriteConfig(class_id=29, class_name="battle_elephant", sprite_patterns=["battle_elephant_*.png"],
+    SpriteConfig(class_id=36, class_name="battle_elephant", sprite_patterns=["battle_elephant_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 1), z_order=3),
 
     # =========================================================================
     # ARCHER UNITS
     # =========================================================================
-    SpriteConfig(class_id=30, class_name="archer_line", sprite_patterns=["archer_line_*.png"],
+    SpriteConfig(class_id=37, class_name="archer_line", sprite_patterns=["archer_line_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 5), z_order=3),
-    SpriteConfig(class_id=31, class_name="skirmisher_line", sprite_patterns=["skirmisher_line_*.png"],
+    SpriteConfig(class_id=38, class_name="skirmisher_line", sprite_patterns=["skirmisher_line_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 3), z_order=3),
-    SpriteConfig(class_id=32, class_name="cavalry_archer", sprite_patterns=["cavalry_archer_*.png"],
+    SpriteConfig(class_id=39, class_name="cavalry_archer", sprite_patterns=["cavalry_archer_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 2), z_order=3),
-    SpriteConfig(class_id=33, class_name="hand_cannoneer", sprite_patterns=["hand_cannoneer_*.png"],
+    SpriteConfig(class_id=40, class_name="hand_cannoneer", sprite_patterns=["hand_cannoneer_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 2), z_order=3),
 
     # =========================================================================
     # INFANTRY UNITS
     # =========================================================================
-    SpriteConfig(class_id=34, class_name="militia_line", sprite_patterns=["militia_line_*.png"],
+    SpriteConfig(class_id=41, class_name="militia_line", sprite_patterns=["militia_line_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 5), z_order=3),
-    SpriteConfig(class_id=35, class_name="spearman_line", sprite_patterns=["spearman_line_*.png"],
+    SpriteConfig(class_id=42, class_name="spearman_line", sprite_patterns=["spearman_line_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 4), z_order=3),
-    SpriteConfig(class_id=36, class_name="eagle_line", sprite_patterns=["eagle_line_*.png"],
+    SpriteConfig(class_id=43, class_name="eagle_line", sprite_patterns=["eagle_line_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 3), z_order=3),
 
     # =========================================================================
     # SIEGE UNITS
     # =========================================================================
-    SpriteConfig(class_id=37, class_name="ram", sprite_patterns=["ram_*.png"],
+    SpriteConfig(class_id=44, class_name="ram", sprite_patterns=["ram_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 1), z_order=3),
-    SpriteConfig(class_id=38, class_name="mangonel_line", sprite_patterns=["mangonel_line_*.png"],
+    SpriteConfig(class_id=45, class_name="mangonel_line", sprite_patterns=["mangonel_line_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 1), z_order=3),
-    SpriteConfig(class_id=39, class_name="scorpion", sprite_patterns=["scorpion_*.png"],
+    SpriteConfig(class_id=46, class_name="scorpion", sprite_patterns=["scorpion_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 1), z_order=3),
-    SpriteConfig(class_id=40, class_name="trebuchet", sprite_patterns=["trebuchet_*.png"],
+    SpriteConfig(class_id=47, class_name="trebuchet", sprite_patterns=["trebuchet_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 1), z_order=3),
 
     # =========================================================================
     # SPECIAL UNITS
     # =========================================================================
-    SpriteConfig(class_id=41, class_name="monk", sprite_patterns=["monk_*.png"],
+    SpriteConfig(class_id=48, class_name="monk", sprite_patterns=["monk_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 2), z_order=3),
-    SpriteConfig(class_id=42, class_name="king", sprite_patterns=["king_*.png"],
+    SpriteConfig(class_id=49, class_name="king", sprite_patterns=["king_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 1), z_order=3),
 
     # =========================================================================
-    # UNIQUE UNITS
+    # UNIQUE UNITS - Grouped by type (matching classes.yaml ids 50-54)
     # =========================================================================
-    SpriteConfig(class_id=43, class_name="longbowman", sprite_patterns=["longbowman_*.png"],
+    SpriteConfig(class_id=50, class_name="unique_archer", sprite_patterns=["unique_archer_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 3), z_order=3),
-    SpriteConfig(class_id=44, class_name="mangudai", sprite_patterns=["mangudai_*.png"],
+    SpriteConfig(class_id=51, class_name="unique_cavalry", sprite_patterns=["unique_cavalry_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 2), z_order=3),
-    SpriteConfig(class_id=45, class_name="war_wagon", sprite_patterns=["war_wagon_*.png"],
+    SpriteConfig(class_id=52, class_name="unique_infantry", sprite_patterns=["unique_infantry_*.png"],
+                 scale_range=(0.9, 1.1), count_range=(0, 3), z_order=3),
+    SpriteConfig(class_id=53, class_name="unique_siege", sprite_patterns=["unique_siege_*.png"],
+                 scale_range=(0.9, 1.1), count_range=(0, 1), z_order=3),
+    SpriteConfig(class_id=54, class_name="unique_ship", sprite_patterns=["unique_ship_*.png"],
                  scale_range=(0.9, 1.1), count_range=(0, 1), z_order=3),
 ]
 
@@ -291,26 +349,38 @@ class TrainingDataGenerator:
 
         return bg
 
+    def _select_biome(self) -> str:
+        """Select a biome weighted by probability."""
+        biomes = list(BIOME_PALETTES.keys())
+        weights = [BIOME_PALETTES[b]["weight"] for b in biomes]
+        return random.choices(biomes, weights=weights, k=1)[0]
+
+    def _get_biome_colors(self, biome: str) -> list[tuple[int, int, int]]:
+        """Get color palette for a biome, handling 'mixed' biome."""
+        if biome == "mixed":
+            other = [b for b in BIOME_PALETTES if b != "mixed" and BIOME_PALETTES[b]["colors"]]
+            chosen = random.sample(other, k=random.randint(2, 3))
+            colors = []
+            for b in chosen:
+                colors.extend(BIOME_PALETTES[b]["colors"])
+            return colors
+        return BIOME_PALETTES[biome]["colors"]
+
     def _generate_terrain_background(self) -> Image.Image:
-        """Generate a simple terrain-like background."""
+        """Generate a biome-diverse terrain background."""
         bg = Image.new("RGB", self.image_size)
 
-        # Base grass colors
-        grass_colors = [
-            (34, 89, 34),   # Dark green
-            (46, 102, 46),  # Medium green
-            (58, 115, 58),  # Light green
-            (72, 99, 52),   # Olive green
-            (85, 107, 47),  # Dark olive
-        ]
+        biome = self._select_biome()
+        colors = self._get_biome_colors(biome)
 
-        # Fill with random grass color patches
-        from PIL import ImageDraw
+        # Store base color for padding in scale zoom
+        self._current_biome_base_color = colors[0]
+
         draw = ImageDraw.Draw(bg)
 
         # Large patches
         for _ in range(20):
-            color = random.choice(grass_colors)
+            color = random.choice(colors)
             x = random.randint(-100, self.image_size[0])
             y = random.randint(-100, self.image_size[1])
             w = random.randint(200, 500)
@@ -354,8 +424,9 @@ class TrainingDataGenerator:
             Tuple of (image, list of YOLO format labels)
         """
         bg = self._create_background()
-        labels = []
         placed_boxes = []
+        # Track (box, z_order, label) for post-rendering occlusion filtering
+        placed_items: list[tuple[tuple[int, int, int, int], int, str]] = []
 
         # Sort configs by z_order
         sorted_configs = sorted(self.configs, key=lambda c: c.z_order)
@@ -385,19 +456,20 @@ class TrainingDataGenerator:
                     continue
 
                 # Try to find non-overlapping position
-                max_attempts = 20
+                # Buildings never overlap in-game (grid); resources rarely; units can group
+                overlap_thresholds = {0: 0.15, 1: 0.10, 3: 0.35}
+                max_overlap = overlap_thresholds.get(config.z_order, 0.3)
+                max_attempts = 50 if config.z_order <= 1 else 20
                 for _ in range(max_attempts):
                     x = random.randint(margin, max_x)
                     y = random.randint(margin, max_y)
 
                     box = (x, y, x + new_w, y + new_h)
-                    if not self._check_overlap(box, placed_boxes, min_overlap=0.4):
+                    if not self._check_overlap(box, placed_boxes, min_overlap=max_overlap):
                         break
                 else:
-                    # Accept some overlap if we can't find clear space
-                    x = random.randint(margin, max_x)
-                    y = random.randint(margin, max_y)
-                    box = (x, y, x + new_w, y + new_h)
+                    # Skip — better to have fewer entities than unrealistic overlap
+                    continue
 
                 # Paste sprite
                 bg.paste(sprite, (x, y), sprite)
@@ -409,9 +481,29 @@ class TrainingDataGenerator:
                 norm_w = new_w / self.image_size[0]
                 norm_h = new_h / self.image_size[1]
 
-                labels.append(
-                    f"{config.class_id} {x_center:.6f} {y_center:.6f} {norm_w:.6f} {norm_h:.6f}"
-                )
+                label = f"{config.class_id} {x_center:.6f} {y_center:.6f} {norm_w:.6f} {norm_h:.6f}"
+                placed_items.append((box, config.z_order, label))
+
+        # Filter labels for sprites occluded by higher z_order sprites
+        labels = []
+        for i, (box_i, z_i, label_i) in enumerate(placed_items):
+            bx1, by1, bx2, by2 = box_i
+            box_area = (bx2 - bx1) * (by2 - by1)
+            if box_area <= 0:
+                continue
+
+            total_occluded = 0.0
+            for j, (box_j, z_j, _) in enumerate(placed_items):
+                if j == i or z_j <= z_i:
+                    continue
+                ox1, oy1, ox2, oy2 = box_j
+                ix1, iy1 = max(bx1, ox1), max(by1, oy1)
+                ix2, iy2 = min(bx2, ox2), min(by2, oy2)
+                if ix1 < ix2 and iy1 < iy2:
+                    total_occluded += (ix2 - ix1) * (iy2 - iy1)
+
+            if total_occluded / box_area < 0.5:
+                labels.append(label_i)
 
         # Apply augmentations (non-spatial, but may occlude regions)
         bg, occluded = self._augment(bg)
@@ -650,8 +742,9 @@ class TrainingDataGenerator:
                 (left, top, left + self.image_size[0], top + self.image_size[1])
             )
         else:
-            # Pad with terrain-like color
-            padded = Image.new("RGB", self.image_size, (45, 80, 45))
+            # Pad with current biome color
+            pad_color = getattr(self, '_current_biome_base_color', (45, 80, 45))
+            padded = Image.new("RGB", self.image_size, pad_color)
             left = (self.image_size[0] - new_w) // 2
             top = (self.image_size[1] - new_h) // 2
             padded.paste(image, (left, top))

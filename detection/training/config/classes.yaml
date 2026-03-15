@@ -160,4 +160,8 @@ classes:
   - id: 58
     name: siege_tower
 
-# Total: 59 classes
+  # Animals (1)
+  - id: 59
+    name: goose
+
+# Total: 60 classes
