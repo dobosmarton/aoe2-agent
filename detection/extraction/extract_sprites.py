@@ -22,6 +22,17 @@ from .sld_extractor import extract_sprite, extract_multiple_frames, PLAYER_COLOR
 DEFAULT_FRAMES_TO_EXTRACT = [0, 4, 8, 12]
 
 
+# Substrings to exclude when matching building SLD files (destruction anims,
+# rubble, shadows, foundation scaffolding, etc.)
+# Note: TC multi-part layers (_back_, _center_, _front_, _main_) are already
+# excluded by the glob patterns themselves, so we don't need to filter them.
+# Excluding "_center_" would break town_center matching.
+EXCLUDE_SUBSTRINGS = [
+    "destruction", "rubble", "shadow", "constr", "foundation",
+    "attackup", "defenseup", "bothup", "_snow_",
+]
+
+
 # =============================================================================
 # SPRITE EXTRACTION CONFIGURATION
 # =============================================================================
@@ -30,6 +41,10 @@ DEFAULT_FRAMES_TO_EXTRACT = [0, 4, 8, 12]
 # Patterns can be:
 #   - Exact filename: "u_vil_male_villager_idleA_x1.sld"
 #   - Glob pattern: "*_house_age2_x1.sld"
+#
+# Building patterns use b_*_ wildcards to capture ALL architecture styles
+# (afri, asia, ceas, east, greek, indi, medi, meso, orie, persian, puru,
+# seas, slav, thracian, west, etc.)
 #
 # We extract multiple variants per class to improve model robustness
 # =============================================================================
@@ -167,164 +182,177 @@ SPRITE_CONFIG = [
     ], 1, "King (regicide)"),
 
     # =========================================================================
-    # UNIQUE UNITS (selected important ones)
+    # UNIQUE UNITS - Grouped by type (matching classes.yaml ids 50-54)
     # =========================================================================
-    ("longbowman", [
+    ("unique_archer", [
         "*longbow*idle*_x1.sld",
-    ], 2, "British UU"),
-
-    ("mangudai", [
+        "*plumedarcher*idle*_x1.sld",
+        "*chukonu*idle*_x1.sld",
         "*mangudai*idle*_x1.sld",
-    ], 2, "Mongol UU"),
+        "*camel_archer*idle*_x1.sld",
+        "*janissary*idle*_x1.sld",
+        "*rattanarcher*idle*_x1.sld",
+    ], 8, "Unique archers (all civs)"),
 
-    ("war_wagon", [
-        "*war*wagon*idle*_x1.sld",
-    ], 2, "Korean UU"),
+    ("unique_cavalry", [
+        "u_cav_cataphract*idle*_x1.sld",
+        "u_cav_boyar*idle*_x1.sld",
+        "u_cav_leitis*idle*_x1.sld",
+        "u_cav_keshik*idle*_x1.sld",
+        "u_cav_konnik*idle*_x1.sld",
+        "u_cav_tarkan*idle*_x1.sld",
+        "u_cam_mameluke*idle*_x1.sld",
+        "u_cav_magyar_huszar*idle*_x1.sld",
+    ], 8, "Unique cavalry (all civs)"),
+
+    ("unique_infantry", [
+        "u_inf_berserk*idle*_x1.sld",
+        "u_inf_samurai*idle*_x1.sld",
+        "u_inf_jaguarwarrior*idle*_x1.sld",
+        "u_inf_huskarl*idle*_x1.sld",
+        "u_inf_throwingaxeman*idle*_x1.sld",
+        "u_inf_woadraider*idle*_x1.sld",
+        "u_inf_karambitwarrior*idle*_x1.sld",
+        "u_inf_shotelwarrior*idle*_x1.sld",
+        "u_inf_kamayuk*idle*_x1.sld",
+        "u_inf_obuch*idle*_x1.sld",
+        "u_inf_serjeant*idle*_x1.sld",
+        "u_inf_gbeto*idle*_x1.sld",
+        "u_inf_chakram_thrower*idle*_x1.sld",
+        "u_inf_urumi_swordsman*idle*_x1.sld",
+        "u_inf_ghulam*idle*_x1.sld",
+    ], 10, "Unique infantry (all civs)"),
+
+    ("unique_siege", [
+        "u_cav_warwagon*idle*_x1.sld",
+        "u_sie_organ*idle*_x1.sld",
+        "u_sie_hussite_wagon*idle*_x1.sld",
+        "u_sie_bombard_cannon*idle*_x1.sld",
+    ], 4, "Unique siege units"),
+
+    ("unique_ship", [
+        "u_shp_longboat*_x1.sld",
+        "u_shp_caravel*_x1.sld",
+        "u_shp_turtle_ship*_x1.sld",
+        "u_shp_thirisadai*_x1.sld",
+    ], 4, "Unique ships"),
 
     # =========================================================================
-    # BUILDINGS - ECONOMY (All ages: Dark, Feudal, Castle, Imperial)
-    # Using dark/west/medi civs for generic European look
+    # BUILDINGS - ECONOMY (All ages, all architecture styles via wildcards)
+    # Wildcards b_*_ capture all 17+ styles: afri, asia, ceas, east, greek,
+    # indi, medi, meso, orie, persian, puru, seas, slav, thracian, west, etc.
     # =========================================================================
     ("town_center", [
-        # Dark Age (age1) - no TC in Dark Age, starts in Feudal
-        "b_west_town_center_age2_x1.sld",   # Feudal
-        "b_west_town_center_age3_x1.sld",   # Castle
-        "b_west_town_center_age4_x1.sld",   # Imperial
-        "b_medi_town_center_age2_x1.sld",
-        "b_medi_town_center_age3_x1.sld",
-    ], 5, "Town Center (all ages)"),
+        "b_*_town_center_age2_x1.sld",      # Feudal
+        "b_*_town_center_age3_x1.sld",      # Castle
+        "b_*_town_center_age4_x1.sld",      # Imperial
+    ], 15, "Town Center (all ages, all styles)"),
 
     ("house", [
-        "b_dark_house_age1_x1.sld",         # Dark Age
-        "b_west_house_age2_x1.sld",         # Feudal
-        "b_west_house_age3_x1.sld",         # Castle
-        "b_medi_house_age2_x1.sld",
-        "b_medi_house_age3_x1.sld",
-    ], 5, "Houses (all ages)"),
+        "b_*_house_age1_x1.sld",            # Dark Age
+        "b_*_house_age2_x1.sld",            # Feudal
+        "b_*_house_age3_x1.sld",            # Castle
+    ], 15, "Houses (all ages, all styles)"),
 
     ("mill", [
-        "b_dark_mill_age1_x1.sld",          # Dark Age
-        "b_west_mill_age2_x1.sld",          # Feudal
-        "b_west_mill_age3_x1.sld",          # Castle
-        "b_medi_mill_age2_x1.sld",
-    ], 4, "Mill (all ages)"),
+        "b_*_mill_age1_x1.sld",             # Dark Age
+        "b_*_mill_age2_x1.sld",             # Feudal
+        "b_*_mill_age3_x1.sld",             # Castle
+    ], 12, "Mill (all ages, all styles)"),
 
     ("lumber_camp", [
-        "b_dark_lumber_camp_age1_x1.sld",   # Dark Age
-        "b_west_lumber_camp_age2_x1.sld",   # Feudal
-        "b_west_lumber_camp_age3_x1.sld",   # Castle
-        "b_medi_lumber_camp_age2_x1.sld",
-    ], 4, "Lumber Camp (all ages)"),
+        "b_*_lumber_camp_age1_x1.sld",      # Dark Age
+        "b_*_lumber_camp_age2_x1.sld",      # Feudal
+    ], 10, "Lumber Camp (all ages, all styles)"),
 
     ("mining_camp", [
-        "b_dark_mining_camp_age1_x1.sld",   # Dark Age
-        "b_west_mining_camp_age2_x1.sld",   # Feudal
-        "b_west_mining_camp_age3_x1.sld",   # Castle
-        "b_medi_mining_camp_age2_x1.sld",
-    ], 4, "Mining Camp (all ages)"),
+        "b_*_mining_camp_age1_x1.sld",      # Dark Age
+        "b_*_mining_camp_age2_x1.sld",      # Feudal
+    ], 10, "Mining Camp (all ages, all styles)"),
 
     # Farm buildings are terrain textures in a different format, skipping
 
     ("market", [
-        "b_west_market_age2_x1.sld",        # Feudal
-        "b_west_market_age3_x1.sld",        # Castle
-        "b_west_market_age4_x1.sld",        # Imperial
-        "b_medi_market_age2_x1.sld",
-    ], 4, "Market (all ages)"),
+        "b_*_market_age2_x1.sld",           # Feudal
+        "b_*_market_age3_x1.sld",           # Castle
+        "b_*_market_age4_x1.sld",           # Imperial
+    ], 12, "Market (all ages, all styles)"),
 
     ("blacksmith", [
-        "b_dark_blacksmith_age1_x1.sld",    # Dark Age
-        "b_west_blacksmith_age2_x1.sld",    # Feudal
-        "b_west_blacksmith_age3_x1.sld",    # Castle
-        "b_medi_blacksmith_age2_x1.sld",
-    ], 4, "Blacksmith (all ages)"),
+        "b_*_blacksmith_age2_x1.sld",       # Feudal
+        "b_*_blacksmith_age3_x1.sld",       # Castle
+    ], 10, "Blacksmith (all ages, all styles)"),
 
     # =========================================================================
-    # BUILDINGS - MILITARY (All ages)
+    # BUILDINGS - MILITARY (All ages, all architecture styles)
     # =========================================================================
     ("barracks", [
-        "b_dark_barracks_age1_x1.sld",      # Dark Age
-        "b_west_barracks_age2_x1.sld",      # Feudal
-        "b_west_barracks_age3_x1.sld",      # Castle
-        "b_medi_barracks_age2_x1.sld",
-    ], 4, "Barracks (all ages)"),
+        "b_*_barracks_age1_x1.sld",         # Dark Age
+        "b_*_barracks_age2_x1.sld",         # Feudal
+        "b_*_barracks_age3_x1.sld",         # Castle
+    ], 12, "Barracks (all ages, all styles)"),
 
     ("archery_range", [
-        "b_west_archery_range_age2_x1.sld", # Feudal
-        "b_west_archery_range_age3_x1.sld", # Castle
-        "b_medi_archery_range_age2_x1.sld",
-        "b_medi_archery_range_age3_x1.sld",
-    ], 4, "Archery Range (all ages)"),
+        "b_*_archery_range_age2_x1.sld",    # Feudal
+        "b_*_archery_range_age3_x1.sld",    # Castle
+    ], 10, "Archery Range (all ages, all styles)"),
 
     ("stable", [
-        "b_west_stable_age2_x1.sld",        # Feudal
-        "b_west_stable_age3_x1.sld",        # Castle
-        "b_medi_stable_age2_x1.sld",
-        "b_medi_stable_age3_x1.sld",
-    ], 4, "Stable (all ages)"),
+        "b_*_stable_age2_x1.sld",           # Feudal
+        "b_*_stable_age3_x1.sld",           # Castle
+    ], 10, "Stable (all ages, all styles)"),
 
     ("siege_workshop", [
-        "b_west_siege_workshop_age3_x1.sld", # Castle
-        "b_medi_siege_workshop_age3_x1.sld",
-    ], 2, "Siege Workshop"),
+        "b_*_siege_workshop_age3_x1.sld",   # Castle
+    ], 8, "Siege Workshop (all styles)"),
 
     ("monastery", [
-        "b_west_monastery_age3_x1.sld",     # Castle
-        "b_medi_monastery_age3_x1.sld",
-    ], 2, "Monastery"),
+        "b_*_monastery_age3_x1.sld",        # Castle
+    ], 10, "Monastery (all styles)"),
 
     ("castle", [
-        "b_west_castle_age3_x1.sld",        # Castle
-        "b_medi_castle_age3_x1.sld",
-    ], 2, "Castle"),
-
-    # Krepost is Bulgarian unique - skipping for generic training
+        "b_*_castle_age3_x1.sld",           # Castle
+    ], 15, "Castle (all styles)"),
 
     # =========================================================================
-    # BUILDINGS - DEFENSE (All ages)
+    # BUILDINGS - DEFENSE (All ages, all styles)
     # =========================================================================
     ("tower", [
-        "b_dark_outpost_age1_x1.sld",       # Dark Age outpost
-        "b_west_watch_tower_age2_x1.sld",   # Feudal
-        "b_west_guard_tower_age3_x1.sld",   # Castle
-        "b_west_keep_age4_x1.sld",          # Imperial
-        "b_west_tower_age4_x1.sld",
-        "b_medi_watch_tower_age2_x1.sld",
-    ], 6, "Towers (all ages)"),
+        "b_*_outpost_age1_x1.sld",          # Dark Age outpost
+        "b_*_tower_age2_x1.sld",            # Feudal (Watch Tower)
+        "b_*_tower_age3_x1.sld",            # Castle (Guard Tower)
+        "b_*_tower_age4_x1.sld",            # Imperial (Keep)
+    ], 12, "Towers (all ages, all styles)"),
 
     ("wall", [
-        "b_dark_palisade_wall_x1.sld",      # Dark Age palisade
-        "b_archaic_palisade_wall_x1.sld",
-        "b_west_stone_wall_age3_x1.sld",    # Castle
-        "b_west_fortified_wall_age4_x1.sld", # Imperial
-    ], 4, "Walls (all ages)"),
+        "b_*_palisade_wall_x1.sld",         # Dark Age palisade
+        "b_*_wall_stone_x1.sld",            # Castle stone wall
+        "b_*_wall_fortified_x1.sld",        # Imperial fortified wall
+    ], 8, "Walls (all ages, all styles)"),
 
     ("gate", [
-        "b_dark_gate_palisade_e_closed_x1.sld",  # Dark Age
-        "b_west_gate_palisade_e_closed_x1.sld",
-        "b_west_gate_stone_e_closed_x1.sld",     # Castle
-        "b_west_gate_fortified_e_closed_x1.sld", # Imperial
-    ], 4, "Gates (all ages)"),
+        "b_*_gate_palisade_e_closed_x1.sld",   # Dark Age
+        "b_*_gate_stone_e_closed_x1.sld",       # Castle
+        "b_*_gate_fortified_e_closed_x1.sld",   # Imperial
+    ], 8, "Gates (all ages, all styles)"),
 
     # =========================================================================
-    # BUILDINGS - OTHER (All ages)
+    # BUILDINGS - OTHER (All ages, all styles)
     # =========================================================================
     ("dock", [
-        "b_dark_dock_age1_x1.sld",          # Dark Age
-        "b_west_dock_age2_x1.sld",          # Feudal
-        "b_west_dock_age3_x1.sld",          # Castle
-    ], 3, "Dock (all ages)"),
+        "b_*_dock_age1_x1.sld",             # Dark Age
+        "b_*_dock_age2_x1.sld",             # Feudal
+        "b_*_dock_age3_x1.sld",             # Castle
+    ], 10, "Dock (all ages, all styles)"),
 
     ("university", [
-        "b_west_university_age3_x1.sld",    # Castle
-        "b_west_university_age4_x1.sld",    # Imperial
-        "b_medi_university_age3_x1.sld",
-    ], 3, "University (all ages)"),
+        "b_*_university_age3_x1.sld",       # Castle
+        "b_*_university_age4_x1.sld",       # Imperial
+    ], 10, "University (all ages, all styles)"),
 
     ("wonder", [
-        "b_west_wonder_britons_x1.sld",
-        "b_west_wonder_franks_x1.sld",
-    ], 2, "Wonder"),
+        "b_*_wonder_*_x1.sld",              # All civ wonders
+    ], 12, "Wonder (all civs)"),
 
     # =========================================================================
     # RESOURCES & NATURE
@@ -376,8 +404,21 @@ SPRITE_CONFIG = [
 ]
 
 
-def find_matching_files(game_dir: Path, patterns: list[str], max_count: int) -> list[Path]:
-    """Find SLD files matching patterns."""
+def find_matching_files(
+    game_dir: Path,
+    patterns: list[str],
+    max_count: int,
+    exclude_substrings: list[str] | None = None,
+) -> list[Path]:
+    """Find SLD files matching patterns.
+
+    Args:
+        game_dir: Directory to search in.
+        patterns: Glob patterns or exact filenames.
+        max_count: Maximum files to return.
+        exclude_substrings: If provided, skip files whose name contains
+            any of these substrings (e.g. "destruction", "rubble").
+    """
     matches = []
 
     for pattern in patterns:
@@ -389,9 +430,18 @@ def find_matching_files(game_dir: Path, patterns: list[str], max_count: int) -> 
 
         for f in sorted(found):  # Sort for consistency
             if f not in matches and f.suffix == '.sld':
+                # Apply exclusion filter
+                if exclude_substrings:
+                    name_lower = f.name.lower()
+                    if any(ex in name_lower for ex in exclude_substrings):
+                        continue
                 matches.append(f)
-                if len(matches) >= max_count:
-                    return matches
+
+    # Shuffle to get style diversity instead of alphabetical bias
+    if len(matches) > max_count:
+        import random as _rng
+        _rng.seed(42)  # Deterministic for reproducibility
+        _rng.shuffle(matches)
 
     return matches[:max_count]
 
@@ -435,7 +485,9 @@ def extract_sprites(
         "archer_line", "skirmisher_line", "cavalry_archer", "hand_cannoneer",
         "militia_line", "spearman_line", "eagle_line",
         "ram", "mangonel_line", "scorpion", "trebuchet",
-        "monk", "king", "longbowman", "mangudai", "war_wagon",
+        "monk", "king",
+        "unique_archer", "unique_cavalry", "unique_infantry",
+        "unique_siege", "unique_ship",
     }
 
     stats = {
@@ -458,7 +510,12 @@ def extract_sprites(
     print(f"{'='*60}\n")
 
     for class_name, patterns, max_variants, description in SPRITE_CONFIG:
-        matches = find_matching_files(game_dir, patterns, max_variants)
+        # Apply exclusion filter for building sprites to skip destruction/rubble/shadow files
+        is_building = any(p.startswith("b_") for p in patterns)
+        matches = find_matching_files(
+            game_dir, patterns, max_variants,
+            exclude_substrings=EXCLUDE_SUBSTRINGS if is_building else None,
+        )
 
         if verbose:
             print(f"{class_name} ({description}):")
@@ -549,7 +606,8 @@ def print_config():
         "Archers": ["archer_line", "skirmisher_line", "cavalry_archer", "hand_cannoneer"],
         "Infantry": ["militia_line", "spearman_line", "eagle_line"],
         "Siege": ["ram", "mangonel_line", "scorpion", "trebuchet"],
-        "Special": ["monk", "king", "longbowman", "mangudai", "war_wagon"],
+        "Special": ["monk", "king"],
+        "Unique Units": ["unique_archer", "unique_cavalry", "unique_infantry", "unique_siege", "unique_ship"],
         "Economy Buildings": ["town_center", "house", "mill", "lumber_camp", "mining_camp", "farm", "market", "blacksmith"],
         "Military Buildings": ["barracks", "archery_range", "stable", "siege_workshop", "monastery", "castle"],
         "Defense": ["tower", "wall", "gate"],
