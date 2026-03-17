@@ -21,7 +21,7 @@ class DetectedEntity:
 
 ## 7.2 The 60-Class Taxonomy
 
-Defined in `detection/training/config/classes.yaml` (source of truth) and mirrored in `detection/inference/detector.py` as `DEFAULT_CLASSES`:
+Defined in `detection/training/config/classes.yaml` (source of truth). The detector loads classes dynamically: the PyTorch backend reads `model.names` at load time; ONNX and mock backends use `_load_default_classes()` which parses `classes.yaml` at import time (with a hardcoded fallback if YAML loading fails).
 
 | Range | Category | Classes |
 |-------|----------|---------|
@@ -50,17 +50,18 @@ Defined at `detection/inference/detector.py:123+`. Key initialization parameters
 | Parameter | Default | Purpose |
 |-----------|---------|---------|
 | `model_path` | auto-detect | Path to .pt or .onnx model file |
-| `confidence_threshold` | `0.35` | Minimum confidence for detections |
-| `class_names` | `DEFAULT_CLASSES` | 60-class name list |
+| `confidence_threshold` | `0.25` | Minimum confidence for detections |
+| `class_names` | loaded from `classes.yaml` | 60-class name list (PyTorch overrides with `model.names`) |
 | `use_mock` | `False` | Use mock detections for testing |
-| `imgsz` | `1280` | Inference resolution (higher = more detections on large screenshots) |
+| `imgsz` | `1280` | Inference resolution (used for standard inference fallback) |
+| `use_sahi` | `True` | Use SAHI sliced inference for large images (PyTorch only) |
 
 ### Model Loading
 
 The detector supports two model formats:
 
-- **PyTorch (.pt)** -- loaded via ultralytics YOLO library. Requires `torch` and `ultralytics` packages.
-- **ONNX (.onnx)** -- loaded via `onnxruntime`. Cross-platform, works on ARM64 Windows where PyTorch may not be available.
+- **PyTorch (.pt)** -- loaded via ultralytics YOLO library. Requires `torch` and `ultralytics` packages. At load time, `_load_pytorch()` reads `model.names` from the model file to set `self.class_names` — this is authoritative and overrides the YAML-loaded defaults.
+- **ONNX (.onnx)** -- loaded via `onnxruntime`. Cross-platform, works on ARM64 Windows where PyTorch may not be available. Uses `DEFAULT_CLASSES` loaded from `classes.yaml`.
 
 If `model_path` is not specified, `get_detector()` auto-detects using a priority chain:
 
@@ -83,17 +84,27 @@ If `model_path` is not specified, `get_detector()` auto-detects using a priority
 
 ## 7.4 Backend: PyTorch
 
-Uses ultralytics YOLO for inference:
+### SAHI Sliced Inference (default)
+
+By default (`use_sahi=True`), images wider than 640px use SAHI (Slicing Aided Hyper Inference). On Retina displays (3024x1672), standard inference resizes to `imgsz=1280`, shrinking small entities like sheep to ~21px — below the model's reliable detection threshold. SAHI solves this:
+
+1. Tiles the screenshot into overlapping **640x640** chunks (model's training resolution)
+2. Overlap: **128px** (20%) — prevents missing entities at tile boundaries
+3. Runs YOLO on each tile at native resolution (~40ms/tile)
+4. Offsets each tile's detections by `(x_start, y_start)` to get original-image coordinates
+5. Returns all entities; the unified NMS in `detect()` deduplicates overlapping detections
+
+For a 3024x1672 screenshot: ~24 tiles × ~40ms ≈ 960ms total — acceptable given the LLM API call takes 1-3s.
+
+### Standard Inference (fallback)
+
+For images ≤640px wide, or when `use_sahi=False`, the detector falls back to standard ultralytics inference:
 
 ```python
 results = self.model(image, conf=self.confidence_threshold, imgsz=self.input_size, verbose=False)
-for box in results[0].boxes:
-    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-    confidence = float(box.conf[0])
-    class_id = int(box.cls[0])
 ```
 
-The `imgsz` parameter (default 1280, configurable via `config.detection_imgsz`) controls inference resolution. Ultralytics handles image preprocessing (resize to imgsz) and post-processing internally. An additional NMS pass is applied in the unified `detect()` method across all backends.
+The `imgsz` parameter (default 1280, configurable via `config.detection_imgsz`) controls inference resolution. An additional NMS pass is applied in the unified `detect()` method across all backends.
 
 ## 7.5 Backend: ONNX
 

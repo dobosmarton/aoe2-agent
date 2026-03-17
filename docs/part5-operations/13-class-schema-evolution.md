@@ -83,7 +83,7 @@ CVAT COCO exports use 1-indexed category IDs with names. The conversion matches 
 - **YOLO training** — `dataset.yaml` references these class names
 - **Synthetic data** — `SPRITE_CONFIGS` in `generate_training_data.py` uses these IDs directly
 - **CVAT import** — `get_classes_for_cvat()` reads from this file
-- **Detector inference** — `DEFAULT_CLASSES` in `detector.py` mirrors this file
+- **Detector inference** — `detector.py` loads classes from this file at import time via `_load_default_classes()` (PyTorch backend overrides with `model.names`)
 - **Pre-labeling** — `write_classes_txt()` generates CVAT-compatible format from this file
 
 Any class additions, removals, or renamings must update `classes.yaml` first. All other code derives from it.
@@ -91,12 +91,13 @@ Any class additions, removals, or renamings must update `classes.yaml` first. Al
 ## 13.5 Adding New Classes
 
 1. Add the new class to `classes.yaml` with the next available ID
-2. Update `DEFAULT_CLASSES` in `detector.py` to match
-3. Extract sprites for the new class (if generating synthetic data)
-4. Add sprite config to `generate_training_data.py` using the classes.yaml ID
-5. Regenerate synthetic dataset
-6. Re-merge with real data via `prepare_training.py`
-7. Retrain the model
+2. Extract sprites for the new class (if generating synthetic data)
+3. Add sprite config to `generate_training_data.py` using the classes.yaml ID
+4. Regenerate synthetic dataset
+5. Re-merge with real data via `prepare_training.py`
+6. Retrain the model
+
+> **Note**: `detector.py` auto-loads from `classes.yaml` — no manual class list update needed. The PyTorch backend reads classes directly from the trained model's `model.names`.
 
 ---
 

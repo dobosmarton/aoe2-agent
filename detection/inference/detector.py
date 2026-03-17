@@ -44,83 +44,39 @@ class DetectedEntity:
         }
 
 
-# Default class names for AoE2 detection (59 classes - matches v2 hybrid model)
-# Source of truth: detection/training/config/classes.yaml
-DEFAULT_CLASSES = [
-    # Resources & Nature (0-8)
-    "tree",            # 0
-    "gold_mine",       # 1
-    "stone_mine",      # 2
-    "berry_bush",      # 3
-    "relic",           # 4
-    "deer",            # 5
-    "boar",            # 6
-    "wolf",            # 7
-    "sheep",           # 8
-    # Economy Buildings (9-16)
-    "town_center",     # 9
-    "house",           # 10
-    "lumber_camp",     # 11
-    "mining_camp",     # 12
-    "mill",            # 13
-    "market",          # 14
-    "dock",            # 15
-    "farm",            # 16
-    # Military Buildings (17-24)
-    "barracks",        # 17
-    "archery_range",   # 18
-    "stable",          # 19
-    "blacksmith",      # 20
-    "siege_workshop",  # 21
-    "monastery",       # 22
-    "castle",          # 23
-    "university",      # 24
-    # Defensive (25-27)
-    "gate",            # 25
-    "wall",            # 26
-    "tower",           # 27
-    # Special Buildings (28-29)
-    "wonder",          # 28
-    "krepost",         # 29
-    # Civilian Units (30-32)
-    "villager",        # 30
-    "trade_cart",      # 31
-    "fishing_ship",    # 32
-    # Cavalry (33-36)
-    "scout_line",      # 33
-    "knight_line",     # 34
-    "camel_line",      # 35
-    "battle_elephant", # 36
-    # Archers (37-40)
-    "archer_line",     # 37
-    "skirmisher_line", # 38
-    "cavalry_archer",  # 39
-    "hand_cannoneer",  # 40
-    # Infantry (41-43)
-    "militia_line",    # 41
-    "spearman_line",   # 42
-    "eagle_line",      # 43
-    # Siege (44-47)
-    "ram",             # 44
-    "mangonel_line",   # 45
-    "scorpion",        # 46
-    "trebuchet",       # 47
-    # Monks & Special (48-49)
-    "monk",            # 48
-    "king",            # 49
-    # Unique Units (50-54)
-    "unique_archer",   # 50
-    "unique_cavalry",  # 51
-    "unique_infantry", # 52
-    "unique_siege",    # 53
-    "unique_ship",     # 54
-    # Naval (55-57)
-    "fish",            # 55
-    "galley",          # 56
-    "fire_galley",     # 57
-    # Additional Siege (58)
-    "siege_tower",     # 58
-]
+def _load_default_classes() -> list[str]:
+    """Load class names from classes.yaml (single source of truth).
+
+    Falls back to a minimal list if the YAML file can't be loaded.
+    PyTorch backend overrides this with model.names at load time anyway —
+    this only affects ONNX and mock backends.
+    """
+    yaml_path = Path(__file__).parent.parent / "training" / "config" / "classes.yaml"
+    try:
+        import yaml
+        with open(yaml_path) as f:
+            data = yaml.safe_load(f)
+        classes = sorted(data["classes"], key=lambda c: c["id"])
+        return [c["name"] for c in classes]
+    except Exception:
+        logger.warning("Could not load classes.yaml, using minimal fallback")
+        return [
+            "tree", "gold_mine", "stone_mine", "berry_bush", "relic",
+            "deer", "boar", "wolf", "sheep", "town_center", "house",
+            "lumber_camp", "mining_camp", "mill", "market", "dock", "farm",
+            "barracks", "archery_range", "stable", "blacksmith", "siege_workshop",
+            "monastery", "castle", "university", "gate", "wall", "tower",
+            "wonder", "krepost", "villager", "trade_cart", "fishing_ship",
+            "scout_line", "knight_line", "camel_line", "battle_elephant",
+            "archer_line", "skirmisher_line", "cavalry_archer", "hand_cannoneer",
+            "militia_line", "spearman_line", "eagle_line", "ram", "mangonel_line",
+            "scorpion", "trebuchet", "monk", "king", "unique_archer",
+            "unique_cavalry", "unique_infantry", "unique_siege", "unique_ship",
+            "fish", "galley", "fire_galley", "siege_tower", "goose",
+        ]
+
+
+DEFAULT_CLASSES = _load_default_classes()
 
 
 class EntityDetector:
@@ -134,9 +90,10 @@ class EntityDetector:
         self,
         model_path: Optional[str] = None,
         class_names: Optional[list[str]] = None,
-        confidence_threshold: float = 0.35,  # v2 model has better confidence on real screenshots
+        confidence_threshold: float = 0.25,
         use_mock: bool = False,
         imgsz: int = 1280,
+        use_sahi: bool = True,
     ):
         """Initialize the detector.
 
@@ -146,10 +103,12 @@ class EntityDetector:
             confidence_threshold: Minimum confidence for detections
             use_mock: If True, use mock detections (for testing without model)
             imgsz: Inference resolution (higher = more detections on large screenshots)
+            use_sahi: If True, use SAHI sliced inference for large images (PyTorch only)
         """
         self.class_names = class_names or DEFAULT_CLASSES
         self.confidence_threshold = confidence_threshold
         self.use_mock = use_mock
+        self.use_sahi = use_sahi
         self.model = None
         self.onnx_session = None
         self.backend = None  # 'pytorch', 'onnx', or None
@@ -191,7 +150,10 @@ class EntityDetector:
             self.model = YOLO(model_path)
             self.backend = 'pytorch'
             self.use_mock = False
-            print(f"Loaded PyTorch model: {model_path}")
+            # Use class names from the model itself (authoritative)
+            if hasattr(self.model, 'names') and self.model.names:
+                self.class_names = list(self.model.names.values())
+            print(f"Loaded PyTorch model: {model_path} ({len(self.class_names)} classes, SAHI={'on' if self.use_sahi else 'off'})")
         except ImportError:
             print("WARNING: ultralytics not installed. Trying ONNX...")
             # Try ONNX fallback
@@ -302,7 +264,11 @@ class EntityDetector:
         return entities
 
     def _pytorch_detect(self, screenshot: Union[bytes, "Image.Image"]) -> list[DetectedEntity]:
-        """Run detection using PyTorch/ultralytics backend."""
+        """Run detection using PyTorch/ultralytics backend.
+
+        Uses SAHI sliced inference by default for large images to detect
+        small entities (sheep, villagers) that get lost when downscaled.
+        """
         from PIL import Image
 
         # Convert bytes to PIL Image if needed
@@ -311,30 +277,93 @@ class EntityDetector:
         else:
             image = screenshot
 
-        # Run inference
-        results = self.model(image, conf=self.confidence_threshold, imgsz=self.input_size, verbose=False)
+        # Use SAHI for large images (wider than tile size)
+        if self.use_sahi and image.size[0] > 640:
+            return self._sahi_detect(image)
 
+        # Standard inference for small images
+        results = self.model(image, conf=self.confidence_threshold, imgsz=self.input_size, verbose=False)
+        return self._parse_yolo_results(results)
+
+    def _sahi_detect(self, image: "Image.Image") -> list[DetectedEntity]:
+        """SAHI sliced inference: tile the image into overlapping 640x640 chunks.
+
+        On Retina displays (3024x1672), standard inference resizes to imgsz=1280,
+        shrinking sheep to ~21px — below reliable detection. SAHI runs each tile
+        at native 640x640 (the model's training resolution), then offsets coordinates
+        back to the original image space. Existing NMS in detect() deduplicates.
+
+        ~24 tiles * ~40ms/tile ≈ 960ms total — acceptable vs 1-3s LLM API call.
+        """
+        width, height = image.size
+        tile_size = 640
+        overlap = 128  # 20% overlap to catch entities at tile boundaries
+        stride = tile_size - overlap
+        all_entities = []
+
+        for y_start in range(0, height, stride):
+            for x_start in range(0, width, stride):
+                x_end = min(x_start + tile_size, width)
+                y_end = min(y_start + tile_size, height)
+
+                tile = image.crop((x_start, y_start, x_end, y_end))
+                results = self.model(tile, conf=self.confidence_threshold,
+                                     imgsz=tile_size, verbose=False)
+
+                for result in results:
+                    if result.boxes is None:
+                        continue
+                    for box, cls_id, conf in zip(
+                        result.boxes.xyxy.cpu().numpy(),
+                        result.boxes.cls.cpu().numpy(),
+                        result.boxes.conf.cpu().numpy()
+                    ):
+                        x1, y1, x2, y2 = box.tolist()
+                        class_idx = int(cls_id)
+                        class_name = (self.class_names[class_idx]
+                                      if class_idx < len(self.class_names)
+                                      else f"unknown_{class_idx}")
+
+                        # Offset coordinates to original image space
+                        abs_x1 = x1 + x_start
+                        abs_y1 = y1 + y_start
+                        abs_x2 = x2 + x_start
+                        abs_y2 = y2 + y_start
+
+                        all_entities.append(DetectedEntity(
+                            id=self._generate_id(class_name),
+                            class_name=class_name,
+                            bbox=(abs_x1, abs_y1, abs_x2, abs_y2),
+                            center=((abs_x1 + abs_x2) / 2, (abs_y1 + abs_y2) / 2),
+                            confidence=float(conf),
+                            area=(abs_x2 - abs_x1) * (abs_y2 - abs_y1)
+                        ))
+
+        # Sort by class name, then by confidence (highest first)
+        all_entities.sort(key=lambda e: (e.class_name, -e.confidence))
+        return all_entities
+
+    def _parse_yolo_results(self, results) -> list[DetectedEntity]:
+        """Parse ultralytics YOLO results into DetectedEntity list."""
         entities = []
         for result in results:
             boxes = result.boxes
             if boxes is None:
                 continue
 
-            for i, (box, cls_id, conf) in enumerate(zip(
+            for box, cls_id, conf in zip(
                 boxes.xyxy.cpu().numpy(),
                 boxes.cls.cpu().numpy(),
                 boxes.conf.cpu().numpy()
-            )):
+            ):
                 x1, y1, x2, y2 = box.tolist()
                 class_idx = int(cls_id)
 
-                # Get class name (with fallback)
                 if class_idx < len(self.class_names):
                     class_name = self.class_names[class_idx]
                 else:
                     class_name = f"unknown_{class_idx}"
 
-                # Calculate center and area
                 center_x = (x1 + x2) / 2
                 center_y = (y1 + y2) / 2
                 area = (x2 - x1) * (y2 - y1)
@@ -349,9 +378,7 @@ class EntityDetector:
                 )
                 entities.append(entity)
 
-        # Sort by class name, then by confidence (highest first)
         entities.sort(key=lambda e: (e.class_name, -e.confidence))
-
         return entities
 
     def _onnx_detect(self, screenshot: Union[bytes, "Image.Image"]) -> list[DetectedEntity]:

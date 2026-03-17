@@ -32,6 +32,7 @@ Use these metric names in your goals:
 **Dark Age (0-10 min) — 100% Economy:**
 - Priority: grow population to 20-25 villagers
 - Food sources: sheep → berries (build Mill) → farms (60 wood each, need Mill first)
+- **If no sheep or berry bushes are visible near TC, create a P9 local goal: "Build Mill + 3 farms". Without food income, the game is lost.**
 - Build houses proactively (every 5 pop)
 - Send scout exploring to find resources
 - 6-8 villagers on food, 3-4 on wood initially

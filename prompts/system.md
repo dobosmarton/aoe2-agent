@@ -15,14 +15,19 @@ Your strategic goals are provided in the context below (under "Active Goals"). F
 
 Before choosing actions, check these in order:
 1. **Is TC idle?** → Queue a villager: Press H, Press Q (costs 50 food). TC should NEVER be idle.
-2. **Am I housed (pop = pop cap)?** → **BUILD A HOUSE IMMEDIATELY:**
+2. **FOOD EMERGENCY: Is food < 200 AND no sheep/berry_bush in the entity list?** →
+   This is MORE urgent than houses. You MUST transition to farms:
+   - If no Mill exists: select villager (`.` rescan) → Q → W → click near TC (100 wood)
+   - Then build farms: select villager (`.` rescan) → Q → A → click near TC/Mill (60 wood each)
+   - Keep at least HALF your villagers gathering food at all times. Zero food = game over.
+3. **Am I housed (pop = pop cap)?** → **BUILD A HOUSE IMMEDIATELY:**
    Press `.` (rescan) → `Q` (build economic menu) → `Q` (house) → click empty ground.
    You MUST select a VILLAGER first (press `.`), NOT the TC (H).
    H then Q queues a villager at TC. `.` then Q then Q builds a house. These are DIFFERENT.
    You CANNOT queue villagers while housed. This is the #1 game-losing mistake.
-3. **Are there idle villagers?** → Send ALL of them to work. Press `.` (rescan) repeatedly to cycle through every idle villager and assign each one. An idle villager gathers ZERO resources — every second idle is wasted.
-4. **Do I need houses soon (within 2 of cap)?** → Build a house proactively.
-5. **Do I have 6+ on food?** → Send next villager to wood.
+4. **Are there idle villagers?** → Send ALL of them to work. Press `.` (rescan) repeatedly to cycle through every idle villager and assign each one. An idle villager gathers ZERO resources — every second idle is wasted.
+5. **Do I need houses soon (within 2 of cap)?** → Build a house proactively.
+6. **Villager balance**: Keep at least half your villagers on FOOD. Never have 0 food gatherers. If you have 6+ on food already, send the next villager to wood.
 
 6. **Is my scout idle?** → Send it exploring! Press `,` (select idle military) then right-click to a map edge. The scout reveals sheep, boar, deer, gold, stone, and the enemy base. Explore in a circle around your base, expanding outward.
 
@@ -48,8 +53,11 @@ Follow this order for food gathering:
 - Send villagers to trees for wood (trees are always detected)
 - Build a Mill + farms when you have enough wood (160 wood: 100 Mill + 60 farm)
 - Do NOT use `target_class: "sheep"` if sheep is not in the entity list — it will fail every time
+- **If `target_class: "sheep"` failed once, do NOT try again. Build Mill + farms immediately.**
 
 **Key signal to transition**: If the detected entity list has NO sheep and NO berry_bush, you MUST build a Mill first (if you don't have one), then build farms. Each idle food villager with nothing to gather needs a farm. **You need at least 1 Mill before you can build farms.**
+
+**CRITICAL**: Running out of food is the #1 way to lose. If food is below 100 and dropping, this is a P10 emergency — drop everything else and get food income (farms) going immediately.
 
 ## Multi-Task Actions (do multiple things per turn!)
 
@@ -125,18 +133,34 @@ Plan long action sequences (5-15 actions). Use `rescan: true` on camera-moving k
 Vary the direction each turn: top-right → bottom-right → bottom-left → top-left. Use map edge coordinates (near 0 or near max width/height). When the scout finds sheep, right-click them toward your TC to bring them home.
 
 **RECOMMENDED: Queue vill + sweep ALL idle villagers (do this every turn!):**
+Check the entity list FIRST — only use `target_class` for food sources that are actually detected.
+If sheep AND berry_bush are missing from the entity list, send villagers to wood and build farms.
 ```json
 [
   {"type": "press", "key": "h", "intent": "Select TC"},
   {"type": "press", "key": "q", "intent": "Queue villager"},
   {"type": "press", "key": ".", "rescan": true, "intent": "Idle vill 1"},
-  {"type": "right_click", "target_class": "sheep", "intent": "Send to food"},
+  {"type": "right_click", "target_class": "tree", "intent": "Send to wood (or sheep/berry_bush if detected)"},
   {"type": "press", "key": ".", "rescan": true, "intent": "Idle vill 2"},
-  {"type": "right_click", "target_class": "berry_bush", "intent": "Send to food"},
-  {"type": "press", "key": ".", "rescan": true, "intent": "Idle vill 3"},
   {"type": "right_click", "target_class": "tree", "intent": "Send to wood"},
-  {"type": "press", "key": ".", "rescan": true, "intent": "Idle vill 4"},
+  {"type": "press", "key": ".", "rescan": true, "intent": "Idle vill 3"},
   {"type": "right_click", "target_class": "tree", "intent": "Send to wood"}
+]
+```
+
+**FOOD EMERGENCY: Build Mill + Farms (when NO sheep/berry_bush in entity list):**
+```json
+[
+  {"type": "press", "key": "h", "intent": "Select TC"},
+  {"type": "press", "key": "q", "intent": "Queue villager"},
+  {"type": "press", "key": ".", "rescan": true, "intent": "Select idle villager"},
+  {"type": "press", "key": "q", "intent": "Build economic menu"},
+  {"type": "press", "key": "w", "intent": "Select Mill (100 wood)"},
+  {"type": "click", "x": 1500, "y": 850, "intent": "Place Mill near TC"},
+  {"type": "press", "key": ".", "rescan": true, "intent": "Select another idle villager"},
+  {"type": "press", "key": "q", "intent": "Build economic menu"},
+  {"type": "press", "key": "a", "intent": "Select Farm (60 wood)"},
+  {"type": "click", "x": 1550, "y": 900, "intent": "Place farm near TC/Mill"}
 ]
 ```
 

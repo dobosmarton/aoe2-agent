@@ -16,7 +16,7 @@ Screenshot → YOLO Model → Detected Entities (class, bbox, confidence)
 - 92.2% mAP50 accuracy (v5 model, 18,520-image hybrid dataset)
 - Persistent entity tracking across frames via IoU matching
 - NMS applied to all backends (PyTorch, ONNX, Mock)
-- SAHI sliced inference for high-resolution prelabeling
+- SAHI sliced inference by default for large screenshots (640x640 tiles, 20% overlap)
 
 ## Quick Start
 
@@ -29,7 +29,7 @@ from detection import EntityDetector, get_detector
 detector = get_detector()
 
 # Detect entities in a screenshot
-entities = detector.detect("screenshot.png", conf=0.5)
+entities = detector.detect("screenshot.png")
 
 for entity in entities:
     print(f"{entity.class_name}: {entity.center} (conf: {entity.confidence:.2f})")
