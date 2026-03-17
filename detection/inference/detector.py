@@ -10,11 +10,14 @@ ONNX is recommended for Windows ARM64 where PyTorch is not available.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Union, TYPE_CHECKING
 import io
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from PIL import Image
@@ -132,7 +135,8 @@ class EntityDetector:
         model_path: Optional[str] = None,
         class_names: Optional[list[str]] = None,
         confidence_threshold: float = 0.35,  # v2 model has better confidence on real screenshots
-        use_mock: bool = False
+        use_mock: bool = False,
+        imgsz: int = 1280,
     ):
         """Initialize the detector.
 
@@ -141,6 +145,7 @@ class EntityDetector:
             class_names: List of class names (order matches model output)
             confidence_threshold: Minimum confidence for detections
             use_mock: If True, use mock detections (for testing without model)
+            imgsz: Inference resolution (higher = more detections on large screenshots)
         """
         self.class_names = class_names or DEFAULT_CLASSES
         self.confidence_threshold = confidence_threshold
@@ -148,8 +153,11 @@ class EntityDetector:
         self.model = None
         self.onnx_session = None
         self.backend = None  # 'pytorch', 'onnx', or None
-        self.input_size = 640  # YOLO input size
+        self.input_size = imgsz  # YOLO input size
         self._class_counters: dict[str, int] = {}
+        # Persistent entity tracking across frames
+        self._previous_entities: list[DetectedEntity] = []
+        self._global_id_counter: int = 0
 
         if model_path and not use_mock:
             self._load_model(model_path)
@@ -227,6 +235,46 @@ class EntityDetector:
         self._class_counters[class_name] += 1
         return f"{class_name}_{idx}"
 
+    def _assign_persistent_ids(self, new_entities: list[DetectedEntity]) -> list[DetectedEntity]:
+        """Match new detections to previous frame by IoU, preserving entity IDs.
+
+        Entities that overlap >40% with a previous same-class entity keep the old ID.
+        New entities get a globally unique ID that never repeats.
+        """
+        if not self._previous_entities:
+            # First frame — assign fresh global IDs
+            for entity in new_entities:
+                entity.id = f"{entity.class_name}_{self._global_id_counter}"
+                self._global_id_counter += 1
+            self._previous_entities = new_entities
+            return new_entities
+
+        used_prev_indices: set[int] = set()
+
+        for entity in new_entities:
+            best_iou = 0.0
+            best_idx = -1
+
+            for i, prev in enumerate(self._previous_entities):
+                if i in used_prev_indices or prev.class_name != entity.class_name:
+                    continue
+                iou = self._iou(entity.bbox, prev.bbox)
+                if iou > best_iou:
+                    best_iou = iou
+                    best_idx = i
+
+            if best_idx >= 0 and best_iou > 0.4:
+                # Same entity — carry forward old ID
+                entity.id = self._previous_entities[best_idx].id
+                used_prev_indices.add(best_idx)
+            else:
+                # New entity — assign fresh global ID
+                entity.id = f"{entity.class_name}_{self._global_id_counter}"
+                self._global_id_counter += 1
+
+        self._previous_entities = new_entities
+        return new_entities
+
     def detect(self, screenshot: Union[bytes, "Image.Image"]) -> list[DetectedEntity]:
         """Detect entities in screenshot.
 
@@ -239,12 +287,19 @@ class EntityDetector:
         self._reset_counters()
 
         if self.use_mock:
-            return self._mock_detect(screenshot)
-
-        if self.backend == 'onnx':
-            return self._onnx_detect(screenshot)
+            entities = self._mock_detect(screenshot)
+        elif self.backend == 'onnx':
+            entities = self._onnx_detect(screenshot)
         else:
-            return self._pytorch_detect(screenshot)
+            entities = self._pytorch_detect(screenshot)
+
+        # Apply NMS to remove duplicate overlapping detections
+        entities = self._nms(entities, iou_threshold=0.5)
+
+        # Assign persistent IDs across frames
+        entities = self._assign_persistent_ids(entities)
+
+        return entities
 
     def _pytorch_detect(self, screenshot: Union[bytes, "Image.Image"]) -> list[DetectedEntity]:
         """Run detection using PyTorch/ultralytics backend."""
@@ -257,7 +312,7 @@ class EntityDetector:
             image = screenshot
 
         # Run inference
-        results = self.model(image, conf=self.confidence_threshold, verbose=False)
+        results = self.model(image, conf=self.confidence_threshold, imgsz=self.input_size, verbose=False)
 
         entities = []
         for result in results:
@@ -326,7 +381,7 @@ class EntityDetector:
 
         # Debug: print output shape to understand format
         raw_output = outputs[0]
-        print(f"DEBUG ONNX output shape: {raw_output.shape}")
+        logger.debug("ONNX output shape: %s", raw_output.shape)
 
         # Handle different ONNX output formats from ultralytics
         # Format 1: Post-NMS (1, num_detections, 6) = x1, y1, x2, y2, conf, class_id
@@ -335,25 +390,19 @@ class EntityDetector:
         if len(raw_output.shape) == 3 and raw_output.shape[2] == 6:
             # Post-NMS format: (1, num_detections, 6)
             predictions = raw_output[0]
-            print(f"DEBUG: Post-NMS format, {len(predictions)} detection slots")
+            logger.debug("Post-NMS format, %d detection slots", len(predictions))
 
             # Debug: show confidence distribution
             confidences = predictions[:, 4]
             non_zero = confidences[confidences > 0.01]
-            print(f"DEBUG: Confidences > 0.01: {len(non_zero)}")
+            logger.debug("Confidences > 0.01: %d", len(non_zero))
             if len(non_zero) > 0:
-                print(f"DEBUG: Max conf: {non_zero.max():.4f}, Min conf: {non_zero.min():.4f}")
-                # Show top 5 detections by confidence
-                top_indices = np.argsort(confidences)[-5:][::-1]
-                print("DEBUG: Top 5 detections:")
-                for idx in top_indices:
-                    x1, y1, x2, y2, conf, cls = predictions[idx]
-                    print(f"  [{idx}] conf={conf:.4f} cls={int(cls)} box=({x1:.1f},{y1:.1f},{x2:.1f},{y2:.1f})")
+                logger.debug("Max conf: %.4f, Min conf: %.4f", non_zero.max(), non_zero.min())
         elif len(raw_output.shape) == 3 and raw_output.shape[1] == (4 + len(self.class_names)):
             # Raw format: (1, 4+num_classes, num_boxes) - needs transposing
             # Shape is (1, 50, 8400) for 46 classes -> transpose to (8400, 50)
             predictions_raw = raw_output[0].T  # Now (num_boxes, 4+num_classes)
-            print(f"DEBUG: Raw format, {len(predictions_raw)} boxes, processing...")
+            logger.debug("Raw format, %d boxes, processing...", len(predictions_raw))
 
             # Extract boxes, scores, and class predictions
             boxes = predictions_raw[:, :4]  # x_center, y_center, width, height
@@ -369,7 +418,7 @@ class EntityDetector:
             best_class_idx = best_class_idx[mask]
             best_confidence = best_confidence[mask]
 
-            print(f"DEBUG: {len(boxes)} boxes after confidence filter ({self.confidence_threshold})")
+            logger.debug("%d boxes after confidence filter (%.2f)", len(boxes), self.confidence_threshold)
 
             # Convert from x_center, y_center, w, h to x1, y1, x2, y2
             predictions = []
@@ -382,7 +431,7 @@ class EntityDetector:
                 predictions.append([x1, y1, x2, y2, conf, cls_id])
             predictions = np.array(predictions) if predictions else np.array([]).reshape(0, 6)
         else:
-            print(f"DEBUG: Unknown format shape {raw_output.shape}, trying as post-NMS")
+            logger.debug("Unknown format shape %s, trying as post-NMS", raw_output.shape)
             predictions = raw_output[0] if len(raw_output.shape) == 3 else raw_output
 
         # Scale factors for converting from 640x640 to original size
@@ -437,10 +486,7 @@ class EntityDetector:
         # Sort by class name, then by confidence (highest first)
         entities.sort(key=lambda e: (e.class_name, -e.confidence))
 
-        print(f"DEBUG: Final entity count: {len(entities)}")
-        if entities:
-            for e in entities[:5]:
-                print(f"  {e.id}: {e.class_name} at ({e.center[0]:.0f},{e.center[1]:.0f}) conf={e.confidence:.2f}")
+        logger.debug("Final entity count: %d", len(entities))
 
         return entities
 
@@ -637,30 +683,39 @@ class EntityDetector:
 # Singleton instance for easy access
 _instance: Optional[EntityDetector] = None
 
-def get_detector(model_path: Optional[str] = None, use_mock: bool = False) -> EntityDetector:
+def get_detector(
+    model_path: Optional[str] = None,
+    use_mock: bool = False,
+    imgsz: int = 1280,
+) -> EntityDetector:
     """Get or create the singleton detector instance.
 
     Model priority (from highest to lowest):
     1. Explicitly provided model_path
-    2. v2 model (aoe2_yolo_v2.onnx/pt) - hybrid trained, better on real screenshots
-    3. v1 model (aoe2_yolo26.onnx/pt) - synthetic only, fallback
+    2. v5 model (aoe2_yolo_v5.pt) - latest, trained on synthetic + real data
+    3. v2 model (aoe2_yolo_v2.onnx/pt) - hybrid trained
+    4. v1 model (aoe2_yolo26.onnx/pt) - synthetic only, fallback
     """
     global _instance
     if _instance is None:
         if model_path is None:
-            # Default model path - prefer v2 ONNX for cross-platform compatibility
             models_dir = Path(__file__).parent / "models"
 
-            # v2 model (hybrid training - preferred)
+            # v5 model (latest - preferred)
+            v5_pt_path = models_dir / "aoe2_yolo_v5.pt"
+
+            # v2 model (hybrid training - fallback)
             v2_onnx_path = models_dir / "aoe2_yolo_v2.onnx"
             v2_pt_path = models_dir / "aoe2_yolo_v2.pt"
 
-            # v1 model (synthetic only - fallback)
+            # v1 model (synthetic only - last resort)
             v1_onnx_path = models_dir / "aoe2_yolo26.onnx"
             v1_pt_path = models_dir / "aoe2_yolo26.pt"
 
-            # Priority: v2 ONNX > v2 PT > v1 ONNX > v1 PT
-            if v2_onnx_path.exists():
+            # Priority: v5 PT > v2 ONNX > v2 PT > v1 ONNX > v1 PT
+            if v5_pt_path.exists():
+                model_path = str(v5_pt_path)
+            elif v2_onnx_path.exists():
                 model_path = str(v2_onnx_path)
             elif v2_pt_path.exists():
                 model_path = str(v2_pt_path)
@@ -669,7 +724,7 @@ def get_detector(model_path: Optional[str] = None, use_mock: bool = False) -> En
             elif v1_pt_path.exists():
                 model_path = str(v1_pt_path)
             else:
-                model_path = str(v2_pt_path)  # Will fail gracefully
+                model_path = str(v5_pt_path)  # Will fail gracefully
 
-        _instance = EntityDetector(model_path=model_path, use_mock=use_mock)
+        _instance = EntityDetector(model_path=model_path, use_mock=use_mock, imgsz=imgsz)
     return _instance
