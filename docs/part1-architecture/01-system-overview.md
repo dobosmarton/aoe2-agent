@@ -54,7 +54,7 @@ agent/
 
 ## 1.3 Graceful Degradation
 
-Every subsystem beyond the core loop is optional. The agent starts and runs with only an Anthropic API key.
+The agent won't crash without optional subsystems, but YOLO detection is practically required for meaningful gameplay.
 
 **Detection** — imported inside a try/except at `src/game_loop.py:90-95`:
 
@@ -66,7 +66,7 @@ except ImportError:
     DETECTION_AVAILABLE = False
 ```
 
-Without detection, the agent has no entity list. The executor can still receive resource readings from the strategist and use coordinate-based actions.
+Without detection, the executor has no entity list — it cannot target units, buildings, or resources by class or ID. The strategist can still read screenshots and set goals, but the executor is limited to hotkeys and hardcoded coordinates. In practice, this makes the agent nearly non-functional: it can't gather resources, train units, or build at specific locations. Detection is technically optional (the agent starts and runs) but practically required for any useful gameplay.
 
 **Game Knowledge** — imported inside a try/except at `src/providers/claude.py:19-24`:
 
@@ -78,11 +78,11 @@ except ImportError:
     GAME_KNOWLEDGE_AVAILABLE = False
 ```
 
-Without the knowledge database, no dynamic context injection occurs. The executor still receives the system prompt and memory context.
+Without the knowledge database, no dynamic context injection occurs. The executor still receives the system prompt and memory context. This is a minor degradation — the agent plays reasonably without it.
 
 **Window Management** — pygetwindow is optional at `src/window.py`. When unavailable, functions return `True` by default — the agent assumes the game is running and focused. Screenshot capture falls back to the full primary monitor.
 
-> **Key Insight**: The agent runs entirely without YOLO detection or game knowledge — both are additive enhancements. A developer can test the core loop with just an Anthropic API key and a running game window.
+> **Key Insight**: Detection is the critical optional dependency. Without YOLO, the executor is essentially blind — the experience is very poor. Game knowledge and window management are truly additive enhancements that degrade gracefully.
 
 ## 1.4 Configuration
 
@@ -127,7 +127,7 @@ Key log events: `iteration_start`, `screenshot_captured`, `detection_complete`, 
 ## Summary
 
 - Two-tier architecture: Sonnet strategist (vision, goals) + Haiku executor (text-only, actions)
-- Three optional subsystems (detection, knowledge, window management) each degrade gracefully
+- Detection is practically required for useful gameplay; game knowledge and window management are truly optional
 - Pydantic for config and validation, structlog for observability, asyncio for concurrency
 - Goal-driven gameplay with alarm system for emergency defense
 
