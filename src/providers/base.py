@@ -10,19 +10,17 @@ class BaseLLMProvider(ABC):
     @abstractmethod
     async def get_actions(
         self,
-        screenshot_bytes: bytes,
-        context: str = "",
+        context: str,
         width: int = 1920,
         height: int = 1080,
     ) -> dict[str, Any]:
         """
-        Send screenshot to LLM and get actions back.
+        Send game state to LLM and get actions back.
 
         Args:
-            screenshot_bytes: JPEG image bytes of the current screen
-            context: Optional context string (e.g., game state, previous actions)
-            width: Screenshot width in pixels
-            height: Screenshot height in pixels
+            context: Context string with detected entities, goals, resources, previous actions
+            width: Game window width in pixels (for coordinate reference)
+            height: Game window height in pixels (for coordinate reference)
 
         Returns:
             Dictionary containing:

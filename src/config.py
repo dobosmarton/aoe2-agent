@@ -13,11 +13,16 @@ class Config(BaseModel):
 
     # LLM settings
     anthropic_api_key: str = ""
-    model: str = "claude-sonnet-4-5-20250929"
-    max_tokens: int = 1024
+    model: str = "claude-haiku-4-5"  # Executor: fast, cheap
+    max_tokens: int = 1536
+    strategist_model: str = "claude-sonnet-4-6"  # Strategist: deeper reasoning
+    strategist_interval: int = 10  # Run strategist every N turns
+
+    # Detection settings
+    detection_imgsz: int = 1280  # YOLO inference resolution (higher = more detections, slower)
 
     # Timing settings
-    loop_delay: float = 2.0  # Seconds between decisions
+    loop_delay: float = 1.0  # Seconds between decisions
     action_delay: float = 0.05  # Seconds between actions
 
     # Logging
@@ -29,8 +34,10 @@ class Config(BaseModel):
         """Load configuration from environment variables."""
         return cls(
             anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
-            model=os.environ.get("AOE2_MODEL", "claude-sonnet-4-5-20250929"),
-            loop_delay=float(os.environ.get("AOE2_LOOP_DELAY", "2.0")),
+            model=os.environ.get("AOE2_MODEL", "claude-haiku-4-5"),
+            strategist_model=os.environ.get("AOE2_STRATEGIST_MODEL", "claude-sonnet-4-6"),
+            strategist_interval=int(os.environ.get("AOE2_STRATEGIST_INTERVAL", "10")),
+            loop_delay=float(os.environ.get("AOE2_LOOP_DELAY", "1.0")),
             save_screenshots=os.environ.get("AOE2_SAVE_SCREENSHOTS", "true").lower() == "true",
         )
 

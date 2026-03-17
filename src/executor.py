@@ -1,7 +1,7 @@
 """Action executor module for AoE2 LLM Agent."""
 
 import asyncio
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import pyautogui
 import structlog
@@ -16,11 +16,20 @@ log = structlog.get_logger()
 pyautogui.FAILSAFE = False  # Disable failsafe (mouse to corner stops execution)
 pyautogui.PAUSE = 0.02  # Reduce default pause between actions (default is 0.1)
 
-# Cache window position (updated before action batches)
+# Cache window position (updated before each action)
 _window_offset: tuple[int, int] = (0, 0)
 
 # Cache detected entities for target_id resolution
 _detected_entities: list[dict] = []
+
+# Rescan callback (set by game_loop to capture screenshot + run detection)
+_rescan_fn: Optional[Callable] = None
+
+
+def set_rescan_fn(fn: Callable) -> None:
+    """Set the rescan callback for mid-turn screenshot+detection."""
+    global _rescan_fn
+    _rescan_fn = fn
 
 
 def set_detected_entities(entities: list) -> None:
@@ -51,6 +60,23 @@ def resolve_target_id(target_id: str) -> Optional[tuple[int, int]]:
     """
     for entity in _detected_entities:
         if entity.get("id") == target_id:
+            center = entity.get("center")
+            if center:
+                return (int(center[0]), int(center[1]))
+    return None
+
+
+def resolve_target_class(target_class: str) -> Optional[tuple[int, int]]:
+    """Resolve a target_class to (x, y) of the nearest entity of that class.
+
+    Args:
+        target_class: Entity class name (e.g., 'sheep', 'tree', 'berry_bush')
+
+    Returns:
+        (x, y) tuple of first matching entity, None if not found
+    """
+    for entity in _detected_entities:
+        if entity.get("class") == target_class:
             center = entity.get("center")
             if center:
                 return (int(center[0]), int(center[1]))
@@ -91,18 +117,30 @@ async def execute_action(action: dict[str, Any] | Action) -> bool:
     intent = action_dict.get("intent", "")
 
     try:
+        # Re-fetch window offset before each action to handle window movement
+        global _window_offset
+        rect = get_game_window_rect()
+        if rect:
+            _window_offset = (rect[0], rect[1])
+
         # Translate coordinates from screenshot-relative to screen-absolute
         def translate(x: int, y: int) -> tuple[int, int]:
             return (x + _window_offset[0], y + _window_offset[1])
 
-        # Helper to resolve coordinates (handles target_id if present)
+        # Helper to resolve coordinates (handles target_id and target_class)
         def get_coords(action_dict: dict) -> tuple[int, int] | None:
-            """Get (x, y) from action, resolving target_id if needed."""
+            """Get (x, y) from action, resolving target_id or target_class if needed."""
             target_id = action_dict.get("target_id")
             if target_id:
                 coords = resolve_target_id(target_id)
                 if coords is None:
                     log.warning("target_id_not_found", target_id=target_id)
+                return coords
+            target_class = action_dict.get("target_class")
+            if target_class:
+                coords = resolve_target_class(target_class)
+                if coords is None:
+                    log.warning("target_class_not_found", target_class=target_class)
                 return coords
             x = action_dict.get("x")
             y = action_dict.get("y")
@@ -136,8 +174,19 @@ async def execute_action(action: dict[str, Any] | Action) -> bool:
 
         elif action_type == "press":
             key = action_dict["key"]
-            pyautogui.press(key)
-            log.info("press", key=key, intent=intent)
+            modifiers = action_dict.get("modifiers", [])
+            if modifiers:
+                pyautogui.hotkey(*modifiers, key)
+                log.info("press", key=key, modifiers=modifiers, intent=intent)
+            else:
+                pyautogui.press(key)
+                log.info("press", key=key, intent=intent)
+
+            # Rescan: take fresh screenshot + detection after camera-moving keys
+            if action_dict.get("rescan") and _rescan_fn:
+                await asyncio.sleep(0.3)  # Wait for camera to settle
+                await _rescan_fn()
+                log.info("rescan_after_press", key=key)
 
         elif action_type == "drag":
             x1, y1 = action_dict["x1"], action_dict["y1"]
@@ -179,17 +228,6 @@ async def execute_actions(actions: list[dict[str, Any] | Action]) -> int:
     Returns:
         Number of successfully executed actions
     """
-    global _window_offset
-
-    # Get window position before executing actions
-    rect = get_game_window_rect()
-    if rect:
-        _window_offset = (rect[0], rect[1])
-        log.debug("window_offset_updated", left=rect[0], top=rect[1])
-    else:
-        _window_offset = (0, 0)
-        log.warning("window_rect_not_found", message="Using (0,0) offset")
-
     # Ensure game is focused before executing
     if not ensure_game_focused():
         log.warning("could_not_focus_before_actions")

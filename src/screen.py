@@ -46,6 +46,23 @@ def save_screenshot(data: bytes, path: str) -> None:
         f.write(data)
 
 
+def crop_resource_bar(screenshot_bytes: bytes, bar_height: int = 60) -> bytes:
+    """Crop just the resource bar from the top of a screenshot.
+
+    Args:
+        screenshot_bytes: Full JPEG screenshot bytes
+        bar_height: Height of the resource bar crop in pixels
+
+    Returns:
+        JPEG bytes of the cropped resource bar
+    """
+    img = Image.open(io.BytesIO(screenshot_bytes))
+    bar = img.crop((0, 0, img.width, min(bar_height, img.height)))
+    buffer = io.BytesIO()
+    bar.save(buffer, format="JPEG", quality=80)
+    return buffer.getvalue()
+
+
 def capture_and_save(path: str, monitor: int = 1) -> tuple[bytes, int, int]:
     """Capture screenshot and save to file, returning (bytes, width, height)."""
     data, width, height = capture_screenshot(monitor)

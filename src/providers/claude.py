@@ -1,15 +1,10 @@
 """Claude (Anthropic) LLM provider for AoE2 Agent."""
 
-import base64
-import json
-import re
 from pathlib import Path
 from typing import Any, Optional
 
 import anthropic
 import structlog
-from pydantic import ValidationError
-from tenacity import retry, stop_after_attempt, wait_exponential
 
 from ..config import config
 from ..models import LLMResponse
@@ -48,8 +43,8 @@ class ClaudeProvider(BaseLLMProvider):
         """
         self.api_key = api_key or config.anthropic_api_key
         self.model = model or config.model
-        # Use AsyncAnthropic for proper async support
-        self.client = anthropic.AsyncAnthropic(api_key=self.api_key)
+        # Use AsyncAnthropic with built-in retry (429/5xx with exponential backoff)
+        self.client = anthropic.AsyncAnthropic(api_key=self.api_key, max_retries=3)
         self._system_prompt: str | None = None
         self.use_dynamic_context = use_dynamic_context and GAME_KNOWLEDGE_AVAILABLE
         self._game_db: Optional["GameKnowledge"] = None
@@ -153,86 +148,76 @@ Play to win!"""
             return context
 
     def _build_content(
-        self, screenshot_bytes: bytes, context: str, width: int, height: int
+        self, context: str, width: int, height: int
     ) -> list[dict]:
-        """Build the message content for Claude."""
-        image_base64 = base64.standard_b64encode(screenshot_bytes).decode("utf-8")
+        """Build the message content for Claude.
 
-        content = [
-            {
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": "image/jpeg",
-                    "data": image_base64,
-                },
-            },
-        ]
-
+        Pure text content with YOLO-detected entities, goals, cached resources,
+        and game state. No images — all visual info comes from YOLO detection
+        and strategist resource readings.
+        """
         # Enhance context with dynamic game knowledge
         enhanced_context = self._get_dynamic_context(context)
 
-        # Build text with dimensions info - include center to help LLM calibrate
+        # Build text with dimensions info
         center_x = width // 2
         center_y = height // 2
-        dimensions_info = f"Screenshot dimensions: {width}x{height} pixels. Center=({center_x},{center_y}). Valid x=0-{width}, y=0-{height}."
+        dimensions_info = f"Game window: {width}x{height} pixels. Center=({center_x},{center_y}). Valid x=0-{width}, y=0-{height}."
 
-        if enhanced_context:
-            text = f"{dimensions_info}\n\n{enhanced_context}\n\nWhat should I do next?"
-        else:
-            text = f"{dimensions_info}\n\nWhat should I do next?"
+        text = f"{dimensions_info}\n\n{enhanced_context}\n\nBased on the detected entities, goals, and resource status above, decide what to do next."
 
-        content.append({
-            "type": "text",
-            "text": text,
-        })
+        content = [
+            {
+                "type": "text",
+                "text": text,
+            },
+        ]
 
         return content
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=10),
-        reraise=True,
-    )
-    async def _call_api(self, content: list[dict]) -> str:
-        """
-        Call Claude API with retry logic.
+    async def _call_api(self, content: list[dict]) -> LLMResponse:
+        """Call Claude API with structured output parsing.
 
-        Retries up to 3 times with exponential backoff.
+        Uses messages.parse() to get validated Pydantic output directly.
+        SDK handles retry (429/5xx) with exponential backoff automatically.
         """
-        response = await self.client.messages.create(
+        response = await self.client.messages.parse(
             model=self.model,
             max_tokens=config.max_tokens,
             system=self.get_system_prompt(),
             messages=[{"role": "user", "content": content}],
+            output_format=LLMResponse,
         )
-        return response.content[0].text
+        if response.stop_reason == "refusal":
+            raise ValueError("Claude refused the request")
+        return response.parsed_output
 
     async def get_actions(
         self,
-        screenshot_bytes: bytes,
-        context: str = "",
+        context: str,
         width: int = 1920,
         height: int = 1080,
     ) -> dict[str, Any]:
         """
-        Send screenshot to Claude and get actions back.
+        Send text context to Claude and get actions back.
+
+        The executor is 100% text-based. All visual information comes from
+        YOLO entity detection (text list) and strategist resource readings.
 
         Args:
-            screenshot_bytes: JPEG image bytes
-            context: Optional context string (memory/game state)
-            width: Screenshot width in pixels
-            height: Screenshot height in pixels
+            context: Context string with entities, goals, resources, memory
+            width: Game window width in pixels
+            height: Game window height in pixels
 
         Returns:
             Dictionary with reasoning, observations, and actions
         """
-        content = self._build_content(screenshot_bytes, context, width, height)
+        content = self._build_content(context, width, height)
 
         try:
-            response_text = await self._call_api(content)
-            log.debug("claude_response", response=response_text[:500])
-            return self._parse_response(response_text)
+            result = await self._call_api(content)
+            log.debug("claude_response", reasoning=result.reasoning[:200])
+            return result.model_dump()
 
         except anthropic.APIError as e:
             log.error("claude_api_error", error=str(e))
@@ -248,43 +233,3 @@ Play to win!"""
             "observations": {},
             "actions": [{"type": "wait", "ms": 1000, "intent": "Error recovery"}],
         }
-
-    def _parse_response(self, response_text: str) -> dict[str, Any]:
-        """
-        Parse JSON response from Claude.
-
-        Handles cases where JSON is wrapped in markdown code blocks.
-        Validates response with Pydantic models.
-        """
-        # Try to extract JSON from markdown code block
-        json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response_text, re.DOTALL)
-        if json_match:
-            json_str = json_match.group(1)
-        else:
-            # Try to find raw JSON object
-            json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
-            if json_match:
-                json_str = json_match.group(0)
-            else:
-                log.warning("no_json_found", response=response_text[:200])
-                return {"reasoning": response_text, "observations": {}, "actions": []}
-
-        try:
-            result = json.loads(json_str)
-
-            # Validate with Pydantic
-            try:
-                validated = LLMResponse.model_validate(result)
-                return validated.model_dump()
-            except ValidationError as e:
-                log.warning("validation_error", errors=str(e.errors()[:3]))
-                # Return with original reasoning but empty actions if validation fails
-                return {
-                    "reasoning": result.get("reasoning", response_text),
-                    "observations": result.get("observations", {}),
-                    "actions": [],
-                }
-
-        except json.JSONDecodeError as e:
-            log.warning("json_parse_error", error=str(e), json_str=json_str[:200])
-            return {"reasoning": response_text, "observations": {}, "actions": []}

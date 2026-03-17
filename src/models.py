@@ -17,15 +17,17 @@ class ClickAction(BaseModel):
     x: Optional[int] = Field(default=None, ge=0, le=7680)
     y: Optional[int] = Field(default=None, ge=0, le=4320)
     target_id: Optional[str] = Field(default=None, description="Entity ID from detection, e.g. 'sheep_0'")
+    target_class: Optional[str] = Field(default=None, description="Entity class to target nearest of, e.g. 'sheep'")
     intent: str = ""
 
     @model_validator(mode='after')
     def check_coords_or_target(self):
-        """Ensure either coordinates or target_id is provided."""
+        """Ensure either coordinates, target_id, or target_class is provided."""
         has_coords = self.x is not None and self.y is not None
         has_target = self.target_id is not None
-        if not has_coords and not has_target:
-            raise ValueError("Must provide either (x, y) coordinates or target_id")
+        has_class = self.target_class is not None
+        if not has_coords and not has_target and not has_class:
+            raise ValueError("Must provide (x, y) coordinates, target_id, or target_class")
         return self
 
 
@@ -41,15 +43,17 @@ class RightClickAction(BaseModel):
     x: Optional[int] = Field(default=None, ge=0, le=7680)
     y: Optional[int] = Field(default=None, ge=0, le=4320)
     target_id: Optional[str] = Field(default=None, description="Entity ID from detection, e.g. 'sheep_0'")
+    target_class: Optional[str] = Field(default=None, description="Entity class to target nearest of, e.g. 'sheep'")
     intent: str = ""
 
     @model_validator(mode='after')
     def check_coords_or_target(self):
-        """Ensure either coordinates or target_id is provided."""
+        """Ensure either coordinates, target_id, or target_class is provided."""
         has_coords = self.x is not None and self.y is not None
         has_target = self.target_id is not None
-        if not has_coords and not has_target:
-            raise ValueError("Must provide either (x, y) coordinates or target_id")
+        has_class = self.target_class is not None
+        if not has_coords and not has_target and not has_class:
+            raise ValueError("Must provide (x, y) coordinates, target_id, or target_class")
         return self
 
 
@@ -58,6 +62,8 @@ class PressAction(BaseModel):
 
     type: Literal["press"]
     key: str = Field(min_length=1, max_length=20)
+    modifiers: list[str] = Field(default_factory=list, description="Modifier keys, e.g. ['ctrl', 'shift']")
+    rescan: bool = Field(default=False, description="Take fresh screenshot+detection after this key press")
     intent: str = ""
 
     @field_validator("key")
@@ -157,15 +163,21 @@ class Observations(BaseModel):
     age: str = ""
     idle_tc: bool = False
     under_attack: bool = False
+    game_state: Literal["playing", "victory", "defeat", "menu"] = "playing"
     events: list[str] = Field(default_factory=list)
 
 
 class LLMResponse(BaseModel):
-    """Complete LLM response with validation."""
+    """Complete LLM response with validation.
 
-    reasoning: str
-    observations: Observations = Field(default_factory=Observations)
+    Field order matters: structured output generates fields sequentially.
+    Actions first ensures they get generated before reasoning consumes
+    the token budget.
+    """
+
     actions: list[Action] = Field(default_factory=list)
+    observations: Observations = Field(default_factory=Observations)
+    reasoning: str = ""
 
 
 def validate_action(action_dict: dict) -> Action | None:

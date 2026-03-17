@@ -5,16 +5,86 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+import math
+
 import structlog
 
 from .config import config
-from .executor import execute_actions, set_detected_entities, clear_detected_entities
-from .memory import AgentMemory
+from .executor import execute_actions, set_detected_entities, clear_detected_entities, set_rescan_fn
+from .goal_logger import GoalLogger
+from .goals import GoalManager
+from .memory import AgentMemory, GameState
 from .providers.base import BaseLLMProvider
+from .providers.strategist import StrategistProvider
 from .screen import capture_screenshot, save_screenshot
 from .window import ensure_game_focused, is_game_running
 
 log = structlog.get_logger()
+
+
+def _verify_actions(pre_entities: list, post_entities: list, actions: list[dict]) -> str:
+    """Compare pre/post detection to infer action outcomes.
+
+    Returns human-readable verification text for LLM context.
+    """
+    if not pre_entities and not post_entities:
+        return ""
+
+    results = []
+
+    # Build lookup dicts by entity ID
+    def _entity_dict(entities):
+        d = {}
+        for e in entities:
+            eid = e.id if hasattr(e, 'id') else e.get('id', '')
+            center = e.center if hasattr(e, 'center') else e.get('center', (0, 0))
+            cls = e.class_name if hasattr(e, 'class_name') else e.get('class', '')
+            d[eid] = {"center": center, "class": cls}
+        return d
+
+    pre_dict = _entity_dict(pre_entities)
+    post_dict = _entity_dict(post_entities)
+
+    # Check target-based actions
+    for action in actions:
+        target_id = action.get("target_id")
+        if not target_id:
+            continue
+
+        pre = pre_dict.get(target_id)
+        post = post_dict.get(target_id)
+        intent = action.get("intent", "")
+
+        if pre and not post:
+            results.append(f"- {target_id}: no longer visible (moved or gathered)")
+        elif pre and post:
+            dx = post["center"][0] - pre["center"][0]
+            dy = post["center"][1] - pre["center"][1]
+            dist = math.sqrt(dx * dx + dy * dy)
+            if dist > 20:
+                results.append(f"- {target_id}: moved {dist:.0f}px")
+            else:
+                results.append(f"- {target_id}: no visible change")
+        elif not pre:
+            results.append(f"- {target_id}: was not detected before action")
+
+    # Check for new entities (e.g., new building placed)
+    new_ids = set(post_dict.keys()) - set(pre_dict.keys())
+    if new_ids:
+        new_summary = ", ".join(
+            f"{eid}({post_dict[eid]['class']})" for eid in list(new_ids)[:5]
+        )
+        results.append(f"- New entities: {new_summary}")
+
+    # Check for disappeared entities
+    gone_ids = set(pre_dict.keys()) - set(post_dict.keys())
+    if gone_ids:
+        gone_summary = ", ".join(
+            f"{eid}({pre_dict[eid]['class']})" for eid in list(gone_ids)[:5]
+        )
+        results.append(f"- Disappeared: {gone_summary}")
+
+    return "\n".join(results) if results else ""
 
 # Optional detection module (graceful fallback if not available)
 try:
@@ -30,15 +100,20 @@ async def game_loop(
     max_iterations: int | None = None,
     memory: AgentMemory | None = None,
     use_detection: bool = True,
-) -> None:
+    time_budget: float | None = None,
+) -> AgentMemory:
     """
-    Main game loop: capture → detect → think → act → repeat.
+    Main game loop: capture → detect → alarm check → strategist → executor → act → repeat.
 
     Args:
-        provider: LLM provider to use for decisions
+        provider: LLM provider to use for decisions (text-only executor)
         max_iterations: Maximum number of iterations (None = infinite)
         memory: Optional memory instance (creates new one if not provided)
         use_detection: Whether to use YOLO detection (if available)
+        time_budget: Maximum game duration in seconds (None = no limit)
+
+    Returns:
+        The AgentMemory instance with cumulative metrics
     """
     # Initialize memory if not provided
     if memory is None:
@@ -49,8 +124,8 @@ async def game_loop(
     if use_detection and DETECTION_AVAILABLE:
         try:
             # Use real YOLO detection (falls back to mock if model not found)
-            # Prefers v2 model (hybrid training) over v1 (synthetic only)
-            detector = get_detector(use_mock=False)
+            # Prefers v5 model (latest) with configurable inference resolution
+            detector = get_detector(use_mock=False, imgsz=config.detection_imgsz)
             backend = "mock" if detector.use_mock else detector.backend or "yolo"
             log.info("detector_initialized",
                      mode=backend,
@@ -59,15 +134,31 @@ async def game_loop(
             log.warning("detector_init_failed", error=str(e))
             detector = None
 
+    # Register rescan callback so executor can take mid-turn screenshots
+    if detector:
+        async def _rescan():
+            screenshot, _, _ = capture_screenshot()
+            entities = detector.detect(screenshot)
+            set_detected_entities(entities)
+            log.debug("rescan_complete", entity_count=len(entities))
+        set_rescan_fn(_rescan)
+
+    # Initialize goal system
+    goal_manager = GoalManager()
+    strategist = StrategistProvider()
+    log_dir = Path(config.log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    goal_logger = GoalLogger(log_dir)
+
     iteration = 0
     log.info("game_loop_start", provider=type(provider).__name__,
-             detection=detector is not None)
+             detection=detector is not None,
+             executor_model=config.model,
+             strategist_model=config.strategist_model)
 
     # Create logs directory if saving screenshots
     screenshots_dir = None
     if config.save_screenshots:
-        log_dir = Path(config.log_dir)
-        log_dir.mkdir(parents=True, exist_ok=True)
         screenshots_dir = log_dir / "screenshots"
         screenshots_dir.mkdir(exist_ok=True)
 
@@ -109,22 +200,80 @@ async def game_loop(
                     log.warning("detection_failed", error=str(e))
                     clear_detected_entities()
 
-            # 3. Build context from memory and detected entities
-            context = memory.get_context_for_llm()
-
-            # Add detected entities to context for LLM
+            # 3. Build entity summary text for context and strategist
+            entity_summary = ""
+            ownership_results = {}
             if detected_entities:
-                entity_context = "\n## Detected Entities\n"
-                for entity in detected_entities[:15]:  # Limit to avoid token bloat
+                # Classify ownership of military units via color detection
+                try:
+                    from detection.inference.ownership import classify_entities as classify_ownership
+                    from .goals import THREAT_CLASSES
+                    ownership_results = classify_ownership(screenshot, detected_entities, THREAT_CLASSES)
+                except Exception:
+                    pass  # Non-critical — entity summary works without ownership tags
+
+                entity_lines = []
+                for entity in detected_entities[:20]:
                     eid = entity.id if hasattr(entity, 'id') else entity.get('id', 'unknown')
                     cls = entity.class_name if hasattr(entity, 'class_name') else entity.get('class', 'unknown')
                     center = entity.center if hasattr(entity, 'center') else entity.get('center', (0, 0))
                     conf = entity.confidence if hasattr(entity, 'confidence') else entity.get('confidence', 0)
-                    entity_context += f"  {eid}: {cls} at ({int(center[0])},{int(center[1])}) [{conf:.0%}]\n"
+                    # Add ownership tag for military units
+                    owner_tag = ""
+                    if eid in ownership_results:
+                        owner_tag = f" [{ownership_results[eid][0].value}]"
+                    entity_lines.append(f"  {eid}: {cls}{owner_tag} at ({int(center[0])},{int(center[1])}) [{conf:.0%}]")
+                entity_summary = "\n".join(entity_lines)
+
+            # 4. Alarm check — scan YOLO entities for enemy military threats
+            #    Pass screenshot for color-based own/enemy classification
+            alarm = goal_manager.check_alarm(detected_entities, screenshot_bytes=screenshot) if detected_entities else False
+
+            # 5. Run strategist (every N turns OR on alarm) to create/update goals
+            if strategist.should_run(iteration, alarm=alarm):
+                try:
+                    prev_goals = list(goal_manager.active_goals)
+                    new_goals, resource_readings = await strategist.generate_goals(
+                        memory.game_state,
+                        goal_manager.get_goals_summary(),
+                        entity_summary,
+                        iteration,
+                        screenshot_bytes=screenshot,
+                        alarm=alarm,
+                    )
+                    goal_manager.set_goals(new_goals)
+                    goal_manager.update_resource_readings(resource_readings, memory)
+                    goal_logger.log_goals_created(iteration, new_goals)
+                    if prev_goals:
+                        goal_logger.log_strategist_update(iteration, prev_goals, new_goals)
+                    log.info("strategist_goals_updated", turn=iteration,
+                             goal_count=len(new_goals),
+                             alarm=alarm)
+                except Exception as e:
+                    log.warning("strategist_failed", error=str(e))
+
+            # 6. Build context from memory, goals, resources, and detected entities
+            context = memory.get_context_for_llm()
+
+            # Inject cached resource readings from strategist
+            resource_context = goal_manager.get_resource_context()
+            if resource_context:
+                context = resource_context + "\n\n" + context
+
+            # Inject goal context
+            goal_context = goal_manager.get_context_for_llm()
+            if goal_context:
+                context = goal_context + "\n\n" + context
+
+            # Add detected entities to context as text for LLM
+            if entity_summary:
+                entity_context = "\n## Detected Entities (from YOLO)\n"
+                entity_context += "Use target_class or target_id to interact with these:\n"
+                entity_context += entity_summary + "\n"
                 context = entity_context + "\n" + context
 
-            # 4. Get actions from LLM
-            response = await provider.get_actions(screenshot, context, width, height)
+            # 7. Get actions from executor (text-only, no images)
+            response = await provider.get_actions(context, width, height)
             reasoning = response.get("reasoning", "")
             observations = response.get("observations", {})
             actions = response.get("actions", [])
@@ -136,36 +285,97 @@ async def game_loop(
                 action_count=len(actions),
             )
 
-            # 5. Update memory with this turn
-            memory.create_turn(
+            # 8. Update memory with this turn
+            prev_state = GameState(
+                resources=dict(memory.game_state.resources),
+                population=memory.game_state.population,
+                population_cap=memory.game_state.population_cap,
+                current_age=memory.game_state.current_age,
+            )
+            turn = memory.create_turn(
                 reasoning=reasoning,
                 actions=actions,
                 observations=observations,
             )
 
-            # 6. Execute actions
+            # 8b. Evaluate goal progress and compute reward
+            goal_manager.evaluate_progress(memory.game_state, iteration)
+            reward = goal_manager.compute_turn_reward(prev_state, memory.game_state)
+            turn.reward = reward.get("total", 0.0)
+            goal_logger.log_progress(iteration, goal_manager.active_goals, reward)
+
+            # Log completed goals
+            for goal in goal_manager.completed_goals:
+                if goal.created_turn != iteration:  # Avoid logging on same turn
+                    goal_logger.log_goal_completed(iteration, goal)
+
+            if reward["total"] != 0:
+                log.info("turn_reward", iteration=iteration, **reward)
+
+            # 8c. Check for game-over via LLM observations
+            game_state = observations.get("game_state", "playing") if observations else "playing"
+            if game_state in ("victory", "defeat"):
+                memory.game_end_reason = game_state
+                log.info("game_over_detected", result=game_state, iteration=iteration)
+                break
+
+            # 8d. Check time budget
+            if time_budget and memory.get_game_duration_seconds() >= time_budget:
+                memory.game_end_reason = "timeout"
+                log.info("time_budget_reached", seconds=time_budget, iteration=iteration)
+                break
+
+            # 9. Execute actions
             if actions:
                 success_count = await execute_actions(actions)
+                memory.record_action_results(success_count, len(actions))
                 log.info(
                     "actions_executed",
                     iteration=iteration,
                     total=len(actions),
                     successful=success_count,
                 )
+
+                # 9b. Post-action verification (compare pre/post entity states)
+                if detector and detected_entities:
+                    try:
+                        await asyncio.sleep(0.3)  # Brief settle time
+                        post_screenshot, _, _ = capture_screenshot()
+                        post_entities = detector.detect(post_screenshot)
+                        verification = _verify_actions(detected_entities, post_entities, actions)
+                        if verification:
+                            memory.set_last_verification(verification)
+                            log.debug("action_verification", result=verification[:200])
+                    except Exception as e:
+                        log.debug("verification_skipped", error=str(e))
             else:
                 log.warning("no_actions", iteration=iteration, reasoning=reasoning[:200])
 
             # Clear detected entities after execution
             clear_detected_entities()
 
-            # 7. Wait before next iteration
+            # 10. Wait before next iteration
             await asyncio.sleep(config.loop_delay)
 
     except KeyboardInterrupt:
         log.info("game_loop_interrupted", iterations=iteration)
+        if not memory.game_end_reason:
+            memory.game_end_reason = "interrupted"
     except Exception as e:
         log.error("game_loop_error", error=str(e), iteration=iteration)
+        if not memory.game_end_reason:
+            memory.game_end_reason = "error"
         raise
+    finally:
+        metrics = memory.get_metrics_snapshot()
+        log.info("game_metrics_final", **metrics)
+        goal_logger.log_game_end(
+            iteration,
+            memory.game_end_reason or "unknown",
+            len(goal_manager.completed_goals),
+        )
+
+    return memory
 
 
 async def run_single_iteration(
@@ -215,8 +425,9 @@ async def run_single_iteration(
     # Build context with detected entities
     context = memory.get_context_for_llm()
     if detected_entities:
-        entity_context = "\n## Detected Entities\n"
-        for entity in detected_entities[:15]:
+        entity_context = "\n## Detected Entities (from YOLO)\n"
+        entity_context += "Use target_class or target_id to interact with these:\n"
+        for entity in detected_entities[:20]:
             eid = entity.id if hasattr(entity, 'id') else entity.get('id', 'unknown')
             cls = entity.class_name if hasattr(entity, 'class_name') else entity.get('class', 'unknown')
             center = entity.center if hasattr(entity, 'center') else entity.get('center', (0, 0))
@@ -224,8 +435,8 @@ async def run_single_iteration(
             entity_context += f"  {eid}: {cls} at ({int(center[0])},{int(center[1])}) [{conf:.0%}]\n"
         context = entity_context + "\n" + context
 
-    # Get actions
-    response = await provider.get_actions(screenshot, context, width, height)
+    # Get actions (text-only, no images)
+    response = await provider.get_actions(context, width, height)
 
     # Update memory
     memory.create_turn(
