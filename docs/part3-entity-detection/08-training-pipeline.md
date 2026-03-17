@@ -55,10 +55,12 @@ For each image generation:
 3. For each sprite instance:
    - Apply random scale from `scale_range`
    - Try up to 20 random positions
-   - Check IoU overlap with existing sprites (threshold: 0.4)
-   - Accept position if overlap is acceptable
+   - Check overlap with z-order-aware thresholds: buildings 10%, resources 15%, units 35%
+   - **Skip placement** if overlap limit exceeded (no force-place)
 4. Paste sprite with alpha transparency
 5. Generate YOLO-format label: `class_id x_center y_center width height` (all normalized 0-1)
+
+> **v5 improvement**: Z-order-aware overlap thresholds replaced the flat 40% IoU threshold from earlier versions. Buildings overlap less (10%) since they're large and static, while units tolerate more overlap (35%) since they cluster in groups. Sprites that can't find a valid position are skipped entirely rather than force-placed, reducing label noise.
 
 ### Background Sources
 
@@ -152,17 +154,31 @@ Training produces:
 
 ### Results
 
-v4 model (hybrid): **86.8% mAP50** on validation data, 60 classes. Trained on 8,520 images (5,520 real tiles + 3,000 synthetic). See [Chapter 12](../part5-operations/12-cloud-training.md) for cloud training details.
+**v5 model (latest):** **92.2% mAP50**, **85.4% mAP50-95** on validation data, 60 classes.
+
+| Metric | v5 | v4 (previous) |
+|--------|-----|---------------|
+| mAP50 | **92.2%** | 86.8% |
+| mAP50-95 | **85.4%** | 72.3% |
+| Precision | **94.8%** | 87.1% |
+| Recall | **89.2%** | 78.5% |
+
+**v5 dataset:** 18,520 images total (15,120 train + 3,400 val):
+- 8,000 synthetic train + 2,000 synthetic val
+- 7,120 real train + 1,400 real val
+
+See [Chapter 12](../part5-operations/12-cloud-training.md) for cloud training details.
 
 ---
 
 ## Summary
 
-- Synthetic data: sprite compositing with z-order, overlap management, 3 background types with 9 biome palettes
+- Synthetic data: sprite compositing with z-order, z-order-aware overlap thresholds (buildings 10%, resources 15%, units 35%)
 - 53 sprite configs using classes.yaml IDs directly (no remapping needed)
 - 17+ architecture styles per building via wildcard patterns
 - 6 enhanced augmentations simulating real game conditions (fog, UI, compression, zoom, temperature, vignette)
 - YOLO11 nano model: 150 epochs, isometric-tuned hyperparameters
+- v5 model: 92.2% mAP50 on 18,520-image hybrid dataset (8k synthetic + 7.1k real train, 2k synthetic + 1.4k real val)
 
 ## Related Topics
 

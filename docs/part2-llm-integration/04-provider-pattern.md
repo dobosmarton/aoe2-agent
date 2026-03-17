@@ -78,42 +78,31 @@ Loads from `prompts/system.md` on disk. If the file doesn't exist, falls back to
 3. Appends dimensions info: `"Screenshot dimensions: 1920x1080 pixels. Center=(960,540). Valid x=0-1920, y=0-1080."`
 4. Ends with `"What should I do next?"`
 
-### API Call with Retry (`claude.py:192-209`)
+### API Call with Structured Output (`claude.py:189-208`)
 
 ```python
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=10))
-async def _call_api(self, content: list[dict]) -> str:
-    response = await self.client.messages.create(
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=10), reraise=True)
+async def _call_api(self, content: list[dict]) -> LLMResponse:
+    response = await self.client.messages.parse(
         model=self.model,
         max_tokens=config.max_tokens,
         system=self.get_system_prompt(),
         messages=[{"role": "user", "content": content}],
+        output_format=LLMResponse,
     )
-    return response.content[0].text
+    return response.parsed_output
 ```
+
+Uses the Anthropic SDK's native `messages.parse()` with `output_format=LLMResponse` to get validated Pydantic output directly. This replaced the previous custom two-tier JSON extraction approach (regex for markdown fences, then raw JSON matching) which was fragile and error-prone.
+
+**Key benefits of structured output:**
+- No custom JSON parsing code — the SDK handles extraction and validation
+- Removed `_extract_json_object()` and `_parse_response()` methods (~55 lines)
+- Removed unused imports: `json`, `re`, `ValidationError`
+- Type-safe: returns `LLMResponse` Pydantic model directly
+- Requires `anthropic>=0.84.0`
 
 Uses tenacity's `@retry` decorator: 3 attempts with exponential backoff (1s, 2s, 4s delays). Handles transient API errors (rate limits, network timeouts) without crashing the game loop.
-
-### Response Parsing (`claude.py:252-290`)
-
-A two-tier JSON extraction strategy:
-
-1. **Try markdown code fences first**: `re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response, re.DOTALL)`
-2. **Fall back to raw JSON**: `re.search(r"\{.*\}", response, re.DOTALL)`
-3. **If no JSON found**: return reasoning as the raw response text with no actions
-
-After extraction, Pydantic validation acts as a safety net:
-
-```python
-try:
-    validated = LLMResponse.model_validate(result)
-    return validated.model_dump()
-except ValidationError:
-    # Return reasoning but drop all actions
-    return {"reasoning": result.get("reasoning", response_text), "observations": ..., "actions": []}
-```
-
-> **Key Insight**: The two-tier extraction handles Claude's tendency to wrap JSON in markdown code fences. Pydantic validation is a safety net -- if actions are malformed, they're dropped rather than executed. This prevents garbage actions (e.g., negative coordinates, missing keys) from reaching pyautogui.
 
 ### Error Recovery (`claude.py:244-250`)
 
@@ -145,7 +134,8 @@ The game loop, memory system, executor, and detection pipeline are provider-agno
 ## Summary
 
 - Abstract `BaseLLMProvider` with two required methods
-- Claude implementation: AsyncAnthropic, retry logic, two-tier JSON parsing
+- Claude implementation: AsyncAnthropic, retry logic, SDK-native structured output via `messages.parse()`
+- No custom JSON parsing — Pydantic models validated directly by the Anthropic SDK (requires `anthropic>=0.84.0`)
 - Error recovery returns a safe wait action rather than crashing
 - Provider-agnostic game loop enables model switching
 

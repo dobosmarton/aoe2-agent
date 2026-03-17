@@ -46,36 +46,44 @@ The detection system enables an AI agent to identify game entities (units, build
 
 ## Training Results
 
-**Model:** YOLO26n (2.5M parameters, 5.9 GFLOPs)
+### v5 (Latest)
+
+**Model:** YOLO11n (nano)
 
 **Training Configuration:**
-- Dataset: 8,520 images (5,520 real tiles + 3,000 synthetic)
-- Epochs: 150
+- Dataset: 18,520 images (8,000 synthetic train + 7,120 real train + 2,000 synthetic val + 1,400 real val)
+- Epochs: 150 on Lambda Labs A100
 - Image size: 640x640
-- Batch size: 16
+- Batch size: 32
 - Classes: 60 (see `training/config/classes.yaml`)
 
-**Final Metrics (v4):**
+**Final Metrics (v5):**
+
+| Metric | v5 | v4 (previous) |
+|--------|-----|---------------|
+| **mAP50** | **92.2%** | 86.8% |
+| **mAP50-95** | **85.4%** | 72.3% |
+| Precision | **94.8%** | 87.1% |
+| Recall | **89.2%** | 78.5% |
+
+**Key improvements over v4:**
+- 2x larger dataset (18,520 vs 8,520 images)
+- Z-order-aware overlap thresholds in synthetic data (buildings 10%, resources 15%, units 35%)
+- Skip-instead-of-force-place when overlap limit exceeded
+- Better balance of synthetic and real data
+
+**Training Time:** ~1 hour on Lambda Labs A100
+
+### v4 (Previous)
 
 | Metric | Value |
 |--------|-------|
-| **mAP50** | **86.8%** |
-| **mAP50-95** | **72.3%** |
+| mAP50 | 86.8% |
+| mAP50-95 | 72.3% |
 | Precision | 87.1% |
 | Recall | 78.5% |
-| Inference speed | 7.1ms/image |
 
-**Per-Class Performance (Top 10):**
-
-| Class | mAP50 | Class | mAP50 |
-|-------|-------|-------|-------|
-| trade_cart | 97.4% | castle | 96.9% |
-| unique_siege | 97.1% | wonder | 96.8% |
-| knight_line | 95.8% | fishing_ship | 94.4% |
-| unique_archer | 94.6% | camel_line | 95.1% |
-| town_center | 92.9% | battle_elephant | 95.3% |
-
-**Training Time:** ~1 hour on Lambda Labs A100
+Dataset: 8,520 images (5,520 real tiles + 3,000 synthetic)
 
 ---
 
@@ -177,7 +185,7 @@ Synthetic data works well for AoE2 because:
 
 ### Features
 - Z-order layering (resources → buildings → animals → units)
-- Overlap management (max 30% overlap)
+- Z-order-aware overlap thresholds: buildings 10%, resources 15%, units 35% (skip placement when exceeded)
 - Data augmentation (brightness, contrast, saturation, blur)
 - Automatic YOLO-format label generation
 
@@ -409,6 +417,20 @@ entity = find_entity(action["target_id"], detected_entities)
 x, y = entity["center"]
 pyautogui.click(x, y)
 ```
+
+### SAHI for High-Resolution Prelabeling
+
+For prelabeling high-resolution screenshots (e.g., 3024x1964 retina), direct inference even at imgsz=1280 misses many objects because the image is still downscaled ~2.4x. SAHI (Slicing Aided Hyper Inference) solves this:
+
+```bash
+python -m detection.labeling.prelabel --model aoe2_yolo_v5.pt --sahi --conf 0.15
+```
+
+SAHI cuts the image into overlapping 640x640 tiles, runs inference on each, and merges results with NMS. Benchmarked on 3024x1964 retina screenshots:
+- Without SAHI: 475 total detections (0 town centers)
+- With SAHI: 8,108 total detections across 104 images
+
+SAHI is used for **offline prelabeling only** — it takes ~978ms/image, too slow for real-time gameplay. Real-time detection uses `imgsz=1280` directly (~234ms, negligible vs 1-3s LLM call).
 
 ---
 

@@ -122,7 +122,7 @@ def resolve_target_id(target_id: str) -> Optional[tuple[int, int]]:
     return None
 ```
 
-Entity IDs follow the pattern `{class_name}_{counter}` (e.g., `sheep_0`, `villager_1`, `town_center_0`). Counters reset each detection cycle, so IDs are only valid within the current iteration.
+Entity IDs follow the pattern `{class_name}_{counter}` (e.g., `sheep_0`, `villager_1`, `town_center_0`). IDs persist across detection frames via IoU-based matching — if an entity overlaps >40% with a same-class entity from the previous frame, it keeps the same ID. New entities get a globally unique counter that never resets. This means `sheep_0` remains `sheep_0` across turns as long as it's visible, giving the LLM a stable reference.
 
 If resolution fails (entity not found), the action is skipped with a warning log.
 
@@ -130,30 +130,34 @@ If resolution fails (entity not found), the action is skipped with a warning log
 
 Screenshots capture the game window at its screen position. The LLM sees coordinates relative to the screenshot (0,0 = top-left of game window). But pyautogui operates in screen-absolute coordinates.
 
-The executor translates before every action batch (`src/executor.py:184-188`):
+The executor re-fetches the window position **before each individual action** (`src/executor.py:94-98`):
 
 ```python
+# Re-fetch window offset before each action to handle window movement
+global _window_offset
 rect = get_game_window_rect()
 if rect:
     _window_offset = (rect[0], rect[1])
 ```
 
-Then each action applies the offset (`src/executor.py:95-96`):
+Then each action applies the offset:
 
 ```python
 def translate(x: int, y: int) -> tuple[int, int]:
     return (x + _window_offset[0], y + _window_offset[1])
 ```
 
+> **Key change**: The window offset was previously fetched once per action batch. Now it's re-fetched before each individual action to handle cases where the game window moves during a batch (e.g., due to the user or OS repositioning the window).
+
 If the window rect is unavailable, offset defaults to `(0, 0)`, which works for fullscreen games.
 
 ## 3.5 Execution Pipeline
 
-`execute_actions()` at `src/executor.py:172-203`:
+`execute_actions()` at `src/executor.py:178-198`:
 
-1. **Get window position** -- updates `_window_offset` for coordinate translation
-2. **Ensure focus** -- activates game window, retries once if it fails
-3. **Execute sequentially** -- iterates through actions, calling `execute_action()` for each
+1. **Ensure focus** -- activates game window, retries once if it fails
+2. **Execute sequentially** -- iterates through actions, calling `execute_action()` for each
+3. **Per-action window offset** -- each action re-fetches the window position before translating coordinates
 4. **Count successes** -- returns the number of actions that executed without error
 
 Each action type dispatches to pyautogui:

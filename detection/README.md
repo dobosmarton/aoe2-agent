@@ -12,9 +12,11 @@ Screenshot → YOLO Model → Detected Entities (class, bbox, confidence)
 
 **Key Features:**
 - 60 entity classes (units, buildings, resources, animals)
-- Real-time inference (~7ms/image)
-- 86.8% mAP50 accuracy (v4 model, hybrid dataset)
-- Trained on 8,520 images (5,520 real tiles + 3,000 synthetic)
+- Real-time inference at 1280px resolution (~234ms/image, negligible vs LLM latency)
+- 92.2% mAP50 accuracy (v5 model, 18,520-image hybrid dataset)
+- Persistent entity tracking across frames via IoU matching
+- NMS applied to all backends (PyTorch, ONNX, Mock)
+- SAHI sliced inference for high-resolution prelabeling
 
 ## Quick Start
 
@@ -41,8 +43,9 @@ The agent automatically uses detection when available:
 # In game_loop.py, detection is used like this:
 from detection.inference.detector import EntityDetector, get_detector
 
-detector = get_detector()
+detector = get_detector(imgsz=1280)  # Configurable inference resolution
 entities = detector.detect(screenshot_bytes)
+# Entity IDs persist across frames via IoU matching (e.g., sheep_0 stays sheep_0)
 ```
 
 ## Directory Structure
@@ -52,10 +55,12 @@ detection/
 ├── __init__.py                  # Package exports (EntityDetector, get_detector)
 │
 ├── inference/                   # Runtime detection
-│   ├── detector.py              # EntityDetector class
+│   ├── detector.py              # EntityDetector class (NMS, persistent tracking)
+│   ├── ownership.py             # Blue-dominance ownership classifier (own vs enemy)
 │   └── models/
-│       ├── aoe2_yolo_v4.pt      # PyTorch model weights
-│       └── aoe2_yolo_v4.onnx    # ONNX model (optional)
+│       ├── aoe2_yolo_v5.pt      # PyTorch model weights (latest, preferred)
+│       ├── aoe2_yolo_v2.onnx    # ONNX model (fallback)
+│       └── aoe2_yolo26.pt       # v1 model (last resort)
 │
 ├── training/                    # Training pipeline
 │   ├── train_yolo.py            # YOLO training script
@@ -152,17 +157,19 @@ python -m detection.extraction.capture_replay --count 200 --interval 5
 3. Run the capture script
 4. Move camera around during capture for diverse angles
 
-## Model Performance (v4)
+## Model Performance (v5 — latest)
 
-| Metric | Value |
-|--------|-------|
-| mAP50 | 86.8% |
-| mAP50-95 | 72.3% |
-| Precision | 87.1% |
-| Recall | 78.5% |
-| Inference | 7.1ms/image |
+| Metric | v5 | v4 (previous) |
+|--------|-----|---------------|
+| mAP50 | **92.2%** | 86.8% |
+| mAP50-95 | **85.4%** | 72.3% |
+| Precision | **94.8%** | 87.1% |
+| Recall | **89.2%** | 78.5% |
+| Inference (imgsz=1280) | ~234ms | ~7ms (at 640) |
 
-**Top Performing Classes:** trade_cart (97.4%), castle (96.9%), knight_line (95.8%), town_center (92.9%)
+**v5 dataset:** 18,520 images (8,000 synthetic train + 7,120 real train + 2,000 synthetic val + 1,400 real val)
+
+**Inference resolution:** 1280px (up from 640). Benchmarked on 1920x1080 gameplay: imgsz=640 found 12 entities, imgsz=1280 found 55 entities (+4.6x detections, only +160ms). The LLM API call dominates at 1-3s, so detection latency is negligible.
 
 ## Dependencies
 
@@ -176,6 +183,28 @@ Install with:
 ```bash
 pip install ultralytics Pillow numpy
 ```
+
+## Ownership Classification
+
+`detection/inference/ownership.py` classifies detected military units as own (Player 1, blue) or enemy using pixel color analysis.
+
+In AoE2:DE, Player 1 is always blue. The classifier samples two regions per entity:
+1. **Health bar zone** — narrow band above the bounding box (health bars are tinted in player color)
+2. **Unit body zone** — top 30% of the bounding box (livery/clothing color)
+
+A pixel is "blue" if `B > 120 AND B > R * 1.5 AND B > G * 1.5`. If blue pixel ratio exceeds 4%, the unit is classified as own.
+
+```python
+from detection.inference.ownership import classify_entities, Owner
+
+results = classify_entities(screenshot_bytes, entities, threat_classes)
+for entity_id, (owner, blue_ratio) in results.items():
+    print(f"{entity_id}: {owner.value} (blue_ratio={blue_ratio:.3f})")
+    # e.g., "scout_line_0: own (blue_ratio=0.065)"
+    # e.g., "archer_line_0: enemy (blue_ratio=0.000)"
+```
+
+Used by the alarm system (`src/goals.py`) to avoid false alarms from own military units.
 
 ## Integration with Agent
 
@@ -191,11 +220,13 @@ except ImportError:
 
 # During game loop, entities are detected and passed to LLM
 if DETECTION_AVAILABLE:
+    detector = get_detector(imgsz=config.detection_imgsz)  # default 1280
     entities = detector.detect(screenshot_bytes)
+    # Entity IDs persist across frames: sheep_0 stays sheep_0 between turns
     # LLM can reference entities by ID: "right_click on sheep_0"
 ```
 
-The executor resolves entity IDs to screen coordinates automatically.
+The executor resolves entity IDs to screen coordinates automatically. Window offset is re-fetched before each action to handle window movement.
 
 ## License
 

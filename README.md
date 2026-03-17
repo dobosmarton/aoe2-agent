@@ -1,180 +1,165 @@
 # AoE2 LLM Agent
 
-A pure vision-based AI agent that plays Age of Empires 2: Definitive Edition using LLMs.
+An AI agent that plays Age of Empires 2: Definitive Edition using a two-tier LLM architecture: a Sonnet strategist reads screenshots and sets goals, a Haiku executor reads YOLO entity detections and executes actions.
 
-## Overview
+## Architecture
 
-The agent uses a simple loop:
-1. **Capture** - Take a screenshot of the game window
-2. **Think** - Send to LLM with game context, get back actions
-3. **Act** - Execute mouse/keyboard commands
-4. **Remember** - Update memory with observations
-5. **Repeat**
+```
+Screenshot → YOLO Detection → Entity List (text)
+                                    ↓
+Screenshot → Strategist (Sonnet) → Goals + Resource Readings
+                                    ↓
+Entity List + Goals + Resources → Executor (Haiku) → Actions
+                                                       ↓
+                                                 Mouse/Keyboard
+```
 
-The LLM sees the raw screenshot and outputs structured JSON with reasoning, observations, and actions. No OCR, no hardcoded coordinates, no predefined action vocabulary.
+**Two-model design:**
+
+| Role | Model | Input | Output | Frequency |
+|------|-------|-------|--------|-----------|
+| Strategist | `claude-sonnet-4-6` | Screenshot (vision) + game state | Goals + resource readings | Every 10 turns, or on alarm |
+| Executor | `claude-haiku-4-5` | Text only (entities, goals, resources) | Mouse/keyboard actions | Every turn (~1s) |
+
+The executor never sees screenshots. All visual information comes from YOLO entity detection (text list of class/position/confidence) and the strategist's cached resource readings.
+
+## The Game Loop
+
+Each iteration (~3-5 seconds):
+
+1. **Capture** — Screenshot the game window via `mss`
+2. **Detect** — Run YOLO v5 on screenshot → list of entities with IDs, classes, positions
+3. **Classify ownership** — Color-based blue-dominance check on military units (own vs enemy)
+4. **Alarm check** — Scan for enemy military → inject emergency defense goals if found
+5. **Strategist** (periodic) — Sonnet reads screenshot, extracts resources, creates/updates goals
+6. **Build context** — Assemble text: entities + goals + resources + memory + game knowledge
+7. **Execute** — Haiku reads text context, returns structured actions (Pydantic-validated)
+8. **Act** — Execute mouse clicks / keyboard presses via pyautogui
+9. **Verify** — Compare pre/post YOLO detection to assess action effectiveness
+10. **Remember** — Update memory, evaluate goal progress, compute rewards
 
 ## Requirements
 
 - Windows 10/11 with AoE2:DE installed
-- Python 3.11+
+- Python 3.11+ (x64, not ARM64)
 - Anthropic API key
 
 ## Installation
 
 ```bash
-# Create virtual environment
 python -m venv venv
-venv\Scripts\activate  # Windows
-
-# Install dependencies
+venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
 ## Configuration
 
-Set your Anthropic API key:
-
 ```bash
 set ANTHROPIC_API_KEY=your-key-here
 ```
 
-Optional environment variables:
-- `AOE2_MODEL` - Claude model to use (default: claude-sonnet-4-5-20250929)
-- `AOE2_LOOP_DELAY` - Seconds between decisions (default: 2.0)
-- `AOE2_SAVE_SCREENSHOTS` - Save screenshots to logs/ (default: true)
+| Env Var | Default | Purpose |
+|---------|---------|---------|
+| `ANTHROPIC_API_KEY` | — | Claude API authentication (required) |
+| `AOE2_MODEL` | `claude-haiku-4-5` | Executor model |
+| `AOE2_STRATEGIST_MODEL` | `claude-sonnet-4-6` | Strategist model |
+| `AOE2_STRATEGIST_INTERVAL` | `10` | Run strategist every N turns |
+| `AOE2_LOOP_DELAY` | `1.0` | Seconds between iterations |
+| `AOE2_SAVE_SCREENSHOTS` | `true` | Save screenshots to logs/ |
 
 ## Usage
 
-### Run the Agent
-
 ```bash
-# Start the agent (runs until Ctrl+C)
+# Run the agent
 python -m src.main
 
-# Run specific number of iterations
-python -m src.main --iterations 10
+# Run N iterations
+python -m src.main --iterations 20
 
-# Test mode - single iteration, no action execution
+# Single test iteration (no action execution)
 python -m src.main --test
 
-# Specify provider (currently only claude available)
-python -m src.main --provider claude
-```
-
-### Test Screen Capture
-
-```python
-from src.screen import capture_screenshot, save_screenshot
-
-# Capture returns (bytes, width, height)
-screenshot_bytes, width, height = capture_screenshot()
-save_screenshot(screenshot_bytes, "test.jpg")
+# Autoresearch: timed experiment with metrics
+python -m autoresearch.game_runner --time-budget 600 --description "test run"
 ```
 
 ## Project Structure
 
 ```
 agent/
-├── src/                        # Core agent implementation
-│   ├── main.py                 # Entry point, CLI argument parsing
-│   ├── game_loop.py            # Main capture→think→act loop
-│   ├── screen.py               # Screenshot capture (targets game window)
-│   ├── executor.py             # Mouse/keyboard action execution
-│   ├── config.py               # Settings via Pydantic
-│   ├── window.py               # AoE2 window detection and focus
-│   ├── memory.py               # Agent memory and game state tracking
-│   ├── models.py               # Pydantic models for action validation
+├── src/                           # Core agent
+│   ├── main.py                    # CLI entry point
+│   ├── config.py                  # Pydantic config with env var overrides
+│   ├── game_loop.py               # Main capture→detect→think→act loop
+│   ├── executor.py                # Mouse/keyboard action execution
+│   ├── models.py                  # Pydantic models (actions, LLMResponse)
+│   ├── memory.py                  # Working memory and game state tracking
+│   ├── goals.py                   # Goal management, alarm system, rewards
+│   ├── goal_logger.py             # Goal progress logging
+│   ├── screen.py                  # Screenshot capture via mss
+│   ├── window.py                  # AoE2 window detection and focus
 │   └── providers/
-│       ├── base.py             # Provider interface (BaseLLMProvider)
-│       └── claude.py           # Anthropic Claude implementation
-├── detection/                  # YOLO entity detection system
-│   ├── inference/              # Runtime detection (detector.py, models/)
-│   ├── training/               # Training pipeline & config
-│   ├── extraction/             # Sprite & screenshot extraction
-│   ├── testing/                # Validation scripts
-│   └── docs/                   # Detection documentation
-├── data/                       # Game knowledge database
-│   ├── game_knowledge.py       # Structured AoE2 game rules
-│   └── aoe2.db                 # SQLite database
+│       ├── base.py                # Abstract LLM provider interface
+│       ├── claude.py              # Haiku executor (text-only)
+│       └── strategist.py          # Sonnet strategist (vision + goals)
+├── detection/                     # YOLO entity detection
+│   ├── inference/
+│   │   ├── detector.py            # EntityDetector, 60 classes, tracking
+│   │   ├── ownership.py           # Blue-dominance ownership classifier
+│   │   └── models/                # YOLO model weights (.pt)
+│   ├── training/                  # Synthetic data gen + YOLO training
+│   ├── extraction/                # SLD sprite extraction
+│   ├── labeling/                  # CVAT/COCO labeling tools
+│   └── docs/                      # Detection documentation
+├── data/                          # Game knowledge database
+│   ├── game_knowledge.py          # SQLite wrapper for dynamic context
+│   └── knowledge_base/            # Static game data
 ├── prompts/
-│   └── system.md               # System prompt with game knowledge
-├── logs/                       # Screenshots saved here
+│   ├── system.md                  # Executor system prompt
+│   └── strategist.md              # Strategist system prompt
+├── autoresearch/                  # Automated experiment framework
+│   ├── game_runner.py             # Run timed experiments with metrics
+│   ├── orchestrator.py            # Prompt mutation + experiment loop
+│   ├── metrics.py                 # Scoring and analysis
+│   ├── experiment_log.py          # Experiment result storage
+│   └── memory_chain.py            # Cross-game learning
+├── logs/                          # Screenshots and goal logs
 └── requirements.txt
 ```
 
-See [detection/README.md](detection/README.md) for details on the entity detection system.
+## Key Systems
 
-## Architecture
+### Goal Management (`src/goals.py`)
 
-### Entity Detection (Optional)
+The strategist creates prioritized goals (e.g., "Reach 10 population", "Advance to Feudal Age"). The executor receives these as context and follows them in priority order. Goals have:
+- **Type**: local (complete quickly) or global (long-term)
+- **Metric**: population, food, wood, gold, stone, age
+- **Priority**: 1-10 (10 = most urgent)
+- **Progress**: 0.0-1.0, auto-computed from game state
 
-When available, YOLO-based detection provides structured game understanding:
+### Alarm System (`src/goals.py`)
 
-```python
-from detection import get_detector
+Scans YOLO detections for 21 enemy military classes. Uses color-based ownership detection (`detection/inference/ownership.py`) to distinguish own units (blue, Player 1) from enemy units. On enemy detection:
+- Injects priority-10 "Defend base" goal
+- Triggers early strategist wake-up
 
-detector = get_detector()
-entities = detector.detect(screenshot_bytes)
-# Returns: [{"id": "sheep_0", "class": "sheep", "center": (x, y), "confidence": 0.95}, ...]
-```
+### Entity Detection (`detection/`)
 
-The LLM can reference entities by ID instead of pixel coordinates:
-```json
-{"type": "right_click", "target_id": "sheep_0"}
-```
+60-class YOLO v5 model with 92.2% mAP50 accuracy. Entities persist across frames via IoU tracking (e.g., `sheep_0` stays `sheep_0`). The executor can target entities by class (`target_class: "sheep"`) or by ID (`target_id: "sheep_0"`).
 
-The executor automatically resolves IDs to screen coordinates.
+### Action Verification (`src/game_loop.py`)
 
-### Memory System
+After executing actions, compares pre/post YOLO detections to assess effectiveness. Results are fed back to the executor as context for the next turn.
 
-The agent maintains memory across turns:
-- **Working Memory** - Last 10 turns with reasoning and actions
-- **Game State** - Tracked resources, population, age, alerts
-- **Context Building** - Memory is summarized and sent to LLM each turn
+### Autoresearch (`autoresearch/`)
 
-### Action Validation
+Automated experiment framework. Runs timed games, collects metrics (peak population, food gathered, survival time, action success rate), and scores performance for prompt optimization.
 
-Actions are validated using Pydantic models before execution:
-- `click` - Left click at (x, y)
-- `right_click` - Right click at (x, y)
-- `press` - Keyboard key press
-- `drag` - Mouse drag from (x1, y1) to (x2, y2)
-- `wait` - Delay in milliseconds
+## Documentation
 
-Coordinates are automatically translated from screenshot-relative to screen-absolute based on window position.
+See [docs/index.md](docs/index.md) for detailed architecture documentation.
 
-### Window Management
-
-The agent automatically:
-- Finds the AoE2 window by title
-- Captures only the game window (not full screen)
-- Ensures the game is focused before executing actions
-- Falls back gracefully if window detection fails
-
-## Adding New Providers
-
-Create a new file in `src/providers/` implementing `BaseLLMProvider`:
-
-```python
-from .base import BaseLLMProvider
-
-class MyProvider(BaseLLMProvider):
-    async def get_actions(
-        self,
-        screenshot_bytes: bytes,
-        context: str = "",
-        width: int = 1920,
-        height: int = 1080,
-    ) -> dict:
-        # Send screenshot to your LLM
-        # Return {"reasoning": "...", "observations": {...}, "actions": [...]}
-        pass
-
-    def get_system_prompt(self) -> str:
-        return "..."
-```
-
-Then register it in `src/main.py` in the `create_provider()` function.
+See [detection/README.md](detection/README.md) for the entity detection system.
 
 ## License
 
