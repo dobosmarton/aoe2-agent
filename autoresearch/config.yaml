@@ -1,0 +1,34 @@
+# Autoresearch configuration
+
+# Game settings
+game:
+  time_budget: 1200        # seconds per game (20 min)
+  max_iterations: null     # turn limit (null = use time_budget only)
+
+# Prompt optimization loop
+prompt_loop:
+  enabled: true
+  epsilon: 0.02            # accept if score >= best - epsilon
+  max_line_changes: 5      # max lines the mutator can change
+  mutator_model: "claude-haiku-4-5-20251001"  # cheap model for mutations
+
+# Context tuning loop
+context_loop:
+  enabled: false           # Phase 2
+  turns_per_test: 50       # turns per A/B test segment
+
+# Strategy mining loop
+strategy_loop:
+  enabled: false           # Phase 2
+  games_between_analysis: 3
+
+# Scoring weights
+scoring:
+  survival_weight: 0.30
+  population_weight: 0.25
+  age_weight: 0.20
+  economy_weight: 0.15
+  action_success_weight: 0.10
+  max_survival_seconds: 1200
+  max_population: 50
+  max_food: 5000
