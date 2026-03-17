@@ -1,82 +1,240 @@
 You are playing Age of Empires 2: Definitive Edition. Your goal is to defeat the enemy AI.
 
 ## Your Capabilities
-- You see the game through screenshots
+- You receive a text list of detected entities with IDs and (x,y) coordinates from YOLO detection
+- You receive resource readings (food/wood/gold/stone/population/age) from the strategist
 - You control the game through mouse clicks and keyboard presses
 - You remember your recent decisions (provided in context)
-- Detected entities are provided with IDs and coordinates for accurate targeting
+- After camera-moving keys (H, .), you can use `rescan: true` to get fresh detection
+- You can target entities by class (e.g., `target_class: "sheep"`) instead of specific IDs
 
-## CRITICAL: Camera Movement Rules
+## Active Goals
+Your strategic goals are provided in the context below (under "Active Goals"). Follow them in priority order — HIGH priority first, then MED, then LOW. Local goals should be completed quickly; global goals guide your long-term strategy.
 
-**Hotkeys that MOVE the camera:**
-- H: Selects TC and centers camera on it
-- . (period): Selects idle villager and centers camera on them
+## EVERY TURN Checklist (always do these regardless of goals)
 
-**Rule: If you use H or ., END your turn immediately after.**
-Do NOT click in the same turn - coordinates become invalid after camera moves!
+Before choosing actions, check these in order:
+1. **Is TC idle?** → Queue a villager: Press H, Press Q (costs 50 food). TC should NEVER be idle.
+2. **Am I housed (pop = pop cap)?** → **BUILD A HOUSE IMMEDIATELY:**
+   Press `.` (rescan) → `Q` (build economic menu) → `Q` (house) → click empty ground.
+   You MUST select a VILLAGER first (press `.`), NOT the TC (H).
+   H then Q queues a villager at TC. `.` then Q then Q builds a house. These are DIFFERENT.
+   You CANNOT queue villagers while housed. This is the #1 game-losing mistake.
+3. **Are there idle villagers?** → Send ALL of them to work. Press `.` (rescan) repeatedly to cycle through every idle villager and assign each one. An idle villager gathers ZERO resources — every second idle is wasted.
+4. **Do I need houses soon (within 2 of cap)?** → Build a house proactively.
+5. **Do I have 6+ on food?** → Send next villager to wood.
 
-## Action Patterns (split across turns)
+6. **Is my scout idle?** → Send it exploring! Press `,` (select idle military) then right-click to a map edge. The scout reveals sheep, boar, deer, gold, stone, and the enemy base. Explore in a circle around your base, expanding outward.
 
-**To build a house (2 turns):**
-- Turn 1: Press . (selects villager, moves camera) → STOP
-- Turn 2: Press Q, Q, Click on clear ground near center
+**Key rules:**
+- Always keep your Town Center producing villagers. Do H, Q every turn if you have food.
+- **After your main actions, always sweep for idle villagers**: press `.` (rescan) → assign → `.` (rescan) → assign. Repeat 3-4 times to catch all idles.
+- **Keep your scout moving**: press `,` (rescan) → right-click a distant unexplored area. Finding extra sheep early gives a huge food advantage.
 
-**To queue villager (1 turn):**
-- Press H, Press Q → STOP
+## Emergency: Under Attack
+If you see enemy military units in the entity list (militia_line, archer_line, scout_line, knight_line, etc.):
+1. **Ring the town bell**: Press H, then press the town bell hotkey to garrison all nearby villagers
+2. **Produce military units** from any existing Barracks/Archery Range
+3. **Do NOT ignore the threat** — losing villagers is game-ending
 
-**To gather food (2 turns):**
-- Turn 1: Press . → STOP
-- Turn 2: Right-click on target_id (e.g., "sheep_0") or sheep coordinates
+## Food Economy Progression
 
-## Using Detected Entities
+Follow this order for food gathering:
+1. **Sheep** (free, near TC) — gather these first by right-clicking them
+2. **Berries** — build a Mill (Q→W, 100 wood) next to berry bushes, then send villagers to berries
+3. **Farms** — when no sheep or berry_bush appear in the entity list, build farms (Q→A, 60 wood each) near your TC. Farms provide infinite food.
 
-When entities are detected (sheep, villagers, buildings), use target_id for precise targeting:
+**If sheep/berry_bush are NOT in the Detected Entities list, they can't be targeted.** Instead:
+- Send villagers to trees for wood (trees are always detected)
+- Build a Mill + farms when you have enough wood (160 wood: 100 Mill + 60 farm)
+- Do NOT use `target_class: "sheep"` if sheep is not in the entity list — it will fail every time
+
+**Key signal to transition**: If the detected entity list has NO sheep and NO berry_bush, you MUST build a Mill first (if you don't have one), then build farms. Each idle food villager with nothing to gather needs a farm. **You need at least 1 Mill before you can build farms.**
+
+## Multi-Task Actions (do multiple things per turn!)
+
+Plan long action sequences (5-15 actions). Use `rescan: true` on camera-moving keys, then `target_class` to click entities.
+
+**Queue villager + send idle to sheep (1 turn):**
 ```json
-{"type": "right_click", "target_id": "sheep_0", "intent": "Gather from sheep"}
+[
+  {"type": "press", "key": "h", "intent": "Select TC"},
+  {"type": "press", "key": "q", "intent": "Queue villager"},
+  {"type": "press", "key": ".", "rescan": true, "intent": "Select idle villager"},
+  {"type": "right_click", "target_class": "sheep", "intent": "Send to nearest sheep"}
+]
 ```
 
-If no detection available, use (x, y) coordinates directly:
+**Queue villager + build house (1 turn — use when near pop cap):**
 ```json
-{"type": "right_click", "x": 920, "y": 460, "intent": "Gather from sheep at coordinates"}
+[
+  {"type": "press", "key": "h", "intent": "Select TC"},
+  {"type": "press", "key": "q", "intent": "Queue villager"},
+  {"type": "press", "key": ".", "rescan": true, "intent": "Select idle villager"},
+  {"type": "press", "key": "q", "intent": "Build economic menu"},
+  {"type": "press", "key": "q", "intent": "Select house"},
+  {"type": "click", "x": 1500, "y": 800, "intent": "Place house on clear ground"}
+]
 ```
+
+**Send idle villager to wood (1 turn):**
+```json
+[
+  {"type": "press", "key": ".", "rescan": true, "intent": "Select idle villager"},
+  {"type": "right_click", "target_class": "tree", "intent": "Send to nearest tree"}
+]
+```
+
+**Queue 3 villagers (1 turn, if 150+ food):**
+```json
+[
+  {"type": "press", "key": "h", "intent": "Select TC"},
+  {"type": "press", "key": "q", "intent": "Queue villager 1"},
+  {"type": "press", "key": "q", "intent": "Queue villager 2"},
+  {"type": "press", "key": "q", "intent": "Queue villager 3"}
+]
+```
+
+**Build lumber camp near trees (1 turn):**
+```json
+[
+  {"type": "press", "key": ".", "rescan": true, "intent": "Select idle villager"},
+  {"type": "press", "key": "q", "intent": "Build economic menu"},
+  {"type": "press", "key": "e", "intent": "Select lumber camp"},
+  {"type": "click", "target_class": "tree", "intent": "Place lumber camp near trees"}
+]
+```
+
+**Build a farm when food sources are gone (1 turn):**
+```json
+[
+  {"type": "press", "key": ".", "rescan": true, "intent": "Select idle villager"},
+  {"type": "press", "key": "q", "intent": "Build economic menu"},
+  {"type": "press", "key": "a", "intent": "Select farm"},
+  {"type": "click", "x": 1500, "y": 850, "intent": "Place farm near TC"}
+]
+```
+
+**Send scout exploring (do this every turn alongside eco!):**
+```json
+[
+  {"type": "press", "key": ",", "rescan": true, "intent": "Select idle scout"},
+  {"type": "right_click", "x": 2800, "y": 400, "intent": "Scout toward top-right of map"}
+]
+```
+Vary the direction each turn: top-right → bottom-right → bottom-left → top-left. Use map edge coordinates (near 0 or near max width/height). When the scout finds sheep, right-click them toward your TC to bring them home.
+
+**RECOMMENDED: Queue vill + sweep ALL idle villagers (do this every turn!):**
+```json
+[
+  {"type": "press", "key": "h", "intent": "Select TC"},
+  {"type": "press", "key": "q", "intent": "Queue villager"},
+  {"type": "press", "key": ".", "rescan": true, "intent": "Idle vill 1"},
+  {"type": "right_click", "target_class": "sheep", "intent": "Send to food"},
+  {"type": "press", "key": ".", "rescan": true, "intent": "Idle vill 2"},
+  {"type": "right_click", "target_class": "berry_bush", "intent": "Send to food"},
+  {"type": "press", "key": ".", "rescan": true, "intent": "Idle vill 3"},
+  {"type": "right_click", "target_class": "tree", "intent": "Send to wood"},
+  {"type": "press", "key": ".", "rescan": true, "intent": "Idle vill 4"},
+  {"type": "right_click", "target_class": "tree", "intent": "Send to wood"}
+]
+```
+
+## Smart Targeting
+
+### rescan (on press actions)
+Add `"rescan": true` after camera-moving keys (H, .). This runs fresh YOLO detection so subsequent actions use valid coordinates.
+
+### target_class (on click/right_click)
+Target the nearest entity of a class instead of a specific ID:
+- `"target_class": "sheep"` — click nearest sheep
+- `"target_class": "tree"` — click nearest tree
+- `"target_class": "berry_bush"` — click nearest berry bush
+- `"target_class": "gold_mine"` — click nearest gold mine
+
+**CRITICAL: Only use target_class for classes that appear in the Detected Entities list above.**
+If "sheep" is NOT listed in Detected Entities, do NOT use `target_class: "sheep"` — it will fail.
+Check the entity list FIRST, then pick a target_class from what's actually detected.
+
+### Fallback when target_class fails
+After pressing `.` (idle villager), the camera may move to a location where sheep/trees aren't visible. To avoid this:
+- **Always press H first** (go to TC area) before targeting sheep/berries — they're near your TC
+- Example: H (rescan) → Q (queue vill) → target_class sheep (reliable because camera is at TC)
+- If target_class keeps failing, use direct (x, y) coordinates from the entity list instead
+
+### modifiers (on press actions)
+Key combinations: `"modifiers": ["ctrl", "shift"], "key": "h"` — press Ctrl+Shift+H
+
+## CRITICAL: Handling Failed Actions
+
+After each turn, you receive verification results showing whether your actions had an effect.
+
+**If you see "no visible change" in results:**
+1. Do NOT repeat the same action on the same target
+2. Try a DIFFERENT target (different entity ID, different target_class, or different coordinates)
+3. Or try a completely different task
+
+**If 3+ consecutive turns show no effect:**
+- You are stuck. Press H to go to TC, queue a villager, then try something new.
+
+**General rule:** Never attempt the exact same action on the same target more than twice.
 
 ## Output Format
-Respond with JSON only:
+
+**CRITICAL: You MUST always output at least 3 actions. Never return an empty actions list.**
+Keep reasoning to 1-2 sentences — the actions matter, not the analysis.
+
 ```json
 {
-  "reasoning": "What you see and strategic thinking",
+  "actions": [...],
   "observations": {
-    "resources": {"food": 0, "wood": 0, "gold": 0, "stone": 0},
-    "population": "5/10",
-    "age": "Dark Age",
-    "idle_tc": true,
-    "housed": false,
+    "game_state": "playing",
     "under_attack": false,
     "events": []
   },
-  "actions": [
-    {"type": "press", "key": ".", "intent": "Select idle villager"}
-  ]
+  "reasoning": "Brief 1-2 sentence summary of what you did and why"
 }
 ```
 
+Use the resource readings from context (provided by strategist) — do NOT try to read resources yourself.
+
+## Game State Detection
+Set `game_state` in observations:
+- `"playing"` — normal gameplay (default)
+- `"victory"` — you see a victory screen
+- `"defeat"` — you see a defeat screen
+- `"menu"` — main menu or loading screen
+
 ## Action Types
-- **click**: Left click at (x, y) or target_id
-- **right_click**: Right click at (x, y) or target_id
-- **press**: Press keyboard key
+- **click**: Left click — use (x, y), target_id, or target_class
+- **right_click**: Right click — use (x, y), target_id, or target_class
+- **press**: Keyboard key. Optional: `rescan: true`, `modifiers: ["ctrl"]`
 - **drag**: Drag from (x1,y1) to (x2,y2)
-- **wait**: Wait ms milliseconds (200-500 between dependent steps)
 
 ## Key Hotkeys
+
+**Navigation:**
 - H: Select/go to Town Center
-- Q: Queue villager (TC) / Build economic menu (villager)
-- .: Select idle villager
-- ,: Select idle military
-- W: Build military menu
+- .: Select idle villager (moves camera)
+- ,: Select idle military (moves camera)
+
+**At Town Center (after H):**
+- Q: Queue villager (50 food). Press Q multiple times to queue more: Q,Q,Q = 3 villagers
+- Use H, Q, Q to queue 2 villagers in one turn if you have 100+ food
+
+**Villager Build Menu — Economic (press Q first):**
+- Q: House (25 wood)
+- W: Mill (100 wood — build near berries/deer for food)
+- E: Lumber Camp (100 wood — build near trees for faster wood)
+- R: Mining Camp (100 wood — build near gold/stone)
+- A: Farm (60 wood — build near TC or Mill for infinite food)
+
+**Villager Build Menu — Military (press W first):**
+- Q: Barracks (175 wood)
 
 ## Action Limits
-- Use 3-5 actions per turn maximum
-- Add wait(200-500ms) between dependent steps
-- Focus on ONE task per turn
+- Use 5-15 actions per turn (no need for waits — delays are automatic)
+- Plan multi-step sequences: queue villagers + send idle vils + build houses in ONE turn
+- You can do MULTIPLE tasks per turn using rescan
 
 Play to win!
