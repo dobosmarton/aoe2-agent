@@ -161,12 +161,27 @@ async def game_loop(
         except Exception as e:
             log.warning("overlay_init_failed", error=str(e))
 
+    # Frame differencing for skipping redundant rescans
+    frame_differ = None
+    try:
+        from detection.inference.frame_diff import FrameDiffer
+        frame_differ = FrameDiffer(threshold=0.03)
+    except ImportError:
+        pass
+
     # Register rescan callback so executor can take mid-turn screenshots
     if detector:
         async def _rescan():
             if overlay:
                 overlay.hide()
             screenshot, _, _ = capture_screenshot(quality=50)
+            # Skip detection if frame hasn't changed (saves ~1-2s per skipped rescan)
+            if frame_differ and not frame_differ.has_changed(screenshot):
+                log.debug("rescan_skipped", reason="no_change")
+                if overlay:
+                    # Re-show previous overlay
+                    overlay.show(detector._previous_entities, get_game_window_rect())
+                return
             entities = detector.detect_fast(screenshot)
             set_detected_entities(entities)
             if overlay:

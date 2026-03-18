@@ -20,6 +20,8 @@ detection/**/training_data*/
 detection/real_screenshots/
 detection/labeling/output/
 
-# Model weights
+# Model weights (except deployed models)
 **/models/*.pt
 **/models/*.onnx
+!detection/inference/models/aoe2_yolo_v5.pt
+!detection/inference/models/aoe2_yolo_v5.onnx

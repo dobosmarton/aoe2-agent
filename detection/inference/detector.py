@@ -168,16 +168,22 @@ class EntityDetector:
             self.use_mock = True
 
     def _load_onnx(self, model_path: str):
-        """Load ONNX model using onnxruntime."""
+        """Load ONNX model using onnxruntime with optimized session options."""
         try:
             import onnxruntime as ort
+            sess_options = ort.SessionOptions()
+            sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+            sess_options.intra_op_num_threads = 4
+            # Auto-detect best available provider
+            available = ort.get_available_providers()
+            providers = [p for p in ['DmlExecutionProvider', 'CPUExecutionProvider']
+                         if p in available]
             self.onnx_session = ort.InferenceSession(
-                model_path,
-                providers=['CPUExecutionProvider']
+                model_path, sess_options, providers=providers
             )
             self.backend = 'onnx'
             self.use_mock = False
-            print(f"Loaded ONNX model: {model_path}")
+            print(f"Loaded ONNX model: {model_path} (providers={providers})")
         except ImportError:
             print("WARNING: onnxruntime not installed. Using mock detection.")
             self.use_mock = True
@@ -252,6 +258,17 @@ class EntityDetector:
 
         if self.use_mock:
             entities = self._mock_detect(screenshot)
+        elif self.backend == 'onnx' and self.use_sahi:
+            # ONNX + SAHI: batch all tiles in one inference call
+            from PIL import Image as PILImage
+            if isinstance(screenshot, bytes):
+                image = PILImage.open(io.BytesIO(screenshot))
+            else:
+                image = screenshot
+            if image.size[0] > 640:
+                entities = self._onnx_sahi_detect(image)
+            else:
+                entities = self._onnx_detect(screenshot)
         elif self.backend == 'onnx':
             entities = self._onnx_detect(screenshot)
         else:
@@ -264,7 +281,9 @@ class EntityDetector:
         entities = self._assign_persistent_ids(entities)
 
         elapsed = time.monotonic() - t0
-        logger.info("detect_full elapsed=%.2fs entities=%d", elapsed, len(entities))
+        logger.info("detect_full elapsed=%.2fs entities=%d mode=%s",
+                     elapsed, len(entities),
+                     "onnx_sahi" if self.backend == 'onnx' and self.use_sahi else self.backend)
 
         return entities
 
@@ -381,6 +400,135 @@ class EntityDetector:
         # Sort by class name, then by confidence (highest first)
         all_entities.sort(key=lambda e: (e.class_name, -e.confidence))
         return all_entities
+
+    def _onnx_sahi_detect(self, image: "Image.Image") -> list[DetectedEntity]:
+        """ONNX batched SAHI: tile the image, batch all tiles, run one ONNX call.
+
+        Same tiling logic as _sahi_detect() but batches all tiles into a single
+        ONNX Runtime inference call for ~3-5x speedup over sequential PyTorch.
+        """
+        width, height = image.size
+        tile_size = 640
+        overlap = 64
+        stride = tile_size - overlap
+
+        # 1. Collect all tiles and their offsets
+        tiles = []
+        offsets = []
+        for y_start in range(0, height, stride):
+            for x_start in range(0, width, stride):
+                x_end = min(x_start + tile_size, width)
+                y_end = min(y_start + tile_size, height)
+                tile = image.crop((x_start, y_start, x_end, y_end))
+                # Pad tile to tile_size x tile_size if it's at the edge
+                if tile.size != (tile_size, tile_size):
+                    from PIL import Image as PILImage
+                    padded = PILImage.new("RGB", (tile_size, tile_size), (0, 0, 0))
+                    padded.paste(tile, (0, 0))
+                    tile = padded
+                tiles.append(tile)
+                offsets.append((x_start, y_start, x_end - x_start, y_end - y_start))
+
+        if not tiles:
+            return []
+
+        # 2. Pre-process all tiles into a single batch
+        batch = np.stack([
+            np.transpose(np.array(t).astype(np.float32) / 255.0, (2, 0, 1))
+            for t in tiles
+        ], axis=0)  # (N, 3, 640, 640)
+
+        # 3. Single ONNX inference call
+        input_name = self.onnx_session.get_inputs()[0].name
+        outputs = self.onnx_session.run(None, {input_name: batch})
+        raw_output = outputs[0]
+
+        logger.debug("ONNX SAHI batch shape: %s, tiles: %d", raw_output.shape, len(tiles))
+
+        # 4. Parse results per tile and offset coordinates
+        all_entities = []
+        num_classes = len(self.class_names)
+
+        for tile_idx in range(len(tiles)):
+            x_start, y_start, tile_w, tile_h = offsets[tile_idx]
+            tile_entities = self._parse_onnx_tile(
+                raw_output, tile_idx, num_classes,
+                scale_x=1.0, scale_y=1.0,  # Tiles are already at native 640x640
+                x_offset=x_start, y_offset=y_start,
+                clip_w=tile_w, clip_h=tile_h,
+            )
+            all_entities.extend(tile_entities)
+
+        all_entities.sort(key=lambda e: (e.class_name, -e.confidence))
+        return all_entities
+
+    def _parse_onnx_tile(
+        self, raw_output: np.ndarray, tile_idx: int, num_classes: int,
+        scale_x: float, scale_y: float,
+        x_offset: float = 0, y_offset: float = 0,
+        clip_w: float = 640, clip_h: float = 640,
+    ) -> list[DetectedEntity]:
+        """Parse ONNX output for a single tile from a batched result.
+
+        Handles both output formats:
+        - Post-NMS: (batch, num_detections, 6) → [x1, y1, x2, y2, conf, cls]
+        - Raw: (batch, 4+num_classes, num_boxes) → needs argmax + threshold
+        """
+        entities = []
+
+        if len(raw_output.shape) == 3 and raw_output.shape[2] == 6:
+            # Post-NMS format: (batch, num_detections, 6)
+            predictions = raw_output[tile_idx]
+        elif len(raw_output.shape) == 3 and raw_output.shape[1] == (4 + num_classes):
+            # Raw format: (batch, 4+num_classes, num_boxes)
+            preds_raw = raw_output[tile_idx].T  # (num_boxes, 4+num_classes)
+            boxes = preds_raw[:, :4]
+            class_scores = preds_raw[:, 4:]
+            best_cls = np.argmax(class_scores, axis=1)
+            best_conf = np.max(class_scores, axis=1)
+            mask = best_conf >= self.confidence_threshold
+            boxes, best_cls, best_conf = boxes[mask], best_cls[mask], best_conf[mask]
+            predictions = []
+            for box, cls_id, conf in zip(boxes, best_cls, best_conf):
+                xc, yc, w, h = box
+                predictions.append([xc - w/2, yc - h/2, xc + w/2, yc + h/2, conf, cls_id])
+            predictions = np.array(predictions) if predictions else np.array([]).reshape(0, 6)
+        else:
+            return []
+
+        for pred in predictions:
+            x1, y1, x2, y2, confidence, class_id = pred
+            if confidence < self.confidence_threshold:
+                continue
+
+            # Scale and offset to original image space
+            abs_x1 = x1 * scale_x + x_offset
+            abs_y1 = y1 * scale_y + y_offset
+            abs_x2 = x2 * scale_x + x_offset
+            abs_y2 = y2 * scale_y + y_offset
+
+            # Clip to tile's actual region (handles edge padding)
+            abs_x2 = min(abs_x2, x_offset + clip_w)
+            abs_y2 = min(abs_y2, y_offset + clip_h)
+
+            if abs_x2 <= abs_x1 or abs_y2 <= abs_y1:
+                continue
+
+            class_idx = int(class_id)
+            class_name = (self.class_names[class_idx]
+                          if class_idx < len(self.class_names)
+                          else f"unknown_{class_idx}")
+
+            entities.append(DetectedEntity(
+                id=self._generate_id(class_name),
+                class_name=class_name,
+                bbox=(float(abs_x1), float(abs_y1), float(abs_x2), float(abs_y2)),
+                center=((abs_x1 + abs_x2) / 2, (abs_y1 + abs_y2) / 2),
+                confidence=float(confidence),
+                area=float((abs_x2 - abs_x1) * (abs_y2 - abs_y1)),
+            ))
+
+        return entities
 
     def _parse_yolo_results(self, results) -> list[DetectedEntity]:
         """Parse ultralytics YOLO results into DetectedEntity list."""
@@ -758,9 +906,10 @@ def get_detector(
 
     Model priority (from highest to lowest):
     1. Explicitly provided model_path
-    2. v5 model (aoe2_yolo_v5.pt) - latest, trained on synthetic + real data
-    3. v2 model (aoe2_yolo_v2.onnx/pt) - hybrid trained
-    4. v1 model (aoe2_yolo26.onnx/pt) - synthetic only, fallback
+    2. v5 ONNX (aoe2_yolo_v5.onnx) - latest, batched SAHI support
+    3. v5 PT (aoe2_yolo_v5.pt) - latest, PyTorch SAHI
+    4. v2 model (aoe2_yolo_v2.onnx/pt) - hybrid trained
+    5. v1 model (aoe2_yolo26.onnx/pt) - synthetic only, fallback
     """
     global _instance
     if _instance is None:
@@ -768,6 +917,7 @@ def get_detector(
             models_dir = Path(__file__).parent / "models"
 
             # v5 model (latest - preferred)
+            v5_onnx_path = models_dir / "aoe2_yolo_v5.onnx"
             v5_pt_path = models_dir / "aoe2_yolo_v5.pt"
 
             # v2 model (hybrid training - fallback)
@@ -778,8 +928,10 @@ def get_detector(
             v1_onnx_path = models_dir / "aoe2_yolo26.onnx"
             v1_pt_path = models_dir / "aoe2_yolo26.pt"
 
-            # Priority: v5 PT > v2 ONNX > v2 PT > v1 ONNX > v1 PT
-            if v5_pt_path.exists():
+            # Priority: v5 ONNX > v5 PT > v2 ONNX > v2 PT > v1 ONNX > v1 PT
+            if v5_onnx_path.exists():
+                model_path = str(v5_onnx_path)
+            elif v5_pt_path.exists():
                 model_path = str(v5_pt_path)
             elif v2_onnx_path.exists():
                 model_path = str(v2_onnx_path)
