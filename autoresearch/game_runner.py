@@ -32,6 +32,7 @@ async def run_game(
     use_detection: bool = True,
     game_id: str | None = None,
     extract_memories: bool = True,
+    use_overlay: bool = False,
 ) -> dict:
     """Run a single game and return metrics.
 
@@ -61,6 +62,7 @@ async def run_game(
         memory=memory,
         use_detection=use_detection,
         time_budget=time_budget,
+        use_overlay=use_overlay,
     )
 
     metrics = memory.get_metrics_snapshot()
@@ -107,6 +109,7 @@ async def run_and_log(
     description: str = "manual game run",
     time_budget: float | None = None,
     max_iterations: int | None = None,
+    use_overlay: bool = False,
 ) -> dict:
     """Run a game and log results to the experiment ledger.
 
@@ -126,6 +129,7 @@ async def run_and_log(
     result = await run_game(
         time_budget=time_budget,
         max_iterations=max_iterations,
+        use_overlay=use_overlay,
     )
 
     # Log to experiment ledger (manual runs are always "accepted")
@@ -167,6 +171,11 @@ def main():
         default="manual game run",
         help="Description of this experiment",
     )
+    parser.add_argument(
+        "--overlay",
+        action="store_true",
+        help="Show live YOLO detection overlay on game window",
+    )
     args = parser.parse_args()
 
     result = asyncio.run(
@@ -175,6 +184,7 @@ def main():
             description=args.description,
             time_budget=args.time_budget,
             max_iterations=args.max_iterations,
+            use_overlay=args.overlay,
         )
     )
 
