@@ -123,7 +123,7 @@ Plan long action sequences (5-15 actions). Use `rescan: true` on camera-moving k
 [
   {"type": "press", "key": ".", "rescan": true, "intent": "Select idle villager"},
   {"type": "press", "key": "q", "intent": "Build economic menu"},
-  {"type": "press", "key": "e", "intent": "Select lumber camp"},
+  {"type": "press", "key": "r", "intent": "Select lumber camp"},
   {"type": "click", "target_class": "tree", "intent": "Place lumber camp near trees"}
 ]
 ```
@@ -256,10 +256,15 @@ The full hotkey reference is appended below this prompt. Key shortcuts to rememb
 - H: Go to TC. Then Q to queue villager, B to ring town bell, Z to age up
 - .: Select idle villager (moves camera). Use to sweep all idles.
 - ,: Select idle military (moves camera)
-- Villager selected + Q: Economic build menu (Q=House, W=Mill, E=Lumber Camp, R=Mining Camp, A=Farm)
+- Villager selected + Q: Economic build menu (Q=House, W=Mill, E=Mining Camp, R=Lumber Camp, A=Farm)
 - Villager selected + W: Military build menu (Q=Barracks, W=Archery Range, E=Stable, R=Siege Workshop)
 - Villager selected + V: More buildings (D=Market, F=Tower, Z=Town Center, C=Castle)
 - Press Q multiple times at TC to queue multiple villagers: H, Q, Q, Q = 3 villagers
+
+## Building Placement
+- Buildings CANNOT be placed on trees, water, stone, gold, or other buildings
+- When placing buildings near resources (lumber camp, mining camp), click on OPEN GROUND next to the resource, not directly on it
+- The executor auto-retries nearby positions if placement fails, so don't worry about exact coordinates
 
 ## Action Limits
 - Use 5-15 actions per turn (no need for waits — delays are automatic)

@@ -160,6 +160,16 @@ async def execute_action(action: dict[str, Any] | Action) -> bool:
             log.info("click", x=x, y=y, screen_x=screen_x, screen_y=screen_y,
                      target_id=target_info, intent=intent)
 
+            # Building placement retry — try offset positions if first click was invalid
+            intent_lower = intent.lower()
+            if any(word in intent_lower for word in ("place", "build")):
+                await asyncio.sleep(0.15)
+                for dx, dy in [(80, 0), (0, 80), (-80, 0), (0, -80)]:
+                    pyautogui.click(screen_x + dx, screen_y + dy)
+                    await asyncio.sleep(0.1)
+                pyautogui.press("escape")
+                log.debug("build_placement_retry", x=x, y=y)
+
         elif action_type == "right_click":
             coords = get_coords(action_dict)
             if coords is None:

@@ -389,7 +389,24 @@ class EntityDetector:
                          elapsed, len(entities))
             return entities
 
-        # 3. Run SAHI only on ROI tiles
+        # 3. Check if adaptive is worth it — count ROI tiles vs full SAHI tiles
+        tile_size = 640
+        overlap = 64
+        stride = tile_size - overlap
+        roi_tile_count = 0
+        for roi in rois:
+            rx1, ry1, rx2, ry2 = [int(v) for v in roi]
+            cols = max(1, -(-int(rx2 - rx1) // stride))
+            rows = max(1, -(-int(ry2 - ry1) // stride))
+            roi_tile_count += cols * rows
+        w, h = image.size
+        full_tile_count = max(1, -(-w // stride)) * max(1, -(-h // stride))
+        if roi_tile_count >= full_tile_count * 0.7:
+            logger.info("adaptive_fallback roi_tiles=%d >= 70%% of full=%d",
+                        roi_tile_count, full_tile_count)
+            return self.detect(screenshot)
+
+        # Run SAHI only on ROI tiles
         sahi_entities = self._sahi_detect_rois(image, rois)
 
         # 4. Merge: keep fast entities outside ROIs, use SAHI inside ROIs

@@ -174,23 +174,32 @@ async def game_loop(
         async def _rescan():
             if overlay:
                 overlay.hide()
-            # If tracker is confident, skip rescan and use Kalman predictions
-            if detector.tracker and detector.tracker.get_confidence() > 0.8:
-                predicted = detector.tracker.predict()
-                set_detected_entities(predicted)
-                if overlay:
-                    overlay.show(predicted, get_game_window_rect())
-                log.debug("rescan_predicted", entity_count=len(predicted))
-                return
+            # Always capture screenshot first to check if camera moved
             screenshot, _, _ = capture_screenshot(quality=50)
-            # Skip detection if frame hasn't changed (saves ~1-2s per skipped rescan)
+
+            # 1. Frame diff FIRST — did the camera move?
             if frame_differ and not frame_differ.has_changed(screenshot):
+                # Frame unchanged — safe to use tracker prediction
+                if detector.tracker and detector.tracker.get_confidence() > 0.8:
+                    predicted = detector.tracker.predict()
+                    set_detected_entities(predicted)
+                    if overlay:
+                        overlay.show(predicted, get_game_window_rect())
+                    log.debug("rescan_predicted", entity_count=len(predicted))
+                    return
+                # Frame unchanged but tracker not confident — skip
                 log.debug("rescan_skipped", reason="no_change")
                 if overlay:
-                    # Re-show previous overlay
                     overlay.show(detector._previous_entities, get_game_window_rect())
                 return
+
+            # 2. Frame changed (camera moved) — must run actual detection
             entities = detector.detect_fast(screenshot)
+            # Reset tracker if entity count dropped significantly (camera jump)
+            if detector.tracker and detector._previous_entities:
+                if len(entities) < len(detector._previous_entities) * 0.5:
+                    detector.tracker.reset()
+                    log.debug("tracker_reset", reason="camera_moved")
             set_detected_entities(entities)
             if overlay:
                 overlay.show(entities, get_game_window_rect())
