@@ -68,7 +68,7 @@ async def main_async(args):
     else:
         # Run main game loop
         log.info("starting_game_loop", loop_delay=config.loop_delay)
-        await game_loop(provider, max_iterations=args.iterations)
+        await game_loop(provider, max_iterations=args.iterations, use_overlay=args.overlay)
 
 
 def main():
@@ -93,6 +93,11 @@ def main():
         type=int,
         default=None,
         help="Maximum number of iterations (default: unlimited)",
+    )
+    parser.add_argument(
+        "--overlay",
+        action="store_true",
+        help="Show live YOLO detection overlay on game window",
     )
 
     args = parser.parse_args()

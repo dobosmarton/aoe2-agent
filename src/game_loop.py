@@ -17,7 +17,7 @@ from .memory import AgentMemory, GameState
 from .providers.base import BaseLLMProvider
 from .providers.strategist import StrategistProvider
 from .screen import capture_screenshot, save_screenshot
-from .window import ensure_game_focused, is_game_running
+from .window import ensure_game_focused, get_game_window_rect, is_game_running
 
 log = structlog.get_logger()
 
@@ -101,6 +101,7 @@ async def game_loop(
     memory: AgentMemory | None = None,
     use_detection: bool = True,
     time_budget: float | None = None,
+    use_overlay: bool = False,
 ) -> AgentMemory:
     """
     Main game loop: capture → detect → alarm check → strategist → executor → act → repeat.
@@ -111,6 +112,7 @@ async def game_loop(
         memory: Optional memory instance (creates new one if not provided)
         use_detection: Whether to use YOLO detection (if available)
         time_budget: Maximum game duration in seconds (None = no limit)
+        use_overlay: Whether to show live YOLO detection overlay on game window
 
     Returns:
         The AgentMemory instance with cumulative metrics
@@ -134,12 +136,26 @@ async def game_loop(
             log.warning("detector_init_failed", error=str(e))
             detector = None
 
+    # Initialize detection overlay (optional)
+    overlay = None
+    if use_overlay:
+        try:
+            from .overlay import DetectionOverlay
+            overlay = DetectionOverlay()
+            log.info("overlay_enabled")
+        except Exception as e:
+            log.warning("overlay_init_failed", error=str(e))
+
     # Register rescan callback so executor can take mid-turn screenshots
     if detector:
         async def _rescan():
+            if overlay:
+                overlay.hide()
             screenshot, _, _ = capture_screenshot()
             entities = detector.detect(screenshot)
             set_detected_entities(entities)
+            if overlay:
+                overlay.show(entities, get_game_window_rect())
             log.debug("rescan_complete", entity_count=len(entities))
         set_rescan_fn(_rescan)
 
@@ -180,7 +196,9 @@ async def game_loop(
                 await asyncio.sleep(1)
                 continue
 
-            # 1. Capture screenshot
+            # 1. Capture screenshot (hide overlay so it's not captured by mss)
+            if overlay:
+                overlay.hide()
             screenshot, width, height = capture_screenshot()
             log.debug("screenshot_captured", width=width, height=height)
 
@@ -196,6 +214,9 @@ async def game_loop(
                     detected_entities = detector.detect(screenshot)
                     set_detected_entities(detected_entities)
                     log.debug("detection_complete", entity_count=len(detected_entities))
+                    # Show overlay with fresh detections
+                    if overlay:
+                        overlay.show(detected_entities, get_game_window_rect())
                 except Exception as e:
                     log.warning("detection_failed", error=str(e))
                     clear_detected_entities()
@@ -340,6 +361,8 @@ async def game_loop(
                 if detector and detected_entities:
                     try:
                         await asyncio.sleep(0.3)  # Brief settle time
+                        if overlay:
+                            overlay.hide()
                         post_screenshot, _, _ = capture_screenshot()
                         post_entities = detector.detect(post_screenshot)
                         verification = _verify_actions(detected_entities, post_entities, actions)
@@ -367,6 +390,8 @@ async def game_loop(
             memory.game_end_reason = "error"
         raise
     finally:
+        if overlay:
+            overlay.close()
         metrics = memory.get_metrics_snapshot()
         log.info("game_metrics_final", **metrics)
         goal_logger.log_game_end(
