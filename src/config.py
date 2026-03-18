@@ -20,6 +20,8 @@ class Config(BaseModel):
 
     # Detection settings
     detection_imgsz: int = 1280  # YOLO inference resolution (higher = more detections, slower)
+    adaptive_sahi: bool = True   # Use adaptive SAHI (fast scan + targeted SAHI on entity clusters)
+    full_sahi_interval: int = 5  # Force full SAHI scan every N turns
 
     # Timing settings
     loop_delay: float = 1.0  # Seconds between decisions

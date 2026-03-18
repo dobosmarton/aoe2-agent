@@ -35,5 +35,8 @@ ultralytics>=8.0.0
 # ONNX Runtime for batched SAHI inference (much faster than sequential PyTorch)
 onnxruntime>=1.17.0
 
+# Object tracking (Kalman filter + Hungarian algorithm)
+scipy>=1.11.0
+
 # YAML parsing (for class config)
 pyyaml>=6.0

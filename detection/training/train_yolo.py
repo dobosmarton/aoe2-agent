@@ -1,24 +1,23 @@
 #!/usr/bin/env python3
 """
-YOLO v2 Training Script for AoE2 Detection
+YOLO Training Script for AoE2 Detection
 
-This script trains an improved YOLO model using the v2 hybrid dataset
-that combines real annotated screenshots with improved synthetic data.
+Trains YOLO models for AoE2 entity detection. Supports any ultralytics
+base model (YOLO11, YOLO26, etc.).
 
 Usage:
-    python train_yolo_v2.py                          # Train with defaults
-    python train_yolo_v2.py --epochs 200             # Custom epochs
-    python train_yolo_v2.py --model yolo11s.pt       # Use larger model
-    python train_yolo_v2.py --resume                 # Resume training
+    python train_yolo.py                                    # Train with defaults (YOLO11n)
+    python train_yolo.py --model yolo11s.pt --epochs 200    # Larger model
+    python train_yolo.py --model yolo26n.pt --name aoe2_yolo_v6 --export-onnx  # YOLO26
+    python train_yolo.py --resume                           # Resume training
 
 Lambda Labs Training:
-    1. Upload dataset: scp -r detection/training_data_v2 ubuntu@<IP>:/home/ubuntu/
-    2. Upload script:  scp train_yolo_v2.py ubuntu@<IP>:/home/ubuntu/
-    3. SSH and run:    python train_yolo_v2.py
-    4. Download:       scp ubuntu@<IP>:/home/ubuntu/runs/aoe2_yolo_v2/weights/best.pt ./
+    1. Upload dataset: scp -r detection/training_data_v3 ubuntu@<IP>:/home/ubuntu/
+    2. Upload script:  scp train_yolo.py ubuntu@<IP>:/home/ubuntu/
+    3. SSH and run:    python train_yolo.py --export-onnx
+    4. Download:       scp ubuntu@<IP>:/home/ubuntu/runs/<name>/weights/best.pt ./
 
-Estimated training time: ~2 hours on A100 for 150 epochs
-Estimated cost: ~$2.60 on Lambda Labs
+Estimated training time: ~1-2 hours on A100 for 150 epochs
 """
 
 import argparse
@@ -27,17 +26,17 @@ from pathlib import Path
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Train YOLO v2 model for AoE2 detection"
+        description="Train YOLO model for AoE2 detection"
     )
     parser.add_argument(
         "--data", "-d",
-        default="detection/training_data_v2/dataset.yaml",
-        help="Path to dataset.yaml (default: detection/training_data_v2/dataset.yaml)"
+        default="detection/training_data_v3/dataset.yaml",
+        help="Path to dataset.yaml (default: detection/training_data_v3/dataset.yaml)"
     )
     parser.add_argument(
         "--model", "-m",
         default="yolo11n.pt",
-        help="Base model to use (default: yolo11n.pt for YOLO11 nano)"
+        help="Base pretrained model (e.g., yolo11n.pt, yolo26n.pt)"
     )
     parser.add_argument(
         "--epochs", "-e",
@@ -82,8 +81,8 @@ def main():
     )
     parser.add_argument(
         "--name",
-        default="aoe2_yolo_v2",
-        help="Run name (default: aoe2_yolo_v2)"
+        default="aoe2_yolo_v5",
+        help="Run name and output model name (default: aoe2_yolo_v5)"
     )
     parser.add_argument(
         "--resume",
@@ -117,7 +116,7 @@ def main():
             return 1
 
     print("=" * 60)
-    print("AoE2 YOLO v2 Training")
+    print(f"AoE2 YOLO Training — {args.name}")
     print("=" * 60)
     print(f"Dataset: {data_path}")
     print(f"Base model: {args.model}")
@@ -178,18 +177,20 @@ def main():
 
     # Export to ONNX if requested
     if args.export_onnx and best_model_path.exists():
-        print("\nExporting to ONNX...")
+        print("\nExporting to ONNX (dynamic batch)...")
         best_model = YOLO(str(best_model_path))
-        onnx_path = best_model.export(format='onnx', imgsz=args.imgsz, simplify=True)
+        onnx_path = best_model.export(
+            format='onnx', imgsz=args.imgsz, simplify=True, dynamic=True,
+        )
         print(f"ONNX model: {onnx_path}")
 
-        # Copy to detection/models
-        models_dir = script_dir / "detection" / "models"
+        # Copy to detection/inference/models using the run name
+        models_dir = script_dir / "detection" / "inference" / "models"
         models_dir.mkdir(exist_ok=True)
 
         import shutil
-        dest_pt = models_dir / "aoe2_yolo_v2.pt"
-        dest_onnx = models_dir / "aoe2_yolo_v2.onnx"
+        dest_pt = models_dir / f"{args.name}.pt"
+        dest_onnx = models_dir / f"{args.name}.onnx"
 
         shutil.copy(best_model_path, dest_pt)
         shutil.copy(onnx_path, dest_onnx)

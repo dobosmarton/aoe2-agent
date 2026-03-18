@@ -174,6 +174,14 @@ async def game_loop(
         async def _rescan():
             if overlay:
                 overlay.hide()
+            # If tracker is confident, skip rescan and use Kalman predictions
+            if detector.tracker and detector.tracker.get_confidence() > 0.8:
+                predicted = detector.tracker.predict()
+                set_detected_entities(predicted)
+                if overlay:
+                    overlay.show(predicted, get_game_window_rect())
+                log.debug("rescan_predicted", entity_count=len(predicted))
+                return
             screenshot, _, _ = capture_screenshot(quality=50)
             # Skip detection if frame hasn't changed (saves ~1-2s per skipped rescan)
             if frame_differ and not frame_differ.has_changed(screenshot):
@@ -197,6 +205,7 @@ async def game_loop(
     goal_logger = GoalLogger(log_dir)
 
     iteration = 0
+    alarm = False  # Track alarm state across iterations for adaptive SAHI
     log.info("game_loop_start", provider=type(provider).__name__,
              detection=detector is not None,
              executor_model=config.model,
@@ -241,7 +250,16 @@ async def game_loop(
             detected_entities = []
             if detector:
                 try:
-                    detected_entities = detector.detect(screenshot)
+                    # Use adaptive SAHI: fast scan + targeted SAHI on entity clusters
+                    if config.adaptive_sahi:
+                        force_full = (
+                            iteration == 1
+                            or iteration % config.full_sahi_interval == 0
+                            or alarm
+                        )
+                        detected_entities = detector.detect_adaptive(screenshot, force_full=force_full)
+                    else:
+                        detected_entities = detector.detect(screenshot)
                     set_detected_entities(detected_entities)
                     log.debug("detection_complete", entity_count=len(detected_entities))
                     # Show overlay with fresh detections

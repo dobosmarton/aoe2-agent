@@ -12,11 +12,15 @@ Screenshot → YOLO Model → Detected Entities (class, bbox, confidence)
 
 **Key Features:**
 - 60 entity classes (units, buildings, resources, animals)
-- Real-time inference at 1280px resolution (~234ms/image, negligible vs LLM latency)
+- Real-time inference at 1280px resolution (~234ms full SAHI, ~100-200ms adaptive)
 - 92.2% mAP50 accuracy (v5 model, 18,520-image hybrid dataset)
-- Persistent entity tracking across frames via IoU matching
+- **Adaptive SAHI** — smart tiling that only runs SAHI on regions with entities (~3-8 tiles vs ~18)
+- **Kalman filter object tracking** — 6D state vector with Hungarian algorithm assignment for persistent entity IDs
+- **Tracker prediction mode** — extrapolate entity positions without inference (~0ms) when confidence is high
+- **Frame differencing** — skip redundant rescans when the screen hasn't changed
+- **ONNX batched SAHI** — all tiles in a single batched inference call (~3-5x faster than sequential)
 - NMS applied to all backends (PyTorch, ONNX, Mock)
-- SAHI sliced inference by default for large screenshots (640x640 tiles, 20% overlap)
+- SAHI sliced inference for large screenshots (640x640 tiles, 64px overlap)
 
 ## Quick Start
 
@@ -28,11 +32,11 @@ from detection import EntityDetector, get_detector
 # Get singleton detector instance
 detector = get_detector()
 
-# Detect entities in a screenshot
-entities = detector.detect("screenshot.png")
+# Detect entities — adaptive SAHI is the default
+entities = detector.detect_adaptive(screenshot_bytes)
 
 for entity in entities:
-    print(f"{entity.class_name}: {entity.center} (conf: {entity.confidence:.2f})")
+    print(f"{entity.entity_id}: {entity.class_name} at {entity.center} (conf: {entity.confidence:.2f})")
 ```
 
 ### From the Agent
@@ -40,13 +44,33 @@ for entity in entities:
 The agent automatically uses detection when available:
 
 ```python
-# In game_loop.py, detection is used like this:
 from detection.inference.detector import EntityDetector, get_detector
 
-detector = get_detector(imgsz=1280)  # Configurable inference resolution
+detector = get_detector(imgsz=1280)
+
+# Adaptive SAHI (default) — fast scan + targeted SAHI on entity regions
+entities = detector.detect_adaptive(screenshot_bytes, force_full=False)
+
+# Full SAHI — tiles entire image, used on first turn and periodically
 entities = detector.detect(screenshot_bytes)
-# Entity IDs persist across frames via IoU matching (e.g., sheep_0 stays sheep_0)
+
+# Fast single-pass — used for mid-turn rescans
+entities = detector.detect_fast(screenshot_bytes)
+
+# Tracker prediction — extrapolate positions without inference
+predicted = detector.tracker.predict()
 ```
+
+## Detection Modes
+
+| Mode | Method | Tiles | Latency | When Used |
+|------|--------|-------|---------|-----------|
+| Full SAHI | `detect()` | ~18 | ~234ms | First turn, every N turns, alarm |
+| Adaptive SAHI | `detect_adaptive()` | ~3-8 | ~100-200ms | Default (most turns) |
+| Fast | `detect_fast()` | 1 | ~50ms | Mid-turn rescans |
+| Prediction | `tracker.predict()` | 0 | ~0ms | Rescan skip (confidence > 80%) |
+
+**Adaptive SAHI** is the default mode. It runs a fast single-pass scan at `imgsz=1280`, clusters detected entities into ROI regions, then runs SAHI only on those regions. Falls back to full SAHI on the first turn, every `full_sahi_interval` turns (default 5), and when an alarm is triggered.
 
 ## Directory Structure
 
@@ -55,15 +79,19 @@ detection/
 ├── __init__.py                  # Package exports (EntityDetector, get_detector)
 │
 ├── inference/                   # Runtime detection
-│   ├── detector.py              # EntityDetector class (NMS, persistent tracking)
+│   ├── detector.py              # EntityDetector (SAHI, adaptive SAHI, NMS, tracking)
+│   ├── tracker.py               # Kalman filter multi-object tracker
+│   ├── frame_diff.py            # Frame differencing (skip unchanged frames)
 │   ├── ownership.py             # Blue-dominance ownership classifier (own vs enemy)
 │   └── models/
-│       ├── aoe2_yolo_v5.pt      # PyTorch model weights (latest, preferred)
-│       ├── aoe2_yolo_v2.onnx    # ONNX model (fallback)
+│       ├── aoe2_yolo_v5.pt      # PyTorch model weights (v5, preferred)
+│       ├── aoe2_yolo_v5.onnx    # ONNX model (v5, batched SAHI)
+│       ├── aoe2_yolo_v2.onnx    # ONNX model (v2 fallback)
 │       └── aoe2_yolo26.pt       # v1 model (last resort)
 │
 ├── training/                    # Training pipeline
-│   ├── train_yolo.py            # YOLO training script
+│   ├── train_yolo.py            # YOLO training script (supports YOLO11 & YOLO26)
+│   ├── export_onnx.py           # Export trained model to ONNX format
 │   ├── generate_training_data.py # Synthetic image generator
 │   ├── synthetic_data.py        # Data generation utilities
 │   └── config/
@@ -171,17 +199,37 @@ python -m detection.extraction.capture_replay --count 200 --interval 5
 
 **Inference resolution:** 1280px (up from 640). Benchmarked on 1920x1080 gameplay: imgsz=640 found 12 entities, imgsz=1280 found 55 entities (+4.6x detections, only +160ms). The LLM API call dominates at 1-3s, so detection latency is negligible.
 
+## Object Tracking
+
+The detection module includes a Kalman filter-based multi-object tracker (`detection/inference/tracker.py`) that provides persistent entity IDs across frames. This replaces the previous greedy IoU-only matching.
+
+**How it works:**
+1. Each tracked entity has a 6D state vector: `[x_center, y_center, vx, vy, width, height]`
+2. On each frame, the tracker **predicts** where entities moved using constant-velocity kinematics
+3. New detections are **matched** to predicted tracks via the Hungarian algorithm (cost = `1 - IoU`, same-class constraint)
+4. Matched tracks are **updated** with Kalman gain correction; unmatched detections create new tracks
+5. Tracks with 3+ consecutive misses are pruned
+
+**Prediction mode:** When the tracker has high confidence (`get_confidence() > 0.8`), the game loop can call `tracker.predict()` to extrapolate entity positions without running YOLO inference at all (~0ms). This is used in mid-turn rescans to save ~50-234ms per rescan.
+
+**Fallback:** If scipy is unavailable for the Hungarian algorithm, a greedy IoU matcher is used. If the tracker module fails to import entirely, the detector falls back to the legacy `_assign_persistent_ids()` method.
+
+For detailed Kalman filter math and tuning parameters, see [Chapter 7: Detector Architecture](../docs/part3-entity-detection/07-detector-architecture.md).
+
 ## Dependencies
 
 ```
 ultralytics>=8.0.0    # YOLO implementation
+onnxruntime>=1.17.0   # ONNX batched inference (faster SAHI)
+scipy>=1.11.0         # Hungarian algorithm for tracker (optional, has greedy fallback)
 Pillow>=9.0.0         # Image processing
 numpy>=1.21.0         # Array operations
+pyyaml>=6.0           # Class config parsing
 ```
 
 Install with:
 ```bash
-pip install ultralytics Pillow numpy
+pip install ultralytics onnxruntime scipy Pillow numpy pyyaml
 ```
 
 ## Ownership Classification
@@ -218,12 +266,25 @@ try:
 except ImportError:
     DETECTION_AVAILABLE = False
 
-# During game loop, entities are detected and passed to LLM
+# During game loop
 if DETECTION_AVAILABLE:
     detector = get_detector(imgsz=config.detection_imgsz)  # default 1280
-    entities = detector.detect(screenshot_bytes)
-    # Entity IDs persist across frames: sheep_0 stays sheep_0 between turns
+
+    # Main detection — adaptive SAHI by default
+    if config.adaptive_sahi:
+        force_full = (iteration == 1 or iteration % config.full_sahi_interval == 0 or alarm)
+        entities = detector.detect_adaptive(screenshot_bytes, force_full=force_full)
+    else:
+        entities = detector.detect(screenshot_bytes)
+
+    # Entity IDs persist across frames via Kalman tracker
     # LLM can reference entities by ID: "right_click on sheep_0"
+
+    # Mid-turn rescan callback (inside action execution)
+    if detector.tracker and detector.tracker.get_confidence() > 0.8:
+        predicted = detector.tracker.predict()  # ~0ms, no YOLO inference
+    else:
+        rescan_entities = detector.detect_fast(new_screenshot)  # ~50ms single-pass
 ```
 
 The executor resolves entity IDs to screen coordinates automatically. Window offset is re-fetched before each action to handle window movement.

@@ -61,7 +61,14 @@ Calls `ensure_game_focused()`. If focus fails, the iteration is skipped with `co
 
 ### Step 4: Run entity detection (`game_loop.py:192-201`)
 
-YOLO v5 model detects entities. Results are cached in the executor module via `set_detected_entities()` for later target_id/target_class resolution. Detection failures are caught and logged without breaking the loop.
+Entity detection uses **adaptive SAHI** by default (`config.adaptive_sahi = True`). Adaptive SAHI runs a fast single-pass scan at `imgsz=1280`, clusters detected entities into ROI regions, then runs SAHI tiling only on those regions (~3-8 tiles instead of ~18 for full SAHI). This reduces detection latency from ~234ms to ~100-200ms.
+
+Full SAHI is forced on:
+- The first iteration (no prior entity data)
+- Every `full_sahi_interval` turns (default 5) to catch entities in new areas
+- When an alarm was triggered on the previous turn
+
+Results are cached in the executor module via `set_detected_entities()` for later target_id/target_class resolution. Entity IDs persist across frames via the Kalman filter tracker. Detection failures are caught and logged without breaking the loop.
 
 ### Step 5: Classify ownership (`game_loop.py:204-213`)
 
@@ -108,7 +115,11 @@ Creates a `Turn` record, updates `GameState` from the executor's observations. E
 - Resolves `target_class` to the nearest entity of that class
 - Translates coordinates from screenshot-relative to screen-absolute
 - Executes via pyautogui with `action_delay` (50ms) between actions
-- On `rescan: true`, takes a mid-turn screenshot and re-detects entities
+- On `rescan: true`, runs the rescan pipeline:
+  1. **Tracker prediction check** — if tracker confidence > 80%, extrapolate positions via Kalman predict (~0ms, no screenshot or inference needed)
+  2. **Screenshot capture** — if prediction not used
+  3. **Frame differencing** — compare to previous frame; skip detection if MAD < 3%
+  4. **Fast detection** — single-pass `detect_fast()` at `imgsz=1280` (~50ms)
 
 ### Step 12: Action verification (`game_loop.py:339-350`)
 
@@ -140,15 +151,17 @@ Captures a screenshot, runs detection, builds context, gets actions from Claude 
 |-------|----------|--------|
 | Window check + focus | ~200ms worst case | `window.py` (3 retries, 200ms each) |
 | Screenshot capture | ~10-30ms | mss grab + PIL convert + JPEG encode |
-| YOLO detection | ~234ms | PyTorch inference at imgsz=1280 |
+| YOLO detection (adaptive SAHI) | ~100-200ms | Fast scan + targeted SAHI on ROI regions |
+| YOLO detection (full SAHI) | ~234ms | Full tiled inference (first turn, periodic, alarm) |
 | Ownership classification | ~5ms | NumPy pixel analysis |
 | Strategist call (periodic) | 3-8s | Sonnet vision API call |
 | Executor call | 1-3s | Haiku text API call |
 | Action execution | ~50ms per action | pyautogui + 50ms inter-action delay |
-| Verification detection | ~234ms | Post-action YOLO inference |
+| Rescan: tracker prediction | ~0ms | Kalman extrapolation (confidence > 80%) |
+| Rescan: fast detection | ~50ms | Single-pass YOLO at imgsz=1280 |
 | Loop delay | 1.0s | `config.loop_delay` |
 
-On non-strategist turns, total cycle time is ~3-5 seconds. On strategist turns, add 3-8 seconds for the Sonnet call.
+On non-strategist turns, total cycle time is ~3-5 seconds. On strategist turns, add 3-8 seconds for the Sonnet call. Most rescans are handled by tracker prediction (~0ms) or fast detection (~50ms).
 
 ## 2.4 Error Handling
 
@@ -173,6 +186,8 @@ The game loop supports a `time_budget` parameter (seconds). When elapsed time ex
 
 - 13-step iteration cycle: check → focus → capture → detect → classify → alarm → strategist → context → executor → memory → execute → verify → wait
 - ~3-5 second cycle time dominated by Claude API latency
+- Detection uses adaptive SAHI by default (~100-200ms), falling back to full SAHI periodically
+- Rescans use tracker prediction (~0ms) or fast detection (~50ms)
 - Strategist runs periodically; executor runs every turn
 - Goal-driven with reward computation per turn
 - Action verification provides closed-loop feedback

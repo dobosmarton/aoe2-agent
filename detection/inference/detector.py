@@ -114,9 +114,17 @@ class EntityDetector:
         self.backend = None  # 'pytorch', 'onnx', or None
         self.input_size = imgsz  # YOLO input size
         self._class_counters: dict[str, int] = {}
-        # Persistent entity tracking across frames
+        # Persistent entity tracking across frames (fallback when tracker is None)
         self._previous_entities: list[DetectedEntity] = []
         self._global_id_counter: int = 0
+
+        # Kalman filter tracker (replaces greedy IoU ID assignment)
+        self.tracker = None
+        try:
+            from .tracker import EntityTracker
+            self.tracker = EntityTracker()
+        except Exception:
+            logger.debug("Tracker not available, using greedy IoU ID assignment")
 
         if model_path and not use_mock:
             self._load_model(model_path)
@@ -277,8 +285,11 @@ class EntityDetector:
         # Apply NMS to remove duplicate overlapping detections
         entities = self._nms(entities, iou_threshold=0.5)
 
-        # Assign persistent IDs across frames
-        entities = self._assign_persistent_ids(entities)
+        # Assign persistent IDs: Kalman tracker or greedy IoU fallback
+        if self.tracker:
+            entities = self.tracker.update(entities)
+        else:
+            entities = self._assign_persistent_ids(entities)
 
         elapsed = time.monotonic() - t0
         logger.info("detect_full elapsed=%.2fs entities=%d mode=%s",
@@ -314,12 +325,309 @@ class EntityDetector:
             entities = self._parse_yolo_results(results)
 
         entities = self._nms(entities, iou_threshold=0.5)
-        entities = self._assign_persistent_ids(entities)
+
+        # Assign persistent IDs: Kalman tracker or greedy IoU fallback
+        if self.tracker:
+            entities = self.tracker.update(entities)
+        else:
+            entities = self._assign_persistent_ids(entities)
 
         elapsed = time.monotonic() - t0
         logger.info("detect_fast elapsed=%.2fs entities=%d", elapsed, len(entities))
 
         return entities
+
+    def detect_adaptive(
+        self, screenshot: Union[bytes, "Image.Image"], force_full: bool = False
+    ) -> list[DetectedEntity]:
+        """Adaptive detection: fast scan + targeted SAHI on entity clusters only.
+
+        Reduces tile count from ~18 (full SAHI) to ~3-8 by running SAHI only
+        on ROI regions around detected entities. Falls back to full SAHI on
+        first turn, periodically, or when force_full=True.
+
+        Args:
+            screenshot: JPEG bytes or PIL Image
+            force_full: If True, run full SAHI scan (e.g., first turn, alarm)
+        """
+        import time
+        t0 = time.monotonic()
+        self._reset_counters()
+
+        # Fall back to full SAHI when we have no prior context
+        if force_full or not self._previous_entities:
+            return self.detect(screenshot)
+
+        from PIL import Image as PILImage
+        if isinstance(screenshot, bytes):
+            image = PILImage.open(io.BytesIO(screenshot))
+        else:
+            image = screenshot
+
+        # 1. Fast single-pass scan (raw detections, no NMS/IDs yet)
+        if self.use_mock:
+            fast_entities = self._mock_detect(screenshot)
+        elif self.backend == 'onnx':
+            fast_entities = self._onnx_detect(screenshot)
+        else:
+            results = self.model(image, conf=self.confidence_threshold,
+                                 imgsz=self.input_size, verbose=False)
+            fast_entities = self._parse_yolo_results(results)
+
+        # 2. Compute ROI regions around entity clusters
+        rois = self._compute_sahi_rois(fast_entities, self._previous_entities, image.size)
+
+        if not rois:
+            # No ROIs needed — fast scan is sufficient
+            entities = self._nms(fast_entities, iou_threshold=0.5)
+            if self.tracker:
+                entities = self.tracker.update(entities)
+            else:
+                entities = self._assign_persistent_ids(entities)
+            elapsed = time.monotonic() - t0
+            logger.info("detect_adaptive elapsed=%.2fs entities=%d rois=0 mode=fast_only",
+                         elapsed, len(entities))
+            return entities
+
+        # 3. Run SAHI only on ROI tiles
+        sahi_entities = self._sahi_detect_rois(image, rois)
+
+        # 4. Merge: keep fast entities outside ROIs, use SAHI inside ROIs
+        merged = self._merge_detections(fast_entities, sahi_entities, rois)
+
+        # 5. Final NMS + persistent IDs
+        merged = self._nms(merged, iou_threshold=0.5)
+        if self.tracker:
+            merged = self.tracker.update(merged)
+        else:
+            merged = self._assign_persistent_ids(merged)
+
+        elapsed = time.monotonic() - t0
+        logger.info("detect_adaptive elapsed=%.2fs entities=%d rois=%d mode=adaptive",
+                     elapsed, len(merged), len(rois))
+        return merged
+
+    def _compute_sahi_rois(
+        self,
+        fast_entities: list[DetectedEntity],
+        previous_entities: list[DetectedEntity],
+        image_size: tuple[int, int],
+    ) -> list[tuple[float, float, float, float]]:
+        """Compute ROI regions for targeted SAHI based on entity clusters.
+
+        Groups entities within 200px into clusters, adds 128px padding,
+        and merges overlapping ROIs. Also includes regions where previous
+        entities disappeared (may have moved just beyond fast-pass range).
+        """
+        # Collect bboxes from current detections + disappeared previous entities
+        all_bboxes = [e.bbox for e in fast_entities]
+
+        for prev in previous_entities:
+            # Include previous entities not found in fast scan
+            if not any(self._iou(prev.bbox, f.bbox) > 0.3 for f in fast_entities):
+                all_bboxes.append(prev.bbox)
+
+        if not all_bboxes:
+            return []
+
+        # Union-Find clustering: group entities within 200px of each other
+        n = len(all_bboxes)
+        parent = list(range(n))
+
+        def find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a: int, b: int):
+            a, b = find(a), find(b)
+            if a != b:
+                parent[a] = b
+
+        for i in range(n):
+            ci = ((all_bboxes[i][0] + all_bboxes[i][2]) / 2,
+                  (all_bboxes[i][1] + all_bboxes[i][3]) / 2)
+            for j in range(i + 1, n):
+                cj = ((all_bboxes[j][0] + all_bboxes[j][2]) / 2,
+                      (all_bboxes[j][1] + all_bboxes[j][3]) / 2)
+                dist = ((ci[0] - cj[0]) ** 2 + (ci[1] - cj[1]) ** 2) ** 0.5
+                if dist < 200:
+                    union(i, j)
+
+        # Build cluster bounding boxes
+        clusters: dict[int, list[tuple]] = {}
+        for i in range(n):
+            root = find(i)
+            clusters.setdefault(root, []).append(all_bboxes[i])
+
+        # Convert clusters to padded ROIs
+        padding = 128
+        img_w, img_h = image_size
+        rois = []
+        for bboxes in clusters.values():
+            x1 = max(0, min(b[0] for b in bboxes) - padding)
+            y1 = max(0, min(b[1] for b in bboxes) - padding)
+            x2 = min(img_w, max(b[2] for b in bboxes) + padding)
+            y2 = min(img_h, max(b[3] for b in bboxes) + padding)
+            rois.append((x1, y1, x2, y2))
+
+        # Merge overlapping ROIs
+        return self._merge_overlapping_rois(rois)
+
+    def _merge_overlapping_rois(
+        self, rois: list[tuple[float, float, float, float]]
+    ) -> list[tuple[float, float, float, float]]:
+        """Merge ROIs that overlap with each other."""
+        if len(rois) <= 1:
+            return rois
+
+        merged = True
+        while merged:
+            merged = False
+            new_rois = []
+            used = set()
+            for i in range(len(rois)):
+                if i in used:
+                    continue
+                rx1, ry1, rx2, ry2 = rois[i]
+                for j in range(i + 1, len(rois)):
+                    if j in used:
+                        continue
+                    ox1, oy1, ox2, oy2 = rois[j]
+                    # Check overlap
+                    if rx1 <= ox2 and rx2 >= ox1 and ry1 <= oy2 and ry2 >= oy1:
+                        rx1 = min(rx1, ox1)
+                        ry1 = min(ry1, oy1)
+                        rx2 = max(rx2, ox2)
+                        ry2 = max(ry2, oy2)
+                        used.add(j)
+                        merged = True
+                new_rois.append((rx1, ry1, rx2, ry2))
+                used.add(i)
+            rois = new_rois
+
+        return rois
+
+    def _sahi_detect_rois(
+        self, image: "Image.Image", rois: list[tuple[float, float, float, float]]
+    ) -> list[DetectedEntity]:
+        """Run SAHI detection only on specified ROI regions.
+
+        Tiles each ROI into 640x640 chunks and batches all tiles for
+        one ONNX call (or sequential PyTorch calls).
+        """
+        tile_size = 640
+        overlap = 64
+        stride = tile_size - overlap
+
+        tiles = []
+        offsets = []
+
+        for roi in rois:
+            rx1, ry1, rx2, ry2 = [int(v) for v in roi]
+            for y in range(ry1, ry2, stride):
+                for x in range(rx1, rx2, stride):
+                    x_end = min(x + tile_size, rx2)
+                    y_end = min(y + tile_size, ry2)
+                    tile = image.crop((x, y, x_end, y_end))
+                    tile_w, tile_h = tile.size
+                    if tile.size != (tile_size, tile_size):
+                        from PIL import Image as PILImage
+                        padded = PILImage.new("RGB", (tile_size, tile_size), (0, 0, 0))
+                        padded.paste(tile, (0, 0))
+                        tile = padded
+                    tiles.append(tile)
+                    offsets.append((x, y, tile_w, tile_h))
+
+        if not tiles:
+            return []
+
+        all_entities: list[DetectedEntity] = []
+
+        if self.backend == 'onnx' and self.onnx_session:
+            # Batch ONNX inference (same approach as _onnx_sahi_detect)
+            batch = np.stack([
+                np.transpose(np.array(t).astype(np.float32) / 255.0, (2, 0, 1))
+                for t in tiles
+            ], axis=0)
+            input_name = self.onnx_session.get_inputs()[0].name
+            outputs = self.onnx_session.run(None, {input_name: batch})
+            raw_output = outputs[0]
+            num_classes = len(self.class_names)
+            for tile_idx in range(len(tiles)):
+                x_off, y_off, tw, th = offsets[tile_idx]
+                tile_entities = self._parse_onnx_tile(
+                    raw_output, tile_idx, num_classes,
+                    scale_x=1.0, scale_y=1.0,
+                    x_offset=x_off, y_offset=y_off,
+                    clip_w=tw, clip_h=th,
+                )
+                all_entities.extend(tile_entities)
+        else:
+            # Sequential PyTorch
+            for tile_idx, tile in enumerate(tiles):
+                results = self.model(tile, conf=self.confidence_threshold,
+                                     imgsz=tile_size, verbose=False)
+                x_off, y_off, tw, th = offsets[tile_idx]
+                for result in results:
+                    if result.boxes is None:
+                        continue
+                    for box, cls_id, conf in zip(
+                        result.boxes.xyxy.cpu().numpy(),
+                        result.boxes.cls.cpu().numpy(),
+                        result.boxes.conf.cpu().numpy()
+                    ):
+                        x1, y1, x2, y2 = box.tolist()
+                        class_idx = int(cls_id)
+                        class_name = (self.class_names[class_idx]
+                                      if class_idx < len(self.class_names)
+                                      else f"unknown_{class_idx}")
+                        abs_x1 = x1 + x_off
+                        abs_y1 = y1 + y_off
+                        abs_x2 = min(x2 + x_off, x_off + tw)
+                        abs_y2 = min(y2 + y_off, y_off + th)
+                        if abs_x2 <= abs_x1 or abs_y2 <= abs_y1:
+                            continue
+                        all_entities.append(DetectedEntity(
+                            id=self._generate_id(class_name),
+                            class_name=class_name,
+                            bbox=(abs_x1, abs_y1, abs_x2, abs_y2),
+                            center=((abs_x1 + abs_x2) / 2, (abs_y1 + abs_y2) / 2),
+                            confidence=float(conf),
+                            area=(abs_x2 - abs_x1) * (abs_y2 - abs_y1)
+                        ))
+
+        logger.debug("SAHI ROI tiles=%d entities=%d", len(tiles), len(all_entities))
+        return all_entities
+
+    def _merge_detections(
+        self,
+        fast_entities: list[DetectedEntity],
+        sahi_entities: list[DetectedEntity],
+        rois: list[tuple[float, float, float, float]],
+    ) -> list[DetectedEntity]:
+        """Merge fast scan + SAHI detections.
+
+        Keep fast entities outside ROIs (reliable at full resolution),
+        use SAHI entities inside ROIs (more accurate for small objects).
+        """
+        merged = []
+
+        # Keep fast entities whose centers are outside all ROI regions
+        for e in fast_entities:
+            cx, cy = e.center
+            in_roi = any(
+                rx1 <= cx <= rx2 and ry1 <= cy <= ry2
+                for rx1, ry1, rx2, ry2 in rois
+            )
+            if not in_roi:
+                merged.append(e)
+
+        # Add all SAHI entities from ROI regions
+        merged.extend(sahi_entities)
+
+        return merged
 
     def _pytorch_detect(self, screenshot: Union[bytes, "Image.Image"]) -> list[DetectedEntity]:
         """Run detection using PyTorch/ultralytics backend.
@@ -906,17 +1214,21 @@ def get_detector(
 
     Model priority (from highest to lowest):
     1. Explicitly provided model_path
-    2. v5 ONNX (aoe2_yolo_v5.onnx) - latest, batched SAHI support
-    3. v5 PT (aoe2_yolo_v5.pt) - latest, PyTorch SAHI
-    4. v2 model (aoe2_yolo_v2.onnx/pt) - hybrid trained
-    5. v1 model (aoe2_yolo26.onnx/pt) - synthetic only, fallback
+    2. v6 ONNX/PT (aoe2_yolo_v6) - YOLO26, NMS-free
+    3. v5 ONNX/PT (aoe2_yolo_v5) - YOLO11, batched SAHI
+    4. v2 model (aoe2_yolo_v2) - hybrid trained
+    5. v1 model (aoe2_yolo26) - synthetic only, fallback
     """
     global _instance
     if _instance is None:
         if model_path is None:
             models_dir = Path(__file__).parent / "models"
 
-            # v5 model (latest - preferred)
+            # v6 model (YOLO26 - NMS-free, fastest)
+            v6_onnx_path = models_dir / "aoe2_yolo_v6.onnx"
+            v6_pt_path = models_dir / "aoe2_yolo_v6.pt"
+
+            # v5 model (YOLO11 - current production)
             v5_onnx_path = models_dir / "aoe2_yolo_v5.onnx"
             v5_pt_path = models_dir / "aoe2_yolo_v5.pt"
 
@@ -928,8 +1240,12 @@ def get_detector(
             v1_onnx_path = models_dir / "aoe2_yolo26.onnx"
             v1_pt_path = models_dir / "aoe2_yolo26.pt"
 
-            # Priority: v5 ONNX > v5 PT > v2 ONNX > v2 PT > v1 ONNX > v1 PT
-            if v5_onnx_path.exists():
+            # Priority: v6 > v5 > v2 > v1 (ONNX preferred over PT)
+            if v6_onnx_path.exists():
+                model_path = str(v6_onnx_path)
+            elif v6_pt_path.exists():
+                model_path = str(v6_pt_path)
+            elif v5_onnx_path.exists():
                 model_path = str(v5_onnx_path)
             elif v5_pt_path.exists():
                 model_path = str(v5_pt_path)
