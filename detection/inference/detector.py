@@ -238,7 +238,7 @@ class EntityDetector:
         return new_entities
 
     def detect(self, screenshot: Union[bytes, "Image.Image"]) -> list[DetectedEntity]:
-        """Detect entities in screenshot.
+        """Detect entities in screenshot (full SAHI for accuracy).
 
         Args:
             screenshot: JPEG bytes or PIL Image
@@ -246,6 +246,8 @@ class EntityDetector:
         Returns:
             List of detected entities sorted by class, then by confidence
         """
+        import time
+        t0 = time.monotonic()
         self._reset_counters()
 
         if self.use_mock:
@@ -260,6 +262,43 @@ class EntityDetector:
 
         # Assign persistent IDs across frames
         entities = self._assign_persistent_ids(entities)
+
+        elapsed = time.monotonic() - t0
+        logger.info("detect_full elapsed=%.2fs entities=%d", elapsed, len(entities))
+
+        return entities
+
+    def detect_fast(self, screenshot: Union[bytes, "Image.Image"]) -> list[DetectedEntity]:
+        """Fast detection without SAHI tiling. For mid-turn rescans.
+
+        Single-pass inference at imgsz resolution. Much faster (~1-2s vs ~28s)
+        but may miss very small objects (~20px sheep). Use full detect() for
+        the initial per-turn detection, and detect_fast() for rescans.
+        """
+        import time
+        t0 = time.monotonic()
+        self._reset_counters()
+
+        if self.use_mock:
+            entities = self._mock_detect(screenshot)
+        elif self.backend == 'onnx':
+            entities = self._onnx_detect(screenshot)
+        else:
+            from PIL import Image as PILImage
+            if isinstance(screenshot, bytes):
+                image = PILImage.open(io.BytesIO(screenshot))
+            else:
+                image = screenshot
+            # Single-pass inference — skip SAHI
+            results = self.model(image, conf=self.confidence_threshold,
+                                 imgsz=self.input_size, verbose=False)
+            entities = self._parse_yolo_results(results)
+
+        entities = self._nms(entities, iou_threshold=0.5)
+        entities = self._assign_persistent_ids(entities)
+
+        elapsed = time.monotonic() - t0
+        logger.info("detect_fast elapsed=%.2fs entities=%d", elapsed, len(entities))
 
         return entities
 
@@ -297,7 +336,7 @@ class EntityDetector:
         """
         width, height = image.size
         tile_size = 640
-        overlap = 128  # 20% overlap to catch entities at tile boundaries
+        overlap = 64  # 10% overlap — NMS handles boundary duplicates
         stride = tile_size - overlap
         all_entities = []
 

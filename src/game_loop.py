@@ -86,6 +86,21 @@ def _verify_actions(pre_entities: list, post_entities: list, actions: list[dict]
 
     return "\n".join(results) if results else ""
 
+def _get_ground_commands(iteration: int) -> list[dict]:
+    """Return hardcoded actions that execute regardless of LLM output.
+
+    These are injected BEFORE LLM actions each turn.
+    """
+    commands = []
+    if iteration == 1:
+        # Auto Scout on turn 1 — scout explores map automatically
+        commands.extend([
+            {"type": "press", "key": ",", "intent": "Select scout (ground cmd)"},
+            {"type": "press", "key": "g", "intent": "Auto Scout (ground cmd)"},
+        ])
+    return commands
+
+
 # Optional detection module (graceful fallback if not available)
 try:
     from detection.inference.detector import EntityDetector, get_detector
@@ -151,12 +166,12 @@ async def game_loop(
         async def _rescan():
             if overlay:
                 overlay.hide()
-            screenshot, _, _ = capture_screenshot()
-            entities = detector.detect(screenshot)
+            screenshot, _, _ = capture_screenshot(quality=50)
+            entities = detector.detect_fast(screenshot)
             set_detected_entities(entities)
             if overlay:
                 overlay.show(entities, get_game_window_rect())
-            log.debug("rescan_complete", entity_count=len(entities))
+            log.debug("rescan_complete", entity_count=len(entities), mode="fast")
         set_rescan_fn(_rescan)
 
     # Initialize goal system
@@ -346,7 +361,17 @@ async def game_loop(
                 log.info("time_budget_reached", seconds=time_budget, iteration=iteration)
                 break
 
-            # 9. Execute actions
+            # 9. Execute ground commands (hardcoded, before LLM actions)
+            ground_cmds = _get_ground_commands(iteration)
+            if ground_cmds:
+                from .models import validate_actions
+                ground_actions = validate_actions(ground_cmds)
+                if ground_actions:
+                    gc_count = await execute_actions(ground_actions)
+                    log.info("ground_commands_executed", iteration=iteration,
+                             count=gc_count, total=len(ground_actions))
+
+            # 9b. Execute LLM actions
             if actions:
                 success_count = await execute_actions(actions)
                 memory.record_action_results(success_count, len(actions))
@@ -357,20 +382,9 @@ async def game_loop(
                     successful=success_count,
                 )
 
-                # 9b. Post-action verification (compare pre/post entity states)
-                if detector and detected_entities:
-                    try:
-                        await asyncio.sleep(0.3)  # Brief settle time
-                        if overlay:
-                            overlay.hide()
-                        post_screenshot, _, _ = capture_screenshot()
-                        post_entities = detector.detect(post_screenshot)
-                        verification = _verify_actions(detected_entities, post_entities, actions)
-                        if verification:
-                            memory.set_last_verification(verification)
-                            log.debug("action_verification", result=verification[:200])
-                    except Exception as e:
-                        log.debug("verification_skipped", error=str(e))
+                # 9b. Post-action verification disabled for performance
+                # Entity changes are picked up at the start of the next turn.
+                pass
             else:
                 log.warning("no_actions_fallback", iteration=iteration, reasoning=reasoning[:200])
                 # Inject safe fallback: queue villager + sweep idle villagers

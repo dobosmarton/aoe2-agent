@@ -9,7 +9,7 @@ from .config import config
 from .window import get_game_window_rect
 
 
-def capture_screenshot(monitor: int = 1) -> tuple[bytes, int, int]:
+def capture_screenshot(monitor: int = 1, quality: int | None = None) -> tuple[bytes, int, int]:
     """
     Capture the game window and return as JPEG bytes with dimensions.
 
@@ -18,10 +18,14 @@ def capture_screenshot(monitor: int = 1) -> tuple[bytes, int, int]:
 
     Args:
         monitor: Monitor index (1 = primary monitor, used as fallback)
+        quality: JPEG quality (1-100). Defaults to config.screenshot_quality.
 
     Returns:
         Tuple of (JPEG image bytes, width, height)
     """
+    if quality is None:
+        quality = config.screenshot_quality
+
     with mss.mss() as sct:
         # Try to capture just the game window
         rect = get_game_window_rect()
@@ -36,7 +40,7 @@ def capture_screenshot(monitor: int = 1) -> tuple[bytes, int, int]:
         img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
 
         buffer = io.BytesIO()
-        img.save(buffer, format="JPEG", quality=config.screenshot_quality)
+        img.save(buffer, format="JPEG", quality=quality)
         return buffer.getvalue(), img.width, img.height
 
 
