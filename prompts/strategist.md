@@ -30,9 +30,12 @@ Use these metric names in your goals:
 ## Strategy by Game Phase
 
 **Dark Age (0-10 min) — 100% Economy:**
-- Priority: grow population to 20-25 villagers
-- Food sources: sheep → berries (build Mill) → farms (60 wood each, need Mill first)
+- Priority: grow population to 20-25 villagers. **NEVER stop producing villagers until pop 20+** (unless saving 500 food for Feudal).
+- Food sources: sheep → berries (build Mill near berry bushes) → farms (60 wood each, need Mill first)
+- **If berry_bush is visible, create a P9 goal: "Build Mill near berries + send 3-4 villagers to berries"**
 - **If no sheep or berry bushes are visible near TC, create a P9 local goal: "Build Mill + 3 farms". Without food income, the game is lost.**
+- **If villagers are gathering wood but no lumber_camp exists, create a P8 goal: "Build Lumber Camp near trees"**
+- **NEVER hunt boar** — boars kill villagers. Ignore them entirely.
 - Build houses proactively (every 5 pop)
 - Send scout exploring to find resources
 - 6-8 villagers on food, 3-4 on wood initially

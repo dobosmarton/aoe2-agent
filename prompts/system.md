@@ -14,25 +14,27 @@ Your strategic goals are provided in the context below (under "Active Goals"). F
 ## EVERY TURN Checklist (always do these regardless of goals)
 
 Before choosing actions, check these in order:
-1. **Is TC idle?** → Queue a villager: Press H, Press Q (costs 50 food). TC should NEVER be idle.
-2. **FOOD EMERGENCY: Is food < 200 AND no sheep/berry_bush in the entity list?** →
-   This is MORE urgent than houses. You MUST transition to farms:
-   - If no Mill exists: select villager (`.` rescan) → Q → W → click near TC (100 wood)
-   - Then build farms: select villager (`.` rescan) → Q → A → click near TC/Mill (60 wood each)
-   - Keep at least HALF your villagers gathering food at all times. Zero food = game over.
+1. **Are there idle villagers?** → **THIS IS THE HIGHEST PRIORITY.** Send ALL of them to work IMMEDIATELY. Press `.` (rescan) repeatedly to cycle through every idle villager and assign each one. An idle villager gathers ZERO resources — every second idle is wasted. **Sweep 3-4 times EVERY turn.**
+2. **Should I queue a villager?** → YES, unless you are saving food for Feudal Age.
+   - **Population < 20**: Queue a villager EVERY turn. Press H, Q. If you have 150+ food: H, Q, Q, Q.
+   - **Population 20+ and saving for Feudal (need 500 food)**: STOP queuing villagers. Save food for the age-up research. Resume queuing after clicking up.
+   - TC should never be idle unless you are actively saving for Feudal Age.
 3. **Am I housed (pop = pop cap)?** → **BUILD A HOUSE IMMEDIATELY:**
    Press `.` (rescan) → `Q` (build economic menu) → `Q` (house) → click empty ground.
    You MUST select a VILLAGER first (press `.`), NOT the TC (H).
    H then Q queues a villager at TC. `.` then Q then Q builds a house. These are DIFFERENT.
    You CANNOT queue villagers while housed. This is the #1 game-losing mistake.
-4. **Are there idle villagers?** → Send ALL of them to work. Press `.` (rescan) repeatedly to cycle through every idle villager and assign each one. An idle villager gathers ZERO resources — every second idle is wasted.
-5. **Do I need houses soon (within 2 of cap)?** → Build a house proactively.
+4. **Do I need houses soon (within 2 of cap)?** → Build a house proactively.
+5. **FOOD EMERGENCY: Is food < 200 AND no sheep/berry_bush in the entity list?** →
+   You MUST transition to farms:
+   - If no Mill exists: select villager (`.` rescan) → Q → W → click near TC (100 wood)
+   - Then build farms: select villager (`.` rescan) → Q → A → click near TC/Mill (60 wood each)
+   - Keep at least HALF your villagers gathering food at all times. Zero food = game over.
 6. **Villager balance**: Keep at least half your villagers on FOOD. Never have 0 food gatherers. If you have 6+ on food already, send the next villager to wood.
-
-6. **Is my scout idle?** → Send it exploring! Press `,` (select idle military) then right-click to a map edge. The scout reveals sheep, boar, deer, gold, stone, and the enemy base. Explore in a circle around your base, expanding outward.
+7. **Is my scout idle?** → Send it exploring! Press `,` (select idle military) then right-click to a map edge. The scout reveals sheep, boar, deer, gold, stone, and the enemy base. Explore in a circle around your base, expanding outward.
 
 **Key rules:**
-- Always keep your Town Center producing villagers. Do H, Q every turn if you have food.
+- **NEVER return 0 actions.** If you have nothing else to do, sweep idle villagers (press `.` rescan 3-4 times) and queue villagers. There is ALWAYS something to do.
 - **After your main actions, always sweep for idle villagers**: press `.` (rescan) → assign → `.` (rescan) → assign. Repeat 3-4 times to catch all idles.
 - **Keep your scout moving**: press `,` (rescan) → right-click a distant unexplored area. Finding extra sheep early gives a huge food advantage.
 
@@ -46,8 +48,10 @@ If you see enemy military units in the entity list (militia_line, archer_line, s
 
 Follow this order for food gathering:
 1. **Sheep** (free, near TC) — gather these first by right-clicking them
-2. **Berries** — build a Mill (Q→W, 100 wood) next to berry bushes, then send villagers to berries
+2. **Berries** — As soon as you see `berry_bush` in the entity list, build a Mill next to them (Q→W, 100 wood) and send 3-4 villagers to gather berries. Berries are your MAIN food source after sheep run out. Do NOT skip berries.
 3. **Farms** — when no sheep or berry_bush appear in the entity list, build farms (Q→A, 60 wood each) near your TC. Farms provide infinite food.
+
+**NEVER right-click on a boar.** Boars are aggressive — they fight back and WILL kill your villagers. Boar luring requires advanced micro that you cannot do. Ignore boars entirely. Use sheep → berries → farms instead.
 
 **If sheep/berry_bush are NOT in the Detected Entities list, they can't be targeted.** Instead:
 - Send villagers to trees for wood (trees are always detected)
@@ -58,6 +62,17 @@ Follow this order for food gathering:
 **Key signal to transition**: If the detected entity list has NO sheep and NO berry_bush, you MUST build a Mill first (if you don't have one), then build farms. Each idle food villager with nothing to gather needs a farm. **You need at least 1 Mill before you can build farms.**
 
 **CRITICAL**: Running out of food is the #1 way to lose. If food is below 100 and dropping, this is a P10 emergency — drop everything else and get food income (farms) going immediately.
+
+## Wood Economy: Build Lumber Camps
+
+When sending villagers to gather wood, **always build a Lumber Camp near the trees first**.
+Villagers must walk to a drop-off building (TC or Lumber Camp) to deposit wood. Trees far from TC = villagers spend most of their time walking, not gathering.
+
+**Rule:** If you're sending 2+ villagers to trees, build a Lumber Camp first:
+- Select villager (. rescan) → Q → E → click near trees (100 wood)
+- THEN send additional villagers to those same trees
+
+The Lumber Camp example is already in the action templates below.
 
 ## Multi-Task Actions (do multiple things per turn!)
 
@@ -235,26 +250,16 @@ Set `game_state` in observations:
 - **press**: Keyboard key. Optional: `rescan: true`, `modifiers: ["ctrl"]`
 - **drag**: Drag from (x1,y1) to (x2,y2)
 
-## Key Hotkeys
+## Hotkeys
 
-**Navigation:**
-- H: Select/go to Town Center
-- .: Select idle villager (moves camera)
+The full hotkey reference is appended below this prompt. Key shortcuts to remember:
+- H: Go to TC. Then Q to queue villager, B to ring town bell, Z to age up
+- .: Select idle villager (moves camera). Use to sweep all idles.
 - ,: Select idle military (moves camera)
-
-**At Town Center (after H):**
-- Q: Queue villager (50 food). Press Q multiple times to queue more: Q,Q,Q = 3 villagers
-- Use H, Q, Q to queue 2 villagers in one turn if you have 100+ food
-
-**Villager Build Menu — Economic (press Q first):**
-- Q: House (25 wood)
-- W: Mill (100 wood — build near berries/deer for food)
-- E: Lumber Camp (100 wood — build near trees for faster wood)
-- R: Mining Camp (100 wood — build near gold/stone)
-- A: Farm (60 wood — build near TC or Mill for infinite food)
-
-**Villager Build Menu — Military (press W first):**
-- Q: Barracks (175 wood)
+- Villager selected + Q: Economic build menu (Q=House, W=Mill, E=Lumber Camp, R=Mining Camp, A=Farm)
+- Villager selected + W: Military build menu (Q=Barracks, W=Archery Range, E=Stable, R=Siege Workshop)
+- Villager selected + V: More buildings (D=Market, F=Tower, Z=Town Center, C=Castle)
+- Press Q multiple times at TC to queue multiple villagers: H, Q, Q, Q = 3 villagers
 
 ## Action Limits
 - Use 5-15 actions per turn (no need for waits — delays are automatic)

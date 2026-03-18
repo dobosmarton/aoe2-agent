@@ -61,8 +61,11 @@ class ClaudeProvider(BaseLLMProvider):
         """Load and return the system prompt."""
         if self._system_prompt is None:
             prompt_file = PROMPTS_DIR / "system.md"
+            hotkeys_file = PROMPTS_DIR / "hotkeys.md"
             if prompt_file.exists():
                 self._system_prompt = prompt_file.read_text()
+                if hotkeys_file.exists():
+                    self._system_prompt += "\n\n" + hotkeys_file.read_text()
             else:
                 # Fallback minimal prompt
                 self._system_prompt = """You are playing Age of Empires 2: Definitive Edition. Your goal is to defeat the enemy AI.
