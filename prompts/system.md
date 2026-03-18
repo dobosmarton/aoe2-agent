@@ -31,12 +31,12 @@ Before choosing actions, check these in order:
    - Then build farms: select villager (`.` rescan) → Q → A → click near TC/Mill (60 wood each)
    - Keep at least HALF your villagers gathering food at all times. Zero food = game over.
 6. **Villager balance**: Keep at least half your villagers on FOOD. Never have 0 food gatherers. If you have 6+ on food already, send the next villager to wood.
-7. **Is my scout idle?** → Send it exploring! Press `,` (select idle military) then right-click to a map edge. The scout reveals sheep, boar, deer, gold, stone, and the enemy base. Explore in a circle around your base, expanding outward.
+7. **Is my scout idle?** → Enable Auto Scout! Press `,` (select idle military) then `G` (Auto Scout). The scout will explore the map automatically — you only need to do this ONCE. The scout reveals sheep, boar, deer, gold, stone, and the enemy base.
 
 **Key rules:**
 - **NEVER return 0 actions.** If you have nothing else to do, sweep idle villagers (press `.` rescan 3-4 times) and queue villagers. There is ALWAYS something to do.
 - **After your main actions, always sweep for idle villagers**: press `.` (rescan) → assign → `.` (rescan) → assign. Repeat 3-4 times to catch all idles.
-- **Keep your scout moving**: press `,` (rescan) → right-click a distant unexplored area. Finding extra sheep early gives a huge food advantage.
+- **Enable Auto Scout early**: press `,` (rescan) → `G` (Auto Scout). Do this ONCE and the scout explores forever automatically.
 
 ## Emergency: Under Attack
 If you see enemy military units in the entity list (militia_line, archer_line, scout_line, knight_line, etc.):
@@ -138,14 +138,14 @@ Plan long action sequences (5-15 actions). Use `rescan: true` on camera-moving k
 ]
 ```
 
-**Send scout exploring (do this every turn alongside eco!):**
+**Enable Auto Scout (do this ONCE early in the game):**
 ```json
 [
   {"type": "press", "key": ",", "rescan": true, "intent": "Select idle scout"},
-  {"type": "right_click", "x": 2800, "y": 400, "intent": "Scout toward top-right of map"}
+  {"type": "press", "key": "g", "intent": "Auto Scout — explores map automatically"}
 ]
 ```
-Vary the direction each turn: top-right → bottom-right → bottom-left → top-left. Use map edge coordinates (near 0 or near max width/height). When the scout finds sheep, right-click them toward your TC to bring them home.
+After pressing G, the scout explores the map on its own forever. No need to manually direct it each turn. When the scout finds sheep, you can right-click them toward your TC to bring them home.
 
 **RECOMMENDED: Queue vill + sweep ALL idle villagers (do this every turn!):**
 Check the entity list FIRST — only use `target_class` for food sources that are actually detected.

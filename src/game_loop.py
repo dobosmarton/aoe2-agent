@@ -372,7 +372,18 @@ async def game_loop(
                     except Exception as e:
                         log.debug("verification_skipped", error=str(e))
             else:
-                log.warning("no_actions", iteration=iteration, reasoning=reasoning[:200])
+                log.warning("no_actions_fallback", iteration=iteration, reasoning=reasoning[:200])
+                # Inject safe fallback: queue villager + sweep idle villagers
+                fallback = [
+                    {"type": "press", "key": "h", "intent": "Go to TC (fallback)"},
+                    {"type": "press", "key": "q", "intent": "Queue villager (fallback)"},
+                    {"type": "press", "key": ".", "rescan": True, "intent": "Select idle villager (fallback)"},
+                ]
+                from .models import validate_actions
+                fallback_actions = validate_actions(fallback)
+                if fallback_actions:
+                    success_count = await execute_actions(fallback_actions)
+                    memory.record_action_results(success_count, len(fallback_actions))
 
             # Clear detected entities after execution
             clear_detected_entities()

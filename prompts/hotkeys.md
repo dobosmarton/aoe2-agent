@@ -104,6 +104,7 @@
 - T: Toggle Auto Farm Reseeding
 
 ### Military Stances (when military unit selected)
+- G: Auto Scout (scout explores map automatically)
 - R: Attack Move
 - Q: Patrol
 - D: Stand Ground

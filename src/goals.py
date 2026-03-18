@@ -243,11 +243,12 @@ class GoalManager:
 
         Returns True if enemy threat detected, also injects emergency goals.
         """
-        # Step 1: Find candidate military entities
+        # Step 1: Find candidate military entities (confidence gate to avoid false alarms)
         candidates = []
         for entity in detected_entities:
             cls = entity.class_name if hasattr(entity, 'class_name') else entity.get('class', '')
-            if cls in THREAT_CLASSES:
+            conf = entity.confidence if hasattr(entity, 'confidence') else entity.get('confidence', 1.0)
+            if cls in THREAT_CLASSES and conf >= 0.45:
                 candidates.append(entity)
 
         if not candidates:

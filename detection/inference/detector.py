@@ -90,7 +90,7 @@ class EntityDetector:
         self,
         model_path: Optional[str] = None,
         class_names: Optional[list[str]] = None,
-        confidence_threshold: float = 0.25,
+        confidence_threshold: float = 0.35,
         use_mock: bool = False,
         imgsz: int = 1280,
         use_sahi: bool = True,
