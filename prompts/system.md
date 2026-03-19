@@ -63,13 +63,28 @@ Follow this order for food gathering:
 
 **CRITICAL**: Running out of food is the #1 way to lose. If food is below 100 and dropping, this is a P10 emergency — drop everything else and get food income (farms) going immediately.
 
+## TC Gather Point — Efficient Food Gathering
+
+**Right-clicking a resource while the TC is selected sets the GATHER POINT.** All newly queued villagers auto-walk to that resource and start gathering. Use this when you have food to queue villagers.
+
+**Pattern — Set gather point + queue villagers:**
+1. Press H (rescan) → camera goes to TC, sheep/berries visible
+2. Right-click the food source (sheep or berry_bush) → sets gather point
+3. Press Q, Q, Q → queue villagers who auto-gather from that food source
+
+**When food = 0** (can't queue villagers):
+- Press `.` (rescan) → selects idle villager, camera moves to them
+- Right-click `target_class: "sheep"` or `target_class: "tree"` — whatever is visible
+- If sheep aren't visible after `.`, press H (rescan) to go back to TC area, but note this DESELECTS the villager and selects TC. You'd need to `.` again.
+- Safest fallback: send idle villagers to trees (always visible), build farms for food.
+
 ## Wood Economy: Build Lumber Camps
 
 When sending villagers to gather wood, **always build a Lumber Camp near the trees first**.
 Villagers must walk to a drop-off building (TC or Lumber Camp) to deposit wood. Trees far from TC = villagers spend most of their time walking, not gathering.
 
 **Rule:** If you're sending 2+ villagers to trees, build a Lumber Camp first:
-- Select villager (. rescan) → Q → E → click near trees (100 wood)
+- Select villager (. rescan) → Q → R → click near trees (100 wood)
 - THEN send additional villagers to those same trees
 
 The Lumber Camp example is already in the action templates below.
@@ -78,13 +93,13 @@ The Lumber Camp example is already in the action templates below.
 
 Plan long action sequences (5-15 actions). Use `rescan: true` on camera-moving keys, then `target_class` to click entities.
 
-**Queue villager + send idle to sheep (1 turn):**
+**Set food gather point + queue villagers (BEST pattern when food > 50):**
 ```json
 [
-  {"type": "press", "key": "h", "intent": "Select TC"},
-  {"type": "press", "key": "q", "intent": "Queue villager"},
-  {"type": "press", "key": ".", "rescan": true, "intent": "Select idle villager"},
-  {"type": "right_click", "target_class": "sheep", "intent": "Send to nearest sheep"}
+  {"type": "press", "key": "h", "rescan": true, "intent": "Go to TC — sheep/berries visible here"},
+  {"type": "right_click", "target_class": "sheep", "intent": "Set TC gather point to sheep"},
+  {"type": "press", "key": "q", "intent": "Queue villager (auto-gathers sheep)"},
+  {"type": "press", "key": "q", "intent": "Queue another villager"}
 ]
 ```
 
@@ -147,19 +162,19 @@ Plan long action sequences (5-15 actions). Use `rescan: true` on camera-moving k
 ```
 After pressing G, the scout explores the map on its own forever. No need to manually direct it each turn. When the scout finds sheep, you can right-click them toward your TC to bring them home.
 
-**RECOMMENDED: Queue vill + sweep ALL idle villagers (do this every turn!):**
+**RECOMMENDED: Set gather point + queue vills + sweep idles (do this every turn!):**
 Check the entity list FIRST — only use `target_class` for food sources that are actually detected.
 If sheep AND berry_bush are missing from the entity list, send villagers to wood and build farms.
 ```json
 [
-  {"type": "press", "key": "h", "intent": "Select TC"},
-  {"type": "press", "key": "q", "intent": "Queue villager"},
+  {"type": "press", "key": "h", "rescan": true, "intent": "Go to TC — see sheep/berries"},
+  {"type": "right_click", "target_class": "sheep", "intent": "Set gather point to sheep"},
+  {"type": "press", "key": "q", "intent": "Queue villager (auto-gathers)"},
+  {"type": "press", "key": "q", "intent": "Queue another villager"},
   {"type": "press", "key": ".", "rescan": true, "intent": "Idle vill 1"},
-  {"type": "right_click", "target_class": "tree", "intent": "Send to wood (or sheep/berry_bush if detected)"},
+  {"type": "right_click", "target_class": "tree", "intent": "Send to trees"},
   {"type": "press", "key": ".", "rescan": true, "intent": "Idle vill 2"},
-  {"type": "right_click", "target_class": "tree", "intent": "Send to wood"},
-  {"type": "press", "key": ".", "rescan": true, "intent": "Idle vill 3"},
-  {"type": "right_click", "target_class": "tree", "intent": "Send to wood"}
+  {"type": "right_click", "target_class": "tree", "intent": "Send to trees"}
 ]
 ```
 
@@ -196,13 +211,16 @@ If "sheep" is NOT listed in Detected Entities, do NOT use `target_class: "sheep"
 Check the entity list FIRST, then pick a target_class from what's actually detected.
 
 ### Fallback when target_class fails
-After pressing `.` (idle villager), the camera may move to a location where sheep/trees aren't visible. To avoid this:
-- **Always press H first** (go to TC area) before targeting sheep/berries — they're near your TC
-- Example: H (rescan) → Q (queue vill) → target_class sheep (reliable because camera is at TC)
+After pressing `.` (idle villager), the camera may move to a location where sheep/berries aren't visible. To handle this:
+- If `target_class: "sheep"` fails after `.`, sheep may not be on screen at the villager's location
+- **Safest approach:** send idle villagers to `target_class: "tree"` (trees are visible everywhere), and use TC gather point (H → right_click sheep → Q) for food gathering
+- **Alternative:** Press H (rescan) to see sheep at TC — but this DESELECTS the villager and selects TC. You'd need `.` again to reselect a villager.
 - If target_class keeps failing, use direct (x, y) coordinates from the entity list instead
 
 ### modifiers (on press actions)
 Key combinations: `"modifiers": ["ctrl", "shift"], "key": "h"` — press Ctrl+Shift+H
+
+**WARNING:** Do NOT put modifiers in the key field. Wrong: `"key": "ctrl+b"`. Correct: `"modifiers": ["ctrl"], "key": "b"`
 
 ## CRITICAL: Handling Failed Actions
 

@@ -93,6 +93,10 @@ def _get_ground_commands(iteration: int) -> list[dict]:
     """
     commands = []
     if iteration == 1:
+        # Zoom in for better detection of small objects (sheep, berries)
+        commands.append(
+            {"type": "scroll", "clicks": 5, "intent": "Zoom in for better object detection"}
+        )
         # Auto Scout on turn 1 — scout explores map automatically
         commands.extend([
             {"type": "press", "key": ",", "intent": "Select scout (ground cmd)"},

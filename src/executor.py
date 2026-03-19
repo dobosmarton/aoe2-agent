@@ -207,6 +207,17 @@ async def execute_action(action: dict[str, Any] | Action) -> bool:
             pyautogui.drag(sx2 - sx1, sy2 - sy1, duration=0.2)
             log.info("drag", x1=x1, y1=y1, x2=x2, y2=y2, intent=intent)
 
+        elif action_type == "scroll":
+            clicks = action_dict["clicks"]
+            x = action_dict.get("x")
+            y = action_dict.get("y")
+            if x is not None and y is not None:
+                screen_x, screen_y = translate(x, y)
+                pyautogui.scroll(clicks, x=screen_x, y=screen_y)
+            else:
+                pyautogui.scroll(clicks)
+            log.info("scroll", clicks=clicks, intent=intent)
+
         elif action_type == "wait":
             ms = action_dict.get("ms", 100)
             await asyncio.sleep(ms / 1000)

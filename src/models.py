@@ -151,8 +151,18 @@ class WaitAction(BaseModel):
     intent: str = ""
 
 
+class ScrollAction(BaseModel):
+    """Mouse scroll action (for zoom in/out)."""
+
+    type: Literal["scroll"]
+    clicks: int = Field(description="Positive = scroll up (zoom in), negative = scroll down (zoom out)")
+    x: Optional[int] = Field(default=None, ge=0, le=7680)
+    y: Optional[int] = Field(default=None, ge=0, le=4320)
+    intent: str = ""
+
+
 # Union type for all actions
-Action = ClickAction | RightClickAction | PressAction | DragAction | WaitAction
+Action = ClickAction | RightClickAction | PressAction | DragAction | WaitAction | ScrollAction
 
 
 class Observations(BaseModel):
@@ -194,6 +204,7 @@ def validate_action(action_dict: dict) -> Action | None:
         "press": PressAction,
         "drag": DragAction,
         "wait": WaitAction,
+        "scroll": ScrollAction,
     }
 
     model_class = type_map.get(action_type)
