@@ -162,6 +162,16 @@ Plan long action sequences (5-15 actions). Use `rescan: true` on camera-moving k
 ```
 After pressing G, the scout explores the map on its own forever. No need to manually direct it each turn. When the scout finds sheep, you can right-click them toward your TC to bring them home.
 
+**Find missing entities (when target_class keeps failing):**
+Only use this when target_class has failed — it takes 5-10 seconds.
+```json
+[
+  {"type": "press", "key": "h", "rescan": true, "intent": "Go to TC area"},
+  {"type": "detect", "intent": "Full scan — looking for sheep/berries near TC"},
+  {"type": "right_click", "target_class": "sheep", "intent": "Send to sheep (should be visible now)"}
+]
+```
+
 **RECOMMENDED: Set gather point + queue vills + sweep idles (do this every turn!):**
 Check the entity list FIRST — only use `target_class` for food sources that are actually detected.
 If sheep AND berry_bush are missing from the entity list, send villagers to wood and build farms.
@@ -267,6 +277,7 @@ Set `game_state` in observations:
 - **right_click**: Right click — use (x, y), target_id, or target_class
 - **press**: Keyboard key. Optional: `rescan: true`, `modifiers: ["ctrl"]`
 - **drag**: Drag from (x1,y1) to (x2,y2)
+- **detect**: Request full detailed entity scan. Use when you suspect entities are missing (e.g., sheep should be nearby but aren't detected). This is SLOW (~5-10s) — only use when target_class keeps failing. Do NOT use every turn.
 
 ## Hotkeys
 

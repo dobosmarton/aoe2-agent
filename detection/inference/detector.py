@@ -107,6 +107,11 @@ class EntityDetector:
         """
         self.class_names = class_names or DEFAULT_CLASSES
         self.confidence_threshold = confidence_threshold
+        # Lower thresholds for small/hard-to-detect entities
+        self.class_thresholds: dict[str, float] = {
+            "sheep": 0.20, "deer": 0.20, "berry_bush": 0.25,
+            "villager": 0.25, "relic": 0.20,
+        }
         self.use_mock = use_mock
         self.use_sahi = use_sahi
         self.model = None
@@ -178,10 +183,13 @@ class EntityDetector:
     def _load_onnx(self, model_path: str):
         """Load ONNX model using onnxruntime with optimized session options."""
         try:
+            import os
             import onnxruntime as ort
             sess_options = ort.SessionOptions()
             sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-            sess_options.intra_op_num_threads = 4
+            num_threads = min(os.cpu_count() or 4, 8)
+            sess_options.intra_op_num_threads = num_threads
+            sess_options.inter_op_num_threads = max(1, num_threads // 2)
             # Auto-detect best available provider
             available = ort.get_available_providers()
             providers = [p for p in ['DmlExecutionProvider', 'CPUExecutionProvider']
@@ -210,6 +218,10 @@ class EntityDetector:
         idx = self._class_counters[class_name]
         self._class_counters[class_name] += 1
         return f"{class_name}_{idx}"
+
+    def _get_threshold(self, class_name: str) -> float:
+        """Get confidence threshold for a class (lower for small entities)."""
+        return self.class_thresholds.get(class_name, self.confidence_threshold)
 
     def _assign_persistent_ids(self, new_entities: list[DetectedEntity]) -> list[DetectedEntity]:
         """Match new detections to previous frame by IoU, preserving entity IDs.
@@ -337,6 +349,89 @@ class EntityDetector:
 
         return entities
 
+    def detect_fast_multi(self, screenshot: Union[bytes, "Image.Image"]) -> list[DetectedEntity]:
+        """Multi-resolution fast detection for small object recovery.
+
+        Two-pass inference without full SAHI tiling:
+        1. Full image at input_size (1280) — catches buildings, trees, large entities
+        2. Center 50% crop at 640 (native training res) — catches sheep, berries, deer
+
+        ~2x cost of detect_fast() but catches small objects that single pass misses.
+        Much faster than full SAHI (~2-3s vs ~28s).
+        """
+        import time
+        from PIL import Image as PILImage
+        t0 = time.monotonic()
+        self._reset_counters()
+
+        if isinstance(screenshot, bytes):
+            image = PILImage.open(io.BytesIO(screenshot))
+        else:
+            image = screenshot
+
+        if self.use_mock:
+            entities = self._mock_detect(screenshot)
+        elif self.backend == 'onnx':
+            # Pass 1: full image at input_size (1280)
+            full_entities = self._onnx_detect(screenshot)
+
+            # Pass 2: center 50% crop at 640 (native training resolution)
+            w, h = image.size
+            crop_x1 = w // 4
+            crop_y1 = h // 4
+            crop_x2 = w - crop_x1
+            crop_y2 = h - crop_y1
+            center_crop = image.crop((crop_x1, crop_y1, crop_x2, crop_y2))
+
+            # Run at 640 — the model's native training resolution
+            old_input_size = self.input_size
+            self.input_size = 640
+            crop_entities = self._onnx_detect(center_crop)
+            self.input_size = old_input_size
+
+            # Offset crop entities back to full image coordinates
+            for e in crop_entities:
+                x1, y1, x2, y2 = e.bbox
+                e.bbox = (x1 + crop_x1, y1 + crop_y1, x2 + crop_x1, y2 + crop_y1)
+                e.center = ((e.bbox[0] + e.bbox[2]) / 2, (e.bbox[1] + e.bbox[3]) / 2)
+
+            entities = full_entities + crop_entities
+            logger.debug("detect_fast_multi: full=%d crop=%d", len(full_entities), len(crop_entities))
+        else:
+            # PyTorch: same two-pass approach
+            w, h = image.size
+            results = self.model(image, conf=min(self.class_thresholds.values()),
+                                 imgsz=self.input_size, verbose=False)
+            full_entities = self._parse_yolo_results(results)
+
+            crop_x1 = w // 4
+            crop_y1 = h // 4
+            crop_x2 = w - crop_x1
+            crop_y2 = h - crop_y1
+            center_crop = image.crop((crop_x1, crop_y1, crop_x2, crop_y2))
+            results = self.model(center_crop, conf=min(self.class_thresholds.values()),
+                                 imgsz=640, verbose=False)
+            crop_entities = self._parse_yolo_results(results)
+            for e in crop_entities:
+                x1, y1, x2, y2 = e.bbox
+                e.bbox = (x1 + crop_x1, y1 + crop_y1, x2 + crop_x1, y2 + crop_y1)
+                e.center = ((e.bbox[0] + e.bbox[2]) / 2, (e.bbox[1] + e.bbox[3]) / 2)
+
+            entities = full_entities + crop_entities
+
+        # NMS merges duplicates from both passes
+        entities = self._nms(entities, iou_threshold=0.5)
+
+        if self.tracker:
+            entities = self.tracker.update(entities)
+        else:
+            entities = self._assign_persistent_ids(entities)
+
+        elapsed = time.monotonic() - t0
+        logger.info("detect_fast_multi elapsed=%.2fs entities=%d", elapsed, len(entities))
+
+        return entities
+
     def detect_adaptive(
         self, screenshot: Union[bytes, "Image.Image"], force_full: bool = False
     ) -> list[DetectedEntity]:
@@ -391,7 +486,7 @@ class EntityDetector:
 
         # 3. Check if adaptive is worth it — count ROI tiles vs full SAHI tiles
         tile_size = 640
-        overlap = 64
+        overlap = 32
         stride = tile_size - overlap
         roi_tile_count = 0
         for roi in rois:
@@ -535,7 +630,7 @@ class EntityDetector:
         one ONNX call (or sequential PyTorch calls).
         """
         tile_size = 640
-        overlap = 64
+        overlap = 32
         stride = tile_size - overlap
 
         tiles = []
@@ -680,7 +775,7 @@ class EntityDetector:
         """
         width, height = image.size
         tile_size = 640
-        overlap = 64  # 10% overlap — NMS handles boundary duplicates
+        overlap = 32  # 5% overlap — NMS handles boundary duplicates
         stride = tile_size - overlap
         all_entities = []
 
@@ -734,7 +829,7 @@ class EntityDetector:
         """
         width, height = image.size
         tile_size = 640
-        overlap = 64
+        overlap = 32
         stride = tile_size - overlap
 
         # 1. Collect all tiles and their offsets
@@ -811,7 +906,9 @@ class EntityDetector:
             class_scores = preds_raw[:, 4:]
             best_cls = np.argmax(class_scores, axis=1)
             best_conf = np.max(class_scores, axis=1)
-            mask = best_conf >= self.confidence_threshold
+            # Use lowest per-class threshold for initial bulk filter
+            min_thresh = min(self.class_thresholds.values()) if self.class_thresholds else self.confidence_threshold
+            mask = best_conf >= min_thresh
             boxes, best_cls, best_conf = boxes[mask], best_cls[mask], best_conf[mask]
             predictions = []
             for box, cls_id, conf in zip(boxes, best_cls, best_conf):
@@ -823,7 +920,11 @@ class EntityDetector:
 
         for pred in predictions:
             x1, y1, x2, y2, confidence, class_id = pred
-            if confidence < self.confidence_threshold:
+            class_idx = int(class_id)
+            class_name = (self.class_names[class_idx]
+                          if class_idx < len(self.class_names)
+                          else f"unknown_{class_idx}")
+            if confidence < self._get_threshold(class_name):
                 continue
 
             # Scale and offset to original image space
@@ -838,11 +939,6 @@ class EntityDetector:
 
             if abs_x2 <= abs_x1 or abs_y2 <= abs_y1:
                 continue
-
-            class_idx = int(class_id)
-            class_name = (self.class_names[class_idx]
-                          if class_idx < len(self.class_names)
-                          else f"unknown_{class_idx}")
 
             entities.append(DetectedEntity(
                 id=self._generate_id(class_name),
@@ -951,13 +1047,14 @@ class EntityDetector:
             best_class_idx = np.argmax(class_scores, axis=1)
             best_confidence = np.max(class_scores, axis=1)
 
-            # Filter by confidence
-            mask = best_confidence >= self.confidence_threshold
+            # Filter by confidence (use lowest per-class threshold for bulk filter)
+            min_thresh = min(self.class_thresholds.values()) if self.class_thresholds else self.confidence_threshold
+            mask = best_confidence >= min_thresh
             boxes = boxes[mask]
             best_class_idx = best_class_idx[mask]
             best_confidence = best_confidence[mask]
 
-            logger.debug("%d boxes after confidence filter (%.2f)", len(boxes), self.confidence_threshold)
+            logger.debug("%d boxes after confidence filter (%.2f)", len(boxes), min_thresh)
 
             # Convert from x_center, y_center, w, h to x1, y1, x2, y2
             predictions = []
@@ -981,7 +1078,12 @@ class EntityDetector:
         for pred in predictions:
             x1, y1, x2, y2, confidence, class_id = pred
 
-            if confidence < self.confidence_threshold:
+            # Per-class confidence threshold
+            class_idx = int(class_id)
+            class_name = (self.class_names[class_idx]
+                          if class_idx < len(self.class_names)
+                          else f"unknown_{class_idx}")
+            if confidence < self._get_threshold(class_name):
                 continue
 
             # Scale coordinates back to original image size
@@ -999,13 +1101,6 @@ class EntityDetector:
             # Skip invalid boxes
             if x2 <= x1 or y2 <= y1:
                 continue
-
-            # Get class name
-            class_idx = int(class_id)
-            if class_idx < len(self.class_names):
-                class_name = self.class_names[class_idx]
-            else:
-                class_name = f"unknown_{class_idx}"
 
             # Calculate center and area
             center_x = (x1 + x2) / 2

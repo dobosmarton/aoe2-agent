@@ -160,10 +160,10 @@ class AgentMemory:
                     line += f"\n  Result: {t.verification[:150]}"
                 recent_lines.append(line)
 
-            # Stuck-loop detection: count consecutive "no visible change"
+            # Stuck-loop detection: count consecutive failures
             no_change_count = 0
             for t in reversed(recent_turns):
-                if "no visible change" in t.verification:
+                if t.verification and ("no visible change" in t.verification or "FAILED" in t.verification):
                     no_change_count += 1
                 else:
                     break

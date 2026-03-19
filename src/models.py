@@ -161,8 +161,15 @@ class ScrollAction(BaseModel):
     intent: str = ""
 
 
+class DetectAction(BaseModel):
+    """Request full SAHI detection scan for accurate entity detection."""
+
+    type: Literal["detect"]
+    intent: str = ""
+
+
 # Union type for all actions
-Action = ClickAction | RightClickAction | PressAction | DragAction | WaitAction | ScrollAction
+Action = ClickAction | RightClickAction | PressAction | DragAction | WaitAction | ScrollAction | DetectAction
 
 
 class Observations(BaseModel):
@@ -205,6 +212,7 @@ def validate_action(action_dict: dict) -> Action | None:
         "drag": DragAction,
         "wait": WaitAction,
         "scroll": ScrollAction,
+        "detect": DetectAction,
     }
 
     model_class = type_map.get(action_type)

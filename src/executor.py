@@ -1,6 +1,7 @@
 """Action executor module for AoE2 LLM Agent."""
 
 import asyncio
+from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 import pyautogui
@@ -25,11 +26,27 @@ _detected_entities: list[dict] = []
 # Rescan callback (set by game_loop to capture screenshot + run detection)
 _rescan_fn: Optional[Callable] = None
 
+# Full detection callback (set by game_loop for thorough SAHI scan)
+_rescan_full_fn: Optional[Callable] = None
+
+
+@dataclass
+class ActionResult:
+    """Result of executing a single action."""
+    success: bool
+    detail: str
+
 
 def set_rescan_fn(fn: Callable) -> None:
     """Set the rescan callback for mid-turn screenshot+detection."""
     global _rescan_fn
     _rescan_fn = fn
+
+
+def set_rescan_full_fn(fn: Callable) -> None:
+    """Set the full detection callback for thorough SAHI scan."""
+    global _rescan_full_fn
+    _rescan_full_fn = fn
 
 
 def set_detected_entities(entities: list) -> None:
@@ -89,7 +106,7 @@ def clear_detected_entities() -> None:
     _detected_entities = []
 
 
-async def execute_action(action: dict[str, Any] | Action) -> bool:
+async def execute_action(action: dict[str, Any] | Action) -> ActionResult:
     """
     Execute a single action from LLM output.
 
@@ -97,7 +114,7 @@ async def execute_action(action: dict[str, Any] | Action) -> bool:
         action: Action dictionary or validated Action model
 
     Returns:
-        True if action executed successfully, False otherwise
+        ActionResult with success status and detail message
     """
     # Convert to dict if it's a Pydantic model
     if hasattr(action, "model_dump"):
@@ -110,7 +127,7 @@ async def execute_action(action: dict[str, Any] | Action) -> bool:
         validated = validate_action(action_dict)
         if not validated:
             log.warning("invalid_action", action=action_dict)
-            return False
+            return ActionResult(False, "invalid action format")
         action_dict = validated.model_dump()
 
     action_type = action_dict.get("type")
@@ -128,31 +145,36 @@ async def execute_action(action: dict[str, Any] | Action) -> bool:
             return (x + _window_offset[0], y + _window_offset[1])
 
         # Helper to resolve coordinates (handles target_id and target_class)
-        def get_coords(action_dict: dict) -> tuple[int, int] | None:
-            """Get (x, y) from action, resolving target_id or target_class if needed."""
+        def get_coords(action_dict: dict) -> tuple[str, tuple[int, int] | None]:
+            """Get (x, y) from action, resolving target_id or target_class if needed.
+
+            Returns (failure_detail, coords) — failure_detail is non-empty on failure.
+            """
             target_id = action_dict.get("target_id")
             if target_id:
                 coords = resolve_target_id(target_id)
                 if coords is None:
                     log.warning("target_id_not_found", target_id=target_id)
-                return coords
+                    return (f"target_id '{target_id}' not found in detected entities", None)
+                return ("", coords)
             target_class = action_dict.get("target_class")
             if target_class:
                 coords = resolve_target_class(target_class)
                 if coords is None:
                     log.warning("target_class_not_found", target_class=target_class)
-                return coords
+                    return (f"target_class '{target_class}' not found in detected entities", None)
+                return ("", coords)
             x = action_dict.get("x")
             y = action_dict.get("y")
             if x is not None and y is not None:
-                return (x, y)
-            return None
+                return ("", (x, y))
+            return ("no coordinates, target_id, or target_class provided", None)
 
         if action_type == "click":
-            coords = get_coords(action_dict)
+            fail_detail, coords = get_coords(action_dict)
             if coords is None:
                 log.warning("click_no_coords", action=action_dict)
-                return False
+                return ActionResult(False, fail_detail)
             x, y = coords
             screen_x, screen_y = translate(x, y)
             pyautogui.click(screen_x, screen_y)
@@ -171,10 +193,10 @@ async def execute_action(action: dict[str, Any] | Action) -> bool:
                 log.debug("build_placement_retry", x=x, y=y)
 
         elif action_type == "right_click":
-            coords = get_coords(action_dict)
+            fail_detail, coords = get_coords(action_dict)
             if coords is None:
                 log.warning("right_click_no_coords", action=action_dict)
-                return False
+                return ActionResult(False, fail_detail)
             x, y = coords
             screen_x, screen_y = translate(x, y)
             pyautogui.rightClick(screen_x, screen_y)
@@ -218,6 +240,14 @@ async def execute_action(action: dict[str, Any] | Action) -> bool:
                 pyautogui.scroll(clicks)
             log.info("scroll", clicks=clicks, intent=intent)
 
+        elif action_type == "detect":
+            if _rescan_full_fn:
+                await _rescan_full_fn()
+                log.info("full_detection", intent=intent)
+            else:
+                log.warning("full_detection_unavailable")
+                return ActionResult(False, "full detection not available")
+
         elif action_type == "wait":
             ms = action_dict.get("ms", 100)
             await asyncio.sleep(ms / 1000)
@@ -225,21 +255,21 @@ async def execute_action(action: dict[str, Any] | Action) -> bool:
 
         else:
             log.warning("unknown_action", action_type=action_type, action=action_dict)
-            return False
+            return ActionResult(False, f"unknown action type '{action_type}'")
 
         # Small delay between actions for stability (async)
         await asyncio.sleep(config.action_delay)
-        return True
+        return ActionResult(True, "ok")
 
     except KeyError as e:
         log.error("missing_action_param", action=action_dict, missing=str(e))
-        return False
+        return ActionResult(False, f"missing parameter: {e}")
     except Exception as e:
         log.error("action_failed", action=action_dict, error=str(e))
-        return False
+        return ActionResult(False, f"execution error: {e}")
 
 
-async def execute_actions(actions: list[dict[str, Any] | Action]) -> int:
+async def execute_actions(actions: list[dict[str, Any] | Action]) -> list[ActionResult]:
     """
     Execute a list of actions.
 
@@ -247,7 +277,7 @@ async def execute_actions(actions: list[dict[str, Any] | Action]) -> int:
         actions: List of action dictionaries or Action models
 
     Returns:
-        Number of successfully executed actions
+        List of ActionResult for each action
     """
     # Ensure game is focused before executing
     if not ensure_game_focused():
@@ -255,8 +285,8 @@ async def execute_actions(actions: list[dict[str, Any] | Action]) -> int:
         await asyncio.sleep(0.5)
         ensure_game_focused()  # Try once more
 
-    success_count = 0
+    results = []
     for action in actions:
-        if await execute_action(action):
-            success_count += 1
-    return success_count
+        result = await execute_action(action)
+        results.append(result)
+    return results

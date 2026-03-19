@@ -10,7 +10,7 @@ import math
 import structlog
 
 from .config import config
-from .executor import execute_actions, set_detected_entities, clear_detected_entities, set_rescan_fn
+from .executor import execute_actions, set_detected_entities, clear_detected_entities, set_rescan_fn, set_rescan_full_fn
 from .goal_logger import GoalLogger
 from .goals import GoalManager
 from .memory import AgentMemory, GameState
@@ -198,7 +198,7 @@ async def game_loop(
                 return
 
             # 2. Frame changed (camera moved) — must run actual detection
-            entities = detector.detect_fast(screenshot)
+            entities = detector.detect_fast_multi(screenshot)
             # Reset tracker if entity count dropped significantly (camera jump)
             if detector.tracker and detector._previous_entities:
                 if len(entities) < len(detector._previous_entities) * 0.5:
@@ -209,6 +209,31 @@ async def game_loop(
                 overlay.show(entities, get_game_window_rect())
             log.debug("rescan_complete", entity_count=len(entities), mode="fast")
         set_rescan_fn(_rescan)
+
+        # Full detection callback for `detect` action type
+        async def _rescan_full():
+            """Full SAHI detection — slower but catches small objects like sheep."""
+            if overlay:
+                overlay.hide()
+            screenshot_full, _, _ = capture_screenshot(quality=85)
+
+            # Reset frame differ so next fast rescan doesn't skip
+            if frame_differ:
+                frame_differ.reset()
+
+            # Full detection (not fast)
+            entities = detector.detect(screenshot_full)
+
+            # Reset tracker for fresh state
+            if detector.tracker:
+                detector.tracker.reset()
+
+            set_detected_entities(entities)
+            if overlay:
+                overlay.show(entities, get_game_window_rect())
+            log.info("rescan_full_complete", entity_count=len(entities))
+
+        set_rescan_full_fn(_rescan_full)
 
     # Initialize goal system
     goal_manager = GoalManager()
@@ -413,13 +438,15 @@ async def game_loop(
                 from .models import validate_actions
                 ground_actions = validate_actions(ground_cmds)
                 if ground_actions:
-                    gc_count = await execute_actions(ground_actions)
+                    gc_results = await execute_actions(ground_actions)
+                    gc_count = sum(1 for r in gc_results if r.success)
                     log.info("ground_commands_executed", iteration=iteration,
                              count=gc_count, total=len(ground_actions))
 
             # 9b. Execute LLM actions
             if actions:
-                success_count = await execute_actions(actions)
+                results = await execute_actions(actions)
+                success_count = sum(1 for r in results if r.success)
                 memory.record_action_results(success_count, len(actions))
                 log.info(
                     "actions_executed",
@@ -428,9 +455,15 @@ async def game_loop(
                     successful=success_count,
                 )
 
-                # 9b. Post-action verification disabled for performance
-                # Entity changes are picked up at the start of the next turn.
-                pass
+                # Build verification from failed actions
+                verification_lines = []
+                for action, result in zip(actions, results):
+                    if not result.success:
+                        a_intent = action.get("intent", "") if isinstance(action, dict) else ""
+                        a_type = action.get("type", "") if isinstance(action, dict) else ""
+                        verification_lines.append(f"- FAILED {a_type}: {a_intent} — {result.detail}")
+                if verification_lines:
+                    memory.set_last_verification("\n".join(verification_lines))
             else:
                 log.warning("no_actions_fallback", iteration=iteration, reasoning=reasoning[:200])
                 # Inject safe fallback: queue villager + sweep idle villagers
@@ -442,8 +475,9 @@ async def game_loop(
                 from .models import validate_actions
                 fallback_actions = validate_actions(fallback)
                 if fallback_actions:
-                    success_count = await execute_actions(fallback_actions)
-                    memory.record_action_results(success_count, len(fallback_actions))
+                    fb_results = await execute_actions(fallback_actions)
+                    fb_success = sum(1 for r in fb_results if r.success)
+                    memory.record_action_results(fb_success, len(fallback_actions))
 
             # Clear detected entities after execution
             clear_detected_entities()
