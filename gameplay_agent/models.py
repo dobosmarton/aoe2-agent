@@ -5,56 +5,42 @@ from typing import Annotated, Literal, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
-class ClickAction(BaseModel):
-    """Left click action.
+class PointTargetAction(BaseModel):
+    """Base for actions that target a point via coordinates, entity ID, or class.
 
     Can specify either:
     - x, y coordinates directly
     - target_id referencing a detected entity (resolved to coordinates at execution)
+    - target_class to target the nearest entity of that class
     """
+
+    x: Optional[int] = Field(default=None, ge=0, le=7680)
+    y: Optional[int] = Field(default=None, ge=0, le=4320)
+    target_id: Optional[str] = Field(default=None, description="Entity ID from detection, e.g. 'sheep_0'")
+    target_class: Optional[str] = Field(default=None, description="Entity class to target nearest of, e.g. 'sheep'")
+    intent: str = ""
+
+    @model_validator(mode='after')
+    def check_coords_or_target(self):
+        """Ensure either coordinates, target_id, or target_class is provided."""
+        has_coords = self.x is not None and self.y is not None
+        has_target = self.target_id is not None
+        has_class = self.target_class is not None
+        if not has_coords and not has_target and not has_class:
+            raise ValueError("Must provide (x, y) coordinates, target_id, or target_class")
+        return self
+
+
+class ClickAction(PointTargetAction):
+    """Left click action."""
 
     type: Literal["click"]
-    x: Optional[int] = Field(default=None, ge=0, le=7680)
-    y: Optional[int] = Field(default=None, ge=0, le=4320)
-    target_id: Optional[str] = Field(default=None, description="Entity ID from detection, e.g. 'sheep_0'")
-    target_class: Optional[str] = Field(default=None, description="Entity class to target nearest of, e.g. 'sheep'")
-    intent: str = ""
-
-    @model_validator(mode='after')
-    def check_coords_or_target(self):
-        """Ensure either coordinates, target_id, or target_class is provided."""
-        has_coords = self.x is not None and self.y is not None
-        has_target = self.target_id is not None
-        has_class = self.target_class is not None
-        if not has_coords and not has_target and not has_class:
-            raise ValueError("Must provide (x, y) coordinates, target_id, or target_class")
-        return self
 
 
-class RightClickAction(BaseModel):
-    """Right click action.
-
-    Can specify either:
-    - x, y coordinates directly
-    - target_id referencing a detected entity (resolved to coordinates at execution)
-    """
+class RightClickAction(PointTargetAction):
+    """Right click action."""
 
     type: Literal["right_click"]
-    x: Optional[int] = Field(default=None, ge=0, le=7680)
-    y: Optional[int] = Field(default=None, ge=0, le=4320)
-    target_id: Optional[str] = Field(default=None, description="Entity ID from detection, e.g. 'sheep_0'")
-    target_class: Optional[str] = Field(default=None, description="Entity class to target nearest of, e.g. 'sheep'")
-    intent: str = ""
-
-    @model_validator(mode='after')
-    def check_coords_or_target(self):
-        """Ensure either coordinates, target_id, or target_class is provided."""
-        has_coords = self.x is not None and self.y is not None
-        has_target = self.target_id is not None
-        has_class = self.target_class is not None
-        if not has_coords and not has_target and not has_class:
-            raise ValueError("Must provide (x, y) coordinates, target_id, or target_class")
-        return self
 
 
 class PressAction(BaseModel):

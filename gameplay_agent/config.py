@@ -22,6 +22,7 @@ class Config(BaseModel):
     detection_imgsz: int = 1280  # YOLO inference resolution (higher = more detections, slower)
     adaptive_sahi: bool = True   # Use adaptive SAHI (fast scan + targeted SAHI on entity clusters)
     full_sahi_interval: int = 5  # Force full SAHI scan every N turns
+    detection_host: str = ""     # Remote CoreML server URL (e.g., "http://192.168.64.1:8420")
 
     # Timing settings
     loop_delay: float = 1.0  # Seconds between decisions
@@ -41,6 +42,7 @@ class Config(BaseModel):
             strategist_interval=int(os.environ.get("AOE2_STRATEGIST_INTERVAL", "10")),
             loop_delay=float(os.environ.get("AOE2_LOOP_DELAY", "1.0")),
             save_screenshots=os.environ.get("AOE2_SAVE_SCREENSHOTS", "true").lower() == "true",
+            detection_host=os.environ.get("AOE2_DETECTION_HOST", ""),
         )
 
 

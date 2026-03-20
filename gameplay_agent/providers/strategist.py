@@ -160,24 +160,24 @@ Read the screenshot to get exact current resource values (food, wood, gold, ston
 
             # Convert to Goal objects
             goals = []
-            for sg in result.goals:
-                goal_type = "local" if sg.type == "local" else "global"
+            for strategist_goal in result.goals:
+                goal_type = "local" if strategist_goal.type == "local" else "global"
                 # Convert numeric target strings back to numbers
-                target: str | int | float = sg.target
+                target: str | int | float = strategist_goal.target
                 try:
-                    target = int(sg.target)
+                    target = int(strategist_goal.target)
                 except ValueError:
                     try:
-                        target = float(sg.target)
+                        target = float(strategist_goal.target)
                     except ValueError:
                         pass  # Keep as string (e.g., "Feudal Age")
                 goals.append(
                     Goal(
-                        name=sg.name,
+                        name=strategist_goal.name,
                         type=goal_type,
-                        metric=sg.metric,
+                        metric=strategist_goal.metric,
                         target=target,
-                        priority=sg.priority,
+                        priority=strategist_goal.priority,
                         created_turn=turn,
                     )
                 )

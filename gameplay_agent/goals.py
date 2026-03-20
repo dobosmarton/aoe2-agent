@@ -5,11 +5,17 @@ from typing import Any, Literal
 
 import structlog
 
+from .entity_utils import extract_attrs
 from .memory import GameState, AGE_SCORES
 
 log = structlog.get_logger()
 
 # Enemy military classes from YOLO detection that trigger alarm
+ALARM_CONFIDENCE_GATE = 0.45
+RESOURCE_REWARD_DIVISOR = 1000.0
+POPULATION_REWARD_FACTOR = 0.05
+MAX_DISPLAY_GOALS = 5
+
 THREAT_CLASSES = frozenset({
     "militia_line", "spearman_line", "eagle_line",
     "archer_line", "skirmisher_line", "cavalry_archer", "hand_cannoneer",
@@ -116,13 +122,12 @@ class GoalManager:
             prev = prev_state.resources.get(res, 0)
             curr = curr_state.resources.get(res, 0)
             delta = curr - prev
-            # Normalize: +100 resources = +0.1 reward
-            reward[res] = round(delta / 1000.0, 4)
+            reward[res] = round(delta / RESOURCE_REWARD_DIVISOR, 4)
             reward["total"] += reward[res]
 
         # Population delta
         pop_delta = curr_state.population - prev_state.population
-        reward["population"] = round(pop_delta * 0.05, 4)  # +1 pop = +0.05
+        reward["population"] = round(pop_delta * POPULATION_REWARD_FACTOR, 4)
         reward["total"] += reward["population"]
 
         # Age progress
@@ -140,9 +145,8 @@ class GoalManager:
         if not self.active_goals:
             return ""
 
-        # Sort by priority (highest first), show top 5
         sorted_goals = sorted(self.active_goals, key=lambda g: g.priority, reverse=True)
-        top_goals = sorted_goals[:5]
+        top_goals = sorted_goals[:MAX_DISPLAY_GOALS]
 
         lines = ["## Active Goals (follow in priority order)"]
         for goal in top_goals:
@@ -246,9 +250,8 @@ class GoalManager:
         # Step 1: Find candidate military entities (confidence gate to avoid false alarms)
         candidates = []
         for entity in detected_entities:
-            cls = entity.class_name if hasattr(entity, 'class_name') else entity.get('class', '')
-            conf = entity.confidence if hasattr(entity, 'confidence') else entity.get('confidence', 1.0)
-            if cls in THREAT_CLASSES and conf >= 0.45:
+            attrs = extract_attrs(entity)
+            if attrs.class_name in THREAT_CLASSES and attrs.confidence >= ALARM_CONFIDENCE_GATE:
                 candidates.append(entity)
 
         if not candidates:
@@ -268,13 +271,11 @@ class GoalManager:
                 log.warning("ownership_check_failed", error=str(e))
                 # Fallback: treat all candidates as threats
                 for entity in candidates:
-                    cls = entity.class_name if hasattr(entity, 'class_name') else entity.get('class', '')
-                    threats_found.append(cls)
+                    threats_found.append(extract_attrs(entity).class_name)
         else:
             # No screenshot — legacy behavior (all military = threat)
             for entity in candidates:
-                cls = entity.class_name if hasattr(entity, 'class_name') else entity.get('class', '')
-                threats_found.append(cls)
+                threats_found.append(extract_attrs(entity).class_name)
 
         if threats_found:
             self._alarm_active = True

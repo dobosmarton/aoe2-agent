@@ -8,6 +8,9 @@ from PIL import Image
 from .config import config
 from .window import get_game_window_rect
 
+RESOURCE_BAR_HEIGHT = 60
+RESOURCE_BAR_JPEG_QUALITY = 80
+
 
 def capture_screenshot(monitor: int = 1, quality: int | None = None) -> tuple[bytes, int, int]:
     """
@@ -50,7 +53,9 @@ def save_screenshot(data: bytes, path: str) -> None:
         f.write(data)
 
 
-def crop_resource_bar(screenshot_bytes: bytes, bar_height: int = 60) -> bytes:
+def crop_resource_bar(
+    screenshot_bytes: bytes, bar_height: int = RESOURCE_BAR_HEIGHT,
+) -> bytes:
     """Crop just the resource bar from the top of a screenshot.
 
     Args:
@@ -63,7 +68,7 @@ def crop_resource_bar(screenshot_bytes: bytes, bar_height: int = 60) -> bytes:
     img = Image.open(io.BytesIO(screenshot_bytes))
     bar = img.crop((0, 0, img.width, min(bar_height, img.height)))
     buffer = io.BytesIO()
-    bar.save(buffer, format="JPEG", quality=80)
+    bar.save(buffer, format="JPEG", quality=RESOURCE_BAR_JPEG_QUALITY)
     return buffer.getvalue()
 
 

@@ -4,6 +4,12 @@ from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+# AoE2 Dark Age starting values
+INITIAL_RESOURCES = {"food": 200, "wood": 200, "gold": 100, "stone": 200}
+INITIAL_POPULATION = 4
+INITIAL_POPULATION_CAP = 5
+STUCK_LOOP_THRESHOLD = 3
+
 
 @dataclass
 class Turn:
@@ -24,11 +30,9 @@ class Turn:
 class GameState:
     """Structured game state extracted from LLM observations."""
 
-    resources: dict = field(
-        default_factory=lambda: {"food": 200, "wood": 200, "gold": 100, "stone": 200}
-    )
-    population: int = 4
-    population_cap: int = 5
+    resources: dict = field(default_factory=lambda: dict(INITIAL_RESOURCES))
+    population: int = INITIAL_POPULATION
+    population_cap: int = INITIAL_POPULATION_CAP
     current_age: str = "Dark Age"
     idle_tc: bool = False
     under_attack: bool = False
@@ -148,28 +152,28 @@ class AgentMemory:
         if self.working_memory:
             recent_turns = list(self.working_memory)[-3:]
             recent_lines = []
-            for t in recent_turns:
+            for turn in recent_turns:
                 # Summarize actions with target info
                 action_summary = ", ".join(
                     f"{a.get('type', '?')}({a.get('key', '')})" if a.get('type') == 'press'
                     else f"{a.get('type', '?')}({a.get('target_id') or ''} @ {a.get('x', '?')},{a.get('y', '?')})"
-                    for a in t.actions[:5]
+                    for a in turn.actions[:5]
                 )
-                line = f"Turn {t.iteration}: {t.reasoning[:100]}...\n  Actions: {action_summary}"
-                if t.verification:
-                    line += f"\n  Result: {t.verification[:150]}"
+                line = f"Turn {turn.iteration}: {turn.reasoning[:100]}...\n  Actions: {action_summary}"
+                if turn.verification:
+                    line += f"\n  Result: {turn.verification[:150]}"
                 recent_lines.append(line)
 
             # Stuck-loop detection: count consecutive failures
             no_change_count = 0
-            for t in reversed(recent_turns):
-                if t.verification and ("no visible change" in t.verification or "FAILED" in t.verification):
+            for turn in reversed(recent_turns):
+                if turn.verification and ("no visible change" in turn.verification or "FAILED" in turn.verification):
                     no_change_count += 1
                 else:
                     break
 
             header = "## Recent Decisions\n"
-            if no_change_count >= 3:
+            if no_change_count >= STUCK_LOOP_THRESHOLD:
                 header = f"## Recent Decisions\n**WARNING: Last {no_change_count} actions had NO EFFECT. You MUST try a completely different approach — different target, different task, or press H to reset.**\n"
 
             parts.append(header + "\n".join(recent_lines))
@@ -178,19 +182,19 @@ class AgentMemory:
 
     def _format_game_state(self) -> str:
         """Format game state for display."""
-        gs = self.game_state
-        is_housed = gs.population >= gs.population_cap and gs.population_cap > 0
+        state = self.game_state
+        is_housed = state.population >= state.population_cap and state.population_cap > 0
         lines = [
-            f"- Resources: Food={gs.resources['food']}, Wood={gs.resources['wood']}, Gold={gs.resources['gold']}, Stone={gs.resources['stone']}",
-            f"- Population: {gs.population}/{gs.population_cap}",
+            f"- Resources: Food={state.resources['food']}, Wood={state.resources['wood']}, Gold={state.resources['gold']}, Stone={state.resources['stone']}",
+            f"- Population: {state.population}/{state.population_cap}",
             f"- HOUSED (cannot create villagers!): {is_housed}" if is_housed else f"- Housed: False",
-            f"- Age: {gs.current_age}",
-            f"- TC Idle: {gs.idle_tc}",
-            f"- Under Attack: {gs.under_attack}",
+            f"- Age: {state.current_age}",
+            f"- TC Idle: {state.idle_tc}",
+            f"- Under Attack: {state.under_attack}",
         ]
 
-        if gs.enemy_located:
-            lines.append(f"- Enemy Located: {gs.enemy_location}")
+        if state.enemy_located:
+            lines.append(f"- Enemy Located: {state.enemy_location}")
 
         return "\n".join(lines)
 
