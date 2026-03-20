@@ -18,10 +18,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from autoresearch.experiment_log import get_next_experiment_id, log_experiment
 from autoresearch.memory_chain import MemoryChain
 from autoresearch.metrics import compute_score
-from src.config import config
-from src.game_loop import game_loop
-from src.memory import AgentMemory
-from src.providers.claude import ClaudeProvider
+from gameplay_agent.config import config
+from gameplay_agent.game_loop import game_loop
+from gameplay_agent.memory import AgentMemory
+from gameplay_agent.providers.claude import ClaudeProvider
 
 log = structlog.get_logger()
 

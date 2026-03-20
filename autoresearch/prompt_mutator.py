@@ -162,47 +162,6 @@ Propose ONE targeted change to improve the agent's game performance."""
 
     def _parse_response(self, text: str) -> dict | None:
         """Extract JSON from the LLM response."""
-        # Try direct JSON parse
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            pass
+        from .json_utils import extract_json_object
 
-        # Try extracting from code block
-        code_match = re.search(r"```(?:json)?\s*(\{.+\})\s*```", text, re.DOTALL)
-        if code_match:
-            try:
-                return json.loads(code_match.group(1))
-            except json.JSONDecodeError:
-                pass
-
-        # Try finding JSON object with bracket matching
-        start = text.find("{")
-        if start == -1:
-            return None
-
-        depth = 0
-        in_string = False
-        escape = False
-        for i, ch in enumerate(text[start:], start):
-            if escape:
-                escape = False
-                continue
-            if ch == "\\":
-                escape = True
-                continue
-            if ch == '"':
-                in_string = not in_string
-                continue
-            if in_string:
-                continue
-            if ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                if depth == 0:
-                    try:
-                        return json.loads(text[start:i + 1])
-                    except json.JSONDecodeError:
-                        return None
-        return None
+        return extract_json_object(text)

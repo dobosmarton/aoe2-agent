@@ -195,36 +195,11 @@ class MemoryChain:
 
     def _parse_observations(self, text: str) -> list[dict]:
         """Parse LLM response into observation dicts."""
-        try:
-            data = json.loads(text)
+        from .json_utils import extract_json_object
+
+        data = extract_json_object(text)
+        if data is not None:
             return data.get("observations", [])
-        except json.JSONDecodeError:
-            pass
-
-        # Try extracting JSON from code block
-        match = re.search(r"```(?:json)?\s*(\{.+\})\s*```", text, re.DOTALL)
-        if match:
-            try:
-                data = json.loads(match.group(1))
-                return data.get("observations", [])
-            except json.JSONDecodeError:
-                pass
-
-        # Try bracket matching
-        start = text.find("{")
-        if start != -1:
-            depth = 0
-            for i, ch in enumerate(text[start:], start):
-                if ch == "{":
-                    depth += 1
-                elif ch == "}":
-                    depth -= 1
-                    if depth == 0:
-                        try:
-                            data = json.loads(text[start:i + 1])
-                            return data.get("observations", [])
-                        except json.JSONDecodeError:
-                            break
 
         log.warning("memory_parse_failed", text=text[:200])
         return []

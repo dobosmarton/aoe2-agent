@@ -107,11 +107,9 @@ class EntityDetector:
         """
         self.class_names = class_names or DEFAULT_CLASSES
         self.confidence_threshold = confidence_threshold
-        # Lower thresholds for small/hard-to-detect entities
-        self.class_thresholds: dict[str, float] = {
-            "sheep": 0.20, "deer": 0.20, "berry_bush": 0.25,
-            "villager": 0.25, "relic": 0.20,
-        }
+        # Per-class thresholds from shared config
+        from detection.inference.thresholds import CLASS_THRESHOLDS
+        self.class_thresholds: dict[str, float] = dict(CLASS_THRESHOLDS)
         self.use_mock = use_mock
         self.use_sahi = use_sahi
         self.model = None
@@ -621,6 +619,53 @@ class EntityDetector:
 
         return rois
 
+    # ------------------------------------------------------------------
+    # Shared SAHI helpers
+    # ------------------------------------------------------------------
+
+    SAHI_TILE_SIZE = 640
+    SAHI_OVERLAP = 32
+
+    def _generate_tiles(
+        self,
+        image: "Image.Image",
+        rois: list[tuple[float, float, float, float]] | None = None,
+    ) -> tuple[list, list[tuple[int, int, int, int]]]:
+        """Generate padded tiles and their (x, y, tile_w, tile_h) offsets.
+
+        If *rois* is given, only tiles within those regions are produced.
+        Otherwise the whole image is tiled.
+        """
+        from PIL import Image as PILImage
+
+        tile_size = self.SAHI_TILE_SIZE
+        stride = tile_size - self.SAHI_OVERLAP
+
+        if rois:
+            regions = [(int(r[0]), int(r[1]), int(r[2]), int(r[3])) for r in rois]
+        else:
+            width, height = image.size
+            regions = [(0, 0, width, height)]
+
+        tiles: list = []
+        offsets: list[tuple[int, int, int, int]] = []
+
+        for rx1, ry1, rx2, ry2 in regions:
+            for y in range(ry1, ry2, stride):
+                for x in range(rx1, rx2, stride):
+                    x_end = min(x + tile_size, rx2)
+                    y_end = min(y + tile_size, ry2)
+                    tile = image.crop((x, y, x_end, y_end))
+                    tile_w, tile_h = tile.size
+                    if tile.size != (tile_size, tile_size):
+                        padded = PILImage.new("RGB", (tile_size, tile_size), (0, 0, 0))
+                        padded.paste(tile, (0, 0))
+                        tile = padded
+                    tiles.append(tile)
+                    offsets.append((x, y, tile_w, tile_h))
+
+        return tiles, offsets
+
     def _sahi_detect_rois(
         self, image: "Image.Image", rois: list[tuple[float, float, float, float]]
     ) -> list[DetectedEntity]:
@@ -629,28 +674,8 @@ class EntityDetector:
         Tiles each ROI into 640x640 chunks and batches all tiles for
         one ONNX call (or sequential PyTorch calls).
         """
-        tile_size = 640
-        overlap = 32
-        stride = tile_size - overlap
-
-        tiles = []
-        offsets = []
-
-        for roi in rois:
-            rx1, ry1, rx2, ry2 = [int(v) for v in roi]
-            for y in range(ry1, ry2, stride):
-                for x in range(rx1, rx2, stride):
-                    x_end = min(x + tile_size, rx2)
-                    y_end = min(y + tile_size, ry2)
-                    tile = image.crop((x, y, x_end, y_end))
-                    tile_w, tile_h = tile.size
-                    if tile.size != (tile_size, tile_size):
-                        from PIL import Image as PILImage
-                        padded = PILImage.new("RGB", (tile_size, tile_size), (0, 0, 0))
-                        padded.paste(tile, (0, 0))
-                        tile = padded
-                    tiles.append(tile)
-                    offsets.append((x, y, tile_w, tile_h))
+        tile_size = self.SAHI_TILE_SIZE
+        tiles, offsets = self._generate_tiles(image, rois=rois)
 
         if not tiles:
             return []
@@ -827,27 +852,7 @@ class EntityDetector:
         Same tiling logic as _sahi_detect() but batches all tiles into a single
         ONNX Runtime inference call for ~3-5x speedup over sequential PyTorch.
         """
-        width, height = image.size
-        tile_size = 640
-        overlap = 32
-        stride = tile_size - overlap
-
-        # 1. Collect all tiles and their offsets
-        tiles = []
-        offsets = []
-        for y_start in range(0, height, stride):
-            for x_start in range(0, width, stride):
-                x_end = min(x_start + tile_size, width)
-                y_end = min(y_start + tile_size, height)
-                tile = image.crop((x_start, y_start, x_end, y_end))
-                # Pad tile to tile_size x tile_size if it's at the edge
-                if tile.size != (tile_size, tile_size):
-                    from PIL import Image as PILImage
-                    padded = PILImage.new("RGB", (tile_size, tile_size), (0, 0, 0))
-                    padded.paste(tile, (0, 0))
-                    tile = padded
-                tiles.append(tile)
-                offsets.append((x_start, y_start, x_end - x_start, y_end - y_start))
+        tiles, offsets = self._generate_tiles(image)
 
         if not tiles:
             return []
@@ -1027,12 +1032,12 @@ class EntityDetector:
             predictions = raw_output[0]
             logger.debug("Post-NMS format, %d detection slots", len(predictions))
 
-            # Debug: show confidence distribution
-            confidences = predictions[:, 4]
-            non_zero = confidences[confidences > 0.01]
-            logger.debug("Confidences > 0.01: %d", len(non_zero))
-            if len(non_zero) > 0:
-                logger.debug("Max conf: %.4f, Min conf: %.4f", non_zero.max(), non_zero.min())
+            if logger.isEnabledFor(logging.DEBUG):
+                confidences = predictions[:, 4]
+                non_zero = confidences[confidences > 0.01]
+                logger.debug("Confidences > 0.01: %d", len(non_zero))
+                if len(non_zero) > 0:
+                    logger.debug("Max conf: %.4f, Min conf: %.4f", non_zero.max(), non_zero.min())
         elif len(raw_output.shape) == 3 and raw_output.shape[1] == (4 + len(self.class_names)):
             # Raw format: (1, 4+num_classes, num_boxes) - needs transposing
             # Shape is (1, 50, 8400) for 46 classes -> transpose to (8400, 50)
