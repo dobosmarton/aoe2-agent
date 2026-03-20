@@ -1,6 +1,6 @@
 # Chapter 2: Game Loop Pipeline
 
-The game loop is the heartbeat of the agent. Every ~1 second, it captures a screenshot, detects entities, checks for threats, optionally runs the strategist, builds text context, asks the executor for actions, executes them, and verifies the results.
+The game loop is the heartbeat of the agent. Every ~1 second, it captures a screenshot, detects entities, checks for threats, optionally runs the strategist, builds text context, asks the executor for actions, and executes them.
 
 ## 2.1 The Iteration Cycle
 
@@ -40,26 +40,24 @@ sequenceDiagram
         GL->>M: create_turn(reasoning, actions, observations)
         GL->>GM: evaluate_progress(game_state)
         GL->>E: execute_actions(actions)
-        GL->>D: detect(post_screenshot)
-        Note over GL: Compare pre/post for verification
     end
 ```
 
-The full cycle is implemented in `src/game_loop.py:98-378`.
+The main loop is implemented in `game_loop()` with phase logic decomposed into named functions.
 
-### Step 1: Check game is running (`game_loop.py:172-175`)
+### Step 1: Check game is running
 
 Calls `is_game_running()` which searches for a window titled `"Age of Empires II: Definitive Edition"` via pygetwindow. If the window is gone, the loop exits.
 
-### Step 2: Ensure focus (`game_loop.py:177-181`)
+### Step 2: Ensure focus
 
 Calls `ensure_game_focused()`. If focus fails, the iteration is skipped with `continue` and a 1-second sleep.
 
-### Step 3: Capture screenshot (`game_loop.py:183-190`)
+### Step 3: Capture screenshot — `_capture_screenshot()`
 
-`capture_screenshot()` uses the `mss` library to grab the game window region, convert from BGRA to RGB via PIL, and encode as JPEG. Returns `(bytes, width, height)`.
+Uses the `mss` library to grab the game window region, convert from BGRA to RGB via PIL, and encode as JPEG. Returns `(bytes, width, height)`. Optionally saves screenshots to disk when `config.save_screenshots` is enabled.
 
-### Step 4: Run entity detection (`game_loop.py:192-201`)
+### Step 4: Run entity detection — `_run_detection()`
 
 Entity detection uses **adaptive SAHI** by default (`config.adaptive_sahi = True`). Adaptive SAHI runs a fast single-pass scan at `imgsz=1280`, clusters detected entities into ROI regions, then runs SAHI tiling only on those regions (~3-8 tiles instead of ~18 for full SAHI). This reduces detection latency from ~234ms to ~100-200ms.
 
@@ -70,15 +68,17 @@ Full SAHI is forced on:
 
 Results are cached in the executor module via `set_detected_entities()` for later target_id/target_class resolution. Entity IDs persist across frames via the Kalman filter tracker. Detection failures are caught and logged without breaking the loop.
 
-### Step 5: Classify ownership (`game_loop.py:204-213`)
+### Step 5: Classify ownership — `_classify_entities()`
 
 For military entities, a color-based classifier checks blue pixel dominance in the health bar and unit body regions. In AoE2:DE, Player 1 is always blue. Entities are tagged `[own]` or `[enemy]` in the text context sent to the executor.
 
-### Step 6: Alarm check (`game_loop.py:228-230`)
+Entity formatting uses `build_entity_summary()` from `entity_utils.py`, which normalizes both `DetectedEntity` objects and plain dicts via `extract_attrs()`.
+
+### Step 6: Alarm check
 
 Scans detected entities for 21 enemy military classes (militia_line, archer_line, knight_line, etc.). Uses ownership classification to filter out own units. If enemy threats are found, injects a priority-10 "Defend base" goal and triggers an early strategist run.
 
-### Step 7: Run strategist (`game_loop.py:232-253`)
+### Step 7: Run strategist — `_run_strategist()`
 
 The strategist (Sonnet) runs every N turns (default 10), on the first successful iteration, or when an alarm is triggered. It:
 1. Receives the screenshot as a base64 image
@@ -88,50 +88,41 @@ The strategist (Sonnet) runs every N turns (default 10), on the first successful
 
 The strategist uses `messages.parse()` with a `StrategistResponse` Pydantic model for structured output.
 
-### Step 8: Build context (`game_loop.py:255-273`)
+### Step 8: Build context — `_build_llm_context()`
 
 Assembles text context from multiple sources, layered in this order:
 1. **Detected entities** — YOLO results formatted as text: `sheep_0: sheep at (456,789) [95%]`
 2. **Active goals** — from goal manager, sorted by priority: `[HIGH] Queue villagers: 4/10 (40%)`
 3. **Resource readings** — cached from strategist: `Food: 250, Wood: 180, Gold: 50, Stone: 100`
 4. **Game state** — from memory: population, age, under_attack flags
-5. **Recent decisions** — last 3 turns with verification results
+5. **Recent decisions** — last 3 turns with action feedback
 6. **Dynamic game knowledge** — affordable units/buildings based on current resources (optional)
 
-### Step 9: Get actions from executor (`game_loop.py:275-286`)
+### Step 9: Get actions from executor
 
 Calls `provider.get_actions(context, width, height)` — note: **no screenshot**. The executor is 100% text-based. It uses `messages.parse()` with the `LLMResponse` Pydantic model.
 
 The `LLMResponse` fields are ordered: `actions` first, then `observations`, then `reasoning`. This ensures structured output generates actions before reasoning consumes the token budget.
 
-### Step 10: Update memory and goals (`game_loop.py:288-313`)
+### Step 10: Update memory and goals — `_process_response()`
 
-Creates a `Turn` record, updates `GameState` from the executor's observations. Evaluates goal progress against the updated state. Computes a turn reward based on resource deltas, population changes, and age progression.
+Creates a `Turn` record, updates `GameState` from the executor's observations. Evaluates goal progress against the updated state. Computes a turn reward based on resource deltas, population changes, and age progression. Checks for game-over conditions (victory, defeat, timeout).
 
-### Step 11: Execute actions (`game_loop.py:328-337`)
+### Step 11: Execute actions — `_execute_turn_actions()`
 
-`execute_actions()` iterates through the action list:
-- Resolves `target_id` to coordinates from cached entity positions
-- Resolves `target_class` to the nearest entity of that class
+Executes ground commands (hardcoded first-turn actions like zoom and auto-scout), then LLM actions:
+- Resolves `target_id` or `target_class` to coordinates from cached entity positions
 - Translates coordinates from screenshot-relative to screen-absolute
 - Executes via pyautogui with `action_delay` (50ms) between actions
+- Tracks success/failure via `ActionResult` — failed actions are recorded in memory as feedback for the next turn
+- Falls back to TC hotkey + villager queue + idle villager select if no actions were returned
 - On `rescan: true`, runs the rescan pipeline:
   1. **Tracker prediction check** — if tracker confidence > 80%, extrapolate positions via Kalman predict (~0ms, no screenshot or inference needed)
   2. **Screenshot capture** — if prediction not used
   3. **Frame differencing** — compare to previous frame; skip detection if MAD < 3%
   4. **Fast detection** — single-pass `detect_fast()` at `imgsz=1280` (~50ms)
 
-### Step 12: Action verification (`game_loop.py:339-350`)
-
-After execution, captures a new screenshot and runs detection. Compares pre/post entity states:
-- New entities (e.g., building placed)
-- Disappeared entities (e.g., resource gathered)
-- Moved entities (e.g., unit repositioned)
-- No change (action may have failed)
-
-Verification results are stored in memory and sent to the executor as context on the next turn.
-
-### Step 13: Wait (`game_loop.py:358`)
+### Step 12: Wait
 
 `asyncio.sleep(config.loop_delay)` — default 1.0 seconds.
 
@@ -140,7 +131,7 @@ Verification results are stored in memory and sent to the executor as context on
 `run_single_iteration()` runs one cycle without looping:
 
 ```bash
-python -m src.main --test
+python -m gameplay_agent --test
 ```
 
 Captures a screenshot, runs detection, builds context, gets actions from Claude but does **not** execute them by default. Returns all intermediate results for debugging.
@@ -184,13 +175,13 @@ The game loop supports a `time_budget` parameter (seconds). When elapsed time ex
 
 ## Summary
 
-- 13-step iteration cycle: check → focus → capture → detect → classify → alarm → strategist → context → executor → memory → execute → verify → wait
+- 12-step iteration cycle: check → focus → capture → detect → classify → alarm → strategist → context → executor → memory → execute → wait
 - ~3-5 second cycle time dominated by Claude API latency
 - Detection uses adaptive SAHI by default (~100-200ms), falling back to full SAHI periodically
 - Rescans use tracker prediction (~0ms) or fast detection (~50ms)
 - Strategist runs periodically; executor runs every turn
 - Goal-driven with reward computation per turn
-- Action verification provides closed-loop feedback
+- Action failure feedback tracked via `ActionResult` and fed back to memory
 
 ## Related Topics
 

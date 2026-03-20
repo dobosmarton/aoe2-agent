@@ -35,8 +35,7 @@ Each iteration (~3-5 seconds):
 6. **Build context** — Assemble text: entities + goals + resources + memory + game knowledge
 7. **Execute** — Haiku reads text context, returns structured actions (Pydantic-validated)
 8. **Act** — Execute mouse clicks / keyboard presses via pyautogui
-9. **Verify** — Compare pre/post YOLO detection to assess action effectiveness
-10. **Remember** — Update memory, evaluate goal progress, compute rewards
+9. **Remember** — Update memory, evaluate goal progress, compute rewards
 
 ## Requirements
 
@@ -49,7 +48,7 @@ Each iteration (~3-5 seconds):
 ```bash
 python -m venv venv
 venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r gameplay_agent/requirements.txt
 ```
 
 ## Configuration
@@ -66,18 +65,22 @@ set ANTHROPIC_API_KEY=your-key-here
 | `AOE2_STRATEGIST_INTERVAL` | `10` | Run strategist every N turns |
 | `AOE2_LOOP_DELAY` | `1.0` | Seconds between iterations |
 | `AOE2_SAVE_SCREENSHOTS` | `true` | Save screenshots to logs/ |
+| `AOE2_DETECTION_HOST` | — | Remote detection server URL (e.g., `http://192.168.64.1:8420`) |
 
 ## Usage
 
 ```bash
 # Run the agent
-python -m src.main
+just agent
 
 # Run N iterations
-python -m src.main --iterations 20
+just agent --iterations 20
 
 # Single test iteration (no action execution)
-python -m src.main --test
+just agent --test
+
+# Run the detection server (macOS host)
+just server --model detection/inference/models/aoe2_yolo_v5.onnx
 
 # Autoresearch: timed experiment with metrics
 python -m autoresearch.game_runner --time-budget 600 --description "test run"
@@ -87,49 +90,44 @@ python -m autoresearch.game_runner --time-budget 600 --description "test run"
 
 ```
 agent/
-├── src/                           # Core agent
+├── gameplay_agent/                # Gameplay agent (Windows VM)
 │   ├── main.py                    # CLI entry point
 │   ├── config.py                  # Pydantic config with env var overrides
 │   ├── game_loop.py               # Main capture→detect→think→act loop
-│   ├── executor.py                # Mouse/keyboard action execution
-│   ├── models.py                  # Pydantic models (actions, LLMResponse)
+│   ├── executor.py                # Mouse/keyboard action execution (dispatch pattern)
+│   ├── models.py                  # Pydantic models (7 action types, LLMResponse)
+│   ├── entity_utils.py            # Entity attribute extraction and summary formatting
 │   ├── memory.py                  # Working memory and game state tracking
 │   ├── goals.py                   # Goal management, alarm system, rewards
-│   ├── goal_logger.py             # Goal progress logging
 │   ├── screen.py                  # Screenshot capture via mss
 │   ├── window.py                  # AoE2 window detection and focus
-│   └── providers/
-│       ├── base.py                # Abstract LLM provider interface
-│       ├── claude.py              # Haiku executor (text-only)
-│       └── strategist.py          # Sonnet strategist (vision + goals)
-├── detection/                     # YOLO entity detection
+│   ├── providers/                 # LLM providers (Claude executor + strategist)
+│   └── requirements.txt           # Agent dependencies
+├── server/                        # Detection API server (macOS host)
+│   ├── app.py                     # FastAPI + CoreML/ONNX inference
+│   ├── classes.yaml               # Bundled class definitions
+│   └── requirements.txt           # Server dependencies
+├── detection/                     # YOLO entity detection (shared)
 │   ├── inference/
 │   │   ├── detector.py            # EntityDetector, 60 classes, tracking
+│   │   ├── remote_detector.py     # HTTP client for detection server
 │   │   ├── ownership.py           # Blue-dominance ownership classifier
-│   │   └── models/                # YOLO model weights (.pt)
+│   │   ├── thresholds.py          # Per-class confidence thresholds
+│   │   ├── frame_diff.py          # Frame differencing for rescan optimization
+│   │   └── models/                # YOLO model weights
 │   ├── training/                  # Synthetic data gen + YOLO training
-│   ├── extraction/                # SLD sprite extraction
 │   ├── labeling/                  # CVAT/COCO labeling tools
 │   └── docs/                      # Detection documentation
 ├── data/                          # Game knowledge database
-│   ├── game_knowledge.py          # SQLite wrapper for dynamic context
-│   └── knowledge_base/            # Static game data
-├── prompts/
-│   ├── system.md                  # Executor system prompt
-│   └── strategist.md              # Strategist system prompt
+├── prompts/                       # System prompts (executor + strategist)
 ├── autoresearch/                  # Automated experiment framework
-│   ├── game_runner.py             # Run timed experiments with metrics
-│   ├── orchestrator.py            # Prompt mutation + experiment loop
-│   ├── metrics.py                 # Scoring and analysis
-│   ├── experiment_log.py          # Experiment result storage
-│   └── memory_chain.py            # Cross-game learning
-├── logs/                          # Screenshots and goal logs
-└── requirements.txt
+├── justfile                       # Monorepo commands
+└── logs/                          # Screenshots and goal logs
 ```
 
 ## Key Systems
 
-### Goal Management (`src/goals.py`)
+### Goal Management (`gameplay_agent/goals.py`)
 
 The strategist creates prioritized goals (e.g., "Reach 10 population", "Advance to Feudal Age"). The executor receives these as context and follows them in priority order. Goals have:
 - **Type**: local (complete quickly) or global (long-term)
@@ -137,7 +135,7 @@ The strategist creates prioritized goals (e.g., "Reach 10 population", "Advance 
 - **Priority**: 1-10 (10 = most urgent)
 - **Progress**: 0.0-1.0, auto-computed from game state
 
-### Alarm System (`src/goals.py`)
+### Alarm System (`gameplay_agent/goals.py`)
 
 Scans YOLO detections for 21 enemy military classes. Uses color-based ownership detection (`detection/inference/ownership.py`) to distinguish own units (blue, Player 1) from enemy units. On enemy detection:
 - Injects priority-10 "Defend base" goal
@@ -145,11 +143,15 @@ Scans YOLO detections for 21 enemy military classes. Uses color-based ownership 
 
 ### Entity Detection (`detection/`)
 
-60-class YOLO v5 model with 92.2% mAP50 accuracy. Entities persist across frames via IoU tracking (e.g., `sheep_0` stays `sheep_0`). The executor can target entities by class (`target_class: "sheep"`) or by ID (`target_id: "sheep_0"`).
+60-class YOLO v5 model with 92.2% mAP50 accuracy. Entities persist across frames via IoU tracking (e.g., `sheep_0` stays `sheep_0`). The executor supports 7 action types (click, right_click, press, drag, wait, scroll, detect) and can target entities by class (`target_class: "sheep"`) or by ID (`target_id: "sheep_0"`).
 
-### Action Verification (`src/game_loop.py`)
+### Remote Detection Server (`server/`)
 
-After executing actions, compares pre/post YOLO detections to assess effectiveness. Results are fed back to the executor as context for the next turn.
+Offloads YOLO inference to the macOS host's Neural Engine via CoreML (~15ms per tile vs ~1.2s on VM CPU). The agent talks to it over HTTP with automatic fallback to local ONNX.
+
+### Action Feedback (`gameplay_agent/game_loop.py`)
+
+Action success/failure is tracked via `ActionResult` objects returned by the executor. Failed actions (e.g., unresolved target_id) are recorded in memory and fed back to the LLM as context for the next turn.
 
 ### Autoresearch (`autoresearch/`)
 

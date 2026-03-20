@@ -128,7 +128,7 @@ These limits keep each turn atomic and recoverable. If an action fails, the next
 
 ## 5.8 Prompt Loading Mechanism
 
-The prompt is loaded from disk at `src/providers/claude.py:65-98`:
+The prompt is loaded from disk at `gameplay_agent/providers/claude.py:65-98`:
 
 ```python
 def get_system_prompt(self) -> str:

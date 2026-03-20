@@ -4,7 +4,7 @@ The agent abstracts LLM communication behind a provider interface. Currently onl
 
 ## 4.1 The Abstract Interface
 
-`src/providers/base.py:7-37` defines the contract:
+`gameplay_agent/providers/base.py:7-37` defines the contract:
 
 ```python
 class BaseLLMProvider(ABC):
@@ -29,7 +29,7 @@ Two methods: `get_actions()` takes a screenshot and context, returns structured 
 
 ## 4.2 Provider Registration
 
-Providers are registered in a simple dict at `src/main.py:31-44`:
+Providers are registered in a simple dict at `gameplay_agent/main.py:31-44`:
 
 ```python
 def create_provider(provider_name: str):
@@ -44,11 +44,11 @@ def create_provider(provider_name: str):
     return providers[provider_name]()
 ```
 
-Selected via CLI: `python -m src.main --provider claude`.
+Selected via CLI: `python -m gameplay_agent --provider claude`.
 
 ## 4.3 Claude Provider Implementation
 
-`src/providers/claude.py:32-291` -- the only production provider.
+`gameplay_agent/providers/claude.py:32-291` -- the only production provider.
 
 ### Initialization (`claude.py:35-63`)
 
@@ -121,11 +121,11 @@ A 1-second wait action keeps the loop running while the transient error resolves
 
 ## 4.4 Adding a New Provider
 
-1. Create `src/providers/new_provider.py` implementing `BaseLLMProvider`
+1. Create `gameplay_agent/providers/new_provider.py` implementing `BaseLLMProvider`
 2. Implement `get_actions()` to accept screenshot bytes and return the standard dict
 3. Implement `get_system_prompt()` with an appropriate prompt for the model
-4. Register in `create_provider()` at `src/main.py:33`
-5. Add to `--choices` in the argparse definition at `src/main.py:83`
+4. Register in `create_provider()` at `gameplay_agent/main.py:33`
+5. Add to `--choices` in the argparse definition at `gameplay_agent/main.py:83`
 
 The game loop, memory system, executor, and detection pipeline are provider-agnostic -- they only interact through the `get_actions()` return value.
 

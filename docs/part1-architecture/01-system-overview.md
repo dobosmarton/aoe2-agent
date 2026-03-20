@@ -16,15 +16,16 @@ This split optimizes for cost and speed: the expensive vision call (Sonnet) happ
 
 ```
 agent/
-├── src/                       # Core agent runtime
+├── gameplay_agent/                       # Core agent runtime
 │   ├── main.py                # CLI entry point, provider creation
 │   ├── config.py              # Pydantic configuration with env var overrides
-│   ├── game_loop.py           # Main capture→detect→alarm→strategist→execute→verify cycle
+│   ├── game_loop.py           # Main capture→detect→alarm→strategist→execute cycle
 │   ├── memory.py              # Working memory and game state tracking
 │   ├── goals.py               # Goal management, alarm system, reward computation
 │   ├── goal_logger.py         # Goal progress and completion logging
-│   ├── executor.py            # Action execution via pyautogui
-│   ├── models.py              # Pydantic action/response validation
+│   ├── executor.py            # Action execution via pyautogui (dispatch pattern)
+│   ├── models.py              # Pydantic action/response validation (7 action types)
+│   ├── entity_utils.py        # Entity attribute extraction and summary formatting
 │   ├── screen.py              # Screenshot capture via mss
 │   ├── window.py              # Game window detection and focus management
 │   └── providers/
@@ -34,7 +35,10 @@ agent/
 ├── detection/                 # YOLO entity detection (optional)
 │   ├── inference/
 │   │   ├── detector.py        # EntityDetector, 60 classes, IoU tracking
+│   │   ├── remote_detector.py # HTTP client for detection server
 │   │   ├── ownership.py       # Blue-dominance ownership classifier
+│   │   ├── thresholds.py      # Per-class confidence thresholds
+│   │   ├── frame_diff.py      # Frame differencing for rescan optimization
 │   │   └── models/            # YOLO v5 model weights (.pt)
 │   ├── training/              # Synthetic data gen + YOLO training
 │   ├── labeling/              # CVAT integration + class remapping
@@ -48,7 +52,8 @@ agent/
 ├── autoresearch/              # Automated experiment framework
 │   ├── game_runner.py         # Timed experiments with metrics
 │   ├── orchestrator.py        # Prompt mutation loop
-│   └── metrics.py             # Scoring and analysis
+│   ├── metrics.py             # Scoring and analysis
+│   └── json_utils.py          # Robust JSON extraction from LLM output
 └── logs/                      # Screenshots, goal logs
 ```
 
@@ -56,7 +61,7 @@ agent/
 
 The agent won't crash without optional subsystems, but YOLO detection is practically required for meaningful gameplay.
 
-**Detection** — imported inside a try/except at `src/game_loop.py:90-95`:
+**Detection** — imported inside a try/except at module level in `gameplay_agent/game_loop.py`:
 
 ```python
 try:
@@ -68,7 +73,7 @@ except ImportError:
 
 Without detection, the executor has no entity list — it cannot target units, buildings, or resources by class or ID. The strategist can still read screenshots and set goals, but the executor is limited to hotkeys and hardcoded coordinates. In practice, this makes the agent nearly non-functional: it can't gather resources, train units, or build at specific locations. Detection is technically optional (the agent starts and runs) but practically required for any useful gameplay.
 
-**Game Knowledge** — imported inside a try/except at `src/providers/claude.py:19-24`:
+**Game Knowledge** — imported inside a try/except in `gameplay_agent/providers/claude.py`:
 
 ```python
 try:
@@ -80,13 +85,13 @@ except ImportError:
 
 Without the knowledge database, no dynamic context injection occurs. The executor still receives the system prompt and memory context. This is a minor degradation — the agent plays reasonably without it.
 
-**Window Management** — pygetwindow is optional at `src/window.py`. When unavailable, functions return `True` by default — the agent assumes the game is running and focused. Screenshot capture falls back to the full primary monitor.
+**Window Management** — pygetwindow is optional at `gameplay_agent/window.py`. When unavailable, functions return `True` by default — the agent assumes the game is running and focused. Screenshot capture falls back to the full primary monitor.
 
 > **Key Insight**: Detection is the critical optional dependency. Without YOLO, the executor is essentially blind — the experience is very poor. Game knowledge and window management are truly additive enhancements that degrade gracefully.
 
 ## 1.4 Configuration
 
-Configuration uses a Pydantic `BaseModel` with environment variable overrides (`src/config.py`):
+Configuration uses a Pydantic `BaseModel` with environment variable overrides (`gameplay_agent/config.py`):
 
 | Setting | Env Var | Default | Purpose |
 |---------|---------|---------|---------|
@@ -108,17 +113,17 @@ A global singleton `config = Config.from_env()` is created at module load time a
 
 The entire agent runs on asyncio:
 
-- **Entry point**: `asyncio.run(main_async(args))` at `src/main.py`
+- **Entry point**: `asyncio.run(main_async(args))` in `gameplay_agent/main.py`
 - **API clients**: `anthropic.AsyncAnthropic` for both executor and strategist
-- **Game loop**: `async def game_loop()` at `src/game_loop.py`
-- **Action execution**: `async def execute_actions()` at `src/executor.py`
+- **Game loop**: `game_loop()` in `gameplay_agent/game_loop.py`
+- **Action execution**: `execute_actions()` in `gameplay_agent/executor.py`
 - **Delays**: `asyncio.sleep()` for non-blocking waits
 
 pyautogui calls are synchronous but fast (sub-millisecond per click), so they don't block meaningfully.
 
 ## 1.6 Logging
 
-Structured logging via structlog with colored console output, configured at `src/main.py:14-26`.
+Structured logging via structlog with colored console output, configured in `gameplay_agent/main.py`.
 
 Key log events: `iteration_start`, `screenshot_captured`, `detection_complete`, `strategist_response`, `strategist_goals_updated`, `llm_response`, `actions_executed`, `action_verification`, `alarm_triggered`, `turn_reward`.
 

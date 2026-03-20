@@ -6,7 +6,7 @@ Each API call sends more than just a screenshot. The LLM receives layered contex
 
 ```mermaid
 flowchart TD
-    DET["Detected Entities<br/>(top 15, from YOLO)"] --> CTX["Context String"]
+    DET["Detected Entities<br/>(top 20, from YOLO)"] --> CTX["Context String"]
     MEM["Memory Context<br/>(game state + last 3 turns)"] --> CTX
     CTX --> ENHANCE{"Dynamic context<br/>available?"}
     ENHANCE -->|yes| DYN["GameKnowledge<br/>(affordable units/buildings + tips)"]
@@ -20,13 +20,13 @@ flowchart TD
     MSG --> API
 ```
 
-The context string is built in two stages: the game loop builds the base context (`src/game_loop.py:112-124`), then the Claude provider optionally enhances it with game knowledge (`src/providers/claude.py:100-153`).
+The context string is built in two stages: `_build_llm_context()` in the game loop builds the base context, then the Claude provider optionally enhances it with game knowledge.
 
 ## 6.2 Memory System
 
-### Data Structures (`src/memory.py`)
+### Data Structures (`gameplay_agent/memory.py`)
 
-**Turn** (`memory.py:8-17`) -- a single decision cycle:
+**Turn** -- a single decision cycle:
 ```python
 @dataclass
 class Turn:
@@ -38,7 +38,7 @@ class Turn:
     observed_events: list[str] = field(default_factory=list)
 ```
 
-**GameState** (`memory.py:20-33`) -- cumulative state:
+**GameState** -- cumulative state:
 ```python
 @dataclass
 class GameState:
@@ -52,7 +52,9 @@ class GameState:
     enemy_location: str
 ```
 
-**AgentMemory** (`memory.py:36-168`) -- the memory manager:
+Initial resources and population are defined as named constants (`INITIAL_RESOURCES`, `INITIAL_POPULATION`, `INITIAL_POPULATION_CAP`).
+
+**AgentMemory** -- the memory manager:
 - `working_memory`: `deque(maxlen=10)` -- last 10 turns
 - `episode_summary`: string for long-term context (currently unused but plumbed)
 - `game_state`: a single `GameState` updated from observations
@@ -60,13 +62,13 @@ class GameState:
 
 ### Observation Feedback Loop
 
-After each Claude response, `create_turn()` at `memory.py:145-168`:
+After each Claude response, `create_turn()`:
 
 1. Creates a `Turn` record with reasoning, actions, and extracted observations
 2. Calls `update_from_observations()` to update `GameState`
 3. Appends the turn to working memory
 
-`update_from_observations()` at `memory.py:60-89` parses the LLM's self-reported observations:
+`update_from_observations()` parses the LLM's self-reported observations:
 
 - `resources` dict updates directly
 - `population` string like `"12/15"` is split to set `population` and `population_cap`
@@ -77,7 +79,7 @@ This creates a feedback loop: the LLM reports what it sees, those observations b
 
 ### Context Formatting
 
-`get_context_for_llm()` at `memory.py:91-118` builds a human-readable context string with three sections:
+`get_context_for_llm()` builds a human-readable context string with three sections:
 
 **Current Game State:**
 ```
@@ -99,31 +101,43 @@ Turn 1: I see the TC and some sheep. Need to gather food...\n  Actions: press(h)
 Turn 2: Villagers are idle. Sending them to sheep...\n  Actions: press(.), right_click(640,380)
 ```
 
-The "housed" flag (`memory.py:123`) is computed: `population >= population_cap and population_cap > 0`. When true, it's flagged prominently (`HOUSED (cannot create villagers!)`) to alert the LLM.
+The "housed" flag is computed in `_format_game_state()`: `population >= population_cap and population_cap > 0`. When true, it's flagged prominently (`HOUSED (cannot create villagers!)`) to alert the LLM.
+
+Stuck-loop detection counts consecutive turns with no visible change. After `STUCK_LOOP_THRESHOLD` (3) failures, a warning is injected: "Last N actions had NO EFFECT. You MUST try a completely different approach."
 
 ## 6.3 Entity Context
 
-Built in the game loop at `src/game_loop.py:116-124`:
+Built by `_build_llm_context()` in the game loop, using `build_entity_summary()` from `entity_utils.py`:
 
 ```python
-if detected_entities:
-    entity_context = "\n## Detected Entities\n"
-    for entity in detected_entities[:15]:  # Limit to avoid token bloat
-        eid = entity.id if hasattr(entity, 'id') else entity.get('id', 'unknown')
-        cls = entity.class_name if hasattr(entity, 'class_name') else entity.get('class', 'unknown')
-        center = entity.center if hasattr(entity, 'center') else entity.get('center', (0, 0))
-        conf = entity.confidence if hasattr(entity, 'confidence') else entity.get('confidence', 0)
-        entity_context += f"  {eid}: {cls} at ({int(center[0])},{int(center[1])}) [{conf:.0%}]\n"
-    context = entity_context + "\n" + context
+def build_entity_summary(
+    entities: list[object],
+    max_count: int = 20,
+    ownership_results: dict | None = None,
+) -> str:
+    lines = []
+    for entity in entities[:max_count]:
+        attrs = extract_attrs(entity)
+        owner_tag = ""
+        if ownership_results and attrs.entity_id in ownership_results:
+            owner_tag = f" [{ownership_results[attrs.entity_id][0].value}]"
+        lines.append(
+            f"  {attrs.entity_id}: {attrs.class_name}{owner_tag}"
+            f" at ({int(attrs.center[0])},{int(attrs.center[1])})"
+            f" [{attrs.confidence:.0%}]"
+        )
+    return "\n".join(lines)
 ```
 
-The 15-entity limit prevents token bloat. Entities are sorted by confidence in the detector (see [Chapter 7](../part3-entity-detection/07-detector-architecture.md)), so the top 15 are the most reliable detections.
+`extract_attrs()` normalizes both `DetectedEntity` objects and plain dicts into an `EntityAttrs` named tuple, eliminating the hasattr chains that previously existed inline.
+
+The `ENTITY_DISPLAY_LIMIT = 20` constant caps entity count to prevent token bloat. Entities are sorted by confidence in the detector (see [Chapter 7](../part3-entity-detection/07-detector-architecture.md)), so the top 20 are the most reliable detections.
 
 Entity context is **prepended** to memory context, so the LLM sees detections first.
 
 ## 6.4 Dynamic Game Knowledge
 
-When the game knowledge database is available, `_get_dynamic_context()` at `src/providers/claude.py:100-153` enhances the context:
+When the game knowledge database is available, `_get_dynamic_context()` in the Claude provider enhances the context:
 
 ### Resource Extraction
 
@@ -211,7 +225,7 @@ What should I do next?
 - Working memory keeps last 10 turns; LLM sees last 3
 - Observation feedback loop: LLM reports state, memory tracks it, next turn sees updates
 - Dynamic context filters by current age and resources
-- 15-entity cap prevents token bloat
+- 20-entity cap (`ENTITY_DISPLAY_LIMIT`) prevents token bloat; entity formatting via `entity_utils.py`
 
 ## Related Topics
 

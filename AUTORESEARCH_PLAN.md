@@ -66,13 +66,13 @@ Screenshot → YOLO Detection (60 classes) → Entity Context → Claude Vision 
 
 | File | Purpose |
 |---|---|
-| `src/game_loop.py` | Core capture→detect→think→act cycle (2-second loop) |
-| `src/providers/claude.py` | Sends screenshot + context to Claude, parses JSON response |
-| `src/memory.py` | Turn history, game state tracking, cumulative metrics |
-| `src/models.py` | Pydantic models for actions and observations |
-| `src/executor.py` | Translates actions to pyautogui calls |
-| `src/screen.py` | Screenshot capture via mss |
-| `src/window.py` | AoE2 window detection and focus |
+| `gameplay_agent/game_loop.py` | Core capture→detect→think→act cycle (2-second loop) |
+| `gameplay_agent/providers/claude.py` | Sends screenshot + context to Claude, parses JSON response |
+| `gameplay_agent/memory.py` | Turn history, game state tracking, cumulative metrics |
+| `gameplay_agent/models.py` | Pydantic models for actions and observations |
+| `gameplay_agent/executor.py` | Translates actions to pyautogui calls |
+| `gameplay_agent/screen.py` | Screenshot capture via mss |
+| `gameplay_agent/window.py` | AoE2 window detection and focus |
 | `prompts/system.md` | System prompt with game rules, hotkeys, output format |
 | `detection/inference/detector.py` | YOLO11n entity detection (60 classes, 92.2% mAP50, v5 model) |
 
@@ -168,7 +168,7 @@ entities = self._nms(entities, iou_threshold=0.5)
 ### 4.3 Window Offset Race Condition ✅
 
 **Severity**: MEDIUM
-**File**: `src/executor.py`
+**File**: `gameplay_agent/executor.py`
 
 **Problem**: Window rect is fetched once at the start of action batch execution. If the game window moves during the batch, all subsequent coordinate translations are wrong.
 
@@ -189,7 +189,7 @@ window_rect = self.window.get_game_window_rect()  # Fresh fetch per action
 ### 4.5 Action Verification Enhancement ✅
 
 **Severity**: MEDIUM
-**Files**: `src/game_loop.py`, `src/memory.py`
+**Files**: `gameplay_agent/game_loop.py`, `gameplay_agent/memory.py`
 
 **Current state**: Phase 0 tracks `success_count` from `execute_actions()` return value. This is a basic count — it doesn't tell the LLM *what* succeeded or failed.
 
@@ -222,7 +222,7 @@ Verification text example:
 
 ### What Was Built
 
-#### 4.1 Game State Detection (`src/models.py`)
+#### 4.1 Game State Detection (`gameplay_agent/models.py`)
 
 Added `game_state` field to the `Observations` Pydantic model:
 
@@ -241,7 +241,7 @@ The LLM reports game state in every response. The game loop checks it and stops 
 
 **Design decision**: We use the LLM's observation rather than template matching or pixel heuristics because the LLM already sees the screenshot. Claude Vision coordinates are unreliable for UI elements (confirmed from prior testing), but classifying "is this a victory screen?" is reliable.
 
-#### 4.2 Cumulative Metrics (`src/memory.py`)
+#### 4.2 Cumulative Metrics (`gameplay_agent/memory.py`)
 
 Added to `AgentMemory.__init__()`:
 
@@ -263,7 +263,7 @@ Updated in these methods:
 - `get_metrics_snapshot()` → returns dict of all metrics for scoring
 - `reset()` → clears all counters for new game
 
-#### 4.3 Game-Over Detection + Time Budget (`src/game_loop.py`)
+#### 4.3 Game-Over Detection + Time Budget (`gameplay_agent/game_loop.py`)
 
 The `game_loop()` function was updated:
 
@@ -403,8 +403,8 @@ Run this to verify everything works:
 
 ```bash
 python -c "
-from src.models import Observations
-from src.memory import AgentMemory
+from gameplay_agent.models import Observations
+from gameplay_agent.memory import AgentMemory
 from autoresearch.metrics import compute_score
 from autoresearch.experiment_log import get_next_experiment_id
 
@@ -801,7 +801,7 @@ class ContextTuner:
         ...
 ```
 
-#### Modify `src/game_loop.py` — Read Context Config
+#### Modify `gameplay_agent/game_loop.py` — Read Context Config
 
 In the entity context building section (lines 121-129), make the entity limit configurable:
 
@@ -844,7 +844,7 @@ recent_turns = list(self.working_memory)[-memory_depth:]
 
 **Purpose**: Learn which action patterns correlate with good game outcomes, and inject those patterns into the LLM context.
 
-#### Create `src/strategy_db.py`
+#### Create `gameplay_agent/strategy_db.py`
 
 ```python
 import sqlite3
@@ -959,7 +959,7 @@ class StrategyAnalyzer:
         ...
 ```
 
-#### Modify `src/game_loop.py` — Per-Turn Logging
+#### Modify `gameplay_agent/game_loop.py` — Per-Turn Logging
 
 After `memory.create_turn()`, add:
 
@@ -977,7 +977,7 @@ if strategy_db:
     )
 ```
 
-#### Modify `src/providers/claude.py` — Inject Strategy Patterns
+#### Modify `gameplay_agent/providers/claude.py` — Inject Strategy Patterns
 
 In `_get_dynamic_context()` or a new method, inject proven patterns:
 
@@ -1022,7 +1022,7 @@ Before implementation, research which menu transitions can be done via keyboard:
 
 Document which transitions REQUIRE mouse clicks (there will likely be some).
 
-### 7.2 Create `src/menu_navigator.py`
+### 7.2 Create `gameplay_agent/menu_navigator.py`
 
 ```python
 import pyautogui
@@ -1145,7 +1145,7 @@ async def run_loop_autonomous(self, max_experiments: int, time_budget: float = 1
 
 ### 9.1 Error Capture During Gameplay
 
-#### Create `src/error_capture.py`
+#### Create `gameplay_agent/error_capture.py`
 
 Three dedicated capture methods, each saving both screenshot and structured metadata:
 
@@ -1229,7 +1229,7 @@ class ErrorCapture:
 
 ### 9.2 Integrate into Game Loop
 
-In `src/game_loop.py`, after action execution:
+In `gameplay_agent/game_loop.py`, after action execution:
 
 ```python
 # After actions are executed:
@@ -1398,16 +1398,16 @@ Where `epsilon = 0.02`. This means:
 
 | File | Line(s) | What Changed |
 |---|---|---|
-| `src/models.py:160` | Added `game_state: Literal[...]` to `Observations` |
-| `src/memory.py:36-66` | Added `AGE_SCORES` dict and cumulative metrics to `AgentMemory` |
-| `src/memory.py:68-86` | Updated `add_turn()` with timer, action count, food tracking |
-| `src/memory.py:97-115` | Updated `update_from_observations()` with peak pop, highest age |
-| `src/memory.py:171-200` | Added `record_action_results()`, `get_game_duration_seconds()`, `get_metrics_snapshot()` |
-| `src/memory.py:202-214` | Updated `reset()` to clear cumulative metrics |
-| `src/game_loop.py:28-47` | Added `time_budget` param, changed return type to `AgentMemory` |
-| `src/game_loop.py:151-162` | Added game-over detection + time budget checks |
-| `src/game_loop.py:165-167` | Added `memory.record_action_results()` call |
-| `src/game_loop.py:183-196` | Added error handling for game_end_reason + final metrics log |
+| `gameplay_agent/models.py:160` | Added `game_state: Literal[...]` to `Observations` |
+| `gameplay_agent/memory.py:36-66` | Added `AGE_SCORES` dict and cumulative metrics to `AgentMemory` |
+| `gameplay_agent/memory.py:68-86` | Updated `add_turn()` with timer, action count, food tracking |
+| `gameplay_agent/memory.py:97-115` | Updated `update_from_observations()` with peak pop, highest age |
+| `gameplay_agent/memory.py:171-200` | Added `record_action_results()`, `get_game_duration_seconds()`, `get_metrics_snapshot()` |
+| `gameplay_agent/memory.py:202-214` | Updated `reset()` to clear cumulative metrics |
+| `gameplay_agent/game_loop.py:28-47` | Added `time_budget` param, changed return type to `AgentMemory` |
+| `gameplay_agent/game_loop.py:151-162` | Added game-over detection + time budget checks |
+| `gameplay_agent/game_loop.py:165-167` | Added `memory.record_action_results()` call |
+| `gameplay_agent/game_loop.py:183-196` | Added error handling for game_end_reason + final metrics log |
 | `prompts/system.md:48,64-70` | Added `game_state` field + Game State Detection section |
 
 ### New Files (Created in Phase 0)
@@ -1426,10 +1426,10 @@ Where `epsilon = 0.02`. This means:
 | File | Fix | Severity |
 |---|---|---|
 | `detection/inference/detector.py` | ✅ Entity ID persistence (IoU tracking) + NMS for all backends + debug print cleanup | HIGH/MED/LOW |
-| `src/executor.py` | ✅ Re-fetch window rect per action | MEDIUM |
-| `src/game_loop.py` | ✅ Post-action screenshot verification | MEDIUM |
-| `src/memory.py` | ✅ Add `last_verification` field | MEDIUM |
-| `src/providers/claude.py` | ✅ Structured output via `messages.parse()` (replaced custom JSON parsing) | HIGH |
+| `gameplay_agent/executor.py` | ✅ Re-fetch window rect per action | MEDIUM |
+| `gameplay_agent/game_loop.py` | ✅ Post-action screenshot verification | MEDIUM |
+| `gameplay_agent/memory.py` | ✅ Add `last_verification` field | MEDIUM |
+| `gameplay_agent/providers/claude.py` | ✅ Structured output via `messages.parse()` (replaced custom JSON parsing) | HIGH |
 
 ### Files to Create (Future Phases)
 
@@ -1440,10 +1440,10 @@ Where `epsilon = 0.02`. This means:
 | `autoresearch/context_tuner.py` | 2 | A/B testing context parameters |
 | `autoresearch/context_config.yaml` | 2 | Tunable context parameters |
 | `autoresearch/strategy_analyzer.py` | 2 | Post-game strategy pattern extraction |
-| `src/strategy_db.py` | 2 | SQLite DB for game recordings + patterns |
-| `src/menu_navigator.py` | 3 | Hotkey + template-based menu navigation |
+| `gameplay_agent/strategy_db.py` | 2 | SQLite DB for game recordings + patterns |
+| `gameplay_agent/menu_navigator.py` | 3 | Hotkey + template-based menu navigation |
 | `autoresearch/templates/` | 3 | Reference images for menu buttons |
-| `src/error_capture.py` | 4 | Captures problematic gameplay screenshots (3 capture methods + CapturedError metadata) |
+| `gameplay_agent/error_capture.py` | 4 | Captures problematic gameplay screenshots (3 capture methods + CapturedError metadata) |
 | `autoresearch/detection_loop.py` | 4 | Manages error-capture-to-retrain cycle |
 | `detection/training/config/sprite_configs.yaml` | 5 | Externalized sprite configuration (from Python dicts) |
 

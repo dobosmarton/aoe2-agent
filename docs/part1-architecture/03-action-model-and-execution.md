@@ -1,31 +1,40 @@
 # Chapter 3: Action Model and Execution
 
-The agent's output is a list of actions that must be validated, resolved to screen coordinates, and executed as real mouse/keyboard inputs. Pydantic models enforce structural correctness, and a target_id resolution system bridges YOLO detection with physical action execution.
+The agent's output is a list of actions that must be validated, resolved to screen coordinates, and executed as real mouse/keyboard inputs. Pydantic models enforce structural correctness, and a coordinate resolution system bridges YOLO detection with physical action execution.
 
-## 3.1 The Five Action Types
+## 3.1 Seven Action Types
 
-All action types are defined as Pydantic models in `src/models.py:8-149`:
+All action types are defined as Pydantic models in `gameplay_agent/models.py`.
 
-### ClickAction (`models.py:8-29`)
+### PointTargetAction (base class)
 
-Left click at a position. Supports two targeting modes:
+`ClickAction` and `RightClickAction` share a common base that handles all three targeting modes:
 
 ```python
-class ClickAction(BaseModel):
-    type: Literal["click"]
+class PointTargetAction(BaseModel):
     x: Optional[int] = Field(default=None, ge=0, le=7680)
     y: Optional[int] = Field(default=None, ge=0, le=4320)
-    target_id: Optional[str] = Field(default=None)
+    target_id: Optional[str] = Field(default=None, description="Entity ID from detection, e.g. 'sheep_0'")
+    target_class: Optional[str] = Field(default=None, description="Entity class to target nearest of, e.g. 'sheep'")
     intent: str = ""
 ```
 
-A `@model_validator` enforces that either `(x, y)` or `target_id` is provided -- not neither.
+A `@model_validator` enforces that at least one of `(x, y)`, `target_id`, or `target_class` is provided.
 
-### RightClickAction (`models.py:32-53`)
+### ClickAction
 
-Identical structure to ClickAction but with `type: Literal["right_click"]`. Used for move commands, gather orders, and attack-move.
+Left click at a position. Inherits targeting from `PointTargetAction`:
 
-### PressAction (`models.py:56-126`)
+```python
+class ClickAction(PointTargetAction):
+    type: Literal["click"]
+```
+
+### RightClickAction
+
+Identical to ClickAction but with `type: Literal["right_click"]`. Used for move commands, gather orders, and attack-move.
+
+### PressAction
 
 Keyboard key press. Includes a whitelist validator for valid keys:
 
@@ -33,11 +42,13 @@ Keyboard key press. Includes a whitelist validator for valid keys:
 class PressAction(BaseModel):
     type: Literal["press"]
     key: str = Field(min_length=1, max_length=20)
+    modifiers: list[str] = Field(default_factory=list)
+    rescan: bool = Field(default=False, description="Take fresh screenshot+detection after this key press")
 ```
 
 Single characters pass through directly. Multi-character strings are validated against a set of ~30 special keys (`enter`, `escape`, `f1`-`f12`, `space`, arrow keys, modifiers). Invalid keys raise a `ValueError`.
 
-### DragAction (`models.py:129-137`)
+### DragAction
 
 Mouse drag with start and end coordinates. Used for box-selecting units:
 
@@ -50,7 +61,7 @@ class DragAction(BaseModel):
     y2: int = Field(ge=0, le=4320)
 ```
 
-### WaitAction (`models.py:140-145`)
+### WaitAction
 
 Async delay between dependent actions. Capped at 5 seconds:
 
@@ -60,44 +71,71 @@ class WaitAction(BaseModel):
     ms: int = Field(ge=0, le=5000)
 ```
 
-### Union Type (`models.py:149`)
+### ScrollAction
+
+Mouse scroll for zoom in/out. Optional position to scroll at:
 
 ```python
-Action = ClickAction | RightClickAction | PressAction | DragAction | WaitAction
+class ScrollAction(BaseModel):
+    type: Literal["scroll"]
+    clicks: int  # Positive = scroll up (zoom in), negative = scroll down (zoom out)
+    x: Optional[int] = Field(default=None, ge=0, le=7680)
+    y: Optional[int] = Field(default=None, ge=0, le=4320)
 ```
 
-### LLMResponse (`models.py:163-168`)
+### DetectAction
+
+Requests a full SAHI detection scan for accurate entity detection. No parameters required:
+
+```python
+class DetectAction(BaseModel):
+    type: Literal["detect"]
+    intent: str = ""
+```
+
+### Union Type
+
+```python
+Action = ClickAction | RightClickAction | PressAction | DragAction | WaitAction | ScrollAction | DetectAction
+```
+
+### LLMResponse
 
 The complete response structure validated by Pydantic:
 
 ```python
 class LLMResponse(BaseModel):
-    reasoning: str
-    observations: Observations = Field(default_factory=Observations)
     actions: list[Action] = Field(default_factory=list)
+    observations: Observations = Field(default_factory=Observations)
+    reasoning: str = ""
 ```
 
-Where `Observations` tracks resources, population, age, idle_tc, under_attack, and events.
+Field order matters: `actions` first ensures structured output generates them before reasoning consumes the token budget. `Observations` tracks resources, population, age, idle_tc, under_attack, game_state, and events.
 
-## 3.2 Dual Targeting: Coordinates vs target_id
+## 3.2 Triple Targeting: Coordinates, target_id, target_class
 
-The LLM can specify click positions in two ways:
+The LLM can specify click/right-click positions in three ways:
 
 **Direct coordinates** -- the LLM estimates pixel positions from the screenshot:
 ```json
 {"type": "right_click", "x": 920, "y": 460, "intent": "Gather from sheep"}
 ```
 
-**Entity reference** -- the LLM uses a detection ID from the entity list:
+**Entity ID reference** -- the LLM uses a detection ID from the entity list:
 ```json
 {"type": "right_click", "target_id": "sheep_0", "intent": "Gather from sheep"}
 ```
 
-> **Key Insight**: The `target_id` mechanism bridges vision detection and action execution. The LLM says `"target_id": "sheep_0"` and the executor resolves it to exact pixel coordinates from the detection cache. This avoids the LLM needing to estimate precise pixel positions for small moving entities -- a task where even advanced vision models are unreliable.
+**Entity class reference** -- the LLM targets the nearest entity of a given class:
+```json
+{"type": "right_click", "target_class": "sheep", "intent": "Gather from nearest sheep"}
+```
 
-## 3.3 Target ID Resolution
+> **Key Insight**: The `target_id` and `target_class` mechanisms bridge vision detection and action execution. The LLM says `"target_id": "sheep_0"` or `"target_class": "sheep"` and the executor resolves it to exact pixel coordinates from the detection cache. This avoids the LLM needing to estimate precise pixel positions for small moving entities -- a task where even advanced vision models are unreliable.
 
-When the game loop runs detection, entities are cached in the executor module (`src/executor.py:22-40`):
+## 3.3 Coordinate Resolution
+
+When the game loop runs detection, entities are cached in the executor module via `set_detected_entities()`:
 
 ```python
 _detected_entities: list[dict] = []
@@ -110,67 +148,101 @@ def set_detected_entities(entities: list) -> None:
     ]
 ```
 
-Resolution searches this cache linearly (`src/executor.py:43-57`):
+The unified resolver `_resolve_coords()` tries three strategies in order:
+
+1. **target_id** — linear search for matching entity ID, return center coordinates
+2. **target_class** — linear search for first entity of that class, return center coordinates
+3. **(x, y)** — use raw coordinates directly
 
 ```python
-def resolve_target_id(target_id: str) -> Optional[tuple[int, int]]:
-    for entity in _detected_entities:
-        if entity.get("id") == target_id:
-            center = entity.get("center")
-            if center:
-                return (int(center[0]), int(center[1]))
-    return None
+def _resolve_coords(action_dict: dict) -> tuple[str, tuple[int, int] | None]:
+    """Returns (error_detail, coords). error_detail is non-empty on failure."""
+    target_id = action_dict.get("target_id")
+    if target_id:
+        coords = _resolve_target_id(str(target_id))
+        if coords is None:
+            return (f"target_id '{target_id}' not found", None)
+        return ("", coords)
+
+    target_class = action_dict.get("target_class")
+    if target_class:
+        coords = _resolve_target_class(str(target_class))
+        if coords is None:
+            return (f"target_class '{target_class}' not found", None)
+        return ("", coords)
+
+    x, y = action_dict.get("x"), action_dict.get("y")
+    if x is not None and y is not None:
+        return ("", (int(x), int(y)))
+
+    return ("no coordinates, target_id, or target_class provided", None)
 ```
 
 Entity IDs follow the pattern `{class_name}_{counter}` (e.g., `sheep_0`, `villager_1`, `town_center_0`). IDs persist across detection frames via IoU-based matching — if an entity overlaps >40% with a same-class entity from the previous frame, it keeps the same ID. New entities get a globally unique counter that never resets. This means `sheep_0` remains `sheep_0` across turns as long as it's visible, giving the LLM a stable reference.
 
-If resolution fails (entity not found), the action is skipped with a warning log.
+If resolution fails (entity not found), the action returns `ActionResult(success=False, detail=...)`.
 
 ## 3.4 Coordinate Translation
 
 Screenshots capture the game window at its screen position. The LLM sees coordinates relative to the screenshot (0,0 = top-left of game window). But pyautogui operates in screen-absolute coordinates.
 
-The executor re-fetches the window position **before each individual action** (`src/executor.py:94-98`):
+The executor re-fetches the window position **before each individual action** via `get_game_window_rect()`:
 
 ```python
-# Re-fetch window offset before each action to handle window movement
 global _window_offset
 rect = get_game_window_rect()
 if rect:
     _window_offset = (rect[0], rect[1])
 ```
 
-Then each action applies the offset:
+Then each action applies the offset via `_translate()`:
 
 ```python
-def translate(x: int, y: int) -> tuple[int, int]:
+def _translate(x: int, y: int) -> tuple[int, int]:
     return (x + _window_offset[0], y + _window_offset[1])
 ```
 
-> **Key change**: The window offset was previously fetched once per action batch. Now it's re-fetched before each individual action to handle cases where the game window moves during a batch (e.g., due to the user or OS repositioning the window).
+This handles cases where the game window moves during a batch (e.g., OS repositioning).
 
 If the window rect is unavailable, offset defaults to `(0, 0)`, which works for fullscreen games.
 
 ## 3.5 Execution Pipeline
 
-`execute_actions()` at `src/executor.py:178-198`:
+The executor uses a dispatch pattern. Each action type has a dedicated async handler, registered in `_ACTION_HANDLERS`:
 
-1. **Ensure focus** -- activates game window, retries once if it fails
-2. **Execute sequentially** -- iterates through actions, calling `execute_action()` for each
-3. **Per-action window offset** -- each action re-fetches the window position before translating coordinates
-4. **Count successes** -- returns the number of actions that executed without error
+```python
+_ACTION_HANDLERS: dict[str, Callable] = {
+    "click": _handle_click,
+    "right_click": _handle_right_click,
+    "press": _handle_press,
+    "drag": _handle_drag,
+    "scroll": _handle_scroll,
+    "detect": _handle_detect,
+    "wait": _handle_wait,
+}
+```
 
-Each action type dispatches to pyautogui:
+`execute_actions()` orchestrates the batch:
+
+1. **Ensure focus** — activates game window, retries once if it fails
+2. **Execute sequentially** — iterates through actions, calling `execute_action()` for each
+3. **Dispatch** — looks up handler in `_ACTION_HANDLERS`, returns `ActionResult(False, ...)` for unknown types
+4. **Per-action window offset** — each action re-fetches the window position before translating coordinates
+5. **Returns results** — list of `ActionResult(success, detail)` per action
+
+Each handler dispatches to pyautogui:
 
 | Action | pyautogui Call | Notes |
 |--------|---------------|-------|
-| `click` | `pyautogui.click(x, y)` | Left click after coordinate translation |
-| `right_click` | `pyautogui.rightClick(x, y)` | Right click after coordinate translation |
-| `press` | `pyautogui.press(key)` | Direct key press |
+| `click` | `pyautogui.click(x, y)` | With building placement retry logic |
+| `right_click` | `pyautogui.rightClick(x, y)` | After coordinate translation |
+| `press` | `pyautogui.press(key)` or `pyautogui.hotkey(*modifiers, key)` | Supports modifiers; optional rescan after |
 | `drag` | `pyautogui.moveTo()` + `pyautogui.drag()` | 200ms drag duration |
+| `scroll` | `pyautogui.scroll(clicks)` | Optional x, y position |
+| `detect` | Calls `_rescan_full_fn()` | Full SAHI detection scan |
 | `wait` | `asyncio.sleep(ms / 1000)` | Async, does not block event loop |
 
-### pyautogui Configuration (`executor.py:16-17`)
+### pyautogui Configuration
 
 ```python
 pyautogui.FAILSAFE = False   # Disable corner-abort safety
@@ -181,13 +253,13 @@ pyautogui.PAUSE = 0.02       # 20ms between pyautogui calls (default is 100ms)
 
 ## 3.6 Action Validation Utilities
 
-Two helper functions for ad-hoc validation (`src/models.py:171-208`):
+Two helper functions for ad-hoc validation in `gameplay_agent/models.py`:
 
-**`validate_action(action_dict)`** -- validates a single action dict against the type map. Returns a Pydantic model or `None`.
+**`validate_action(action_dict)`** — validates a single action dict against a type map. Returns a Pydantic model or `None`.
 
-**`validate_actions(actions)`** -- batch validation, filters out invalid actions silently. Returns only the valid ones.
+**`validate_actions(actions)`** — batch validation, filters out invalid actions silently. Returns only the valid ones.
 
-The executor uses `validate_action()` for any action that arrives as a raw dict rather than a pre-validated Pydantic model (`executor.py:83-88`).
+The executor uses `validate_action()` for any action that arrives as a raw dict rather than a pre-validated Pydantic model.
 
 ## 3.7 Coordinate Bounds
 
@@ -197,11 +269,12 @@ All coordinate fields enforce bounds: `ge=0, le=7680` for x, `ge=0, le=4320` for
 
 ## Summary
 
-- 5 action types with Pydantic validation: click, right_click, press, drag, wait
-- Dual targeting via (x,y) coordinates or target_id entity references
-- Entity IDs resolved from detection cache at execution time
+- 7 action types with Pydantic validation: click, right_click, press, drag, wait, scroll, detect
+- `PointTargetAction` base class for shared triple-targeting logic (coordinates, target_id, target_class)
+- Unified `_resolve_coords()` resolver tries target_id → target_class → (x, y)
+- `_ACTION_HANDLERS` dispatch pattern maps action types to async handler functions
 - Coordinate translation from screenshot-relative to screen-absolute
-- Sequential execution with 50ms inter-action delay
+- Sequential execution with configurable inter-action delay
 
 ## Related Topics
 
