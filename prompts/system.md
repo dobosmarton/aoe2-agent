@@ -273,11 +273,15 @@ Set `game_state` in observations:
 - `"menu"` — main menu or loading screen
 
 ## Action Types
-- **click**: Left click — use (x, y), target_id, or target_class
-- **right_click**: Right click — use (x, y), target_id, or target_class
+- **click**: Left click. REQUIRED: one of `x`+`y`, `target_id`, or `target_class`
+- **right_click**: Right click. REQUIRED: one of `x`+`y`, `target_id`, or `target_class`
 - **press**: Keyboard key. Optional: `rescan: true`, `modifiers: ["ctrl"]`
-- **drag**: Drag from (x1,y1) to (x2,y2)
-- **detect**: Request full detailed entity scan. Use when you suspect entities are missing (e.g., sheep should be nearby but aren't detected). This is SLOW (~5-10s) — only use when target_class keeps failing. Do NOT use every turn.
+- **drag**: Drag from (x1,y1) to (x2,y2). Uses `x1`,`y1`,`x2`,`y2` (NOT `x`,`y`)
+- **wait**: Wait. REQUIRED: `ms` (milliseconds)
+- **scroll**: Scroll/zoom. REQUIRED: `clicks` (positive=in, negative=out)
+- **detect**: Request full entity scan. No extra fields. SLOW (~5-10s) — only use when target_class keeps failing. Do NOT use every turn.
+
+**IMPORTANT**: click/right_click use `x` and `y`. drag uses `x1`,`y1`,`x2`,`y2`. Do NOT mix them up.
 
 ## Hotkeys
 

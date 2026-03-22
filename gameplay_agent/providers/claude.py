@@ -1,13 +1,15 @@
 """Claude (Anthropic) LLM provider for AoE2 Agent."""
 
+import json
 from pathlib import Path
 from typing import Any, Optional
 
 import anthropic
 import structlog
+from pydantic import ValidationError
 
 from ..config import config
-from ..models import LLMResponse
+from ..models import LLMResponse, Observations, validate_actions
 from .base import BaseLLMProvider
 
 log = structlog.get_logger()
@@ -89,8 +91,9 @@ Respond with JSON only:
   ]
 }
 
-Action types: click, right_click, press, drag (with x1,y1,x2,y2), wait (with ms)
-For click/right_click: use either (x, y) coordinates OR target_id from detected entities.
+Action types: click, right_click, press, drag (with x1,y1,x2,y2), wait (with ms), scroll (with clicks), detect
+For click/right_click: MUST include one of: (x, y) coordinates, target_id (e.g. "sheep_0"), or target_class (e.g. "sheep").
+For click/right_click: use "x" and "y" fields (NOT "x1"/"y1" — those are for drag only).
 
 Play to win!"""
         return self._system_prompt
@@ -183,6 +186,9 @@ Play to win!"""
 
         Uses messages.parse() to get validated Pydantic output directly.
         SDK handles retry (429/5xx) with exponential backoff automatically.
+
+        On validation errors, salvages valid actions individually instead of
+        discarding the entire response.
         """
         response = await self.client.messages.parse(
             model=self.model,
@@ -193,7 +199,29 @@ Play to win!"""
         )
         if response.stop_reason == "refusal":
             raise ValueError("Claude refused the request")
-        return response.parsed_output
+
+        if response.parsed_output is not None:
+            return response.parsed_output
+
+        # Structured output JSON was valid but failed Pydantic validation.
+        # Salvage valid actions from the raw response text.
+        raw_text = response.content[0].text
+        raw = json.loads(raw_text)
+        raw_actions = raw.get("actions", [])
+        valid_actions = validate_actions(raw_actions)
+        log.warning("salvaged_actions", total=len(raw_actions), valid=len(valid_actions))
+
+        try:
+            observations = Observations.model_validate(raw.get("observations", {}))
+        except ValidationError as exc:
+            log.debug("observations_validation_failed", error=str(exc))
+            observations = Observations()
+
+        return LLMResponse(
+            actions=valid_actions,
+            observations=observations,
+            reasoning=raw.get("reasoning", ""),
+        )
 
     async def get_actions(
         self,
