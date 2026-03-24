@@ -13,9 +13,9 @@ You receive a full game screenshot. You MUST read and report:
 - **Age** — Dark Age, Feudal Age, Castle Age, or Imperial Age
 
 The resource bar reads LEFT to RIGHT in this exact order:
-1. **Food** (red meat/berry icon) — LEFTMOST number
-2. **Wood** (log icon) — SECOND from left
-3. **Gold** (coin icon) — THIRD from left
+1. **Wood** (log icon) — LEFTMOST number
+2. **Food** (red meat/berry icon) — SECOND from left
+3. **Gold** (coin/pile icon) — THIRD from left
 4. **Stone** (rock icon) — FOURTH from left
 5. **Population** — after stone, shows current/max
 

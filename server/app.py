@@ -121,6 +121,19 @@ class ModelState:
     class_names: tuple[str, ...]
     model_path: str
     input_name: str = ""  # ONNX input tensor name
+    input_size: int = 640  # Model's native input resolution
+
+
+def _get_coreml_input_size(model: object) -> int:
+    """Read the native input resolution from a CoreML model spec."""
+    spec = model.get_spec()  # type: ignore[union-attr]
+    input_desc = spec.description.input[0]
+    input_type = input_desc.type.WhichOneof("Type")
+    if input_type == "imageType":
+        return int(input_desc.type.imageType.width)
+    if input_type == "multiArrayType" and len(input_desc.type.multiArrayType.shape) >= 3:
+        return int(input_desc.type.multiArrayType.shape[-1])
+    return 640
 
 
 def _load_model(model_path: str) -> ModelState:
@@ -134,12 +147,14 @@ def _load_model(model_path: str) -> ModelState:
             import coremltools as ct
 
             model = ct.models.MLModel(str(path), compute_units=ct.ComputeUnit.CPU_AND_NE)
-            logger.info("Loaded CoreML model: %s", model_path)
+            input_size = _get_coreml_input_size(model)
+            logger.info("Loaded CoreML model: %s (input_size=%d)", model_path, input_size)
             return ModelState(
                 backend="coreml",
                 model=model,
                 class_names=class_names,
                 model_path=model_path,
+                input_size=input_size,
             )
         except (ImportError, OSError, RuntimeError) as e:
             logger.warning("CoreML load failed: %s, trying ONNX fallback", e)
@@ -315,7 +330,14 @@ def _parse_raw_output(
 
 
 def _detect_single(state: ModelState, image: Image.Image, imgsz: int) -> list[DetectionResult]:
-    """Single-image detection (no tiling)."""
+    """Single-image detection. Falls back to SAHI tiling for CoreML when
+    requested imgsz exceeds the model's native input size."""
+    # CoreML models have fixed input sizes — use SAHI tiling instead of
+    # resizing the full image (which loses small objects)
+    if state.backend == "coreml" and imgsz > state.input_size:
+        detections, _ = _detect_sahi(state, image, tile_size=state.input_size)
+        return detections
+
     chw, orig_w, orig_h = _preprocess(image, imgsz)
     num_classes = len(state.class_names)
 
