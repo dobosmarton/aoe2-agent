@@ -165,6 +165,26 @@ async def _handle_click(action_dict: dict[str, object], intent: str) -> ActionRe
     return ActionResult(True, "ok")
 
 
+def _re_resolve_from_intent(x: int, y: int, intent: str) -> tuple[int, int]:
+    """Re-resolve raw coordinates using entity class found in the intent.
+
+    The LLM plans all actions from start-of-turn detection. After camera-moving
+    keys (H, .) with rescan, those coordinates become stale. This matches the
+    entity class mentioned in the intent against freshly detected entities.
+    """
+    intent_lower = intent.lower()
+    for entity in _detected_entities:
+        cls = entity.get("class", "")
+        if cls and cls in intent_lower:
+            resolved = _resolve_target_class(cls)
+            if resolved:
+                log.debug("coords_re_resolved", cls=cls,
+                          old_x=x, old_y=y, new_x=resolved[0], new_y=resolved[1])
+                return resolved
+            break
+    return (x, y)
+
+
 async def _handle_right_click(action_dict: dict[str, object], intent: str) -> ActionResult:
     fail_detail, coords = _resolve_coords(action_dict)
     if coords is None:
@@ -172,6 +192,9 @@ async def _handle_right_click(action_dict: dict[str, object], intent: str) -> Ac
         return ActionResult(False, fail_detail)
 
     x, y = coords
+    if not action_dict.get("target_id") and not action_dict.get("target_class"):
+        x, y = _re_resolve_from_intent(x, y, intent)
+
     screen_x, screen_y = _translate(x, y)
     pyautogui.rightClick(screen_x, screen_y)
     log.info("right_click", x=x, y=y, screen_x=screen_x, screen_y=screen_y,
