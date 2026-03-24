@@ -187,8 +187,9 @@ Play to win!"""
         Uses messages.parse() to get validated Pydantic output directly.
         SDK handles retry (429/5xx) with exponential backoff automatically.
 
-        On validation errors, salvages valid actions individually instead of
-        discarding the entire response.
+        Invalid actions are salvaged by LLMResponse.salvage_valid_actions
+        (field_validator) — individual bad actions are dropped instead of
+        failing the entire response.
         """
         response = await self.client.messages.parse(
             model=self.model,
@@ -203,8 +204,7 @@ Play to win!"""
         if response.parsed_output is not None:
             return response.parsed_output
 
-        # Structured output JSON was valid but failed Pydantic validation.
-        # Salvage valid actions from the raw response text.
+        # Safety net: parsed_output is None despite model-level salvage (rare)
         raw_text = response.content[0].text
         raw = json.loads(raw_text)
         raw_actions = raw.get("actions", [])
@@ -213,11 +213,10 @@ Play to win!"""
 
         try:
             observations = Observations.model_validate(raw.get("observations", {}))
-        except ValidationError as exc:
-            log.debug("observations_validation_failed", error=str(exc))
+        except ValidationError:
             observations = Observations()
 
-        return LLMResponse(
+        return LLMResponse.model_construct(
             actions=valid_actions,
             observations=observations,
             reasoning=raw.get("reasoning", ""),

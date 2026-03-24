@@ -1,8 +1,8 @@
 """Pydantic models for action validation."""
 
-from typing import Annotated, Literal, Optional
+from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 
 class PointTargetAction(BaseModel):
@@ -19,6 +19,29 @@ class PointTargetAction(BaseModel):
     target_id: Optional[str] = Field(default=None, description="Entity ID from detection, e.g. 'sheep_0'")
     target_class: Optional[str] = Field(default=None, description="Entity class to target nearest of, e.g. 'sheep'")
     intent: str = ""
+
+    @model_validator(mode='before')
+    @classmethod
+    def normalize_fields(cls, data: object) -> object:
+        """Normalize common field name mistakes from LLM output.
+
+        Haiku frequently uses drag-style x1/y1 for click/right_click actions,
+        and 'target' instead of 'target_id'.
+        """
+        if not isinstance(data, dict):
+            return data
+        # LLM sometimes uses drag-style x1/y1 for click/right_click
+        if 'x1' in data and 'x' not in data:
+            data['x'] = data.pop('x1')
+        if 'y1' in data and 'y' not in data:
+            data['y'] = data.pop('y1')
+        # Remove leftover drag-only fields
+        data.pop('x2', None)
+        data.pop('y2', None)
+        # LLM sometimes uses 'target' instead of 'target_id'
+        if 'target' in data and 'target_id' not in data:
+            data['target_id'] = data.pop('target')
+        return data
 
     @model_validator(mode='after')
     def check_coords_or_target(self):
@@ -170,56 +193,69 @@ class Observations(BaseModel):
     events: list[str] = Field(default_factory=list)
 
 
+_ACTION_TYPE_MAP: dict[str, type[BaseModel]] = {
+    "click": ClickAction,
+    "right_click": RightClickAction,
+    "press": PressAction,
+    "drag": DragAction,
+    "wait": WaitAction,
+    "scroll": ScrollAction,
+    "detect": DetectAction,
+}
+
+
+def validate_action(action_dict: dict) -> Action | None:
+    """Validate a single action dictionary.
+
+    Returns validated action or None if invalid.
+    """
+    model_class = _ACTION_TYPE_MAP.get(action_dict.get("type", ""))
+    if not model_class:
+        return None
+    try:
+        return model_class.model_validate(action_dict)
+    except ValidationError:
+        return None
+
+
+def validate_actions(actions: list[dict]) -> list[Action]:
+    """Validate a list of action dicts, filtering out invalid ones."""
+    return [a for raw in actions if (a := validate_action(raw)) is not None]
+
+
 class LLMResponse(BaseModel):
     """Complete LLM response with validation.
 
     Field order matters: structured output generates fields sequentially.
     Actions first ensures they get generated before reasoning consumes
     the token budget.
+
+    The field_validator on actions individually validates each action and
+    silently drops invalid ones, so messages.parse() succeeds even when
+    the LLM produces some malformed actions.
     """
 
     actions: list[Action] = Field(default_factory=list)
     observations: Observations = Field(default_factory=Observations)
     reasoning: str = ""
 
+    @field_validator('actions', mode='before')
+    @classmethod
+    def salvage_valid_actions(cls, v: list) -> list:
+        """Validate actions individually, dropping invalid ones.
 
-def validate_action(action_dict: dict) -> Action | None:
-    """
-    Validate a single action dictionary.
-
-    Returns validated action or None if invalid.
-    """
-    action_type = action_dict.get("type")
-
-    type_map = {
-        "click": ClickAction,
-        "right_click": RightClickAction,
-        "press": PressAction,
-        "drag": DragAction,
-        "wait": WaitAction,
-        "scroll": ScrollAction,
-        "detect": DetectAction,
-    }
-
-    model_class = type_map.get(action_type)
-    if not model_class:
-        return None
-
-    try:
-        return model_class.model_validate(action_dict)
-    except Exception:
-        return None
-
-
-def validate_actions(actions: list[dict]) -> list[Action]:
-    """
-    Validate a list of action dictionaries.
-
-    Returns list of valid actions, filtering out invalid ones.
-    """
-    validated = []
-    for action_dict in actions:
-        action = validate_action(action_dict)
-        if action:
-            validated.append(action)
-    return validated
+        Without this, a single bad action (e.g. right_click with no coords)
+        fails the entire LLMResponse validation and messages.parse() raises,
+        discarding all valid actions in the response.
+        """
+        if not isinstance(v, list):
+            return v
+        validated = []
+        for item in v:
+            if isinstance(item, dict):
+                action = validate_action(item)
+                if action is not None:
+                    validated.append(action)
+            else:
+                validated.append(item)
+        return validated
