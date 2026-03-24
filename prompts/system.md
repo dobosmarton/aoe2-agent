@@ -32,6 +32,10 @@ Before choosing actions, check these in order:
    - Keep at least HALF your villagers gathering food at all times. Zero food = game over.
 6. **Villager balance**: Keep at least half your villagers on FOOD. Never have 0 food gatherers. If you have 6+ on food already, send the next villager to wood.
 7. **Is my scout idle?** → Enable Auto Scout! Press `,` (select idle military) then `G` (Auto Scout). The scout will explore the map automatically — you only need to do this ONCE. The scout reveals sheep, boar, deer, gold, stone, and the enemy base.
+8. **Are 2+ villagers gathering wood without a Lumber Camp?** → Build one NOW.
+   Select villager (`.` rescan) → Q → R → click near trees (100 wood). Without a Lumber Camp, villagers waste half their time walking to TC to drop off wood.
+9. **Are berry_bush detected but no mill nearby?** → Build a Mill next to the berries.
+   Select villager (`.` rescan) → Q → W → click next to berry bushes (100 wood). Then send 3-4 villagers to gather berries.
 
 **Key rules:**
 - **NEVER return 0 actions.** If you have nothing else to do, sweep idle villagers (press `.` rescan 3-4 times) and queue villagers. There is ALWAYS something to do.
@@ -39,11 +43,12 @@ Before choosing actions, check these in order:
 - **Enable Auto Scout early**: press `,` (rescan) → `G` (Auto Scout). Do this ONCE and the scout explores forever automatically.
 
 ## Emergency: Under Attack
-If you see enemy military units in the entity list (militia_line, archer_line, scout_line, knight_line, etc.):
-1. **Do NOT ring the town bell for 1-2 enemy units** — a single scout or spearman is just scouting, not attacking. Ringing the bell stops ALL gathering and cripples your economy.
-2. **Only ring the town bell if 3+ enemy military units are near your TC** — this is a real attack. Press H, then B to garrison.
-3. **Produce military units** from any existing Barracks/Archery Range
-4. **In Dark Age, ignore enemy scouts entirely** — you have no military buildings and can't fight. Focus on economy.
+**In Dark Age: IGNORE all enemy units completely.** Do NOT press B (town bell), do NOT press T (garrison). Your TC has arrows that automatically shoot nearby enemies. Keep all villagers gathering — economy matters more than 1 lost villager.
+
+**If you accidentally garrisoned villagers (TC shows garrisoned units):**
+Press H (go to TC) → V (All Back to Work) → this sends all villagers back to their tasks immediately.
+
+Only consider defensive actions in Feudal Age or later, and only when 3+ enemy military units are actively killing your villagers.
 
 ## Food Economy Progression
 
@@ -289,19 +294,21 @@ Set `game_state` in observations:
 - **detect**: Request full entity scan. No extra fields. SLOW (~5-10s) — only use when target_class keeps failing. Do NOT use every turn.
 
 **IMPORTANT**: click/right_click use `x` and `y`. drag uses `x1`,`y1`,`x2`,`y2`. Do NOT mix them up.
+**NEVER output x=0, y=0 or intent containing "Skip".** If you have no valid target, use press actions instead of placeholder click/right_click.
 
 ## Hotkeys
 
 The full hotkey reference is appended below this prompt. Key shortcuts to remember:
-- H: Go to TC. Then Q to queue villager, B to ring town bell, Z to age up
+- H: Go to TC. Then Q to queue villager, V to ungarrison all, Z to age up
 - .: Select idle villager (moves camera). Use to sweep all idles.
 - ,: Select idle military (moves camera)
 - Villager selected + Q: Economic build menu (Q=House, W=Mill, E=Mining Camp, R=Lumber Camp, A=Farm)
-- Villager selected + W: Military build menu (Q=Barracks, W=Archery Range, E=Stable, R=Siege Workshop)
+- Villager selected + W: Military build menu (Q=Barracks, W=Archery Range, E=Stable, R=Siege Workshop) — **Feudal Age+ only**
 - Villager selected + V: More buildings (D=Market, F=Tower, Z=Town Center, C=Castle)
 - Press Q multiple times at TC to queue multiple villagers: H, Q, Q, Q = 3 villagers
 
 ## Building Placement
+- **In Dark Age, ONLY use the Q build menu** (economic: House, Mill, Mining Camp, Lumber Camp, Farm). Do NOT use W (military) or V (more buildings) until Feudal Age.
 - Buildings CANNOT be placed on trees, water, stone, gold, or other buildings
 - When placing buildings near resources (lumber camp, mining camp), click on OPEN GROUND next to the resource, not directly on it
 - The executor auto-retries nearby positions if placement fails, so don't worry about exact coordinates
