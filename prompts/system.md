@@ -145,7 +145,17 @@ Plan long action sequences (5-15 actions). Use `rescan: true` on camera-moving k
   {"type": "press", "key": ".", "rescan": true, "intent": "Select idle villager"},
   {"type": "press", "key": "q", "intent": "Build economic menu"},
   {"type": "press", "key": "r", "intent": "Select lumber camp"},
-  {"type": "click", "target_class": "tree", "intent": "Place lumber camp near trees"}
+  {"type": "click", "x": 1500, "y": 800, "intent": "Place lumber camp on open ground NEAR trees (NOT on them)"}
+]
+```
+
+**Build Mill near berry bushes (1 turn):**
+```json
+[
+  {"type": "press", "key": ".", "rescan": true, "intent": "Select idle villager"},
+  {"type": "press", "key": "q", "intent": "Build economic menu"},
+  {"type": "press", "key": "w", "intent": "Select Mill"},
+  {"type": "click", "x": 2400, "y": 1050, "intent": "Place Mill on open ground BELOW berry bushes (NOT on them)"}
 ]
 ```
 
@@ -309,8 +319,9 @@ The full hotkey reference is appended below this prompt. Key shortcuts to rememb
 
 ## Building Placement
 - **In Dark Age, ONLY use the Q build menu** (economic: House, Mill, Mining Camp, Lumber Camp, Farm). Do NOT use W (military) or V (more buildings) until Feudal Age.
-- Buildings CANNOT be placed on trees, water, stone, gold, or other buildings
-- When placing buildings near resources (lumber camp, mining camp), click on OPEN GROUND next to the resource, not directly on it
+- Buildings CANNOT be placed on trees, water, stone, gold, berry bushes, or other buildings
+- **Mill, Lumber Camp, Mining Camp**: MUST be placed on OPEN GROUND next to the resource, NOT directly on it. Use coordinates 100-200 pixels away from the resource entity. Example: if berry_bush is at (2500, 880), place Mill at (2500, 1050) or (2300, 880).
+- **NEVER use target_class for building placement clicks** — target_class resolves to the resource center, where buildings can't be placed. Always use raw x/y on nearby open ground.
 - The executor auto-retries nearby positions if placement fails, so don't worry about exact coordinates
 
 ## Action Limits
