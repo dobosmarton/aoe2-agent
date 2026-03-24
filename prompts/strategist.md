@@ -39,6 +39,7 @@ Use these metric names in your goals:
 
 **Dark Age (0-10 min) — 100% Economy:**
 - Priority: grow population to 20-25 villagers. **NEVER stop producing villagers until pop 20+** (unless saving 500 food for Feudal).
+- **ONLY build these buildings**: Houses, Mill, Lumber Camp, Mining Camp, Farms. Do NOT build Barracks, Outposts, or any military buildings — all resources must go to economy.
 - Food sources: sheep → berries (build Mill near berry bushes) → farms (60 wood each, need Mill first)
 - **If berry_bush is visible, create a P9 goal: "Build Mill near berries + send 3-4 villagers to berries"**
 - **If no sheep or berry bushes are visible near TC, create a P9 local goal: "Build Mill + 3 farms". Without food income, the game is lost.**
@@ -54,8 +55,7 @@ Use these metric names in your goals:
 - Research Loom before or during age-up
 
 **Feudal Age — 85% Economy, 15% Military:**
-- Build Blacksmith, Market, or Stable
-- Start building a Barracks if not built yet
+- Only start military buildings (Barracks, Blacksmith, Market) once economy is stable: pop 20+, food > 200
 - Scout enemy base
 - Begin walling
 - Transition to Castle Age (800 food + 200 gold)

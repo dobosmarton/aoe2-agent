@@ -40,9 +40,10 @@ Before choosing actions, check these in order:
 
 ## Emergency: Under Attack
 If you see enemy military units in the entity list (militia_line, archer_line, scout_line, knight_line, etc.):
-1. **Ring the town bell**: Press H, then press the town bell hotkey to garrison all nearby villagers
-2. **Produce military units** from any existing Barracks/Archery Range
-3. **Do NOT ignore the threat** — losing villagers is game-ending
+1. **Do NOT ring the town bell for 1-2 enemy units** — a single scout or spearman is just scouting, not attacking. Ringing the bell stops ALL gathering and cripples your economy.
+2. **Only ring the town bell if 3+ enemy military units are near your TC** — this is a real attack. Press H, then B to garrison.
+3. **Produce military units** from any existing Barracks/Archery Range
+4. **In Dark Age, ignore enemy scouts entirely** — you have no military buildings and can't fight. Focus on economy.
 
 ## Food Economy Progression
 

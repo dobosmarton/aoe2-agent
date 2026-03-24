@@ -165,17 +165,22 @@ async def _handle_click(action_dict: dict[str, object], intent: str) -> ActionRe
     return ActionResult(True, "ok")
 
 
+# Classes that appear as the subject ("Send villager to..."), never the target.
+_ACTOR_CLASSES = frozenset({"villager", "town_center"})
+
+
 def _re_resolve_from_intent(x: int, y: int, intent: str) -> tuple[int, int]:
     """Re-resolve raw coordinates using entity class found in the intent.
 
     The LLM plans all actions from start-of-turn detection. After camera-moving
     keys (H, .) with rescan, those coordinates become stale. This matches the
     entity class mentioned in the intent against freshly detected entities.
+    Skips actor classes (villager, town_center) that appear as the subject.
     """
     intent_lower = intent.lower()
     for entity in _detected_entities:
         cls = entity.get("class", "")
-        if cls and cls in intent_lower:
+        if cls and cls not in _ACTOR_CLASSES and cls in intent_lower:
             resolved = _resolve_target_class(cls)
             if resolved:
                 log.debug("coords_re_resolved", cls=cls,
