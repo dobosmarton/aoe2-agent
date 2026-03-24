@@ -216,6 +216,12 @@ Target the nearest entity of a class instead of a specific ID:
 - `"target_class": "berry_bush"` — click nearest berry bush
 - `"target_class": "gold_mine"` — click nearest gold mine
 
+**NEVER use raw x/y coordinates for resource gathering after a camera-moving key (H, .).**
+After H or . (with rescan), the camera position changes and old x/y coordinates become INVALID.
+ALWAYS use `target_class` for click/right_click actions that follow a rescan — the executor
+resolves target_class against freshly detected entities, so coordinates are always correct.
+Only use raw x/y for placing buildings on empty ground (no entity to target).
+
 **CRITICAL: Only use target_class for classes that appear in the Detected Entities list above.**
 If "sheep" is NOT listed in Detected Entities, do NOT use `target_class: "sheep"` — it will fail.
 Check the entity list FIRST, then pick a target_class from what's actually detected.

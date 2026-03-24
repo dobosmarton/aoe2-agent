@@ -159,7 +159,7 @@ async def _handle_click(action_dict: dict[str, object], intent: str) -> ActionRe
         ]:
             pyautogui.click(screen_x + dx, screen_y + dy)
             await asyncio.sleep(BUILD_RETRY_DELAY)
-        pyautogui.press("escape")
+        pyautogui.rightClick(screen_x, screen_y)
         log.debug("build_placement_retry", x=x, y=y)
 
     return ActionResult(True, "ok")
