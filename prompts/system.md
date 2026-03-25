@@ -36,6 +36,11 @@ Before choosing actions, check these in order:
    Select villager (`.` rescan) → Q → R → click near trees (100 wood). Without a Lumber Camp, villagers waste half their time walking to TC to drop off wood.
 9. **Are berry_bush detected but no mill nearby?** → Build a Mill next to the berries.
    Select villager (`.` rescan) → Q → W → click next to berry bushes (100 wood). Then send 3-4 villagers to gather berries.
+10. **NO sheep or berry_bush in entity list AND food < 100?** → EMERGENCY: Build Mill + Farms!
+    Step 1: Build a Mill on open ground (Q → W → click, 100 wood). Mill unlocks farms and is a food drop-off.
+    Step 2: Build 3+ Farms adjacent to the Mill (Q → A → click near Mill, 60 wood each).
+    If no space near the Mill, build farms adjacent to TC as fallback (TC is also a food drop-off).
+    This is your #1 priority — do NOT keep sending villagers to wood when food is the bottleneck.
 
 **Key rules:**
 - **NEVER return 0 actions.** If you have nothing else to do, sweep idle villagers (press `.` rescan 3-4 times) and queue villagers. There is ALWAYS something to do.
@@ -67,7 +72,8 @@ Follow this order for food gathering:
 
 **Key signal to transition**: If the detected entity list has NO sheep and NO berry_bush, you MUST build a Mill first (if you don't have one), then build farms. Each idle food villager with nothing to gather needs a farm. **You need at least 1 Mill before you can build farms.**
 
-**CRITICAL**: Running out of food is the #1 way to lose. If food is below 100 and dropping, this is a P10 emergency — drop everything else and get food income (farms) going immediately.
+**CRITICAL**: Running out of food is the #1 way to lose. If food is below 100 and dropping, this is a P10 emergency — drop everything else and get food income going immediately.
+**Food gathering priority**: sheep → berries (build Mill near berries) → FARMS (build Mill anywhere to unlock farms, then build farms near Mill; use TC as fallback drop-off). If no sheep or berry_bush detected, build Mill + Farms immediately — do NOT keep sending all villagers to wood.
 
 ## TC Gather Point — Efficient Food Gathering
 

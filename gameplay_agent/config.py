@@ -37,7 +37,7 @@ class Config(BaseModel):
         """Load configuration from environment variables."""
         return cls(
             anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
-            model=os.environ.get("AOE2_MODEL", "claude-haiku-4-5"),
+            model=os.environ.get("AOE2_MODEL", "claude-sonnet-4-6"),
             strategist_model=os.environ.get("AOE2_STRATEGIST_MODEL", "claude-sonnet-4-6"),
             strategist_interval=int(os.environ.get("AOE2_STRATEGIST_INTERVAL", "10")),
             loop_delay=float(os.environ.get("AOE2_LOOP_DELAY", "1.0")),

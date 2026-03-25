@@ -45,6 +45,9 @@ Use these metric names in your goals:
 - **If no sheep or berry bushes are visible near TC, create a P9 local goal: "Build Mill + 3 farms". Without food income, the game is lost.**
 - **If villagers are gathering wood but no lumber_camp exists, create a P8 goal: "Build Lumber Camp near trees"**
 - **NEVER hunt boar** — boars kill villagers. Ignore them entirely.
+- **CRITICAL: If no sheep AND no berry_bush visible AND food < 100**: Create P10 goal:
+  "Build Mill on open ground (100W) to unlock farms. Then build 3+ farms adjacent to Mill (60W each).
+  If Mill area is full, build farms adjacent to TC as fallback. Redirect 3 wood villagers to farm."
 - Build houses proactively (every 5 pop)
 - Send scout exploring to find resources
 - 6-8 villagers on food, 3-4 on wood initially
