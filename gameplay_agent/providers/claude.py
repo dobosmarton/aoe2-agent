@@ -287,7 +287,6 @@ Play to win!"""
             system=self.get_system_prompt(),
             messages=[{"role": "user", "content": content}],
             tools=_ACTION_TOOLS,
-            tool_choice={"type": "any"},
         )
 
         # Extract actions from tool_use blocks, reasoning from text blocks
