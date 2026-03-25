@@ -1,16 +1,107 @@
 """Claude (Anthropic) LLM provider for AoE2 Agent."""
 
-import json
 from pathlib import Path
 from typing import Any, Optional
 
 import anthropic
 import structlog
-from pydantic import ValidationError
 
 from ..config import config
 from ..models import LLMResponse, Observations, validate_actions
 from .base import BaseLLMProvider
+
+
+def _click_schema(description: str) -> dict:
+    """Shared input schema for click and right_click tools."""
+    return {
+        "type": "object",
+        "properties": {
+            "x": {"type": "integer", "description": "X coordinate on game screen"},
+            "y": {"type": "integer", "description": "Y coordinate on game screen"},
+            "target_class": {"type": "string", "description": "Entity class to target nearest of, e.g. 'sheep'"},
+            "intent": {"type": "string", "description": description},
+        },
+        "required": ["x", "y", "intent"],
+        "additionalProperties": False,
+    }
+
+
+# Tool definitions for each action type — strict per-tool schemas.
+# Each tool has its own enforced schema, preventing field confusion
+# that occurred with structured output union types.
+_ACTION_TOOLS: list[dict] = [
+    {"name": "click", "description": "Left click at screen coordinates. Use for building placement and UI interaction.", "input_schema": _click_schema("What this click does")},
+    {"name": "right_click", "description": "Right click at screen coordinates. Use for resource gathering, setting gather points, and unit commands.", "input_schema": _click_schema("What this right click does")},
+    {
+        "name": "press",
+        "description": "Press a keyboard key. Use for hotkeys, queuing units, opening build menus.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "key": {"type": "string", "description": "Key to press, e.g. 'h', 'q', '.', ','"},
+                "rescan": {"type": "boolean", "description": "Take fresh screenshot+detection after this key press"},
+                "modifiers": {"type": "array", "items": {"type": "string"}, "description": "Modifier keys e.g. ['ctrl']"},
+                "intent": {"type": "string", "description": "What this key press does"},
+            },
+            "required": ["key", "intent"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "drag",
+        "description": "Drag mouse from start to end position.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "start_x": {"type": "integer", "description": "Start X coordinate"},
+                "start_y": {"type": "integer", "description": "Start Y coordinate"},
+                "end_x": {"type": "integer", "description": "End X coordinate"},
+                "end_y": {"type": "integer", "description": "End Y coordinate"},
+                "intent": {"type": "string"},
+            },
+            "required": ["start_x", "start_y", "end_x", "end_y", "intent"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "wait",
+        "description": "Wait for a duration.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ms": {"type": "integer", "description": "Milliseconds to wait (0-5000)"},
+                "intent": {"type": "string"},
+            },
+            "required": ["ms", "intent"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "scroll",
+        "description": "Scroll mouse wheel for zoom in/out.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "clicks": {"type": "integer", "description": "Positive = zoom in, negative = zoom out"},
+                "intent": {"type": "string"},
+            },
+            "required": ["clicks", "intent"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "detect",
+        "description": "Request full SAHI detection scan. SLOW (~5-10s) — only use when target_class keeps failing.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "intent": {"type": "string"},
+            },
+            "required": ["intent"],
+            "additionalProperties": False,
+        },
+    },
+]
 
 log = structlog.get_logger()
 
@@ -182,48 +273,41 @@ Play to win!"""
         return content
 
     async def _call_api(self, content: list[dict]) -> LLMResponse:
-        """Call Claude API with structured output parsing.
+        """Call Claude API with tool use for actions.
 
-        Uses messages.parse() to get validated Pydantic output directly.
+        Each action type is a separate tool with its own strict schema.
+        The model outputs tool_use blocks (actions) + text (reasoning)
+        in a single response. No union schema confusion.
+
         SDK handles retry (429/5xx) with exponential backoff automatically.
-
-        Invalid actions are salvaged by LLMResponse.salvage_valid_actions
-        (field_validator) — individual bad actions are dropped instead of
-        failing the entire response.
         """
-        response = await self.client.messages.parse(
+        response = await self.client.messages.create(
             model=self.model,
             max_tokens=config.max_tokens,
             system=self.get_system_prompt(),
             messages=[{"role": "user", "content": content}],
-            output_format=LLMResponse,
+            tools=_ACTION_TOOLS,
+            tool_choice={"type": "any"},
         )
-        if response.stop_reason == "refusal":
-            raise ValueError("Claude refused the request")
 
-        # Debug: log raw LLM output to diagnose (0,0) coordinate issue
-        raw_text = response.content[0].text
-        log.info("raw_llm_output", text=raw_text[:2000])
+        # Extract actions from tool_use blocks, reasoning from text blocks
+        actions: list[dict] = []
+        reasoning_parts: list[str] = []
 
-        if response.parsed_output is not None:
-            return response.parsed_output
+        for block in response.content:
+            if block.type == "text":
+                reasoning_parts.append(block.text)
+            elif block.type == "tool_use":
+                action_dict = {"type": block.name, **block.input}
+                actions.append(action_dict)
 
-        # Safety net: parsed_output is None despite model-level salvage (rare)
-        raw_text = response.content[0].text
-        raw = json.loads(raw_text)
-        raw_actions = raw.get("actions", [])
-        valid_actions = validate_actions(raw_actions)
-        log.warning("salvaged_actions", total=len(raw_actions), valid=len(valid_actions))
-
-        try:
-            observations = Observations.model_validate(raw.get("observations", {}))
-        except ValidationError:
-            observations = Observations()
+        valid_actions = validate_actions(actions)
+        reasoning = " ".join(reasoning_parts).strip()
 
         return LLMResponse.model_construct(
             actions=valid_actions,
-            observations=observations,
-            reasoning=raw.get("reasoning", ""),
+            observations=Observations(),
+            reasoning=reasoning,
         )
 
     async def get_actions(
