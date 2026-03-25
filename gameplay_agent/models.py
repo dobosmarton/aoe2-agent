@@ -20,29 +20,6 @@ class PointTargetAction(BaseModel):
     target_class: Optional[str] = Field(default=None, description="Entity class to target nearest of, e.g. 'sheep'")
     intent: str = ""
 
-    @model_validator(mode='before')
-    @classmethod
-    def normalize_fields(cls, data: object) -> object:
-        """Normalize common field name mistakes from LLM output.
-
-        Haiku frequently uses drag-style x1/y1 for click/right_click actions,
-        and 'target' instead of 'target_id'.
-        """
-        if not isinstance(data, dict):
-            return data
-        # LLM sometimes uses drag-style x1/y1 for click/right_click
-        if 'x1' in data and 'x' not in data:
-            data['x'] = data.pop('x1')
-        if 'y1' in data and 'y' not in data:
-            data['y'] = data.pop('y1')
-        # Remove leftover drag-only fields
-        data.pop('x2', None)
-        data.pop('y2', None)
-        # LLM sometimes uses 'target' instead of 'target_id'
-        if 'target' in data and 'target_id' not in data:
-            data['target_id'] = data.pop('target')
-        return data
-
     @model_validator(mode='after')
     def check_coords_or_target(self):
         """Ensure either coordinates, target_id, or target_class is provided."""
