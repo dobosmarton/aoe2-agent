@@ -231,13 +231,15 @@ async def _handle_press(action_dict: dict[str, object], intent: str) -> ActionRe
 
 
 async def _handle_drag(action_dict: dict[str, object], intent: str) -> ActionResult:
-    x1, y1 = int(action_dict["x1"]), int(action_dict["y1"])  # type: ignore[arg-type]
-    x2, y2 = int(action_dict["x2"]), int(action_dict["y2"])  # type: ignore[arg-type]
-    start_x, start_y = _translate(x1, y1)
-    end_x, end_y = _translate(x2, y2)
-    pyautogui.moveTo(start_x, start_y)
-    pyautogui.drag(end_x - start_x, end_y - start_y, duration=0.2)
-    log.info("drag", x1=x1, y1=y1, x2=x2, y2=y2, intent=intent)
+    sx = int(action_dict["start_x"])  # type: ignore[arg-type]
+    sy = int(action_dict["start_y"])  # type: ignore[arg-type]
+    ex = int(action_dict["end_x"])  # type: ignore[arg-type]
+    ey = int(action_dict["end_y"])  # type: ignore[arg-type]
+    screen_sx, screen_sy = _translate(sx, sy)
+    screen_ex, screen_ey = _translate(ex, ey)
+    pyautogui.moveTo(screen_sx, screen_sy)
+    pyautogui.drag(screen_ex - screen_sx, screen_ey - screen_sy, duration=0.2)
+    log.info("drag", start_x=sx, start_y=sy, end_x=ex, end_y=ey, intent=intent)
     return ActionResult(True, "ok")
 
 

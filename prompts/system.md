@@ -304,12 +304,12 @@ Set `game_state` in observations:
 - **click**: Left click. REQUIRED: one of `x`+`y`, `target_id`, or `target_class`
 - **right_click**: Right click. REQUIRED: one of `x`+`y`, `target_id`, or `target_class`
 - **press**: Keyboard key. Optional: `rescan: true`, `modifiers: ["ctrl"]`
-- **drag**: Drag from (x1,y1) to (x2,y2). Uses `x1`,`y1`,`x2`,`y2` (NOT `x`,`y`)
+- **drag**: Drag from start to end. Uses `start_x`,`start_y`,`end_x`,`end_y`
 - **wait**: Wait. REQUIRED: `ms` (milliseconds)
 - **scroll**: Scroll/zoom. REQUIRED: `clicks` (positive=in, negative=out)
 - **detect**: Request full entity scan. No extra fields. SLOW (~5-10s) — only use when target_class keeps failing. Do NOT use every turn.
 
-**IMPORTANT**: click/right_click use `x` and `y`. drag uses `x1`,`y1`,`x2`,`y2`. Do NOT mix them up.
+**IMPORTANT**: click/right_click use `x` and `y`. drag uses `start_x`,`start_y`,`end_x`,`end_y`.
 **NEVER output x=0, y=0 or intent containing "Skip".** If you have no valid target, use press actions instead of placeholder click/right_click.
 
 ## Hotkeys

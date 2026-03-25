@@ -122,10 +122,10 @@ class DragAction(BaseModel):
     """Mouse drag action."""
 
     type: Literal["drag"]
-    x1: int = Field(ge=0, le=7680)  # Support up to 8K resolution
-    y1: int = Field(ge=0, le=4320)
-    x2: int = Field(ge=0, le=7680)
-    y2: int = Field(ge=0, le=4320)
+    start_x: int = Field(ge=0, le=7680)
+    start_y: int = Field(ge=0, le=4320)
+    end_x: int = Field(ge=0, le=7680)
+    end_y: int = Field(ge=0, le=4320)
     intent: str = ""
 
 
