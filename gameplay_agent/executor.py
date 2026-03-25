@@ -313,6 +313,11 @@ async def execute_action(action: dict[str, Any] | Action) -> ActionResult:
 
         result = await handler(action_dict, intent)
 
+        # Move cursor to window center to prevent AoE2 edge-scrolling.
+        # Leaving the cursor near screen edges causes camera drift during delays.
+        if rect:
+            pyautogui.moveTo(rect[0] + 1512, rect[1] + 836)
+
         # Small delay between actions for stability
         await asyncio.sleep(config.action_delay)
         return result
