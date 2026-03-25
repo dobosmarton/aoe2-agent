@@ -103,7 +103,7 @@ The Lumber Camp example is already in the action templates below.
 
 ## Multi-Task Actions (do multiple things per turn!)
 
-Plan long action sequences (5-15 actions). Use `rescan: true` on camera-moving keys, then `target_class` to click entities.
+Plan focused action sequences (3-7 actions). Use `rescan: true` on camera-moving keys, then `target_class` to click entities.
 
 **Set food gather point + queue villagers (BEST pattern when food > 50):**
 ```json
@@ -276,20 +276,11 @@ After each turn, you receive verification results showing whether your actions h
 
 ## Output Format
 
-**CRITICAL: You MUST always output at least 3 actions. Never return an empty actions list.**
-Keep reasoning to 1-2 sentences — the actions matter, not the analysis.
+**Call 3-7 tools per turn.** Each action is a separate tool call (click, right_click, press, etc.).
+Call ALL your actions as parallel tool calls in a single response — do NOT call one tool and wait.
+Speed matters — fewer focused actions with fast iteration beats long action sequences.
 
-```json
-{
-  "actions": [...],
-  "observations": {
-    "game_state": "playing",
-    "under_attack": false,
-    "events": []
-  },
-  "reasoning": "Brief 1-2 sentence summary of what you did and why"
-}
-```
+Example: press(h) → right_click(sheep coords) → press(q) → press(.) → right_click(tree coords) — all at once.
 
 Use the resource readings from context (provided by strategist) — do NOT try to read resources yourself.
 
@@ -331,7 +322,7 @@ The full hotkey reference is appended below this prompt. Key shortcuts to rememb
 - The executor auto-retries nearby positions if placement fails, so don't worry about exact coordinates
 
 ## Action Limits
-- Use 5-15 actions per turn (no need for waits — delays are automatic)
+- Use 3-7 actions per turn — speed matters more than long sequences
 - Plan multi-step sequences: queue villagers + send idle vils + build houses in ONE turn
 - You can do MULTIPLE tasks per turn using rescan
 
