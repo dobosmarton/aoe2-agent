@@ -201,6 +201,10 @@ Play to win!"""
         if response.stop_reason == "refusal":
             raise ValueError("Claude refused the request")
 
+        # Debug: log raw LLM output to diagnose (0,0) coordinate issue
+        raw_text = response.content[0].text
+        log.info("raw_llm_output", text=raw_text[:2000])
+
         if response.parsed_output is not None:
             return response.parsed_output
 
