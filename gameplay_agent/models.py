@@ -1,8 +1,8 @@
 """Pydantic models for action validation."""
 
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, Discriminator, Field, ValidationError, field_validator, model_validator
 
 
 class PointTargetAction(BaseModel):
@@ -177,8 +177,13 @@ class DetectAction(BaseModel):
     intent: str = ""
 
 
-# Union type for all actions
-Action = ClickAction | RightClickAction | PressAction | DragAction | WaitAction | ScrollAction | DetectAction
+# Discriminated union ensures the JSON schema uses oneOf + discriminator on "type",
+# preventing the model from confusing field names across action types
+# (e.g., using DragAction's x1/y1 for ClickAction instead of x/y).
+Action = Annotated[
+    Union[ClickAction, RightClickAction, PressAction, DragAction, WaitAction, ScrollAction, DetectAction],
+    Discriminator("type"),
+]
 
 
 class Observations(BaseModel):
