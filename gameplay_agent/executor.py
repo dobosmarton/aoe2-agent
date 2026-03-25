@@ -115,7 +115,11 @@ def _resolve_coords(action_dict: dict[str, object]) -> tuple[str, tuple[int, int
 
     x, y = action_dict.get("x"), action_dict.get("y")
     if x is not None and y is not None:
-        return ("", (int(x), int(y)))  # type: ignore[arg-type]
+        ix, iy = int(x), int(y)  # type: ignore[arg-type]
+        if ix == 0 and iy == 0:
+            log.warning("placeholder_coords_rejected")
+            return ("(0, 0) placeholder coordinates rejected", None)
+        return ("", (ix, iy))
 
     return ("no coordinates, target_id, or target_class provided", None)
 

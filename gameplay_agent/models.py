@@ -45,8 +45,8 @@ class PointTargetAction(BaseModel):
 
     @model_validator(mode='after')
     def check_coords_or_target(self):
-        """Ensure either coordinates, target_id, or target_class is provided."""
-        has_coords = self.x is not None and self.y is not None
+        """Ensure either valid coordinates, target_id, or target_class is provided."""
+        has_coords = self.x is not None and self.y is not None and (self.x > 0 or self.y > 0)
         has_target = self.target_id is not None
         has_class = self.target_class is not None
         if not has_coords and not has_target and not has_class:
