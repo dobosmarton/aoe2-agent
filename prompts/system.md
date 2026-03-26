@@ -24,19 +24,20 @@ Before choosing actions, check these in order:
    You MUST select a VILLAGER first (press `.`), NOT the TC (H).
    H then Q queues a villager at TC. `.` then Q then Q builds a house. These are DIFFERENT.
    You CANNOT queue villagers while housed. This is the #1 game-losing mistake.
-4. **Do I need houses soon (within 2 of cap)?** → Build a house proactively.
-5. **FOOD EMERGENCY: Is food < 200 AND no sheep/berry_bush in the entity list?** →
-   You MUST transition to farms:
-   - If no Mill exists: select villager (`.` rescan) → Q → W → click near TC (100 wood)
-   - Then build farms: select villager (`.` rescan) → Q → A → click near TC/Mill (60 wood each)
-   - Keep at least HALF your villagers gathering food at all times. Zero food = game over.
+4. **Do I need houses soon (within 2 of cap)?** → Build ONE house. Do NOT build multiple houses per turn — one house adds 5 pop slots, that's enough. Over-housing wastes villager time.
+5. **FOOD EMERGENCY: Is food < 50 AND you have idle villagers?** →
+   **Dedicate the ENTIRE turn to building farms.** Do nothing else — no houses, no queuing, just:
+   `.` → `q` → `a` → click (place farm) — repeat for every idle villager.
+   Each farm costs 60 wood. If you have 300+ wood, build 5 farms this turn.
+   If no Mill exists yet: build Mill first (`.` → `q` → `w` → click), then farms.
 6. **Villager balance**: Keep at least half your villagers on FOOD. Never have 0 food gatherers. If you have 6+ on food already, send the next villager to wood.
 7. **Is my scout idle?** → Enable Auto Scout! Press `,` (select idle military) then `G` (Auto Scout). The scout will explore the map automatically — you only need to do this ONCE. The scout reveals sheep, boar, deer, gold, stone, and the enemy base.
 8. **Are 2+ villagers gathering wood without a Lumber Camp?** → Build one NOW.
    Select villager (`.` rescan) → Q → R → click near trees (100 wood). Without a Lumber Camp, villagers waste half their time walking to TC to drop off wood.
 9. **Are berry_bush detected but no mill nearby?** → Build a Mill next to the berries.
    Select villager (`.` rescan) → Q → W → click next to berry bushes (100 wood). Then send 3-4 villagers to gather berries.
-10. **NO sheep or berry_bush in entity list AND food < 100?** → EMERGENCY: Build Mill + Farms!
+10. **Population 20+ AND food > 500?** → Research Feudal Age! Press H (go to TC) → Z (research age up). This is a global goal — don't delay once you have the resources.
+11. **NO sheep or berry_bush in entity list AND food < 100?** → EMERGENCY: Build Mill + Farms!
     Step 1: Build a Mill on open ground (Q → W → click, 100 wood). Mill unlocks farms and is a food drop-off.
     Step 2: Build 3+ Farms adjacent to the Mill (Q → A → click near Mill, 60 wood each).
     If no space near the Mill, build farms adjacent to TC as fallback (TC is also a food drop-off).

@@ -322,6 +322,7 @@ Play to win!"""
                 system=self.get_system_prompt(),
                 messages=messages,
                 tools=_ACTION_TOOLS,
+                cache_control={"type": "ephemeral"},
             )
 
             # Single pass: extract text and tool_use blocks
