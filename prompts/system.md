@@ -14,7 +14,7 @@ Your strategic goals are provided in the context below (under "Active Goals"). F
 ## EVERY TURN Checklist (always do these regardless of goals)
 
 Before choosing actions, check these in order:
-1. **Are there idle villagers?** → **THIS IS THE HIGHEST PRIORITY.** Send ALL of them to work IMMEDIATELY. Press `.` (rescan) repeatedly to cycle through every idle villager and assign each one. An idle villager gathers ZERO resources — every second idle is wasted. **Sweep 3-4 times EVERY turn.**
+1. **Are there idle villagers?** → **THIS IS THE HIGHEST PRIORITY.** After pressing `.` (select idle villager), IMMEDIATELY right_click a resource (sheep, tree, berry_bush) to assign them. Do NOT press H first — that deselects the villager. Pattern: `.` → right_click resource → `.` → right_click resource. Repeat to sweep all idles.
 2. **Should I queue a villager?** → YES, unless you are saving food for Feudal Age.
    - **Population < 20**: Queue a villager EVERY turn. Press H, Q. If you have 150+ food: H, Q, Q, Q.
    - **Population 20+ and saving for Feudal (need 500 food)**: STOP queuing villagers. Save food for the age-up research. Resume queuing after clicking up.
@@ -36,7 +36,8 @@ Before choosing actions, check these in order:
    Select villager (`.` rescan) → Q → R → click near trees (100 wood). Without a Lumber Camp, villagers waste half their time walking to TC to drop off wood.
 9. **Are berry_bush detected but no mill nearby?** → Build a Mill next to the berries.
    Select villager (`.` rescan) → Q → W → click next to berry bushes (100 wood). Then send 3-4 villagers to gather berries.
-10. **Population 20+ AND food > 500?** → Research Feudal Age! Press H (go to TC) → Z (research age up). This is a global goal — don't delay once you have the resources.
+10. **Population 20+ AND food > 500?** → Research Feudal Age! Press H (go to TC) → Z (research age up).
+    **PREREQUISITE**: You MUST have built 2 Dark Age buildings BEFORE pressing Z. Qualifying buildings: Lumber Camp, Mill, Mining Camp, Barracks, or Dock. Houses do NOT count. If you don't have 2 of these, build them first.
 11. **NO sheep or berry_bush in entity list AND food < 100?** → EMERGENCY: Build Mill + Farms!
     Step 1: Build a Mill on open ground (Q → W → click, 100 wood). Mill unlocks farms and is a food drop-off.
     Step 2: Build 3+ Farms adjacent to the Mill (Q → A → click near Mill, 60 wood each).
@@ -321,6 +322,7 @@ The full hotkey reference is appended below this prompt. Key shortcuts to rememb
 - **Mill, Lumber Camp, Mining Camp**: MUST be placed on OPEN GROUND next to the resource, NOT directly on it. Use coordinates 100-200 pixels away from the resource entity. Example: if berry_bush is at (2500, 880), place Mill at (2500, 1050) or (2300, 880).
 - **NEVER use target_class for building placement clicks** — target_class resolves to the resource center, where buildings can't be placed. Always use raw x/y on nearby open ground.
 - The executor auto-retries nearby positions if placement fails, so don't worry about exact coordinates
+- **If a building placement fails 2+ turns in a row**, the location is blocked. Try a COMPLETELY DIFFERENT spot — move 300+ pixels away from the previous attempt. Don't keep clicking the same area.
 
 ## Action Limits
 - Use 3-7 actions per turn — speed matters more than long sequences
