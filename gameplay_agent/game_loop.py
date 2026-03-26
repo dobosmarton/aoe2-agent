@@ -408,17 +408,11 @@ def _process_response(
 async def _execute_turn_actions(
     actions: list, iteration: int, memory: AgentMemory, reasoning: str,
 ) -> None:
-    """Execute ground commands, LLM actions, or fallback actions."""
-    # Ground commands (hardcoded, before LLM actions)
-    ground_cmds = _get_ground_commands(iteration)
-    if ground_cmds:
-        ground_actions = validate_actions(ground_cmds)
-        if ground_actions:
-            gc_results = await execute_actions(ground_actions)
-            gc_count = sum(1 for r in gc_results if r.success)
-            log.info("ground_commands_executed", iteration=iteration,
-                     count=gc_count, total=len(ground_actions))
+    """Execute LLM actions or fallback actions.
 
+    Ground commands (zoom, scout) are handled separately in the main loop
+    to ensure they always run, even in agentic tool loop mode.
+    """
     # LLM actions
     if actions:
         results = await execute_actions(actions)
@@ -552,8 +546,17 @@ async def game_loop(
             if game_end_reason:
                 break
 
-            # In agentic tool loop mode, actions are already executed during
-            # the LLM call. Record metrics but skip re-execution.
+            # Ground commands (zoom, scout) must always run, even when
+            # actions were already executed in the agentic tool loop.
+            ground_cmds = _get_ground_commands(iteration)
+            if ground_cmds:
+                ground_actions = validate_actions(ground_cmds)
+                if ground_actions:
+                    gc_results = await execute_actions(ground_actions)
+                    gc_count = sum(1 for r in gc_results if r.success)
+                    log.info("ground_commands_executed", iteration=iteration,
+                             count=gc_count, total=len(ground_actions))
+
             if response.get("actions_already_executed"):
                 success = response.get("success_count", len(actions))
                 memory.record_action_results(success, len(actions))
