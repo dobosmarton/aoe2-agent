@@ -28,19 +28,21 @@ structlog.configure(
 log = structlog.get_logger()
 
 
+_PROVIDERS = {
+    "claude": lambda: ClaudeProvider(),
+    "claude-tools": lambda: ClaudeProvider(use_batch_mode=False),
+    "ollama": lambda: OllamaProvider(),
+    "parallel": lambda: ParallelExecutorProvider(),
+}
+
+
 def create_provider(provider_name: str):
     """Create an LLM provider by name."""
-    if provider_name == "claude":
-        return ClaudeProvider()
-    if provider_name == "claude-tools":
-        return ClaudeProvider(use_batch_mode=False)
-    if provider_name == "ollama":
-        return OllamaProvider()
-    if provider_name == "parallel":
-        return ParallelExecutorProvider()
-
-    available = "claude, claude-tools, ollama, parallel"
-    raise ValueError(f"Unknown provider: {provider_name}. Available: {available}")
+    factory = _PROVIDERS.get(provider_name)
+    if factory is None:
+        available = ", ".join(_PROVIDERS)
+        raise ValueError(f"Unknown provider: {provider_name}. Available: {available}")
+    return factory()
 
 
 async def main_async(args):
@@ -79,7 +81,7 @@ def main():
         "--provider",
         type=str,
         default="claude",
-        choices=["claude", "claude-tools", "ollama", "parallel"],
+        choices=list(_PROVIDERS),
         help="LLM provider to use (default: claude)",
     )
     parser.add_argument(
