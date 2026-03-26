@@ -1,5 +1,6 @@
 """Claude (Anthropic) LLM provider for AoE2 Agent."""
 
+import json
 from pathlib import Path
 from typing import Any, Optional
 
@@ -7,6 +8,7 @@ import anthropic
 import structlog
 
 from ..config import config
+from ..executor import execute_action, get_detected_entities
 from ..models import LLMResponse, Observations, validate_actions
 from .base import BaseLLMProvider
 
@@ -272,42 +274,86 @@ Play to win!"""
 
         return content
 
-    async def _call_api(self, content: list[dict]) -> LLMResponse:
-        """Call Claude API with tool use for actions.
+    async def _execute_tool_call(self, block: object) -> tuple[dict, dict]:
+        """Execute a single tool call and build the result payload.
 
-        Each action type is a separate tool with its own strict schema.
-        The model outputs tool_use blocks (actions) + text (reasoning)
-        in a single response. No union schema confusion.
-
-        SDK handles retry (429/5xx) with exponential backoff automatically.
+        Returns (action_dict, tool_result_dict).
         """
-        response = await self.client.messages.create(
-            model=self.model,
-            max_tokens=config.max_tokens,
-            system=self.get_system_prompt(),
-            messages=[{"role": "user", "content": content}],
-            tools=_ACTION_TOOLS,
-        )
+        action_dict = {"type": block.name, **block.input}  # type: ignore[union-attr]
 
-        # Extract actions from tool_use blocks, reasoning from text blocks
-        actions: list[dict] = []
+        result = await execute_action(action_dict)
+        log.info("tool_executed", action=block.name, intent=block.input.get("intent", ""),  # type: ignore[union-attr]
+                 success=result.success)
+
+        result_data: dict[str, Any] = {"success": result.success, "detail": result.detail}
+
+        # Include fresh entity list after rescan-triggering actions
+        if block.name == "press" and block.input.get("rescan"):  # type: ignore[union-attr]
+            entities = get_detected_entities()
+            result_data["entities"] = [
+                {"id": e.get("id", ""), "class": e.get("class", ""), "center": e.get("center", [])}
+                for e in entities[:20]
+            ]
+
+        tool_result = {
+            "type": "tool_result",
+            "tool_use_id": block.id,  # type: ignore[union-attr]
+            "content": json.dumps(result_data),
+        }
+        return action_dict, tool_result
+
+    async def _call_api(self, content: list[dict]) -> LLMResponse:
+        """Call Claude API in an agentic tool loop.
+
+        Each iteration: model calls one tool → we execute it → feed result
+        back → model calls next tool. Loop until model says end_turn or we
+        hit max_tool_iterations. The model receives fresh entity positions
+        after every camera-moving action.
+        """
+        messages: list[dict] = [{"role": "user", "content": content}]
+        executed_actions: list[dict] = []
+        success_count = 0
         reasoning_parts: list[str] = []
 
-        for block in response.content:
-            if block.type == "text":
-                reasoning_parts.append(block.text)
-            elif block.type == "tool_use":
-                action_dict = {"type": block.name, **block.input}
-                actions.append(action_dict)
+        for _ in range(config.max_tool_iterations):
+            response = await self.client.messages.create(
+                model=self.model,
+                max_tokens=config.max_tokens,
+                system=self.get_system_prompt(),
+                messages=messages,
+                tools=_ACTION_TOOLS,
+            )
 
-        valid_actions = validate_actions(actions)
-        reasoning = " ".join(reasoning_parts).strip()
+            # Single pass: extract text and tool_use blocks
+            tool_blocks = []
+            for block in response.content:
+                if block.type == "text" and block.text.strip():
+                    reasoning_parts.append(block.text.strip())
+                elif block.type == "tool_use":
+                    tool_blocks.append(block)
 
-        return LLMResponse.model_construct(
-            actions=valid_actions,
+            if response.stop_reason != "tool_use":
+                break
+
+            # Execute each tool call and collect results
+            messages.append({"role": "assistant", "content": response.content})
+            tool_results = []
+            for block in tool_blocks:
+                action_dict, tool_result = await self._execute_tool_call(block)
+                executed_actions.append(action_dict)
+                tool_results.append(tool_result)
+                if json.loads(tool_result["content"]).get("success"):
+                    success_count += 1
+
+            messages.append({"role": "user", "content": tool_results})
+
+        result = LLMResponse.model_construct(
+            actions=validate_actions(executed_actions),
             observations=Observations(),
-            reasoning=reasoning,
+            reasoning=" ".join(reasoning_parts),
         )
+        result._success_count = success_count  # type: ignore[attr-defined]
+        return result
 
     async def get_actions(
         self,
@@ -334,7 +380,10 @@ Play to win!"""
         try:
             result = await self._call_api(content)
             log.debug("claude_response", reasoning=result.reasoning[:200])
-            return result.model_dump()
+            response = result.model_dump()
+            response["actions_already_executed"] = True
+            response["success_count"] = getattr(result, "_success_count", len(response.get("actions", [])))
+            return response
 
         except anthropic.APIError as e:
             log.error("claude_api_error", error=str(e))

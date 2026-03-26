@@ -15,6 +15,7 @@ class Config(BaseModel):
     anthropic_api_key: str = ""
     model: str = "claude-sonnet-4-6"  # Executor: better instruction following
     max_tokens: int = 1536
+    max_tool_iterations: int = 7  # Max tool calls per game turn in agentic loop
     strategist_model: str = "claude-sonnet-4-6"  # Strategist: deeper reasoning
     strategist_interval: int = 10  # Run strategist every N turns
 

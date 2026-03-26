@@ -276,11 +276,11 @@ After each turn, you receive verification results showing whether your actions h
 
 ## Output Format
 
-**Call 3-7 tools per turn.** Each action is a separate tool call (click, right_click, press, etc.).
-Call ALL your actions as parallel tool calls in a single response — do NOT call one tool and wait.
-Speed matters — fewer focused actions with fast iteration beats long action sequences.
+**Call one tool at a time.** Each action executes immediately and you get the result back.
+After camera-moving keys (H, .) with rescan=true, you receive FRESH entity positions in the result.
+Use these updated coordinates for your next click/right_click — they are always accurate.
 
-Example: press(h) → right_click(sheep coords) → press(q) → press(.) → right_click(tree coords) — all at once.
+Aim for 3-7 tool calls per turn. After each tool result, decide your next action based on the feedback.
 
 Use the resource readings from context (provided by strategist) — do NOT try to read resources yourself.
 

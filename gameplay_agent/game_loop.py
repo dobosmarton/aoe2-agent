@@ -552,9 +552,17 @@ async def game_loop(
             if game_end_reason:
                 break
 
-            await _execute_turn_actions(
-                actions, iteration, memory, response.get("reasoning", ""),
-            )
+            # In agentic tool loop mode, actions are already executed during
+            # the LLM call. Record metrics but skip re-execution.
+            if response.get("actions_already_executed"):
+                success = response.get("success_count", len(actions))
+                memory.record_action_results(success, len(actions))
+                log.info("actions_executed", iteration=iteration,
+                         total=len(actions), successful=success)
+            else:
+                await _execute_turn_actions(
+                    actions, iteration, memory, response.get("reasoning", ""),
+                )
 
             await asyncio.sleep(config.loop_delay)
 

@@ -62,6 +62,11 @@ def set_detected_entities(entities: list[object]) -> None:
     log.debug("detected_entities_set", count=len(_detected_entities))
 
 
+def get_detected_entities() -> list[dict]:
+    """Return the current detected entity list."""
+    return _detected_entities
+
+
 def clear_detected_entities() -> None:
     """Clear the cached detected entities."""
     global _detected_entities
