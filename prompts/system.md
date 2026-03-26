@@ -23,9 +23,10 @@ Before choosing actions, check these in order:
    `{"type":"press","key":".","rescan":true,"intent":"Select idle villager"}`
    `{"type":"press","key":"q","intent":"Build economic menu"}`
    `{"type":"press","key":"q","intent":"Select house"}`
-   `{"type":"click","x":<center_x>,"y":<center_y>,"intent":"Place house on open ground"}`
+   `{"type":"click","x":960,"y":540,"intent":"Place house on open ground"}`
    The click at the end is MANDATORY — it places the building. Without it, NOTHING is built.
-   Click near the screen center (from the "Game window" dimensions in context). The executor retries nearby offsets if the spot is blocked, so an approximate location is fine.
+   For x and y, use the Center coordinates from the "Game window" line at the top of your context.
+   The executor retries nearby offsets if the spot is blocked, so an approximate location is fine.
    You MUST select a VILLAGER first (press `.`), NOT the TC (H).
    H then Q queues a villager at TC. `.` then Q then Q then click builds a house. These are DIFFERENT.
    You CANNOT queue villagers while housed. This is the #1 game-losing mistake.
@@ -49,7 +50,7 @@ Before choosing actions, check these in order:
 
 **Key rules:**
 - **NEVER return 0 actions.** If you have nothing else to do, sweep idle villagers (press `.` rescan 3-4 times) and queue villagers. There is ALWAYS something to do.
-- **Every building needs a CLICK to place.** Keys only select the blueprint. You must always follow Q→Q (house), Q→R (lumber camp), Q→W (mill), Q→A (farm) with a `click` action on open ground near the screen center. No click = no building. The executor retries nearby offsets if the spot is blocked.
+- **Every building needs a CLICK to place.** Keys only select the blueprint. You must always follow Q→Q (house), Q→R (lumber camp), Q→W (mill), Q→A (farm) with a `click` action. For x/y use the Center coordinates from the "Game window" line in your context. No click = no building. The executor retries nearby offsets if the spot is blocked.
 - **After your main actions, always sweep for idle villagers**: press `.` (rescan) → assign → `.` (rescan) → assign. Repeat 3-4 times to catch all idles.
 - **Enable Auto Scout early**: press `,` (rescan) → `G` (Auto Scout). Do this ONCE and the scout explores forever automatically.
 
@@ -123,7 +124,7 @@ Plan focused action sequences (3-7 actions). Use `rescan: true` on camera-moving
 
 **Queue villager + build house (1 turn — use when near pop cap):**
 ALL building actions MUST end with a click to place. Without the click, no building is created!
-Click near screen center — the executor retries nearby offsets if the spot is blocked.
+For x/y use the Center coordinates from the "Game window" line. Executor retries nearby if blocked.
 ```json
 [
   {"type": "press", "key": "h", "intent": "Select TC"},
@@ -131,7 +132,7 @@ Click near screen center — the executor retries nearby offsets if the spot is 
   {"type": "press", "key": ".", "rescan": true, "intent": "Select idle villager"},
   {"type": "press", "key": "q", "intent": "Build economic menu"},
   {"type": "press", "key": "q", "intent": "Select house"},
-  {"type": "click", "x": "<center_x>", "y": "<center_y>", "intent": "Place house on open ground near center"}
+  {"type": "click", "x": 960, "y": 540, "intent": "Place house on open ground"}
 ]
 ```
 
@@ -182,7 +183,7 @@ Click near TC or Mill — farms need a nearby food drop-off point.
   {"type": "press", "key": ".", "rescan": true, "intent": "Select idle villager"},
   {"type": "press", "key": "q", "intent": "Build economic menu"},
   {"type": "press", "key": "a", "intent": "Select farm"},
-  {"type": "click", "x": "<center_x>", "y": "<center_y>", "intent": "Place farm near TC"}
+  {"type": "click", "x": 960, "y": 540, "intent": "Place farm near TC"}
 ]
 ```
 
@@ -230,11 +231,11 @@ Place buildings near screen center (close to TC after pressing H). Executor retr
   {"type": "press", "key": ".", "rescan": true, "intent": "Select idle villager"},
   {"type": "press", "key": "q", "intent": "Build economic menu"},
   {"type": "press", "key": "w", "intent": "Select Mill (100 wood)"},
-  {"type": "click", "x": "<center_x>", "y": "<center_y>", "intent": "Place Mill near TC"},
+  {"type": "click", "x": 960, "y": 540, "intent": "Place Mill near TC"},
   {"type": "press", "key": ".", "rescan": true, "intent": "Select another idle villager"},
   {"type": "press", "key": "q", "intent": "Build economic menu"},
   {"type": "press", "key": "a", "intent": "Select Farm (60 wood)"},
-  {"type": "click", "x": "<center_x>", "y": "<center_y>", "intent": "Place farm near TC/Mill"}
+  {"type": "click", "x": 960, "y": 540, "intent": "Place farm near TC/Mill"}
 ]
 ```
 

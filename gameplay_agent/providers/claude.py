@@ -17,6 +17,7 @@ _ACTION_TOOLS = to_anthropic_tools()
 
 log = structlog.get_logger()
 
+
 # Optional game knowledge database for dynamic context injection
 try:
     from data.game_knowledge import GameKnowledge, get_db
