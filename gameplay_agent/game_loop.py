@@ -22,7 +22,7 @@ from .goals import GoalManager
 from .memory import AgentMemory, GameState
 from .models import validate_actions
 from .providers.base import BaseLLMProvider
-from .providers.strategist import StrategistProvider
+from .providers.strategist import StrategistProvider, get_default_goals
 from .screen import capture_screenshot, save_screenshot
 from .window import ensure_game_focused, get_game_window_rect, is_game_running
 
@@ -284,7 +284,7 @@ def _classify_entities(
     return entity_summary, ownership_results
 
 
-async def _run_strategist(
+async def _run_strategist_async(
     strategist: StrategistProvider,
     iteration: int,
     alarm: bool,
@@ -294,9 +294,7 @@ async def _run_strategist(
     screenshot: bytes,
     goal_logger: GoalLogger,
 ) -> None:
-    """Invoke the strategist to create/update goals."""
-    if not strategist.should_run(iteration, alarm=alarm):
-        return
+    """Invoke the strategist to create/update goals (runs as background task)."""
     try:
         prev_goals = list(goal_manager.active_goals)
         new_goals, resource_readings = await strategist.generate_goals(
@@ -316,6 +314,40 @@ async def _run_strategist(
                  goal_count=len(new_goals), alarm=alarm)
     except Exception as e:
         log.warning("strategist_failed", error=str(e))
+
+
+def _maybe_launch_strategist(
+    strategist: StrategistProvider,
+    iteration: int,
+    alarm: bool,
+    memory: AgentMemory,
+    goal_manager: GoalManager,
+    entity_summary: str,
+    screenshot: bytes,
+    goal_logger: GoalLogger,
+    pending_task: asyncio.Task | None,
+) -> asyncio.Task | None:
+    """Launch the strategist as a background task if it should run this turn.
+
+    Returns the new task, or the existing pending task if one is still running.
+    """
+    if not strategist.should_run(iteration, alarm=alarm):
+        return pending_task
+
+    # Don't launch a new task if the previous one is still in-flight
+    if pending_task is not None and not pending_task.done():
+        log.debug("strategist_skipped", reason="previous_task_pending")
+        return pending_task
+
+    task = asyncio.create_task(
+        _run_strategist_async(
+            strategist, iteration, alarm, memory,
+            goal_manager, entity_summary, screenshot, goal_logger,
+        ),
+        name=f"strategist_turn_{iteration}",
+    )
+    log.info("strategist_launched_async", turn=iteration, alarm=alarm)
+    return task
 
 
 def _build_llm_context(
@@ -481,6 +513,7 @@ async def game_loop(
 
     # Initialize goal system
     goal_manager = GoalManager()
+    goal_manager.set_goals(get_default_goals(turn=0))
     strategist = StrategistProvider()
     log_dir = Path(config.log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -493,6 +526,7 @@ async def game_loop(
 
     iteration = 0
     alarm = False
+    strategist_task: asyncio.Task | None = None
     log.info("game_loop_start", provider=type(provider).__name__,
              detection=detector is not None,
              executor_model=config.model,
@@ -531,9 +565,10 @@ async def game_loop(
                 else False
             )
 
-            await _run_strategist(
+            strategist_task = _maybe_launch_strategist(
                 strategist, iteration, alarm, memory,
                 goal_manager, entity_summary, screenshot, goal_logger,
+                strategist_task,
             )
 
             context = _build_llm_context(memory, goal_manager, entity_summary)
@@ -579,6 +614,12 @@ async def game_loop(
             memory.game_end_reason = "error"
         raise
     finally:
+        # Await any in-flight strategist task so it can update goals/log cleanly
+        if strategist_task is not None and not strategist_task.done():
+            try:
+                await strategist_task
+            except Exception:
+                pass  # Already logged inside _run_strategist_async
         if overlay:
             overlay.close()
         metrics = memory.get_metrics_snapshot()
