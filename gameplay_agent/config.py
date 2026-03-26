@@ -21,8 +21,11 @@ class Config(BaseModel):
 
     # Provider settings
     provider: str = "claude"  # "claude" or "ollama"
+    max_retries: int = 3  # Anthropic client retry count (429/5xx with exponential backoff)
+    strategist_max_tokens: int = 768  # Strategist uses more tokens for deeper reasoning
     ollama_host: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:7b"
+    ollama_timeout: float = 30.0  # Ollama HTTP request timeout in seconds
 
     # Detection settings
     detection_imgsz: int = 1280  # YOLO inference resolution (higher = more detections, slower)
@@ -50,8 +53,11 @@ class Config(BaseModel):
             save_screenshots=os.environ.get("AOE2_SAVE_SCREENSHOTS", "true").lower() == "true",
             detection_host=os.environ.get("AOE2_DETECTION_HOST", ""),
             provider=os.environ.get("AOE2_PROVIDER", "claude"),
+            max_retries=int(os.environ.get("AOE2_MAX_RETRIES", "3")),
+            strategist_max_tokens=int(os.environ.get("AOE2_STRATEGIST_MAX_TOKENS", "768")),
             ollama_host=os.environ.get("AOE2_OLLAMA_HOST", "http://localhost:11434"),
             ollama_model=os.environ.get("AOE2_OLLAMA_MODEL", "qwen2.5:7b"),
+            ollama_timeout=float(os.environ.get("AOE2_OLLAMA_TIMEOUT", "30.0")),
         )
 
 

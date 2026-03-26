@@ -33,3 +33,11 @@ class BaseLLMProvider(ABC):
     def get_system_prompt(self) -> str:
         """Get the system prompt for this provider."""
         pass
+
+    def _error_response(self, message: str) -> dict[str, Any]:
+        """Return a safe error response with a wait action."""
+        return {
+            "reasoning": message,
+            "observations": {},
+            "actions": [{"type": "wait", "ms": 1000, "intent": "Error recovery"}],
+        }
