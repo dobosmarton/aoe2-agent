@@ -14,11 +14,21 @@ class PointTargetAction(BaseModel):
     - target_class to target the nearest entity of that class
     """
 
-    x: int = Field(ge=0, le=7680)
-    y: int = Field(ge=0, le=4320)
+    x: Optional[int] = Field(default=None, ge=0, le=7680)
+    y: Optional[int] = Field(default=None, ge=0, le=4320)
     target_id: Optional[str] = Field(default=None, description="Entity ID from detection, e.g. 'sheep_0'")
     target_class: Optional[str] = Field(default=None, description="Entity class to target nearest of, e.g. 'sheep'")
     intent: str = ""
+
+    @model_validator(mode='after')
+    def check_coords_or_target(self):
+        """Ensure either coordinates, target_id, or target_class is provided."""
+        has_coords = self.x is not None and self.y is not None
+        has_target = self.target_id is not None
+        has_class = self.target_class is not None
+        if not has_coords and not has_target and not has_class:
+            raise ValueError("Must provide (x, y) coordinates, target_id, or target_class")
+        return self
 
 
 class ClickAction(PointTargetAction):
