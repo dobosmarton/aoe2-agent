@@ -45,6 +45,18 @@ class StrategistResponse(BaseModel):
     goals: list[StrategistGoal]
 
 
+def get_default_goals(turn: int = 0) -> list[Goal]:
+    """Return sensible Dark Age starting goals used before the strategist responds."""
+    return [
+        Goal(name="Queue villagers", type="local", metric="population",
+             target=10, priority=9, created_turn=turn),
+        Goal(name="Gather food", type="local", metric="food",
+             target=200, priority=8, created_turn=turn),
+        Goal(name="Advance to Feudal Age", type="global", metric="age",
+             target="Feudal Age", priority=4, created_turn=turn),
+    ]
+
+
 class StrategistProvider:
     """Sonnet-powered strategist that creates/updates goals.
 
@@ -186,13 +198,4 @@ Read the screenshot to get exact current resource values (food, wood, gold, ston
 
         except Exception as e:
             log.error("strategist_error", error=str(e))
-            # Return default goals and empty readings on failure
-            default_goals = [
-                Goal(name="Queue villagers", type="local", metric="population",
-                     target=10, priority=9, created_turn=turn),
-                Goal(name="Gather food", type="local", metric="food",
-                     target=200, priority=8, created_turn=turn),
-                Goal(name="Advance to Feudal Age", type="global", metric="age",
-                     target="Feudal Age", priority=4, created_turn=turn),
-            ]
-            return default_goals, {}
+            return get_default_goals(turn), {}

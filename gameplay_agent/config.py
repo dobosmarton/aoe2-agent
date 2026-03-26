@@ -26,7 +26,7 @@ class Config(BaseModel):
     detection_host: str = ""     # Remote CoreML server URL (e.g., "http://192.168.64.1:8420")
 
     # Timing settings
-    loop_delay: float = 1.0  # Seconds between decisions
+    loop_delay: float = 0.3  # Seconds between decisions (pipeline latency provides additional pacing)
     action_delay: float = 0.05  # Seconds between actions
 
     # Logging
@@ -41,7 +41,7 @@ class Config(BaseModel):
             model=os.environ.get("AOE2_MODEL", "claude-sonnet-4-6"),
             strategist_model=os.environ.get("AOE2_STRATEGIST_MODEL", "claude-sonnet-4-6"),
             strategist_interval=int(os.environ.get("AOE2_STRATEGIST_INTERVAL", "10")),
-            loop_delay=float(os.environ.get("AOE2_LOOP_DELAY", "1.0")),
+            loop_delay=float(os.environ.get("AOE2_LOOP_DELAY", "0.3")),
             save_screenshots=os.environ.get("AOE2_SAVE_SCREENSHOTS", "true").lower() == "true",
             detection_host=os.environ.get("AOE2_DETECTION_HOST", ""),
         )
