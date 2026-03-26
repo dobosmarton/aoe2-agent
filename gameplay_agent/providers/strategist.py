@@ -89,7 +89,11 @@ class StrategistProvider:
         response = await self.client.messages.parse(
             model=self.model,
             max_tokens=768,
-            system=self.get_system_prompt(),
+            system=[{
+                "type": "text",
+                "text": self.get_system_prompt(),
+                "cache_control": {"type": "ephemeral"},
+            }],
             messages=[{"role": "user", "content": content}],
             output_format=StrategistResponse,
         )

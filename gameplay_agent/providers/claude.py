@@ -127,6 +127,7 @@ class ClaudeProvider(BaseLLMProvider):
         api_key: str | None = None,
         model: str | None = None,
         use_dynamic_context: bool = True,
+        use_batch_mode: bool = True,
     ):
         """
         Initialize Claude provider.
@@ -135,9 +136,11 @@ class ClaudeProvider(BaseLLMProvider):
             api_key: Anthropic API key (defaults to config/env)
             model: Model to use (defaults to config)
             use_dynamic_context: Whether to use dynamic context injection from game database
+            use_batch_mode: Use single-call batch mode instead of agentic tool loop (faster)
         """
         self.api_key = api_key or config.anthropic_api_key
         self.model = model or config.model
+        self.use_batch_mode = use_batch_mode
         # Use AsyncAnthropic with built-in retry (429/5xx with exponential backoff)
         self.client = anthropic.AsyncAnthropic(api_key=self.api_key, max_retries=3)
         self._system_prompt: str | None = None
@@ -302,6 +305,36 @@ Play to win!"""
         }
         return action_dict, tool_result
 
+    async def _call_api_batch(self, content: list[dict]) -> LLMResponse:
+        """Call Claude API in single-call batch mode using structured output.
+
+        Returns all actions in one API call instead of multiple tool-loop
+        round-trips. Much faster (~2-4s vs ~5-15s) but loses mid-turn
+        feedback (no rescan between actions).
+        """
+        messages: list[dict] = [{"role": "user", "content": content}]
+
+        response = await self.client.messages.parse(
+            model=self.model,
+            max_tokens=config.max_tokens,
+            system=[{
+                "type": "text",
+                "text": self.get_system_prompt(),
+                "cache_control": {"type": "ephemeral"},
+            }],
+            messages=messages,
+            output_format=LLMResponse,
+        )
+
+        if response.stop_reason == "refusal":
+            log.warning("executor_refused")
+            return LLMResponse()
+
+        result = response.parsed_output
+        log.info("batch_response", action_count=len(result.actions),
+                 reasoning=result.reasoning[:150])
+        return result
+
     async def _call_api(self, content: list[dict]) -> LLMResponse:
         """Call Claude API in an agentic tool loop.
 
@@ -319,7 +352,11 @@ Play to win!"""
             response = await self.client.messages.create(
                 model=self.model,
                 max_tokens=config.max_tokens,
-                system=self.get_system_prompt(),
+                system=[{
+                    "type": "text",
+                    "text": self.get_system_prompt(),
+                    "cache_control": {"type": "ephemeral"},
+                }],
                 messages=messages,
                 tools=_ACTION_TOOLS,
             )
@@ -378,6 +415,13 @@ Play to win!"""
         content = self._build_content(context, width, height)
 
         try:
+            if self.use_batch_mode:
+                result = await self._call_api_batch(content)
+                response = result.model_dump()
+                # Batch mode returns actions that haven't been executed yet
+                response["actions_already_executed"] = False
+                return response
+
             result = await self._call_api(content)
             log.debug("claude_response", reasoning=result.reasoning[:200])
             response = result.model_dump()
