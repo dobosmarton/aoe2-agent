@@ -8,7 +8,7 @@ import structlog
 
 from ..config import config
 from ..executor import execute_action, get_detected_entities
-from ..models import LLMResponse, Observations, validate_actions
+from ..models import BatchResponse, LLMResponse, Observations, validate_actions
 from .base import BaseLLMProvider
 from .shared import cached_system_block, format_dimensions, load_system_prompt
 from .tool_definitions import to_anthropic_tools
@@ -180,26 +180,25 @@ class ClaudeProvider(BaseLLMProvider):
         }
         return action_dict, tool_result
 
-    async def _call_api_batch(self, content: list[dict]) -> LLMResponse:
+    async def _call_api_batch(self, content: list[dict]) -> BatchResponse:
         """Call Claude API in single-call batch mode using structured output.
 
-        Returns all actions in one API call instead of multiple tool-loop
-        round-trips. Much faster (~2-4s vs ~5-15s) but loses mid-turn
-        feedback (no rescan between actions).
+        Uses BatchResponse (no Observations) for a smaller schema and fewer
+        output tokens, reducing constrained-decoding latency.
         """
         messages: list[dict] = [{"role": "user", "content": content}]
 
         response = await self.client.messages.parse(
             model=self.model,
-            max_tokens=config.max_tokens,
+            max_tokens=config.batch_max_tokens,
             system=cached_system_block(self.get_system_prompt()),
             messages=messages,
-            output_format=LLMResponse,
+            output_format=BatchResponse,
         )
 
         if response.stop_reason == "refusal":
             log.warning("executor_refused")
-            return LLMResponse()
+            return BatchResponse()
 
         result = response.parsed_output
         log.info("batch_response", action_count=len(result.actions),

@@ -12,7 +12,7 @@ import anthropic
 import structlog
 
 from ..config import config
-from ..models import LLMResponse, validate_actions
+from ..models import BatchResponse, validate_actions
 from .base import BaseLLMProvider
 from .shared import cached_system_block, format_dimensions, load_system_prompt
 
@@ -88,10 +88,10 @@ class ParallelExecutorProvider(BaseLLMProvider):
         try:
             response = await self.client.messages.parse(
                 model=self.model,
-                max_tokens=config.max_tokens,
+                max_tokens=config.batch_max_tokens,
                 system=cached_system_block(system_prompt),
                 messages=[{"role": "user", "content": context}],
-                output_format=LLMResponse,
+                output_format=BatchResponse,
             )
 
             if response.stop_reason == "refusal":

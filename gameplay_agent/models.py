@@ -205,16 +205,50 @@ def validate_actions(actions: list[dict]) -> list[Action]:
     return [a for raw in actions if (a := validate_action(raw)) is not None]
 
 
+def _salvage_actions(v: list) -> list:
+    """Validate actions individually, dropping invalid ones.
+
+    Without this, a single bad action (e.g. right_click with no coords)
+    fails the entire response validation and messages.parse() raises,
+    discarding all valid actions in the response.
+    """
+    if not isinstance(v, list):
+        return v
+    validated = []
+    for item in v:
+        if isinstance(item, dict):
+            action = validate_action(item)
+            if action is not None:
+                validated.append(action)
+        else:
+            validated.append(item)
+    return validated
+
+
+class BatchResponse(BaseModel):
+    """Lightweight response for single-call batch mode (messages.parse).
+
+    Omits Observations to reduce schema complexity (~30% smaller) and
+    output tokens (~50-100 fewer), cutting structured output latency.
+    The strategist already reads resources from the screenshot, so
+    observations from the text-only executor are redundant.
+    """
+
+    actions: list[Action] = Field(default_factory=list)
+    reasoning: str = ""
+
+    @field_validator('actions', mode='before')
+    @classmethod
+    def salvage_valid_actions(cls, v: list) -> list:
+        return _salvage_actions(v)
+
+
 class LLMResponse(BaseModel):
-    """Complete LLM response with validation.
+    """Full LLM response used by the agentic tool loop and parallel executor.
 
     Field order matters: structured output generates fields sequentially.
     Actions first ensures they get generated before reasoning consumes
     the token budget.
-
-    The field_validator on actions individually validates each action and
-    silently drops invalid ones, so messages.parse() succeeds even when
-    the LLM produces some malformed actions.
     """
 
     actions: list[Action] = Field(default_factory=list)
@@ -224,20 +258,4 @@ class LLMResponse(BaseModel):
     @field_validator('actions', mode='before')
     @classmethod
     def salvage_valid_actions(cls, v: list) -> list:
-        """Validate actions individually, dropping invalid ones.
-
-        Without this, a single bad action (e.g. right_click with no coords)
-        fails the entire LLMResponse validation and messages.parse() raises,
-        discarding all valid actions in the response.
-        """
-        if not isinstance(v, list):
-            return v
-        validated = []
-        for item in v:
-            if isinstance(item, dict):
-                action = validate_action(item)
-                if action is not None:
-                    validated.append(action)
-            else:
-                validated.append(item)
-        return validated
+        return _salvage_actions(v)
