@@ -2,6 +2,7 @@
 
 import asyncio
 import math
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -511,9 +512,13 @@ async def game_loop(
                 await asyncio.sleep(1)
                 continue
 
+            t_start = time.perf_counter()
+
             screenshot, width, height = await _capture_screenshot(
                 overlay, screenshots_dir, iteration,
             )
+
+            t_capture = time.perf_counter()
 
             detected_entities = []
             if detector:
@@ -522,6 +527,8 @@ async def game_loop(
                 )
                 if overlay and detected_entities:
                     overlay.show(detected_entities, get_game_window_rect())
+
+            t_detect = time.perf_counter()
 
             entity_summary, _ownership = _classify_entities(detected_entities, screenshot)
 
@@ -536,9 +543,22 @@ async def game_loop(
                 goal_manager, entity_summary, screenshot, goal_logger,
             )
 
+            t_strategist = time.perf_counter()
+
             context = _build_llm_context(memory, goal_manager, entity_summary)
 
             response = await provider.get_actions(context, width, height)
+
+            t_executor = time.perf_counter()
+            log.info(
+                "turn_timing",
+                iteration=iteration,
+                capture_ms=round((t_capture - t_start) * 1000),
+                detect_ms=round((t_detect - t_capture) * 1000),
+                strategist_ms=round((t_strategist - t_detect) * 1000),
+                executor_ms=round((t_executor - t_strategist) * 1000),
+                total_ms=round((t_executor - t_start) * 1000),
+            )
 
             actions, game_end_reason = _process_response(
                 response, memory, goal_manager, iteration, goal_logger, time_budget,

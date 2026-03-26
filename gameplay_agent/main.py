@@ -8,7 +8,7 @@ import structlog
 
 from .config import config
 from .game_loop import game_loop, run_single_iteration
-from .providers import ClaudeProvider
+from .providers import ClaudeProvider, OllamaProvider, ParallelExecutorProvider
 
 # Configure structured logging
 structlog.configure(
@@ -30,24 +30,23 @@ log = structlog.get_logger()
 
 def create_provider(provider_name: str):
     """Create an LLM provider by name."""
-    providers = {
-        "claude": ClaudeProvider,
-        # Add more providers here as they're implemented
-        # "openai": OpenAIProvider,
-        # "gemini": GeminiProvider,
-    }
+    if provider_name == "claude":
+        return ClaudeProvider()
+    if provider_name == "claude-tools":
+        return ClaudeProvider(use_batch_mode=False)
+    if provider_name == "ollama":
+        return OllamaProvider()
+    if provider_name == "parallel":
+        return ParallelExecutorProvider()
 
-    if provider_name not in providers:
-        available = ", ".join(providers.keys())
-        raise ValueError(f"Unknown provider: {provider_name}. Available: {available}")
-
-    return providers[provider_name]()
+    available = "claude, claude-tools, ollama, parallel"
+    raise ValueError(f"Unknown provider: {provider_name}. Available: {available}")
 
 
 async def main_async(args):
     """Async main function."""
-    # Validate API key
-    if not config.anthropic_api_key:
+    # Validate API key (not needed for ollama)
+    if args.provider != "ollama" and not config.anthropic_api_key:
         log.error("missing_api_key", message="Set ANTHROPIC_API_KEY environment variable")
         sys.exit(1)
 
@@ -80,7 +79,7 @@ def main():
         "--provider",
         type=str,
         default="claude",
-        choices=["claude"],  # Add more as implemented
+        choices=["claude", "claude-tools", "ollama", "parallel"],
         help="LLM provider to use (default: claude)",
     )
     parser.add_argument(

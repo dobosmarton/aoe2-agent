@@ -14,10 +14,15 @@ class Config(BaseModel):
     # LLM settings
     anthropic_api_key: str = ""
     model: str = "claude-sonnet-4-6"  # Executor: better instruction following
-    max_tokens: int = 1536
-    max_tool_iterations: int = 7  # Max tool calls per game turn in agentic loop
+    max_tokens: int = 512
+    max_tool_iterations: int = 4  # Max tool calls per game turn in agentic loop
     strategist_model: str = "claude-sonnet-4-6"  # Strategist: deeper reasoning
     strategist_interval: int = 10  # Run strategist every N turns
+
+    # Provider settings
+    provider: str = "claude"  # "claude" or "ollama"
+    ollama_host: str = "http://localhost:11434"
+    ollama_model: str = "qwen2.5:7b"
 
     # Detection settings
     detection_imgsz: int = 1280  # YOLO inference resolution (higher = more detections, slower)
@@ -44,6 +49,9 @@ class Config(BaseModel):
             loop_delay=float(os.environ.get("AOE2_LOOP_DELAY", "1.0")),
             save_screenshots=os.environ.get("AOE2_SAVE_SCREENSHOTS", "true").lower() == "true",
             detection_host=os.environ.get("AOE2_DETECTION_HOST", ""),
+            provider=os.environ.get("AOE2_PROVIDER", "claude"),
+            ollama_host=os.environ.get("AOE2_OLLAMA_HOST", "http://localhost:11434"),
+            ollama_model=os.environ.get("AOE2_OLLAMA_MODEL", "qwen2.5:7b"),
         )
 
 
