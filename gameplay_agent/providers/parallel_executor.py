@@ -6,7 +6,6 @@ to the time of the slowest sub-agent instead of sequential sum.
 """
 
 import asyncio
-from pathlib import Path
 from typing import Any
 
 import anthropic
@@ -15,10 +14,9 @@ import structlog
 from ..config import config
 from ..models import LLMResponse, validate_actions
 from .base import BaseLLMProvider
+from .shared import cached_system_block, format_dimensions, load_system_prompt
 
 log = structlog.get_logger()
-
-PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
 
 # Domain-specific sub-prompts that focus each sub-agent on its responsibility
 _ECONOMY_PROMPT = """You are the ECONOMY sub-agent for an Age of Empires 2 AI. You handle ONLY economy actions:
@@ -68,20 +66,17 @@ class ParallelExecutorProvider(BaseLLMProvider):
     ):
         self.api_key = api_key or config.anthropic_api_key
         self.model = model or config.model
-        self.client = anthropic.AsyncAnthropic(api_key=self.api_key, max_retries=3)
+        self.client = anthropic.AsyncAnthropic(api_key=self.api_key, max_retries=config.max_retries)
         self._base_prompt: str | None = None
 
     def get_system_prompt(self) -> str:
-        """Load base game knowledge (hotkeys, rules) shared by all sub-agents."""
+        """Load base game knowledge (rules, hotkeys) shared by all sub-agents."""
         if self._base_prompt is None:
-            hotkeys_file = PROMPTS_DIR / "hotkeys.md"
-            self._base_prompt = ""
-            if hotkeys_file.exists():
-                self._base_prompt = hotkeys_file.read_text()
+            self._base_prompt = load_system_prompt("system.md", "hotkeys.md")
         return self._base_prompt
 
     def _build_sub_prompt(self, domain_prompt: str) -> str:
-        """Build a full sub-agent system prompt: domain focus + hotkeys."""
+        """Build a full sub-agent system prompt: domain focus + game knowledge."""
         return domain_prompt + "\n\n" + self.get_system_prompt()
 
     async def _call_sub_agent(
@@ -94,11 +89,7 @@ class ParallelExecutorProvider(BaseLLMProvider):
             response = await self.client.messages.parse(
                 model=self.model,
                 max_tokens=config.max_tokens,
-                system=[{
-                    "type": "text",
-                    "text": system_prompt,
-                    "cache_control": {"type": "ephemeral"},
-                }],
+                system=cached_system_block(system_prompt),
                 messages=[{"role": "user", "content": context}],
                 output_format=LLMResponse,
             )
@@ -129,7 +120,6 @@ class ParallelExecutorProvider(BaseLLMProvider):
         all_actions: list[dict] = []
         reasoning_parts: list[str] = []
 
-        # Economy first, then military
         for result in sorted(results, key=lambda r: 0 if r.domain == "economy" else 1):
             all_actions.extend(result.actions)
             if result.reasoning:
@@ -152,12 +142,8 @@ class ParallelExecutorProvider(BaseLLMProvider):
         width: int = 1920,
         height: int = 1080,
     ) -> dict[str, Any]:
-        center_x = width // 2
-        center_y = height // 2
-        dimensions = f"Game window: {width}x{height} pixels. Center=({center_x},{center_y}). Valid x=0-{width}, y=0-{height}."
-        full_context = f"{dimensions}\n\n{context}\n\nDecide what actions to take for your domain."
+        full_context = f"{format_dimensions(width, height)}\n\n{context}\n\nDecide what actions to take for your domain."
 
-        # Fire sub-agents in parallel
         results = await asyncio.gather(
             self._call_sub_agent("economy", _ECONOMY_PROMPT, full_context),
             self._call_sub_agent("military", _MILITARY_PROMPT, full_context),

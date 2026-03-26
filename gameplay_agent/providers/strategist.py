@@ -1,7 +1,7 @@
 """Strategist LLM provider for goal generation."""
 
 import base64
-from pathlib import Path
+
 import anthropic
 import structlog
 from pydantic import BaseModel, Field
@@ -9,11 +9,9 @@ from pydantic import BaseModel, Field
 from ..config import config
 from ..goals import Goal
 from ..memory import GameState
+from .shared import cached_system_block, load_system_prompt
 
 log = structlog.get_logger()
-
-# Load strategist prompt
-PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
 
 
 class StrategistGoal(BaseModel):
@@ -55,7 +53,7 @@ class StrategistProvider:
 
     def __init__(self, model: str | None = None):
         self.model = model or config.strategist_model
-        self.client = anthropic.AsyncAnthropic(api_key=config.anthropic_api_key, max_retries=2)
+        self.client = anthropic.AsyncAnthropic(api_key=config.anthropic_api_key, max_retries=config.max_retries)
         self.refresh_interval = config.strategist_interval
         self._system_prompt: str | None = None
         self._last_alarm_turn: int = 0  # Cooldown tracking
@@ -63,10 +61,8 @@ class StrategistProvider:
 
     def get_system_prompt(self) -> str:
         if self._system_prompt is None:
-            prompt_file = PROMPTS_DIR / "strategist.md"
-            if prompt_file.exists():
-                self._system_prompt = prompt_file.read_text()
-            else:
+            self._system_prompt = load_system_prompt("strategist.md")
+            if not self._system_prompt:
                 self._system_prompt = "You are a strategic advisor for an AoE2 AI. Create 3-5 prioritized goals as JSON."
         return self._system_prompt
 
@@ -88,12 +84,8 @@ class StrategistProvider:
         """
         response = await self.client.messages.parse(
             model=self.model,
-            max_tokens=768,
-            system=[{
-                "type": "text",
-                "text": self.get_system_prompt(),
-                "cache_control": {"type": "ephemeral"},
-            }],
+            max_tokens=config.strategist_max_tokens,
+            system=cached_system_block(self.get_system_prompt()),
             messages=[{"role": "user", "content": content}],
             output_format=StrategistResponse,
         )

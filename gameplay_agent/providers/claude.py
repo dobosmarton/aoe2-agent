@@ -1,7 +1,6 @@
 """Claude (Anthropic) LLM provider for AoE2 Agent."""
 
 import json
-from pathlib import Path
 from typing import Any, Optional
 
 import anthropic
@@ -11,104 +10,12 @@ from ..config import config
 from ..executor import execute_action, get_detected_entities
 from ..models import LLMResponse, Observations, validate_actions
 from .base import BaseLLMProvider
+from .shared import cached_system_block, format_dimensions, load_system_prompt
+from .tool_definitions import to_anthropic_tools
 
-
-def _click_schema(description: str) -> dict:
-    """Shared input schema for click and right_click tools."""
-    return {
-        "type": "object",
-        "properties": {
-            "x": {"type": "integer", "description": "X coordinate on game screen"},
-            "y": {"type": "integer", "description": "Y coordinate on game screen"},
-            "target_class": {"type": "string", "description": "Entity class to target nearest of, e.g. 'sheep'"},
-            "intent": {"type": "string", "description": description},
-        },
-        "required": ["x", "y", "intent"],
-        "additionalProperties": False,
-    }
-
-
-# Tool definitions for each action type — strict per-tool schemas.
-# Each tool has its own enforced schema, preventing field confusion
-# that occurred with structured output union types.
-_ACTION_TOOLS: list[dict] = [
-    {"name": "click", "description": "Left click at screen coordinates. Use for building placement and UI interaction.", "input_schema": _click_schema("What this click does")},
-    {"name": "right_click", "description": "Right click at screen coordinates. Use for resource gathering, setting gather points, and unit commands.", "input_schema": _click_schema("What this right click does")},
-    {
-        "name": "press",
-        "description": "Press a keyboard key. Use for hotkeys, queuing units, opening build menus.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "key": {"type": "string", "description": "Key to press, e.g. 'h', 'q', '.', ','"},
-                "rescan": {"type": "boolean", "description": "Take fresh screenshot+detection after this key press"},
-                "modifiers": {"type": "array", "items": {"type": "string"}, "description": "Modifier keys e.g. ['ctrl']"},
-                "intent": {"type": "string", "description": "What this key press does"},
-            },
-            "required": ["key", "intent"],
-            "additionalProperties": False,
-        },
-    },
-    {
-        "name": "drag",
-        "description": "Drag mouse from start to end position.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "start_x": {"type": "integer", "description": "Start X coordinate"},
-                "start_y": {"type": "integer", "description": "Start Y coordinate"},
-                "end_x": {"type": "integer", "description": "End X coordinate"},
-                "end_y": {"type": "integer", "description": "End Y coordinate"},
-                "intent": {"type": "string"},
-            },
-            "required": ["start_x", "start_y", "end_x", "end_y", "intent"],
-            "additionalProperties": False,
-        },
-    },
-    {
-        "name": "wait",
-        "description": "Wait for a duration.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "ms": {"type": "integer", "description": "Milliseconds to wait (0-5000)"},
-                "intent": {"type": "string"},
-            },
-            "required": ["ms", "intent"],
-            "additionalProperties": False,
-        },
-    },
-    {
-        "name": "scroll",
-        "description": "Scroll mouse wheel for zoom in/out.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "clicks": {"type": "integer", "description": "Positive = zoom in, negative = zoom out"},
-                "intent": {"type": "string"},
-            },
-            "required": ["clicks", "intent"],
-            "additionalProperties": False,
-        },
-    },
-    {
-        "name": "detect",
-        "description": "Request full SAHI detection scan. SLOW (~5-10s) — only use when target_class keeps failing.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "intent": {"type": "string"},
-            },
-            "required": ["intent"],
-            "additionalProperties": False,
-        },
-    },
-]
+_ACTION_TOOLS = to_anthropic_tools()
 
 log = structlog.get_logger()
-
-# Load system prompt from file
-PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
 
 # Optional game knowledge database for dynamic context injection
 try:
@@ -142,7 +49,7 @@ class ClaudeProvider(BaseLLMProvider):
         self.model = model or config.model
         self.use_batch_mode = use_batch_mode
         # Use AsyncAnthropic with built-in retry (429/5xx with exponential backoff)
-        self.client = anthropic.AsyncAnthropic(api_key=self.api_key, max_retries=3)
+        self.client = anthropic.AsyncAnthropic(api_key=self.api_key, max_retries=config.max_retries)
         self._system_prompt: str | None = None
         self.use_dynamic_context = use_dynamic_context and GAME_KNOWLEDGE_AVAILABLE
         self._game_db: Optional["GameKnowledge"] = None
@@ -158,40 +65,12 @@ class ClaudeProvider(BaseLLMProvider):
     def get_system_prompt(self) -> str:
         """Load and return the system prompt."""
         if self._system_prompt is None:
-            prompt_file = PROMPTS_DIR / "system.md"
-            hotkeys_file = PROMPTS_DIR / "hotkeys.md"
-            if prompt_file.exists():
-                self._system_prompt = prompt_file.read_text()
-                if hotkeys_file.exists():
-                    self._system_prompt += "\n\n" + hotkeys_file.read_text()
-            else:
-                # Fallback minimal prompt
-                self._system_prompt = """You are playing Age of Empires 2: Definitive Edition. Your goal is to defeat the enemy AI.
-
-## Output Format
-Respond with JSON only:
-{
-  "reasoning": "What you see and your strategic thinking",
-  "observations": {
-    "resources": {"food": 0, "wood": 0, "gold": 0, "stone": 0},
-    "population": "12/15",
-    "age": "Dark Age",
-    "idle_tc": true,
-    "under_attack": false,
-    "events": []
-  },
-  "actions": [
-    {"type": "click", "x": 100, "y": 200, "intent": "What this does"},
-    {"type": "right_click", "target_id": "sheep_0", "intent": "Gather from sheep"},
-    {"type": "press", "key": "h", "intent": "What this does"}
-  ]
-}
-
-Action types: click, right_click, press, drag (with x1,y1,x2,y2), wait (with ms), scroll (with clicks), detect
-For click/right_click: MUST include one of: (x, y) coordinates, target_id (e.g. "sheep_0"), or target_class (e.g. "sheep").
-For click/right_click: use "x" and "y" fields (NOT "x1"/"y1" — those are for drag only).
-
-Play to win!"""
+            self._system_prompt = load_system_prompt("system.md", "hotkeys.md")
+            if not self._system_prompt:
+                self._system_prompt = (
+                    "You are playing Age of Empires 2: Definitive Edition. "
+                    "Your goal is to defeat the enemy AI. Play to win!"
+                )
         return self._system_prompt
 
     def _get_dynamic_context(self, context: str) -> str:
@@ -262,11 +141,7 @@ Play to win!"""
         enhanced_context = self._get_dynamic_context(context)
 
         # Build text with dimensions info
-        center_x = width // 2
-        center_y = height // 2
-        dimensions_info = f"Game window: {width}x{height} pixels. Center=({center_x},{center_y}). Valid x=0-{width}, y=0-{height}."
-
-        text = f"{dimensions_info}\n\n{enhanced_context}\n\nBased on the detected entities, goals, and resource status above, decide what to do next."
+        text = f"{format_dimensions(width, height)}\n\n{enhanced_context}\n\nBased on the detected entities, goals, and resource status above, decide what to do next."
 
         content = [
             {
@@ -317,11 +192,7 @@ Play to win!"""
         response = await self.client.messages.parse(
             model=self.model,
             max_tokens=config.max_tokens,
-            system=[{
-                "type": "text",
-                "text": self.get_system_prompt(),
-                "cache_control": {"type": "ephemeral"},
-            }],
+            system=cached_system_block(self.get_system_prompt()),
             messages=messages,
             output_format=LLMResponse,
         )
@@ -352,11 +223,7 @@ Play to win!"""
             response = await self.client.messages.create(
                 model=self.model,
                 max_tokens=config.max_tokens,
-                system=[{
-                    "type": "text",
-                    "text": self.get_system_prompt(),
-                    "cache_control": {"type": "ephemeral"},
-                }],
+                system=cached_system_block(self.get_system_prompt()),
                 messages=messages,
                 tools=_ACTION_TOOLS,
             )
@@ -435,11 +302,3 @@ Play to win!"""
         except Exception as e:
             log.error("claude_error", error=str(e))
             return self._error_response(f"Error: {e}")
-
-    def _error_response(self, message: str) -> dict[str, Any]:
-        """Return a safe error response with a wait action."""
-        return {
-            "reasoning": message,
-            "observations": {},
-            "actions": [{"type": "wait", "ms": 1000, "intent": "Error recovery"}],
-        }
