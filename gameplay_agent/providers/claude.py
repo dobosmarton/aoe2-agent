@@ -12,6 +12,12 @@ from ..executor import execute_action, get_detected_entities
 from ..models import LLMResponse, Observations, validate_actions
 from .base import BaseLLMProvider
 
+# Pricing per million tokens (claude-sonnet-4-6)
+_PRICE_INPUT = 3.00
+_PRICE_OUTPUT = 15.00
+_PRICE_CACHE_READ = 0.30
+_PRICE_CACHE_WRITE = 3.75
+
 
 def _click_schema(description: str) -> dict:
     """Shared input schema for click and right_click tools."""
@@ -143,6 +149,10 @@ class ClaudeProvider(BaseLLMProvider):
         self._system_prompt: str | None = None
         self.use_dynamic_context = use_dynamic_context and GAME_KNOWLEDGE_AVAILABLE
         self._game_db: Optional["GameKnowledge"] = None
+        self._total_input_tokens: int = 0
+        self._total_output_tokens: int = 0
+        self._total_cache_read_tokens: int = 0
+        self._total_cache_write_tokens: int = 0
 
         if self.use_dynamic_context:
             try:
@@ -325,6 +335,13 @@ Play to win!"""
                 cache_control={"type": "ephemeral"},
             )
 
+            # Accumulate token usage (cache fields may be None when caching is off)
+            usage = response.usage
+            self._total_input_tokens += usage.input_tokens
+            self._total_output_tokens += usage.output_tokens
+            self._total_cache_read_tokens += getattr(usage, "cache_read_input_tokens", 0) or 0
+            self._total_cache_write_tokens += getattr(usage, "cache_creation_input_tokens", 0) or 0
+
             # Single pass: extract text and tool_use blocks
             tool_blocks = []
             for block in response.content:
@@ -356,6 +373,15 @@ Play to win!"""
         result._success_count = success_count  # type: ignore[attr-defined]
         return result
 
+    def _cumulative_cost_usd(self) -> float:
+        """Calculate cumulative API cost across all calls."""
+        return (
+            self._total_input_tokens * _PRICE_INPUT / 1_000_000
+            + self._total_output_tokens * _PRICE_OUTPUT / 1_000_000
+            + self._total_cache_read_tokens * _PRICE_CACHE_READ / 1_000_000
+            + self._total_cache_write_tokens * _PRICE_CACHE_WRITE / 1_000_000
+        )
+
     async def get_actions(
         self,
         context: str,
@@ -381,6 +407,14 @@ Play to win!"""
         try:
             result = await self._call_api(content)
             log.debug("claude_response", reasoning=result.reasoning[:200])
+
+            log.info("api_cost",
+                     input_tokens=self._total_input_tokens,
+                     output_tokens=self._total_output_tokens,
+                     cache_read_tokens=self._total_cache_read_tokens,
+                     cache_write_tokens=self._total_cache_write_tokens,
+                     cumulative_cost_usd=round(self._cumulative_cost_usd(), 4))
+
             response = result.model_dump()
             response["actions_already_executed"] = True
             response["success_count"] = getattr(result, "_success_count", len(response.get("actions", [])))

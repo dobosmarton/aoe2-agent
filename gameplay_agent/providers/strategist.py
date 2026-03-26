@@ -107,6 +107,11 @@ class StrategistProvider:
         )
         if response.stop_reason == "refusal":
             raise ValueError("Strategist refused the request")
+
+        usage = response.usage
+        log.info("strategist_usage",
+                 input_tokens=usage.input_tokens,
+                 output_tokens=usage.output_tokens)
         return response.parsed_output
 
     async def generate_goals(
