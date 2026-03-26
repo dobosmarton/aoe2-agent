@@ -15,7 +15,7 @@ class Config(BaseModel):
     anthropic_api_key: str = ""
     model: str = "claude-sonnet-4-6"  # Executor: better instruction following
     max_tokens: int = 512  # Token budget for agentic tool loop
-    batch_max_tokens: int = 384  # Token budget for batch mode (smaller schema = fewer tokens needed)
+    batch_max_tokens: int = 512  # Token budget for batch mode (must fit 6-7 actions + reasoning)
     max_tool_iterations: int = 4  # Max tool calls per game turn in agentic loop
     strategist_model: str = "claude-sonnet-4-6"  # Strategist: deeper reasoning
     strategist_interval: int = 10  # Run strategist every N turns
@@ -55,7 +55,7 @@ class Config(BaseModel):
             detection_host=os.environ.get("AOE2_DETECTION_HOST", ""),
             provider=os.environ.get("AOE2_PROVIDER", "claude"),
             max_retries=int(os.environ.get("AOE2_MAX_RETRIES", "3")),
-            batch_max_tokens=int(os.environ.get("AOE2_BATCH_MAX_TOKENS", "384")),
+            batch_max_tokens=int(os.environ.get("AOE2_BATCH_MAX_TOKENS", "512")),
             strategist_max_tokens=int(os.environ.get("AOE2_STRATEGIST_MAX_TOKENS", "768")),
             ollama_host=os.environ.get("AOE2_OLLAMA_HOST", "http://localhost:11434"),
             ollama_model=os.environ.get("AOE2_OLLAMA_MODEL", "qwen2.5:7b"),

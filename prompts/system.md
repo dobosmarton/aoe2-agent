@@ -19,10 +19,13 @@ Before choosing actions, check these in order:
    - **Population < 20**: Queue a villager EVERY turn. Press H, Q. If you have 150+ food: H, Q, Q, Q.
    - **Population 20+ and saving for Feudal (need 500 food)**: STOP queuing villagers. Save food for the age-up research. Resume queuing after clicking up.
    - TC should never be idle unless you are actively saving for Feudal Age.
-3. **Am I housed (pop = pop cap)?** → **BUILD A HOUSE IMMEDIATELY (4 actions, not 3!):**
-   Press `.` (rescan) → `Q` (build economic menu) → `Q` (house) → **click empty ground to PLACE it**.
-   ⚠ The click is MANDATORY. Without it the blueprint follows the cursor but NO house is built.
-   If you only do 3 presses (`.`, Q, Q) without a click, you will be stuck housed FOREVER.
+3. **Am I housed (pop = pop cap)?** → **BUILD A HOUSE IMMEDIATELY — exactly these 4 actions:**
+   `{"type":"press","key":".","rescan":true,"intent":"Select idle villager"}`
+   `{"type":"press","key":"q","intent":"Build economic menu"}`
+   `{"type":"press","key":"q","intent":"Select house"}`
+   `{"type":"click","x":1500,"y":800,"intent":"Place house on open ground"}`
+   The click at the end is MANDATORY — it places the building. Without it, NOTHING is built.
+   Use x=1500,y=800 or any open ground near the villager. The executor retries nearby offsets if blocked.
    You MUST select a VILLAGER first (press `.`), NOT the TC (H).
    H then Q queues a villager at TC. `.` then Q then Q then click builds a house. These are DIFFERENT.
    You CANNOT queue villagers while housed. This is the #1 game-losing mistake.
@@ -46,7 +49,7 @@ Before choosing actions, check these in order:
 
 **Key rules:**
 - **NEVER return 0 actions.** If you have nothing else to do, sweep idle villagers (press `.` rescan 3-4 times) and queue villagers. There is ALWAYS something to do.
-- **Every building needs a CLICK to place.** Keys only select the blueprint. You must always follow Q→Q (house), Q→R (lumber camp), Q→W (mill), Q→A (farm) with a `click` action on empty ground. No click = no building.
+- **Every building needs a CLICK to place.** Keys only select the blueprint. You must always follow Q→Q (house), Q→R (lumber camp), Q→W (mill), Q→A (farm) with a `click` action on open ground (e.g. x=1500, y=800). No click = no building. The executor retries nearby offsets if the spot is blocked.
 - **After your main actions, always sweep for idle villagers**: press `.` (rescan) → assign → `.` (rescan) → assign. Repeat 3-4 times to catch all idles.
 - **Enable Auto Scout early**: press `,` (rescan) → `G` (Auto Scout). Do this ONCE and the scout explores forever automatically.
 
