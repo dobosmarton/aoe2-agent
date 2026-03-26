@@ -23,9 +23,9 @@ Before choosing actions, check these in order:
    `{"type":"press","key":".","rescan":true,"intent":"Select idle villager"}`
    `{"type":"press","key":"q","intent":"Build economic menu"}`
    `{"type":"press","key":"q","intent":"Select house"}`
-   `{"type":"click","x":1500,"y":800,"intent":"Place house on open ground"}`
+   `{"type":"click","x":<center_x>,"y":<center_y>,"intent":"Place house on open ground"}`
    The click at the end is MANDATORY — it places the building. Without it, NOTHING is built.
-   Use x=1500,y=800 or any open ground near the villager. The executor retries nearby offsets if blocked.
+   Click near the screen center (from the "Game window" dimensions in context). The executor retries nearby offsets if the spot is blocked, so an approximate location is fine.
    You MUST select a VILLAGER first (press `.`), NOT the TC (H).
    H then Q queues a villager at TC. `.` then Q then Q then click builds a house. These are DIFFERENT.
    You CANNOT queue villagers while housed. This is the #1 game-losing mistake.
@@ -49,7 +49,7 @@ Before choosing actions, check these in order:
 
 **Key rules:**
 - **NEVER return 0 actions.** If you have nothing else to do, sweep idle villagers (press `.` rescan 3-4 times) and queue villagers. There is ALWAYS something to do.
-- **Every building needs a CLICK to place.** Keys only select the blueprint. You must always follow Q→Q (house), Q→R (lumber camp), Q→W (mill), Q→A (farm) with a `click` action on open ground (e.g. x=1500, y=800). No click = no building. The executor retries nearby offsets if the spot is blocked.
+- **Every building needs a CLICK to place.** Keys only select the blueprint. You must always follow Q→Q (house), Q→R (lumber camp), Q→W (mill), Q→A (farm) with a `click` action on open ground near the screen center. No click = no building. The executor retries nearby offsets if the spot is blocked.
 - **After your main actions, always sweep for idle villagers**: press `.` (rescan) → assign → `.` (rescan) → assign. Repeat 3-4 times to catch all idles.
 - **Enable Auto Scout early**: press `,` (rescan) → `G` (Auto Scout). Do this ONCE and the scout explores forever automatically.
 
@@ -123,6 +123,7 @@ Plan focused action sequences (3-7 actions). Use `rescan: true` on camera-moving
 
 **Queue villager + build house (1 turn — use when near pop cap):**
 ALL building actions MUST end with a click to place. Without the click, no building is created!
+Click near screen center — the executor retries nearby offsets if the spot is blocked.
 ```json
 [
   {"type": "press", "key": "h", "intent": "Select TC"},
@@ -130,7 +131,7 @@ ALL building actions MUST end with a click to place. Without the click, no build
   {"type": "press", "key": ".", "rescan": true, "intent": "Select idle villager"},
   {"type": "press", "key": "q", "intent": "Build economic menu"},
   {"type": "press", "key": "q", "intent": "Select house"},
-  {"type": "click", "x": 1500, "y": 800, "intent": "Place house on clear ground"}
+  {"type": "click", "x": "<center_x>", "y": "<center_y>", "intent": "Place house on open ground near center"}
 ]
 ```
 
@@ -153,32 +154,35 @@ ALL building actions MUST end with a click to place. Without the click, no build
 ```
 
 **Build lumber camp near trees (1 turn):**
+Click near detected trees but not on top of them. The executor retries nearby offsets if blocked.
 ```json
 [
   {"type": "press", "key": ".", "rescan": true, "intent": "Select idle villager"},
   {"type": "press", "key": "q", "intent": "Build economic menu"},
   {"type": "press", "key": "r", "intent": "Select lumber camp"},
-  {"type": "click", "x": 1500, "y": 800, "intent": "Place lumber camp on open ground NEAR trees (NOT on them)"}
+  {"type": "click", "target_class": "tree", "intent": "Place lumber camp near trees (executor offsets from target)"}
 ]
 ```
 
 **Build Mill near berry bushes (1 turn):**
+Click near detected berries but not on top of them.
 ```json
 [
   {"type": "press", "key": ".", "rescan": true, "intent": "Select idle villager"},
   {"type": "press", "key": "q", "intent": "Build economic menu"},
   {"type": "press", "key": "w", "intent": "Select Mill"},
-  {"type": "click", "x": 2400, "y": 1050, "intent": "Place Mill on open ground BELOW berry bushes (NOT on them)"}
+  {"type": "click", "target_class": "berry_bush", "intent": "Place Mill near berry bushes (executor offsets from target)"}
 ]
 ```
 
 **Build a farm when food sources are gone (1 turn):**
+Click near TC or Mill — farms need a nearby food drop-off point.
 ```json
 [
   {"type": "press", "key": ".", "rescan": true, "intent": "Select idle villager"},
   {"type": "press", "key": "q", "intent": "Build economic menu"},
   {"type": "press", "key": "a", "intent": "Select farm"},
-  {"type": "click", "x": 1500, "y": 850, "intent": "Place farm near TC"}
+  {"type": "click", "x": "<center_x>", "y": "<center_y>", "intent": "Place farm near TC"}
 ]
 ```
 
@@ -218,6 +222,7 @@ If sheep AND berry_bush are missing from the entity list, send villagers to wood
 ```
 
 **FOOD EMERGENCY: Build Mill + Farms (when NO sheep/berry_bush in entity list):**
+Place buildings near screen center (close to TC after pressing H). Executor retries offsets if blocked.
 ```json
 [
   {"type": "press", "key": "h", "intent": "Select TC"},
@@ -225,11 +230,11 @@ If sheep AND berry_bush are missing from the entity list, send villagers to wood
   {"type": "press", "key": ".", "rescan": true, "intent": "Select idle villager"},
   {"type": "press", "key": "q", "intent": "Build economic menu"},
   {"type": "press", "key": "w", "intent": "Select Mill (100 wood)"},
-  {"type": "click", "x": 1500, "y": 850, "intent": "Place Mill near TC"},
+  {"type": "click", "x": "<center_x>", "y": "<center_y>", "intent": "Place Mill near TC"},
   {"type": "press", "key": ".", "rescan": true, "intent": "Select another idle villager"},
   {"type": "press", "key": "q", "intent": "Build economic menu"},
   {"type": "press", "key": "a", "intent": "Select Farm (60 wood)"},
-  {"type": "click", "x": 1550, "y": 900, "intent": "Place farm near TC/Mill"}
+  {"type": "click", "x": "<center_x>", "y": "<center_y>", "intent": "Place farm near TC/Mill"}
 ]
 ```
 
