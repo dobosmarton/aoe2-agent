@@ -2,9 +2,13 @@
 
 The agent's output is a list of actions that must be validated, resolved to screen coordinates, and executed as real mouse/keyboard inputs. Pydantic models enforce structural correctness, and a coordinate resolution system bridges YOLO detection with physical action execution.
 
-## 3.1 Seven Action Types
+## 3.1 Action Types
 
-All action types are defined as Pydantic models in `gameplay_agent/models.py`.
+The agent has **seven base action types** (Pydantic-validated in `gameplay_agent/models.py`) and **three composite tools** (defined in `gameplay_agent/providers/claude.py`) that bundle multi-step sequences to eliminate API roundtrips.
+
+### Base Actions
+
+All base action types are defined as Pydantic models in `gameplay_agent/models.py`.
 
 ### PointTargetAction (base class)
 
@@ -111,6 +115,23 @@ class LLMResponse(BaseModel):
 ```
 
 Field order matters: `actions` first ensures structured output generates them before reasoning consumes the token budget. `Observations` tracks resources, population, age, idle_tc, under_attack, game_state, and events.
+
+### Composite Tools
+
+Composite tools execute multi-step hotkey sequences locally without intermediate API roundtrips. They are defined as Claude tool_use tools in `_ACTION_TOOLS` and handled by dedicated methods in `ClaudeProvider`. Each composite calls `_run_steps()` which executes sub-actions sequentially via `execute_action()`, stopping on the first failure.
+
+**`build(building_key, x, y)`** — Select idle villager → open economic build menu → press building_key → click placement. Building keys: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm. Saves 3 API roundtrips (~9s) per building.
+
+**`send_villager(target_class or x, y)`** — Select idle villager → right_click target. Accepts `target_class` (e.g. "sheep", "tree") or raw coordinates. Saves 1 roundtrip (~3s).
+
+**`queue_villager()`** — Go to TC (press h) → queue villager (press q). Saves 1 roundtrip (~3s).
+
+Composite actions bypass Pydantic validation (they are already executed by the time `_call_api` returns). The `_COMPOSITE_NAMES` set ensures they pass through `validate_actions()` unchanged.
+
+Shared helpers eliminate repetition across handlers:
+- `_run_steps(composite_name, steps)` — executes steps, logs each, returns `(success, detail)`
+- `_entity_snapshot()` — returns truncated entity list (capped at `ENTITY_RESULT_LIMIT = 20`)
+- `_make_tool_result(block, success, detail, include_entities)` — builds the tool_result dict for Claude
 
 ## 3.2 Triple Targeting: Coordinates, target_id, target_class
 
@@ -269,10 +290,13 @@ All coordinate fields enforce bounds: `ge=0, le=7680` for x, `ge=0, le=4320` for
 
 ## Summary
 
-- 7 action types with Pydantic validation: click, right_click, press, drag, wait, scroll, detect
+- 7 base action types with Pydantic validation: click, right_click, press, drag, wait, scroll, detect
+- 3 composite tools: build, send_villager, queue_villager — bundle multi-step sequences to eliminate API roundtrips
 - `PointTargetAction` base class for shared triple-targeting logic (coordinates, target_id, target_class)
 - Unified `_resolve_coords()` resolver tries target_id → target_class → (x, y)
-- `_ACTION_HANDLERS` dispatch pattern maps action types to async handler functions
+- `_ACTION_HANDLERS` dispatch pattern maps base action types to async handler functions
+- `_COMPOSITE_HANDLERS` dict maps composite tools to dedicated handler methods
+- Shared helpers (`_run_steps`, `_entity_snapshot`, `_make_tool_result`) eliminate repetition
 - Coordinate translation from screenshot-relative to screen-absolute
 - Sequential execution with configurable inter-action delay
 

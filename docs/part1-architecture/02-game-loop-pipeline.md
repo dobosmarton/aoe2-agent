@@ -78,15 +78,17 @@ Entity formatting uses `build_entity_summary()` from `entity_utils.py`, which no
 
 Scans detected entities for 21 enemy military classes (militia_line, archer_line, knight_line, etc.). Uses ownership classification to filter out own units. If enemy threats are found, injects a priority-10 "Defend base" goal and triggers an early strategist run.
 
-### Step 7: Run strategist — `_run_strategist()`
+### Step 7: Launch strategist — `_maybe_launch_strategist()`
 
-The strategist (Sonnet) runs every N turns (default 10), on the first successful iteration, or when an alarm is triggered. It:
+The strategist (Sonnet) runs every N turns (default 10), on the first successful iteration, or when an alarm is triggered. It is launched **asynchronously** via `asyncio.create_task()` so it runs in the background while the executor continues. If a previous strategist task is still pending, it is reused rather than launching a new one.
+
+The strategist:
 1. Receives the screenshot as a base64 image
 2. Reads resource values, population, and age from the game UI
 3. Creates 3-5 prioritized goals
 4. Returns resource readings that are cached for the executor
 
-The strategist uses `messages.parse()` with a `StrategistResponse` Pydantic model for structured output.
+The strategist uses `messages.parse()` with a `StrategistResponse` Pydantic model for structured output. In the cleanup phase, any pending strategist task is awaited to ensure goals are finalized.
 
 ### Step 8: Build context — `_build_llm_context()`
 
@@ -98,11 +100,16 @@ Assembles text context from multiple sources, layered in this order:
 5. **Recent decisions** — last 3 turns with action feedback
 6. **Dynamic game knowledge** — affordable units/buildings based on current resources (optional)
 
-### Step 9: Get actions from executor
+### Step 9: Get actions from executor (parallelized)
 
-Calls `provider.get_actions(context, width, height)` — note: **no screenshot**. The executor is 100% text-based. It uses `messages.parse()` with the `LLMResponse` Pydantic model.
+The executor LLM call is launched as a background task via `asyncio.create_task(provider.get_actions(...))`. While the LLM is thinking (~10s), the agent executes:
 
-The `LLMResponse` fields are ordered: `actions` first, then `observations`, then `reasoning`. This ensures structured output generates actions before reasoning consumes the token budget.
+1. **Ground commands** (turn 1 only) — zoom in, select scout, enable auto-scout
+2. **Maintenance actions** — safe hotkey presses (h → q to queue villagers) if population is below cap
+
+After these complete, the agent awaits the LLM task result.
+
+The executor is 100% text-based — no screenshot. It runs an **agentic tool loop** (`_call_api` in `claude.py`): Claude calls tools one at a time (up to `max_tool_iterations = 7`), each tool is executed locally via `execute_action()`, and the result is fed back. Composite tools (`build`, `send_villager`, `queue_villager`) execute multi-step sequences within a single tool call, eliminating intermediate API roundtrips.
 
 ### Step 10: Update memory and goals — `_process_response()`
 
@@ -110,7 +117,7 @@ Creates a `Turn` record, updates `GameState` from the executor's observations. E
 
 ### Step 11: Execute actions — `_execute_turn_actions()`
 
-Executes ground commands (hardcoded first-turn actions like zoom and auto-scout), then LLM actions:
+If the agentic tool loop already executed actions (indicated by `actions_already_executed` flag), this step just records the results. Otherwise, it executes LLM actions:
 - Resolves `target_id` or `target_class` to coordinates from cached entity positions
 - Translates coordinates from screenshot-relative to screen-absolute
 - Executes via pyautogui with `action_delay` (50ms) between actions
@@ -146,13 +153,14 @@ Captures a screenshot, runs detection, builds context, gets actions from Claude 
 | YOLO detection (full SAHI) | ~234ms | Full tiled inference (first turn, periodic, alarm) |
 | Ownership classification | ~5ms | NumPy pixel analysis |
 | Strategist call (periodic) | 3-8s | Sonnet vision API call |
-| Executor call | 1-3s | Haiku text API call |
+| Executor call (first response) | ~8-10s | Sonnet text API call (parallelized with maintenance) |
+| Executor call (per tool iteration) | ~3s | Subsequent API roundtrips in agentic loop |
 | Action execution | ~50ms per action | pyautogui + 50ms inter-action delay |
 | Rescan: tracker prediction | ~0ms | Kalman extrapolation (confidence > 80%) |
 | Rescan: fast detection | ~50ms | Single-pass YOLO at imgsz=1280 |
 | Loop delay | 1.0s | `config.loop_delay` |
 
-On non-strategist turns, total cycle time is ~3-5 seconds. On strategist turns, add 3-8 seconds for the Sonnet call. Most rescans are handled by tracker prediction (~0ms) or fast detection (~50ms).
+Total cycle time is ~30-40 seconds per turn due to the agentic tool loop (7 tool calls x ~3s each). Composite tools reduce this significantly (~9s saved per building placement). The strategist runs in the background and does not add to cycle time.
 
 ## 2.4 Error Handling
 
@@ -176,10 +184,12 @@ The game loop supports a `time_budget` parameter (seconds). When elapsed time ex
 ## Summary
 
 - 12-step iteration cycle: check → focus → capture → detect → classify → alarm → strategist → context → executor → memory → execute → wait
-- ~3-5 second cycle time dominated by Claude API latency
+- ~30-40 second cycle time dominated by Claude API roundtrips in the agentic tool loop
+- Executor LLM call parallelized with maintenance actions (villager queuing) via `asyncio.create_task()`
+- Strategist runs asynchronously in the background; executor runs every turn
+- Composite tools (build, send_villager, queue_villager) eliminate multiple API roundtrips per sequence
 - Detection uses adaptive SAHI by default (~100-200ms), falling back to full SAHI periodically
 - Rescans use tracker prediction (~0ms) or fast detection (~50ms)
-- Strategist runs periodically; executor runs every turn
 - Goal-driven with reward computation per turn
 - Action failure feedback tracked via `ActionResult` and fed back to memory
 
