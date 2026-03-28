@@ -16,13 +16,10 @@ Your strategic goals are provided in the context below (under "Active Goals"). F
 Before choosing actions, check these in order:
 1. **Are there idle villagers?** → **THIS IS THE HIGHEST PRIORITY.** After pressing `.` (select idle villager), IMMEDIATELY right_click a resource (sheep, tree, berry_bush) to assign them. Do NOT press H first — that deselects the villager. Pattern: `.` → right_click resource → `.` → right_click resource. Repeat to sweep all idles.
 2. **Should I queue a villager?** → YES, unless you are saving food for Feudal Age.
-   - **Population < 20**: Queue a villager EVERY turn. Press H, Q. If you have 150+ food: H, Q, Q, Q.
+   - **Population < 20**: Use `queue_villager` EVERY turn. If you have 150+ food, call it multiple times.
    - **Population 20+ and saving for Feudal (need 500 food)**: STOP queuing villagers. Save food for the age-up research. Resume queuing after clicking up.
    - TC should never be idle unless you are actively saving for Feudal Age.
-3. **Am I housed (pop = pop cap)?** → **BUILD A HOUSE IMMEDIATELY:**
-   Press `.` (rescan) → `Q` (build economic menu) → `Q` (house) → click empty ground.
-   You MUST select a VILLAGER first (press `.`), NOT the TC (H).
-   H then Q queues a villager at TC. `.` then Q then Q builds a house. These are DIFFERENT.
+3. **Am I housed (pop = pop cap)?** → **BUILD A HOUSE IMMEDIATELY** using `build` with `building_key="q"` and x,y coordinates on clear ground.
    You CANNOT queue villagers while housed. This is the #1 game-losing mistake.
 4. **Do I need houses soon (within 2 of cap)?** → Build ONE house. Do NOT build multiple houses per turn — one house adds 5 pop slots, that's enough. Over-housing wastes villager time.
 5. **FOOD EMERGENCY: Is food < 50 AND you have idle villagers?** →
@@ -112,68 +109,52 @@ Plan focused action sequences (3-7 actions). Use `rescan: true` on camera-moving
 [
   {"type": "press", "key": "h", "rescan": true, "intent": "Go to TC — sheep/berries visible here"},
   {"type": "right_click", "target_class": "sheep", "intent": "Set TC gather point to sheep"},
-  {"type": "press", "key": "q", "intent": "Queue villager (auto-gathers sheep)"},
-  {"type": "press", "key": "q", "intent": "Queue another villager"}
+  {"type": "queue_villager", "intent": "Queue villager (auto-gathers sheep)"}
 ]
 ```
 
 **Queue villager + build house (1 turn — use when near pop cap):**
 ```json
 [
-  {"type": "press", "key": "h", "intent": "Select TC"},
-  {"type": "press", "key": "q", "intent": "Queue villager"},
-  {"type": "press", "key": ".", "rescan": true, "intent": "Select idle villager"},
-  {"type": "press", "key": "q", "intent": "Build economic menu"},
-  {"type": "press", "key": "q", "intent": "Select house"},
-  {"type": "click", "x": 1500, "y": 800, "intent": "Place house on clear ground"}
+  {"type": "queue_villager", "intent": "Queue villager before building house"},
+  {"type": "build", "building_key": "q", "x": 1500, "y": 800, "intent": "Build house — population near cap"}
 ]
 ```
 
 **Send idle villager to wood (1 turn):**
 ```json
 [
-  {"type": "press", "key": ".", "rescan": true, "intent": "Select idle villager"},
-  {"type": "right_click", "target_class": "tree", "intent": "Send to nearest tree"}
+  {"type": "send_villager", "target_class": "tree", "intent": "Send idle villager to nearest tree"}
 ]
 ```
 
 **Queue 3 villagers (1 turn, if 150+ food):**
 ```json
 [
-  {"type": "press", "key": "h", "intent": "Select TC"},
-  {"type": "press", "key": "q", "intent": "Queue villager 1"},
-  {"type": "press", "key": "q", "intent": "Queue villager 2"},
-  {"type": "press", "key": "q", "intent": "Queue villager 3"}
+  {"type": "queue_villager", "intent": "Queue villager 1"},
+  {"type": "queue_villager", "intent": "Queue villager 2"},
+  {"type": "queue_villager", "intent": "Queue villager 3"}
 ]
 ```
 
 **Build lumber camp near trees (1 turn):**
 ```json
 [
-  {"type": "press", "key": ".", "rescan": true, "intent": "Select idle villager"},
-  {"type": "press", "key": "q", "intent": "Build economic menu"},
-  {"type": "press", "key": "r", "intent": "Select lumber camp"},
-  {"type": "click", "x": 1500, "y": 800, "intent": "Place lumber camp on open ground NEAR trees (NOT on them)"}
+  {"type": "build", "building_key": "r", "x": 1500, "y": 800, "intent": "Build lumber camp on open ground NEAR trees (NOT on them)"}
 ]
 ```
 
 **Build Mill near berry bushes (1 turn):**
 ```json
 [
-  {"type": "press", "key": ".", "rescan": true, "intent": "Select idle villager"},
-  {"type": "press", "key": "q", "intent": "Build economic menu"},
-  {"type": "press", "key": "w", "intent": "Select Mill"},
-  {"type": "click", "x": 2400, "y": 1050, "intent": "Place Mill on open ground BELOW berry bushes (NOT on them)"}
+  {"type": "build", "building_key": "w", "x": 2400, "y": 1050, "intent": "Build Mill on open ground BELOW berry bushes (NOT on them)"}
 ]
 ```
 
 **Build a farm when food sources are gone (1 turn):**
 ```json
 [
-  {"type": "press", "key": ".", "rescan": true, "intent": "Select idle villager"},
-  {"type": "press", "key": "q", "intent": "Build economic menu"},
-  {"type": "press", "key": "a", "intent": "Select farm"},
-  {"type": "click", "x": 1500, "y": 850, "intent": "Place farm near TC"}
+  {"type": "build", "building_key": "a", "x": 1500, "y": 850, "intent": "Build farm near TC"}
 ]
 ```
 
@@ -301,6 +282,9 @@ Set `game_state` in observations:
 - **wait**: Wait. REQUIRED: `ms` (milliseconds)
 - **scroll**: Scroll/zoom. REQUIRED: `clicks` (positive=in, negative=out)
 - **detect**: Request full entity scan. No extra fields. SLOW (~5-10s) — only use when target_class keeps failing. Do NOT use every turn.
+- **build**: Composite. REQUIRED: `building_key`, `x`, `y`. Executes: select idle villager → open economic build menu → press building_key → place at (x,y). Building keys: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm. **ALWAYS use this instead of press(.)+press(q)+press(key)+click() separately** — it's 4x faster.
+- **send_villager**: Composite. REQUIRED: `target_class` OR `x`+`y`. Executes: select idle villager (press .) → right_click target. **ALWAYS use this instead of press(.)+right_click() separately** — it's 2x faster.
+- **queue_villager**: Composite. No extra fields. Executes: go to TC → queue villager. **ALWAYS use this instead of press(h)+press(q) separately** — it's 2x faster.
 
 **IMPORTANT**: click/right_click use `x` and `y`. drag uses `start_x`,`start_y`,`end_x`,`end_y`.
 **NEVER output x=0, y=0 or intent containing "Skip".** If you have no valid target, use press actions instead of placeholder click/right_click.

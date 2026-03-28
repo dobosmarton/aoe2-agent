@@ -1,7 +1,6 @@
 """Main game loop for AoE2 LLM Agent."""
 
 import asyncio
-import math
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -51,68 +50,11 @@ async def _invoke_detector(det: object, method: str, *args: object, **kwargs: ob
 
 
 # ---------------------------------------------------------------------------
-# Action feedback (renamed from _verify_actions — builds text, doesn't verify)
-# ---------------------------------------------------------------------------
-
-ENTITY_MOVEMENT_THRESHOLD_PX = 20
 ENTITY_DISPLAY_LIMIT = 20
 RESCAN_SCREENSHOT_QUALITY = 50
 TRACKER_CONFIDENCE_THRESHOLD = 0.8
 ENTITY_DROP_RATIO = 0.5
 FRAME_DIFFER_THRESHOLD = 0.03
-
-
-def _build_action_feedback(
-    pre_entities: list, post_entities: list, actions: list[dict],
-) -> str:
-    """Compare pre/post detection to build human-readable feedback for LLM context."""
-    if not pre_entities and not post_entities:
-        return ""
-
-    def to_lookup(entities: list) -> dict:
-        d = {}
-        for e in entities:
-            attrs = extract_attrs(e)
-            d[attrs.entity_id] = {"center": attrs.center, "class": attrs.class_name}
-        return d
-
-    pre_dict = to_lookup(pre_entities)
-    post_dict = to_lookup(post_entities)
-    results: list[str] = []
-
-    # Check target-based actions
-    for action in actions:
-        target_id = action.get("target_id")
-        if not target_id:
-            continue
-        pre = pre_dict.get(target_id)
-        post = post_dict.get(target_id)
-        if pre and not post:
-            results.append(f"- {target_id}: no longer visible (moved or gathered)")
-        elif pre and post:
-            dx = post["center"][0] - pre["center"][0]
-            dy = post["center"][1] - pre["center"][1]
-            dist = math.sqrt(dx * dx + dy * dy)
-            if dist > ENTITY_MOVEMENT_THRESHOLD_PX:
-                results.append(f"- {target_id}: moved {dist:.0f}px")
-            else:
-                results.append(f"- {target_id}: no visible change")
-        elif not pre:
-            results.append(f"- {target_id}: was not detected before action")
-
-    # New entities
-    new_ids = set(post_dict.keys()) - set(pre_dict.keys())
-    if new_ids:
-        summary = ", ".join(f"{eid}({post_dict[eid]['class']})" for eid in list(new_ids)[:5])
-        results.append(f"- New entities: {summary}")
-
-    # Disappeared entities
-    gone_ids = set(pre_dict.keys()) - set(post_dict.keys())
-    if gone_ids:
-        summary = ", ".join(f"{eid}({pre_dict[eid]['class']})" for eid in list(gone_ids)[:5])
-        results.append(f"- Disappeared: {summary}")
-
-    return "\n".join(results) if results else ""
 
 
 # ---------------------------------------------------------------------------
@@ -131,6 +73,15 @@ def _get_ground_commands(iteration: int) -> list[dict]:
         {"type": "press", "key": ",", "intent": "Select scout (ground cmd)"},
         {"type": "press", "key": "g", "intent": "Auto Scout (ground cmd)"},
     ]
+
+
+def _get_maintenance_actions(memory: AgentMemory) -> list[dict]:
+    """Safe hotkey actions to execute while the LLM call is in-flight."""
+    actions: list[dict] = []
+    if memory.game_state.population < memory.game_state.population_cap:
+        actions.append({"type": "press", "key": "h", "intent": "Select TC (maintenance)"})
+        actions.append({"type": "press", "key": "q", "intent": "Queue villager (maintenance)"})
+    return actions
 
 
 # ---------------------------------------------------------------------------
@@ -573,16 +524,10 @@ async def game_loop(
 
             context = _build_llm_context(memory, goal_manager, entity_summary)
 
-            response = await provider.get_actions(context, width, height)
+            # Launch LLM call as background task so we can act while it thinks.
+            llm_task = asyncio.create_task(provider.get_actions(context, width, height))
 
-            actions, game_end_reason = _process_response(
-                response, memory, goal_manager, iteration, goal_logger, time_budget,
-            )
-            if game_end_reason:
-                break
-
-            # Ground commands (zoom, scout) must always run, even when
-            # actions were already executed in the agentic tool loop.
+            # Ground commands (zoom, scout) run while LLM is in-flight.
             ground_cmds = _get_ground_commands(iteration)
             if ground_cmds:
                 ground_actions = validate_actions(ground_cmds)
@@ -591,6 +536,25 @@ async def game_loop(
                     gc_count = sum(1 for r in gc_results if r.success)
                     log.info("ground_commands_executed", iteration=iteration,
                              count=gc_count, total=len(ground_actions))
+
+            # Safe maintenance actions (queue villagers) while LLM is thinking.
+            if not llm_task.done():
+                maint_cmds = _get_maintenance_actions(memory)
+                if maint_cmds:
+                    maint_actions = validate_actions(maint_cmds)
+                    if maint_actions:
+                        await execute_actions(maint_actions)
+                        log.info("maintenance_executed", iteration=iteration,
+                                 count=len(maint_actions))
+
+            # Wait for LLM result.
+            response = await llm_task
+
+            actions, game_end_reason = _process_response(
+                response, memory, goal_manager, iteration, goal_logger, time_budget,
+            )
+            if game_end_reason:
+                break
 
             if response.get("actions_already_executed"):
                 success = response.get("success_count", len(actions))

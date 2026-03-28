@@ -1,0 +1,213 @@
+flowchart TD
+    %% =====================================================================
+    %% ENTRY
+    %% =====================================================================
+    START(["main() → create_provider() → game_loop()"])
+
+    %% =====================================================================
+    %% INITIALIZATION
+    %% =====================================================================
+    subgraph INIT["Initialization"]
+        direction TB
+        I1["AgentMemory()"]
+        I2["_init_detector()<br/><i>local or remote YOLO</i>"]
+        I3["DetectionOverlay()<br/><i>optional transparent overlay</i>"]
+        I4["_init_frame_differ()<br/><i>FrameDiffer for skip logic</i>"]
+        I5["_register_rescan_callbacks()<br/><i>attach _rescan / _rescan_full to executor</i>"]
+        I6["GoalManager()<br/>+ set_goals(get_default_goals(turn=0))"]
+        I7["StrategistProvider()<br/><i>goal-generation LLM (Sonnet)</i>"]
+        I8["GoalLogger(log_dir)"]
+
+        I1 --> I2 --> I3 --> I4 --> I5 --> I6 --> I7 --> I8
+    end
+
+    START --> INIT
+
+    %% =====================================================================
+    %% MAIN LOOP
+    %% =====================================================================
+    INIT --> LOOP_START
+
+    subgraph LOOP["Main Loop — per iteration"]
+        direction TB
+
+        LOOP_START["iteration += 1"]
+
+        %% --- Window ---
+        subgraph WINDOW["Window Focus"]
+            W1["is_game_running()<br/><i>window.py</i>"]
+            W2["ensure_game_focused()<br/><i>window.py — retry + sleep</i>"]
+            W1 --> W2
+        end
+
+        %% --- Capture ---
+        subgraph CAPTURE["Screenshot Capture"]
+            C1["_capture_screenshot()"]
+            C2["capture_screenshot()<br/><i>screen.py → JPEG bytes</i>"]
+            C3["save_screenshot()<br/><i>optional disk save</i>"]
+            C1 --> C2 --> C3
+        end
+
+        %% --- Detection ---
+        subgraph DETECT["Entity Detection"]
+            D1["_run_detection()"]
+            D2{"config.adaptive_sahi?"}
+            D3["detector.detect_adaptive()"]
+            D4["detector.detect()"]
+            D5["set_detected_entities()"]
+            D6["overlay.show()<br/><i>optional bounding boxes</i>"]
+            D1 --> D2
+            D2 -- yes --> D3 --> D5
+            D2 -- no --> D4 --> D5
+            D5 --> D6
+        end
+
+        %% --- Classification ---
+        subgraph CLASSIFY["Entity Classification"]
+            CL1["_classify_entities()"]
+            CL2["classify_ownership()<br/><i>ownership.py — player color map</i>"]
+            CL3["build_entity_summary()<br/><i>entity_utils.py — text for LLM</i>"]
+            CL1 --> CL2 --> CL3
+        end
+
+        %% --- Alarm ---
+        ALARM["goal_manager.check_alarm()<br/><i>enemy military in THREAT_CLASSES?</i>"]
+
+        %% --- Strategist ---
+        subgraph STRAT["Background Strategist (async)"]
+            S1["_maybe_launch_strategist()"]
+            S2{"should_run?<br/><i>every N turns or alarm</i>"}
+            S3["asyncio.create_task(_run_strategist_async())"]
+            S4["strategist.generate_goals()<br/><i>Claude Sonnet vision call</i>"]
+            S5["goal_manager.set_goals()"]
+            S6["goal_manager.update_resource_readings()"]
+            S7["goal_logger.log_goals_created()"]
+            S1 --> S2
+            S2 -- yes --> S3 --> S4 --> S5 --> S6 --> S7
+            S2 -- no --> S_SKIP["skip / reuse pending task"]
+        end
+
+        %% --- LLM Context ---
+        subgraph CTX["Build LLM Context"]
+            X1["_build_llm_context()"]
+            X2["memory.get_context_for_llm()<br/><i>learned memories + game state<br/>+ recent turns + stuck detection</i>"]
+            X3["goal_manager.get_resource_context()"]
+            X4["goal_manager.get_context_for_llm()<br/><i>active goals list</i>"]
+            X5["append entity summary"]
+            X1 --> X2 --> X3 --> X4 --> X5
+        end
+
+        %% --- LLM Call ---
+        LLM["provider.get_actions(context, w, h)<br/><i>Claude with structured output<br/>returns reasoning + observations + actions</i>"]
+
+        %% --- Process Response ---
+        subgraph PROCESS["Process LLM Response"]
+            P1["_process_response()"]
+            P2["memory.create_turn(reasoning, actions, observations)"]
+            P3["memory.update_from_observations()"]
+            P4["goal_manager.evaluate_progress()"]
+            P5["goal_manager.compute_turn_reward()"]
+            P6["goal_logger.log_progress()"]
+            P7{"game_end?<br/><i>victory / defeat / timeout</i>"}
+            P1 --> P2 --> P3 --> P4 --> P5 --> P6 --> P7
+        end
+
+        %% --- Ground Commands ---
+        subgraph GROUND["Ground Commands (turn 1 only)"]
+            G1["_get_ground_commands()"]
+            G2["validate_actions()"]
+            G3["execute_actions()<br/><i>scroll zoom + select scout + auto-scout</i>"]
+            G1 --> G2 --> G3
+        end
+
+        %% --- Execute Actions ---
+        subgraph EXEC["Execute Turn Actions"]
+            E1["_execute_turn_actions()"]
+            E2["validate_actions()<br/><i>models.py</i>"]
+            E3["execute_actions()<br/><i>executor.py</i>"]
+            E4["memory.record_action_results()"]
+            E5["memory.set_last_verification()<br/><i>if failures</i>"]
+            E6["clear_detected_entities()"]
+            E1 --> E2 --> E3 --> E4 --> E5 --> E6
+        end
+
+        %% --- Delay ---
+        DELAY["asyncio.sleep(config.loop_delay)"]
+
+        %% --- Flow connections ---
+        LOOP_START --> WINDOW --> CAPTURE --> DETECT --> CLASSIFY --> ALARM
+        ALARM --> STRAT --> CTX --> LLM --> PROCESS
+        P7 -- no --> GROUND --> EXEC --> DELAY
+    end
+
+    P7 -- "yes (game over)" --> CLEANUP_START
+
+    DELAY --> LOOP_START
+
+    %% =====================================================================
+    %% CLEANUP
+    %% =====================================================================
+    subgraph CLEANUP["Cleanup & Finalization"]
+        direction TB
+        CLEANUP_START["break from loop"]
+        CU1["await strategist_task<br/><i>if still pending</i>"]
+        CU2["overlay.close()"]
+        CU3["memory.get_metrics_snapshot()<br/><i>survival_time, peak_pop, age, turns…</i>"]
+        CU4["goal_logger.log_game_end()"]
+        CU5["return memory"]
+
+        CLEANUP_START --> CU1 --> CU2 --> CU3 --> CU4 --> CU5
+    end
+
+    %% =====================================================================
+    %% ACTION DISPATCH DETAIL
+    %% =====================================================================
+    subgraph DISPATCH["execute_action() — Action Dispatch"]
+        direction TB
+        EA["execute_action(action)"]
+        RC["_resolve_coords()<br/><i>target_id → entity lookup<br/>target_class → first match<br/>or raw x,y</i>"]
+        EA --> RC
+
+        RC --> HC["_handle_click()<br/><i>left click + building<br/>placement retry</i>"]
+        RC --> HRC["_handle_right_click()<br/><i>right click + stale<br/>coord re-resolution</i>"]
+        RC --> HP["_handle_press()<br/><i>key press + optional<br/>rescan trigger</i>"]
+        RC --> HD["_handle_drag()<br/><i>mouse drag from→to</i>"]
+        RC --> HS["_handle_scroll()<br/><i>mouse wheel zoom</i>"]
+        RC --> HDT["_handle_detect()<br/><i>full SAHI rescan</i>"]
+        RC --> HW["_handle_wait()<br/><i>asyncio.sleep delay</i>"]
+    end
+
+    E3 -. "for each action" .-> EA
+
+    %% =====================================================================
+    %% RESCAN CALLBACKS (mid-turn)
+    %% =====================================================================
+    subgraph RESCAN["Mid-Turn Rescan Callbacks"]
+        direction TB
+        RS1["_rescan()<br/><i>quick: screenshot → tracker.predict()<br/>or detect_fast_multi()</i>"]
+        RS2["_rescan_full()<br/><i>full: screenshot → detector.detect()<br/>full SAHI pipeline</i>"]
+        RS3["frame_differ.has_changed()<br/><i>skip if camera static</i>"]
+        RS3 --> RS1
+    end
+
+    HP -. "if rescan=true" .-> RS1
+    HDT -. "triggers" .-> RS2
+
+    %% =====================================================================
+    %% STYLES
+    %% =====================================================================
+    classDef initNode fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20
+    classDef loopNode fill:#e3f2fd,stroke:#1565c0,color:#0d47a1
+    classDef llmNode fill:#fff3e0,stroke:#e65100,color:#bf360c
+    classDef cleanupNode fill:#fce4ec,stroke:#c62828,color:#b71c1c
+    classDef dispatchNode fill:#f3e5f5,stroke:#6a1b9a,color:#4a148c
+    classDef rescanNode fill:#fff9c4,stroke:#f9a825,color:#f57f17
+    classDef decisionNode fill:#fffde7,stroke:#fbc02d,color:#f57f17
+
+    class I1,I2,I3,I4,I5,I6,I7,I8 initNode
+    class LOOP_START,W1,W2,C1,C2,C3,D1,D3,D4,D5,D6,CL1,CL2,CL3,ALARM,S1,S3,S4,S5,S6,S7,S_SKIP,X1,X2,X3,X4,X5,P1,P2,P3,P4,P5,P6,G1,G2,G3,E1,E2,E3,E4,E5,E6,DELAY loopNode
+    class LLM llmNode
+    class CLEANUP_START,CU1,CU2,CU3,CU4,CU5 cleanupNode
+    class EA,RC,HC,HRC,HP,HD,HS,HDT,HW dispatchNode
+    class RS1,RS2,RS3 rescanNode
+    class D2,S2,P7 decisionNode

@@ -109,6 +109,49 @@ _ACTION_TOOLS: list[dict] = [
             "additionalProperties": False,
         },
     },
+    # --- Composite tools (multi-step sequences, no intermediate API roundtrips) ---
+    {
+        "name": "build",
+        "description": "Composite: select idle villager → open economic build menu → press building_key → place at (x,y). MUCH faster than individual steps. Building keys: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm. ALWAYS use this instead of press(.)+press(q)+press(key)+click() separately.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "building_key": {"type": "string", "description": "Hotkey for the building: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm"},
+                "x": {"type": "integer", "description": "X coordinate for placement"},
+                "y": {"type": "integer", "description": "Y coordinate for placement"},
+                "intent": {"type": "string", "description": "What you are building and why"},
+            },
+            "required": ["building_key", "x", "y", "intent"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "send_villager",
+        "description": "Composite: select idle villager (press .) → right_click target. MUCH faster than press(.)+right_click() separately. Use target_class for resources (e.g. 'sheep', 'tree', 'berry_bush') or x,y for specific locations.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "x": {"type": "integer", "description": "X coordinate to right-click"},
+                "y": {"type": "integer", "description": "Y coordinate to right-click"},
+                "target_class": {"type": "string", "description": "Entity class to target (e.g. 'sheep', 'tree', 'berry_bush')"},
+                "intent": {"type": "string", "description": "Where you are sending the villager and why"},
+            },
+            "required": ["intent"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "queue_villager",
+        "description": "Composite: go to TC (press h) → queue villager (press q). MUCH faster than individual steps. Use this instead of doing press(h)+press(q) separately.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "intent": {"type": "string", "description": "Why queuing this villager"},
+            },
+            "required": ["intent"],
+            "additionalProperties": False,
+        },
+    },
 ]
 
 log = structlog.get_logger()
@@ -284,32 +327,118 @@ Play to win!"""
 
         return content
 
-    async def _execute_tool_call(self, block: object) -> tuple[dict, dict]:
-        """Execute a single tool call and build the result payload.
+    # -- Shared helpers --------------------------------------------------------
 
-        Returns (action_dict, tool_result_dict).
-        """
-        action_dict = {"type": block.name, **block.input}  # type: ignore[union-attr]
+    ENTITY_RESULT_LIMIT = 20
 
-        result = await execute_action(action_dict)
-        log.info("tool_executed", action=block.name, intent=block.input.get("intent", ""),  # type: ignore[union-attr]
-                 success=result.success)
+    def _entity_snapshot(self) -> list[dict]:
+        """Return truncated entity list for tool results."""
+        return [
+            {"id": e.get("id", ""), "class": e.get("class", ""), "center": e.get("center", [])}
+            for e in get_detected_entities()[:self.ENTITY_RESULT_LIMIT]
+        ]
 
-        result_data: dict[str, Any] = {"success": result.success, "detail": result.detail}
-
-        # Include fresh entity list after rescan-triggering actions
-        if block.name == "press" and block.input.get("rescan"):  # type: ignore[union-attr]
-            entities = get_detected_entities()
-            result_data["entities"] = [
-                {"id": e.get("id", ""), "class": e.get("class", ""), "center": e.get("center", [])}
-                for e in entities[:20]
-            ]
-
-        tool_result = {
+    def _make_tool_result(
+        self, block: object, success: bool, detail: str, *, include_entities: bool = False,
+    ) -> dict:
+        """Build the tool_result dict returned to Claude."""
+        result_data: dict[str, Any] = {"success": success, "detail": detail}
+        if include_entities:
+            result_data["entities"] = self._entity_snapshot()
+        return {
             "type": "tool_result",
             "tool_use_id": block.id,  # type: ignore[union-attr]
             "content": json.dumps(result_data),
         }
+
+    async def _run_steps(self, composite_name: str, steps: list[dict]) -> tuple[bool, str]:
+        """Execute action steps sequentially, stop on first failure."""
+        for step in steps:
+            r = await execute_action(step)
+            log.info("composite_step", composite=composite_name,
+                     action=step["type"], key=step.get("key", ""), success=r.success)
+            if not r.success:
+                return False, f"failed at {step['intent']}"
+        return True, "ok"
+
+    # -- Composite tool handlers ------------------------------------------------
+    # Execute multi-step sequences locally, avoiding intermediate API roundtrips.
+
+    _COMPOSITE_NAMES = {"build", "send_villager", "queue_villager"}
+
+    async def _execute_build(self, block: object) -> tuple[dict, dict]:
+        """Composite: press . → q (econ menu) → building_key → click(x,y)."""
+        inp = block.input  # type: ignore[union-attr]
+        intent = inp.get("intent", "Build")
+        steps = [
+            {"type": "press", "key": ".", "intent": f"Select idle villager ({intent})"},
+            {"type": "press", "key": "q", "intent": "Open economic build menu"},
+            {"type": "press", "key": inp["building_key"], "intent": f"Select building ({intent})"},
+            {"type": "click", "x": inp["x"], "y": inp["y"], "intent": f"Place building ({intent})"},
+        ]
+        success, detail = await self._run_steps("build", steps)
+        action_dict = {"type": "build", **inp}
+        tool_result = self._make_tool_result(block, success, detail, include_entities=True)
+        return action_dict, tool_result
+
+    async def _execute_send_villager(self, block: object) -> tuple[dict, dict]:
+        """Composite: press . (select idle villager) → right_click target."""
+        inp = block.input  # type: ignore[union-attr]
+        intent = inp.get("intent", "Send villager")
+
+        rc_action: dict[str, Any] = {"type": "right_click", "intent": intent}
+        if "target_class" in inp:
+            rc_action["target_class"] = inp["target_class"]
+        else:
+            rc_action["x"] = inp["x"]
+            rc_action["y"] = inp["y"]
+
+        steps: list[dict] = [
+            {"type": "press", "key": ".", "intent": f"Select idle villager ({intent})"},
+            rc_action,
+        ]
+        success, detail = await self._run_steps("send_villager", steps)
+        action_dict = {"type": "send_villager", **inp}
+        tool_result = self._make_tool_result(block, success, detail, include_entities=True)
+        return action_dict, tool_result
+
+    async def _execute_queue_villager(self, block: object) -> tuple[dict, dict]:
+        """Composite: press h → press q."""
+        inp = block.input  # type: ignore[union-attr]
+        intent = inp.get("intent", "Queue villager")
+        steps = [
+            {"type": "press", "key": "h", "intent": f"Go to TC ({intent})"},
+            {"type": "press", "key": "q", "intent": f"Queue villager ({intent})"},
+        ]
+        success, detail = await self._run_steps("queue_villager", steps)
+        action_dict = {"type": "queue_villager", **inp}
+        tool_result = self._make_tool_result(block, success, detail)
+        return action_dict, tool_result
+
+    # -- Tool dispatch ---------------------------------------------------------
+
+    _COMPOSITE_HANDLERS: dict[str, str] = {
+        "build": "_execute_build",
+        "send_villager": "_execute_send_villager",
+        "queue_villager": "_execute_queue_villager",
+    }
+
+    async def _execute_tool_call(self, block: object) -> tuple[dict, dict]:
+        """Execute a single tool call and build the result payload."""
+        tool_name = block.name  # type: ignore[union-attr]
+
+        handler_name = self._COMPOSITE_HANDLERS.get(tool_name)
+        if handler_name:
+            return await getattr(self, handler_name)(block)
+
+        action_dict = {"type": tool_name, **block.input}  # type: ignore[union-attr]
+        result = await execute_action(action_dict)
+        log.info("tool_executed", action=tool_name,
+                 intent=block.input.get("intent", ""), success=result.success)  # type: ignore[union-attr]
+
+        include_entities = tool_name == "press" and block.input.get("rescan")  # type: ignore[union-attr]
+        tool_result = self._make_tool_result(block, result.success, result.detail,
+                                             include_entities=include_entities)
         return action_dict, tool_result
 
     async def _call_api(self, content: list[dict]) -> LLMResponse:
@@ -365,8 +494,12 @@ Play to win!"""
 
             messages.append({"role": "user", "content": tool_results})
 
+        # Validate standard actions; keep composite actions as-is (already executed).
+        _COMPOSITE_NAMES = self._COMPOSITE_NAMES
+        validated = validate_actions([a for a in executed_actions if a.get("type") not in _COMPOSITE_NAMES])
+        composite = [a for a in executed_actions if a.get("type") in _COMPOSITE_NAMES]
         result = LLMResponse.model_construct(
-            actions=validate_actions(executed_actions),
+            actions=validated + composite,
             observations=Observations(),
             reasoning=" ".join(reasoning_parts),
         )
