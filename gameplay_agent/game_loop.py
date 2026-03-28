@@ -282,7 +282,7 @@ def _maybe_launch_strategist(
 
     Returns the new task, or the existing pending task if one is still running.
     """
-    if not strategist.should_run(iteration, alarm=alarm):
+    if not strategist.should_run(iteration, alarm=alarm, age=memory.game_state.current_age):
         return pending_task
 
     # Don't launch a new task if the previous one is still in-flight

@@ -82,11 +82,18 @@ class StrategistProvider:
                 self._system_prompt = "You are a strategic advisor for an AoE2 AI. Create 3-5 prioritized goals as JSON."
         return self._system_prompt
 
-    def should_run(self, turn: int, alarm: bool = False) -> bool:
+    # Age-dependent refresh intervals for fresher readings in early game
+    _AGE_INTERVALS: dict[str, int] = {
+        "Dark Age": 3,
+        "Feudal Age": 5,
+    }
+
+    def should_run(self, turn: int, alarm: bool = False, age: str = "") -> bool:
         """Check if the strategist should run this turn."""
         if not self._has_run:
             return True  # Keep trying every turn until first success
-        if turn % self.refresh_interval == 0:
+        interval = self._AGE_INTERVALS.get(age, self.refresh_interval)
+        if turn % interval == 0:
             return True
         if alarm and (turn - self._last_alarm_turn) >= 3:
             self._last_alarm_turn = turn

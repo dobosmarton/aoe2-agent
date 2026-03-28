@@ -196,6 +196,8 @@ class ClaudeProvider(BaseLLMProvider):
         self._total_output_tokens: int = 0
         self._total_cache_read_tokens: int = 0
         self._total_cache_write_tokens: int = 0
+        self._screen_width: int = 1920
+        self._screen_height: int = 1080
 
         if self.use_dynamic_context:
             try:
@@ -351,6 +353,22 @@ Play to win!"""
             "content": json.dumps(result_data),
         }
 
+    @staticmethod
+    def _serialize_response(result: LLMResponse) -> dict[str, Any]:
+        """Convert LLMResponse to a plain dict without Pydantic serialization warnings.
+
+        Composite action dicts don't match the Action union type, so we
+        serialize each action individually to avoid PydanticSerializationUnexpectedValue.
+        """
+        actions = [a.model_dump() if hasattr(a, "model_dump") else a for a in result.actions]
+        return {
+            "reasoning": result.reasoning,
+            "observations": result.observations.model_dump() if hasattr(result.observations, "model_dump") else {},
+            "actions": actions,
+            "actions_already_executed": True,
+            "success_count": getattr(result, "_success_count", len(actions)),
+        }
+
     async def _run_steps(self, composite_name: str, steps: list[dict]) -> tuple[bool, str]:
         """Execute action steps sequentially, stop on first failure."""
         for step in steps:
@@ -366,15 +384,26 @@ Play to win!"""
 
     _COMPOSITE_NAMES = {"build", "send_villager", "queue_villager"}
 
+    # Placement offset from screen center for build composite.
+    # After pressing ".", the villager is roughly centered on screen.
+    BUILD_PLACEMENT_OFFSET = 200
+
     async def _execute_build(self, block: object) -> tuple[dict, dict]:
-        """Composite: press . → q (econ menu) → building_key → click(x,y)."""
+        """Composite: press . → q (econ menu) → building_key → click near center.
+
+        After pressing "." the camera moves to the idle villager, so the
+        LLM-provided coordinates are stale.  We place the building at a
+        fixed offset from screen center instead.
+        """
         inp = block.input  # type: ignore[union-attr]
         intent = inp.get("intent", "Build")
+        place_x = self._screen_width // 2 + self.BUILD_PLACEMENT_OFFSET
+        place_y = self._screen_height // 2 + self.BUILD_PLACEMENT_OFFSET
         steps = [
             {"type": "press", "key": ".", "intent": f"Select idle villager ({intent})"},
             {"type": "press", "key": "q", "intent": "Open economic build menu"},
             {"type": "press", "key": inp["building_key"], "intent": f"Select building ({intent})"},
-            {"type": "click", "x": inp["x"], "y": inp["y"], "intent": f"Place building ({intent})"},
+            {"type": "click", "x": place_x, "y": place_y, "intent": f"Place building ({intent})"},
         ]
         success, detail = await self._run_steps("build", steps)
         action_dict = {"type": "build", **inp}
@@ -382,7 +411,11 @@ Play to win!"""
         return action_dict, tool_result
 
     async def _execute_send_villager(self, block: object) -> tuple[dict, dict]:
-        """Composite: press . (select idle villager) → right_click target."""
+        """Composite: press . (with rescan) → right_click target.
+
+        The "." press moves the camera, so we rescan to get fresh entity
+        positions before right-clicking.
+        """
         inp = block.input  # type: ignore[union-attr]
         intent = inp.get("intent", "Send villager")
 
@@ -394,7 +427,8 @@ Play to win!"""
             rc_action["y"] = inp["y"]
 
         steps: list[dict] = [
-            {"type": "press", "key": ".", "intent": f"Select idle villager ({intent})"},
+            {"type": "press", "key": ".", "rescan": True,
+             "intent": f"Select idle villager ({intent})"},
             rc_action,
         ]
         success, detail = await self._run_steps("send_villager", steps)
@@ -535,6 +569,10 @@ Play to win!"""
         Returns:
             Dictionary with reasoning, observations, and actions
         """
+        # Store screen dimensions for composite tool handlers
+        self._screen_width = width
+        self._screen_height = height
+
         content = self._build_content(context, width, height)
 
         try:
@@ -548,10 +586,7 @@ Play to win!"""
                      cache_write_tokens=self._total_cache_write_tokens,
                      cumulative_cost_usd=round(self._cumulative_cost_usd(), 4))
 
-            response = result.model_dump()
-            response["actions_already_executed"] = True
-            response["success_count"] = getattr(result, "_success_count", len(response.get("actions", [])))
-            return response
+            return self._serialize_response(result)
 
         except anthropic.APIError as e:
             log.error("claude_api_error", error=str(e))
