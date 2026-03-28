@@ -1,8 +1,6 @@
 """Claude (Anthropic) LLM provider for AoE2 Agent."""
 
 import json
-import math
-import random
 from pathlib import Path
 from typing import Any, Optional
 
@@ -198,8 +196,6 @@ class ClaudeProvider(BaseLLMProvider):
         self._total_output_tokens: int = 0
         self._total_cache_read_tokens: int = 0
         self._total_cache_write_tokens: int = 0
-        self._screen_width: int = 1920
-        self._screen_height: int = 1080
 
         if self.use_dynamic_context:
             try:
@@ -386,34 +382,21 @@ Play to win!"""
 
     _COMPOSITE_NAMES = {"build", "send_villager", "queue_villager"}
 
-    # Build placement: random offset from screen center (150-350px, random angle).
-    # After pressing ".", the villager is roughly centered on screen.
-    BUILD_OFFSET_MIN = 150
-    BUILD_OFFSET_MAX = 350
-
-    def _random_placement(self) -> tuple[int, int]:
-        """Pick a random build placement point near screen center."""
-        angle = random.uniform(0, 2 * math.pi)
-        radius = random.randint(self.BUILD_OFFSET_MIN, self.BUILD_OFFSET_MAX)
-        x = self._screen_width // 2 + int(radius * math.cos(angle))
-        y = self._screen_height // 2 + int(radius * math.sin(angle))
-        return x, y
-
     async def _execute_build(self, block: object) -> tuple[dict, dict]:
-        """Composite: press . → q (econ menu) → building_key → click near center.
+        """Composite: press . → q (econ menu) → building_key → click(x,y).
 
-        After pressing "." the camera moves to the idle villager, so the
-        LLM-provided coordinates are stale.  We place the building at a
-        random offset from screen center to avoid overlapping previous builds.
+        Uses the LLM-provided coordinates directly.  The executor's
+        built-in retry logic (_handle_click) tries 4 nearby offsets
+        (±80px) if placement fails.  If the spot is truly blocked,
+        the LLM will choose a different position next turn.
         """
         inp = block.input  # type: ignore[union-attr]
         intent = inp.get("intent", "Build")
-        place_x, place_y = self._random_placement()
         steps = [
             {"type": "press", "key": ".", "intent": f"Select idle villager ({intent})"},
             {"type": "press", "key": "q", "intent": "Open economic build menu"},
             {"type": "press", "key": inp["building_key"], "intent": f"Select building ({intent})"},
-            {"type": "click", "x": place_x, "y": place_y, "intent": f"Place building ({intent})"},
+            {"type": "click", "x": inp["x"], "y": inp["y"], "intent": f"Place building ({intent})"},
         ]
         success, detail = await self._run_steps("build", steps)
         action_dict = {"type": "build", **inp}
@@ -579,10 +562,6 @@ Play to win!"""
         Returns:
             Dictionary with reasoning, observations, and actions
         """
-        # Store screen dimensions for composite tool handlers
-        self._screen_width = width
-        self._screen_height = height
-
         content = self._build_content(context, width, height)
 
         try:
