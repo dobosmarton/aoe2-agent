@@ -29,12 +29,12 @@ Before choosing actions, check these in order:
    If no Mill exists yet: build Mill first (`.` → `q` → `w` → click), then farms.
 6. **Villager balance**: Keep at least half your villagers on FOOD. Never have 0 food gatherers. If you have 6+ on food already, send the next villager to wood.
 7. **Is my scout idle?** → Enable Auto Scout! Press `,` (select idle military) then `G` (Auto Scout). The scout will explore the map automatically — you only need to do this ONCE. The scout reveals sheep, boar, deer, gold, stone, and the enemy base.
-8. **Are 2+ villagers gathering wood without a Lumber Camp?** → Build one NOW.
-   Select villager (`.` rescan) → Q → R → click near trees (100 wood). Without a Lumber Camp, villagers waste half their time walking to TC to drop off wood.
+8. **Are 2+ villagers gathering wood without a Lumber Camp?** → Build one NOW using `build` with `building_key="r"`.
+   Without a Lumber Camp, villagers waste half their time walking to TC to drop off wood. **You MUST build a Lumber Camp by turn 10-15.** It also counts as one of the 2 Dark Age buildings needed for Feudal Age (see item 10).
 9. **Are berry_bush detected but no mill nearby?** → Build a Mill next to the berries.
    Select villager (`.` rescan) → Q → W → click next to berry bushes (100 wood). Then send 3-4 villagers to gather berries.
 10. **Population 20+ AND food > 500?** → Research Feudal Age! Press H (go to TC) → Z (research age up).
-    **PREREQUISITE**: You MUST have built 2 Dark Age buildings BEFORE pressing Z. Qualifying buildings: Lumber Camp, Mill, Mining Camp, Barracks, or Dock. Houses do NOT count. If you don't have 2 of these, build them first.
+    **PREREQUISITE**: You MUST have built 2 Dark Age buildings BEFORE pressing Z. Qualifying buildings: Lumber Camp, Mill, Mining Camp, Barracks, or Dock. Houses do NOT count. The easiest path is **Mill + Lumber Camp** — you should already have both from items 8 and 9. If you don't, build them NOW before attempting age-up.
 11. **NO sheep or berry_bush in entity list AND food < 100?** → EMERGENCY: Build Mill + Farms!
     Step 1: Build a Mill on open ground (Q → W → click, 100 wood). Mill unlocks farms and is a food drop-off.
     Step 2: Build 3+ Farms adjacent to the Mill (Q → A → click near Mill, 60 wood each).
@@ -59,7 +59,7 @@ Only consider defensive actions in Feudal Age or later, and only when 3+ enemy m
 Follow this order for food gathering:
 1. **Sheep** (free, near TC) — gather these first by right-clicking them
 2. **Berries** — As soon as you see `berry_bush` in the entity list, build a Mill next to them (Q→W, 100 wood) and send 3-4 villagers to gather berries. Berries are your MAIN food source after sheep run out. Do NOT skip berries.
-3. **Farms** — when no sheep or berry_bush appear in the entity list, build farms (Q→A, 60 wood each) near your TC. Farms provide infinite food.
+3. **Farms** — when no sheep or berry_bush appear in the entity list, build farms (Q→A, 60 wood each) near your TC. Farms provide infinite food. **Each farm supports only 1 villager.** Build 1 farm per villager you want gathering food. Do NOT send multiple villagers to the same farm — only the first one will work it.
 
 **NEVER right-click on a boar.** Boars are aggressive — they fight back and WILL kill your villagers. Boar luring requires advanced micro that you cannot do. Ignore boars entirely. Use sheep → berries → farms instead.
 

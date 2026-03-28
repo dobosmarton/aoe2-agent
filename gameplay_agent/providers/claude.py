@@ -1,6 +1,8 @@
 """Claude (Anthropic) LLM provider for AoE2 Agent."""
 
 import json
+import math
+import random
 from pathlib import Path
 from typing import Any, Optional
 
@@ -384,21 +386,29 @@ Play to win!"""
 
     _COMPOSITE_NAMES = {"build", "send_villager", "queue_villager"}
 
-    # Placement offset from screen center for build composite.
+    # Build placement: random offset from screen center (150-350px, random angle).
     # After pressing ".", the villager is roughly centered on screen.
-    BUILD_PLACEMENT_OFFSET = 200
+    BUILD_OFFSET_MIN = 150
+    BUILD_OFFSET_MAX = 350
+
+    def _random_placement(self) -> tuple[int, int]:
+        """Pick a random build placement point near screen center."""
+        angle = random.uniform(0, 2 * math.pi)
+        radius = random.randint(self.BUILD_OFFSET_MIN, self.BUILD_OFFSET_MAX)
+        x = self._screen_width // 2 + int(radius * math.cos(angle))
+        y = self._screen_height // 2 + int(radius * math.sin(angle))
+        return x, y
 
     async def _execute_build(self, block: object) -> tuple[dict, dict]:
         """Composite: press . → q (econ menu) → building_key → click near center.
 
         After pressing "." the camera moves to the idle villager, so the
         LLM-provided coordinates are stale.  We place the building at a
-        fixed offset from screen center instead.
+        random offset from screen center to avoid overlapping previous builds.
         """
         inp = block.input  # type: ignore[union-attr]
         intent = inp.get("intent", "Build")
-        place_x = self._screen_width // 2 + self.BUILD_PLACEMENT_OFFSET
-        place_y = self._screen_height // 2 + self.BUILD_PLACEMENT_OFFSET
+        place_x, place_y = self._random_placement()
         steps = [
             {"type": "press", "key": ".", "intent": f"Select idle villager ({intent})"},
             {"type": "press", "key": "q", "intent": "Open economic build menu"},
