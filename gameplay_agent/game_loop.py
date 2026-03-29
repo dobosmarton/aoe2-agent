@@ -75,13 +75,25 @@ def _get_ground_commands(iteration: int) -> list[dict]:
     ]
 
 
+# Age-dependent population thresholds for maintenance villager queuing.
+# Beyond these caps, stop queuing to save food for age-up research.
+_MAINTENANCE_POP_CAP: dict[str, int] = {
+    "Dark Age": 22,
+    "Feudal Age": 35,
+}
+
+
 def _get_maintenance_actions(memory: AgentMemory) -> list[dict]:
     """Safe hotkey actions to execute while the LLM call is in-flight."""
-    actions: list[dict] = []
-    if memory.game_state.population < memory.game_state.population_cap:
-        actions.append({"type": "press", "key": "h", "intent": "Select TC (maintenance)"})
-        actions.append({"type": "press", "key": "q", "intent": "Queue villager (maintenance)"})
-    return actions
+    pop = memory.game_state.population
+    pop_cap = memory.game_state.population_cap
+    age_cap = _MAINTENANCE_POP_CAP.get(memory.game_state.current_age, pop_cap)
+    if pop < min(pop_cap, age_cap):
+        return [
+            {"type": "press", "key": "h", "intent": "Select TC (maintenance)"},
+            {"type": "press", "key": "q", "intent": "Queue villager (maintenance)"},
+        ]
+    return []
 
 
 # ---------------------------------------------------------------------------

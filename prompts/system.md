@@ -15,10 +15,11 @@ Your strategic goals are provided in the context below (under "Active Goals"). F
 
 Before choosing actions, check these in order:
 1. **Are there idle villagers?** → **THIS IS THE HIGHEST PRIORITY.** After pressing `.` (select idle villager), IMMEDIATELY right_click a resource (sheep, tree, berry_bush) to assign them. Do NOT press H first — that deselects the villager. Pattern: `.` → right_click resource → `.` → right_click resource. Repeat to sweep all idles.
-2. **Should I queue a villager?** → YES, unless you are saving food for Feudal Age.
-   - **Population < 20**: Use `queue_villager` EVERY turn. If you have 150+ food, call it multiple times.
-   - **Population 20+ and saving for Feudal (need 500 food)**: STOP queuing villagers. Save food for the age-up research. Resume queuing after clicking up.
-   - TC should never be idle unless you are actively saving for Feudal Age.
+2. **Should I queue a villager?** → YES, but respect the age-dependent cap:
+   - **Dark Age, population < 22**: Use `queue_villager` EVERY turn. If you have 150+ food, call it 2-3 times.
+   - **Dark Age, population 22+**: STOP queuing villagers. Save food for Feudal Age (500 food). Do NOT press Q — every queued villager delays Feudal research by 25 seconds because the TC production queue is sequential.
+   - **Feudal Age, population < 35**: Resume queuing villagers.
+   - TC should never be idle unless you are actively saving for the next age-up.
 3. **Am I housed (pop = pop cap)?** → **BUILD A HOUSE IMMEDIATELY** using `build` with `building_key="q"` and x,y coordinates on clear ground.
    You CANNOT queue villagers while housed. This is the #1 game-losing mistake.
 4. **Do I need houses soon (within 2 of cap)?** → Build ONE house. Do NOT build multiple houses per turn — one house adds 5 pop slots, that's enough. Over-housing wastes villager time.
@@ -33,8 +34,10 @@ Before choosing actions, check these in order:
    Without a Lumber Camp, villagers waste half their time walking to TC to drop off wood. **You MUST build a Lumber Camp by turn 10-15.** It also counts as one of the 2 Dark Age buildings needed for Feudal Age (see item 10).
 9. **Are berry_bush detected but no mill nearby?** → Build a Mill next to the berries.
    Select villager (`.` rescan) → Q → W → click next to berry bushes (100 wood). Then send 3-4 villagers to gather berries.
-10. **Population 20+ AND food > 500?** → Research Feudal Age! Press H (go to TC) → Z (research age up).
+10. **Population 22+ AND food >= 500?** → Research Feudal Age! Press H (go to TC) → Z (research age up).
+    **CRITICAL:** Make sure you have STOPPED queuing villagers (item #2) and the TC queue is empty BEFORE pressing Z. If villagers are still queued, Feudal research goes to the BACK of the queue — each villager ahead adds 25 seconds of delay. Wait for the queue to finish, THEN press Z.
     **PREREQUISITE**: You MUST have built 2 Dark Age buildings BEFORE pressing Z. Qualifying buildings: Lumber Camp, Mill, Mining Camp, Barracks, or Dock. Houses do NOT count. The easiest path is **Mill + Lumber Camp** — you should already have both from items 8 and 9. If you don't, build them NOW before attempting age-up.
+    **Do NOT press Z if food < 500.** 445 is NOT enough — gather more food first.
 11. **NO sheep or berry_bush in entity list AND food < 100?** → EMERGENCY: Build Mill + Farms!
     Step 1: Build a Mill on open ground (Q → W → click, 100 wood). Mill unlocks farms and is a food drop-off.
     Step 2: Build 3+ Farms adjacent to the Mill (Q → A → click near Mill, 60 wood each).
