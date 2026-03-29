@@ -30,6 +30,10 @@ class BaseLLMProvider(ABC):
         pass
 
     @abstractmethod
-    def get_system_prompt(self) -> str:
-        """Get the system prompt for this provider."""
+    def get_system_prompt(self, age: str = "Dark Age") -> str | list[dict]:
+        """Get the system prompt for this provider.
+
+        Returns either a plain string or a list of content blocks
+        (for multi-block system prompts with per-block cache control).
+        """
         pass

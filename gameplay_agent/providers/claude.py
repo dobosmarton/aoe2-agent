@@ -1,6 +1,7 @@
 """Claude (Anthropic) LLM provider for AoE2 Agent."""
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -189,7 +190,8 @@ class ClaudeProvider(BaseLLMProvider):
         self.model = model or config.model
         # Use AsyncAnthropic with built-in retry (429/5xx with exponential backoff)
         self.client = anthropic.AsyncAnthropic(api_key=self.api_key, max_retries=3)
-        self._system_prompt: str | None = None
+        self._core_prompt: str | None = None
+        self._age_prompts: dict[str, str] = {}
         self.use_dynamic_context = use_dynamic_context and GAME_KNOWLEDGE_AVAILABLE
         self._game_db: Optional["GameKnowledge"] = None
         self._total_input_tokens: int = 0
@@ -205,44 +207,65 @@ class ClaudeProvider(BaseLLMProvider):
                 log.warning("game_knowledge_init_failed", error=str(e))
                 self.use_dynamic_context = False
 
-    def get_system_prompt(self) -> str:
-        """Load and return the system prompt."""
-        if self._system_prompt is None:
-            prompt_file = PROMPTS_DIR / "system.md"
-            hotkeys_file = PROMPTS_DIR / "hotkeys.md"
-            if prompt_file.exists():
-                self._system_prompt = prompt_file.read_text()
-                if hotkeys_file.exists():
-                    self._system_prompt += "\n\n" + hotkeys_file.read_text()
+    _AGE_NAMES = ("dark", "feudal", "castle", "imperial")
+    _FALLBACK_PROMPT = "You are playing Age of Empires 2: Definitive Edition. Your goal is to defeat the enemy AI. Play to win!"
+
+    def _load_prompts(self) -> None:
+        """Load all prompt files once (core + age-specific)."""
+        if self._core_prompt is not None:
+            return
+
+        core_file = PROMPTS_DIR / "core.md"
+        legacy_file = PROMPTS_DIR / "system.md"
+        hotkeys_file = PROMPTS_DIR / "hotkeys.md"
+
+        if core_file.exists():
+            self._core_prompt = core_file.read_text()
+        elif legacy_file.exists():
+            self._core_prompt = legacy_file.read_text()
+        else:
+            self._core_prompt = self._FALLBACK_PROMPT
+
+        if hotkeys_file.exists():
+            self._core_prompt += "\n\n" + hotkeys_file.read_text()
+
+        ages_dir = PROMPTS_DIR / "ages"
+        for age_name in self._AGE_NAMES:
+            age_file = ages_dir / f"{age_name}.md"
+            if age_file.exists():
+                self._age_prompts[age_name] = age_file.read_text()
             else:
-                # Fallback minimal prompt
-                self._system_prompt = """You are playing Age of Empires 2: Definitive Edition. Your goal is to defeat the enemy AI.
+                log.debug("age_prompt_missing", age=age_name)
 
-## Output Format
-Respond with JSON only:
-{
-  "reasoning": "What you see and your strategic thinking",
-  "observations": {
-    "resources": {"food": 0, "wood": 0, "gold": 0, "stone": 0},
-    "population": "12/15",
-    "age": "Dark Age",
-    "idle_tc": true,
-    "under_attack": false,
-    "events": []
-  },
-  "actions": [
-    {"type": "click", "x": 100, "y": 200, "intent": "What this does"},
-    {"type": "right_click", "target_id": "sheep_0", "intent": "Gather from sheep"},
-    {"type": "press", "key": "h", "intent": "What this does"}
-  ]
-}
+    def get_system_prompt(self, age: str = "Dark Age") -> list[dict]:
+        """Return system prompt as a two-block list for optimal caching.
 
-Action types: click, right_click, press, drag (with x1,y1,x2,y2), wait (with ms), scroll (with clicks), detect
-For click/right_click: MUST include one of: (x, y) coordinates, target_id (e.g. "sheep_0"), or target_class (e.g. "sheep").
-For click/right_click: use "x" and "y" fields (NOT "x1"/"y1" — those are for drag only).
+        Block 1 (core + hotkeys) is stable across all ages — always cached.
+        Block 2 (age-specific) changes only on age transitions (3 times per game).
+        """
+        self._load_prompts()
 
-Play to win!"""
-        return self._system_prompt
+        # "Dark Age" → "dark", "Feudal Age" → "feudal"
+        age_key = age.split()[0].lower() if age else "dark"
+        age_content = self._age_prompts.get(age_key, self._age_prompts.get("dark", ""))
+
+        blocks = [
+            {
+                "type": "text",
+                "text": self._core_prompt,
+                "cache_control": {"type": "ephemeral"},
+            },
+        ]
+        if age_content:
+            blocks.append({"type": "text", "text": age_content})
+
+        return blocks
+
+    @staticmethod
+    def _extract_age(context: str) -> str:
+        """Extract current age from context string."""
+        match = re.search(r"(Dark|Feudal|Castle|Imperial)\s*Age", context, re.IGNORECASE)
+        return f"{match.group(1)} Age" if match else "Dark Age"
 
     def _get_dynamic_context(self, context: str) -> str:
         """Extract game state from context and generate dynamic knowledge context.
@@ -262,8 +285,6 @@ Play to win!"""
 
         try:
             # Try to extract resources from context
-            import re
-
             food_match = re.search(r"Food[=:]?\s*(\d+)", context, re.IGNORECASE)
             wood_match = re.search(r"Wood[=:]?\s*(\d+)", context, re.IGNORECASE)
             gold_match = re.search(r"Gold[=:]?\s*(\d+)", context, re.IGNORECASE)
@@ -468,7 +489,7 @@ Play to win!"""
                                              include_entities=include_entities)
         return action_dict, tool_result
 
-    async def _call_api(self, content: list[dict]) -> LLMResponse:
+    async def _call_api(self, content: list[dict], age: str = "Dark Age") -> LLMResponse:
         """Call Claude API in an agentic tool loop.
 
         Each iteration: model calls one tool → we execute it → feed result
@@ -480,15 +501,15 @@ Play to win!"""
         executed_actions: list[dict] = []
         success_count = 0
         reasoning_parts: list[str] = []
+        system_prompt = self.get_system_prompt(age)
 
         for _ in range(config.max_tool_iterations):
             response = await self.client.messages.create(
                 model=self.model,
                 max_tokens=config.max_tokens,
-                system=self.get_system_prompt(),
+                system=system_prompt,
                 messages=messages,
                 tools=_ACTION_TOOLS,
-                cache_control={"type": "ephemeral"},
             )
 
             # Accumulate token usage (cache fields may be None when caching is off)
@@ -563,10 +584,11 @@ Play to win!"""
             Dictionary with reasoning, observations, and actions
         """
         content = self._build_content(context, width, height)
+        age = self._extract_age(context)
 
         try:
-            result = await self._call_api(content)
-            log.debug("claude_response", reasoning=result.reasoning[:200])
+            result = await self._call_api(content, age=age)
+            log.debug("claude_response", age=age, reasoning=result.reasoning[:200])
 
             log.info("api_cost",
                      input_tokens=self._total_input_tokens,
