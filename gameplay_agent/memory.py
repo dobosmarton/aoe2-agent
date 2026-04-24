@@ -114,12 +114,12 @@ class AgentMemory:
                 except (ValueError, IndexError):
                     pass
 
-        # Update age
-        if "age" in observations:
-            self.game_state.current_age = observations["age"]
-            # Track highest age reached
-            if AGE_SCORES.get(observations["age"], 0) > AGE_SCORES.get(self.highest_age, 0):
-                self.highest_age = observations["age"]
+        # NOTE: `age` is intentionally NOT read from executor observations.
+        # The executor self-reports `observations.age` but was observed hallucinating
+        # it (exp_0011: reported "Feudal Age" from turn 2 while game was Dark Age),
+        # which misrouted the age-specific prompt. Age is authoritative from the
+        # strategist only — see `update_age()` below, called from
+        # `GoalManager.update_resource_readings()`.
 
         # Update flags
         if "idle_tc" in observations:
@@ -127,6 +127,18 @@ class AgentMemory:
 
         if "under_attack" in observations:
             self.game_state.under_attack = bool(observations["under_attack"])
+
+    def update_age(self, age: str) -> None:
+        """Update current age from the strategist's reading (authoritative).
+
+        The strategist reads age directly from the resource bar — this is the
+        single source of truth. Do NOT call this from the executor path.
+        """
+        if not age:
+            return
+        self.game_state.current_age = age
+        if AGE_SCORES.get(age, 0) > AGE_SCORES.get(self.highest_age, 0):
+            self.highest_age = age
 
     def get_context_for_llm(self) -> str:
         """Build context string for LLM prompt."""

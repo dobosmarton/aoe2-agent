@@ -215,10 +215,12 @@ class GoalManager:
                 }
             if "population" in readings:
                 obs["population"] = readings["population"]
-            if "age" in readings:
-                obs["age"] = readings["age"]
             if obs:
                 memory.update_from_observations(obs)
+            # Age goes through a dedicated channel — the strategist is the only
+            # authoritative source for current_age (executor was hallucinating it).
+            if "age" in readings:
+                memory.update_age(readings["age"])
 
     def get_resource_context(self) -> str:
         """Format cached resource readings for executor context."""

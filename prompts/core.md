@@ -11,6 +11,22 @@ You are playing Age of Empires 2: Definitive Edition. Your goal is to defeat the
 ## Active Goals
 Your strategic goals are provided in the context below (under "Active Goals"). Follow them in priority order — HIGH priority first, then MED, then LOW. Local goals should be completed quickly; global goals guide your long-term strategy.
 
+## Age-up Gate (check FIRST, before the turn checklist)
+
+Read the **strategist's Resource Status** block in context — that is the authoritative reading. Do NOT use your own age estimate.
+
+**If ALL of these are true, your first two actions this turn MUST be `press key=h` then `press key=z` — nothing else before them:**
+- Strategist's Age reads `Dark Age`
+- Food ≥ 500
+- Population ≥ 22
+- Both **Lumber Camp** AND **Mill** appear in the Detected Entities list (Feudal Age prereq: 2 Dark Age buildings)
+
+Research takes ~2 minutes and runs in the background — resume farming / queueing villagers on the NEXT turn, after the research is in flight.
+
+**Do not queue villagers in the same turn you press Z.** The research goes to the back of the TC queue; each villager ahead adds 25 s of delay. Let the queue drain first.
+
+Missing Feudal Age is the #1 ranking killer against real opponents. If this gate fires and you skip it, you will lose the game.
+
 ## EVERY TURN Checklist (always do these regardless of goals)
 
 Before choosing actions, check these in order:
