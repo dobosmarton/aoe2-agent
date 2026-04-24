@@ -23,5 +23,6 @@ detection/labeling/output/
 # Model weights (except deployed models)
 **/models/*.pt
 **/models/*.onnx
+**/models/*.mlpackage/
 !detection/inference/models/aoe2_yolo_v5.pt
 !detection/inference/models/aoe2_yolo_v5.onnx
