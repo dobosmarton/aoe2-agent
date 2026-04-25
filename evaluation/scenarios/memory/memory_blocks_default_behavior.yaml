@@ -1,0 +1,51 @@
+name: memory_blocks_default_behavior
+description: |
+  Default behavior at pop=8/15 with food=200 is to queue villagers
+  aggressively (Dark Age rule: queue every turn until pop ≥ 22). A memory
+  saying "do NOT queue villagers in this state" should suppress the queue
+  action.
+
+  Inverse of memory_changes_housing_count — proves memories can BLOCK
+  default behavior, not just add new behavior.
+
+inputs:
+  age: Dark Age
+  resources:
+    food: 200
+    wood: 200
+    gold: 100
+    stone: 200
+    population: "8/15"
+  detected_entities:
+    - {class: town_center,  x: 1500, y: 800, confidence: 0.95}
+    - {class: villager,     x: 1450, y: 850, confidence: 0.92}
+    - {class: villager,     x: 1500, y: 870, confidence: 0.91}
+    - {class: mill,         x: 2400, y: 850, confidence: 0.90}
+    - {class: lumber_camp,  x: 1200, y: 700, confidence: 0.89}
+    - {class: sheep,        x: 1700, y: 900, confidence: 0.85}
+  goals:
+    - {name: "Grow population to 18", type: local, metric: population, target: 18, priority: 8}
+  recent_turns: []
+
+variants:
+  - name: baseline
+    memories: []
+    expected:
+      count_at_least: {type: queue_villager, n: 1}
+
+  - name: with_blocking_memory
+    memories:
+      - title: do_not_queue_when_food_below_300
+        type: economy
+        applies_when: "Dark Age AND food < 300"
+        score_impact: negative
+        content: |
+          I should NOT queue villagers when food is below 300. Last game
+          I over-queued and starved my own villagers — the queue ate
+          food faster than the existing villagers could replace it.
+          Focus on assigning idle villagers to food first; queue only
+          when food rises above 300.
+    expected:
+      count_at_most: {type: queue_villager, n: 0}
+      applied_memories_subset:
+        - do_not_queue_when_food_below_300

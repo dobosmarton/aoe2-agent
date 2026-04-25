@@ -1,0 +1,51 @@
+name: memory_changes_housing_count
+description: |
+  At pop_cap − 2 with plenty of wood, the default rule is "build ONE house".
+  A memory saying "build TWO houses" should change the action count to 2.
+
+  This is the canonical proof that memories measurably change behavior, not
+  just that the LLM tags them. The two variants share inputs entirely; only
+  the planted memory differs.
+
+inputs:
+  age: Dark Age
+  resources:
+    food: 200
+    wood: 600
+    gold: 100
+    stone: 200
+    population: "13/15"
+  detected_entities:
+    - {class: town_center,  x: 1500, y: 800, confidence: 0.95}
+    - {class: villager,     x: 1450, y: 850, confidence: 0.92}
+    - {class: villager,     x: 1500, y: 870, confidence: 0.91}
+    - {class: villager,     x: 1480, y: 860, confidence: 0.90}
+    - {class: mill,         x: 2400, y: 850, confidence: 0.90}
+    - {class: lumber_camp,  x: 1200, y: 700, confidence: 0.89}
+    - {class: sheep,        x: 1700, y: 900, confidence: 0.85}
+  goals:
+    - {name: "Grow population to 18", type: local, metric: population, target: 18, priority: 8}
+  recent_turns: []
+
+variants:
+  - name: baseline
+    memories: []
+    expected:
+      count_at_least: {type: build, building_key: q, n: 1}
+      count_at_most:  {type: build, building_key: q, n: 1}
+
+  - name: with_two_house_memory
+    memories:
+      - title: build_two_houses_at_pop_cap_minus_2
+        type: economy
+        applies_when: "Dark Age AND population >= (pop_cap - 2)"
+        score_impact: negative
+        content: |
+          I should build TWO houses (not one) when population reaches
+          pop_cap minus 2. Last game I built only one house at pop_cap
+          minus 2 and ended up housed again two turns later because
+          population kept growing.
+    expected:
+      count_at_least: {type: build, building_key: q, n: 2}
+      applied_memories_subset:
+        - build_two_houses_at_pop_cap_minus_2

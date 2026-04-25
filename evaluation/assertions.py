@@ -124,6 +124,58 @@ def count_at_most(actions: list[dict], spec: dict, **_) -> list[str]:
     return []
 
 
+def differs_from_baseline_by(
+    actions: list[dict],
+    spec: dict,
+    *,
+    baseline_actions: list[dict] | None = None,
+    **_,
+) -> list[str]:
+    """Differential assertion: this variant's action list differs from the baseline.
+
+    The first variant in a scenario IS the baseline; subsequent variants
+    compare against it. Spec accepts:
+      must_include: pattern        # appears in this variant, NOT in baseline
+      must_not_include: pattern    # appears in baseline, NOT in this variant
+
+    Both check directions are independent — supply either or both.
+    """
+    if baseline_actions is None:
+        return [
+            "differs_from_baseline_by FAILED — no baseline available. "
+            "This assertion only works on a NON-FIRST variant within a scenario "
+            "that has multiple variants. The first variant is treated as the baseline."
+        ]
+    if not isinstance(spec, dict):
+        return [f"differs_from_baseline_by expected a dict, got {type(spec).__name__}"]
+
+    failures: list[str] = []
+
+    if "must_include" in spec:
+        pattern = spec["must_include"]
+        in_variant = any(_matches(action, pattern) for action in actions)
+        in_baseline = any(_matches(action, pattern) for action in baseline_actions)
+        if not in_variant or in_baseline:
+            failures.append(
+                f"differs_from_baseline_by.must_include FAILED — pattern {pattern!r} "
+                f"should appear in this variant but NOT baseline. "
+                f"Got: variant={in_variant}, baseline={in_baseline}."
+            )
+
+    if "must_not_include" in spec:
+        pattern = spec["must_not_include"]
+        in_variant = any(_matches(action, pattern) for action in actions)
+        in_baseline = any(_matches(action, pattern) for action in baseline_actions)
+        if in_variant or not in_baseline:
+            failures.append(
+                f"differs_from_baseline_by.must_not_include FAILED — pattern {pattern!r} "
+                f"should appear in baseline but NOT this variant. "
+                f"Got: variant={in_variant}, baseline={in_baseline}."
+            )
+
+    return failures
+
+
 # ---------------------------------------------------------------------------
 # Reasoning + memory assertions
 # ---------------------------------------------------------------------------
@@ -193,6 +245,7 @@ _ACTION_ASSERTIONS = {
     "must_not_include": must_not_include,
     "count_at_least": count_at_least,
     "count_at_most": count_at_most,
+    "differs_from_baseline_by": differs_from_baseline_by,
 }
 _REASONING_ASSERTIONS = {
     "applied_memories": applied_memories,
@@ -222,8 +275,18 @@ def _normalize_value(key: str, value):
     return [value]
 
 
-def evaluate(expected: dict, *, actions: list[dict], reasoning: str) -> list[str]:
+def evaluate(
+    expected: dict,
+    *,
+    actions: list[dict],
+    reasoning: str,
+    baseline_actions: list[dict] | None = None,
+) -> list[str]:
     """Evaluate every assertion in `expected:`. Returns aggregated failure messages.
+
+    `baseline_actions` is the first variant's executed actions, used by
+    `differs_from_baseline_by`. None for non-variant fixtures or for the
+    baseline variant itself.
 
     For example:
         must_not_include:
@@ -243,7 +306,7 @@ def evaluate(expected: dict, *, actions: list[dict], reasoning: str) -> list[str
 
         for item in _normalize_value(key, value):
             if action_fn is not None:
-                failures.extend(action_fn(actions, item))
+                failures.extend(action_fn(actions, item, baseline_actions=baseline_actions))
             else:
                 failures.extend(reasoning_fn(reasoning, item))  # type: ignore[misc]
 

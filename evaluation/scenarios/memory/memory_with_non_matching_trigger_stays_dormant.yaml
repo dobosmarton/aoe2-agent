@@ -1,0 +1,56 @@
+name: memory_with_non_matching_trigger_stays_dormant
+description: |
+  A memory whose `applies_when` doesn't match the current state must NOT
+  fire. Dark Age scenario, but the planted memory triggers only in
+  Castle Age. The agent should not tag it via [applied: ...] and the
+  baseline-vs-variant action lists should be similar.
+
+  This is the over-application catch — the precedence header explicitly
+  says the LLM should apply rules whose trigger matches its current
+  state. We need a test that the inverse holds: memories whose trigger
+  does NOT match should stay dormant.
+
+inputs:
+  age: Dark Age
+  resources:
+    food: 200
+    wood: 200
+    gold: 100
+    stone: 200
+    population: "8/15"
+  detected_entities:
+    - {class: town_center,  x: 1500, y: 800, confidence: 0.95}
+    - {class: villager,     x: 1450, y: 850, confidence: 0.92}
+    - {class: villager,     x: 1500, y: 870, confidence: 0.91}
+    - {class: mill,         x: 2400, y: 850, confidence: 0.90}
+    - {class: lumber_camp,  x: 1200, y: 700, confidence: 0.89}
+    - {class: sheep,        x: 1700, y: 900, confidence: 0.85}
+  goals:
+    - {name: "Grow population to 18", type: local, metric: population, target: 18, priority: 8}
+  recent_turns: []
+
+variants:
+  - name: baseline
+    memories: []
+    expected:
+      # Just confirm the agent does something reasonable in Dark Age
+      count_at_least: {type: queue_villager, n: 1}
+
+  - name: with_castle_age_memory
+    memories:
+      - title: build_castle_when_food_high
+        type: strategy
+        applies_when: "Castle Age AND food >= 1000"
+        score_impact: negative
+        content: |
+          I should build a Castle (Villager → V → C, 650 stone) the moment
+          food reaches 1000 in Castle Age. Castles unlock unique units and
+          map control.
+    expected:
+      # Same default behavior as baseline — Castle Age memory is irrelevant
+      count_at_least: {type: queue_villager, n: 1}
+      # Memory should NOT be tagged
+      applied_memories: []
+      # Definitely should NOT try to build a Castle in Dark Age
+      must_not_include:
+        - {type: build, building_key: c}

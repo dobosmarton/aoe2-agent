@@ -86,15 +86,26 @@ class ScenarioResult:
 
 @contextlib.contextmanager
 def _isolate_memories_dir(fixture_memories: list[dict]):
-    """Back up existing memories/, plant fixture memories, restore on exit."""
+    """Back up existing memories/, plant fixture memories, restore on exit.
+
+    Refuses to run if an orphan `<memories>_eval_backup` directory exists
+    from a crashed prior run — its contents are the user's real memories
+    and we cannot tell which of the two dirs is canonical without asking.
+    """
     from autoresearch.memory_chain import MEMORIES_DIR
 
     backup_dir = MEMORIES_DIR.with_name(MEMORIES_DIR.name + "_eval_backup")
-    had_existing = MEMORIES_DIR.exists()
+    if backup_dir.exists():
+        raise RuntimeError(
+            f"Found orphan eval backup at {backup_dir}. A prior evaluation "
+            f"run crashed before restoring your real memories. Inspect both "
+            f"{backup_dir} and {MEMORIES_DIR}, move the canonical contents "
+            f"back to {MEMORIES_DIR}, then delete the other. Refusing to "
+            f"proceed to avoid silent data loss."
+        )
 
+    had_existing = MEMORIES_DIR.exists()
     if had_existing:
-        if backup_dir.exists():
-            shutil.rmtree(backup_dir)
         shutil.move(str(MEMORIES_DIR), str(backup_dir))
     MEMORIES_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -338,11 +349,53 @@ async def _invoke_executor(fixture: dict, model: str | None) -> tuple[list[dict]
             await provider.client.close()
 
 
-async def _run_scenario_async(fixture_path: Path, *, model: str | None = None) -> ScenarioResult:
+def _expand_variants(fixture: dict) -> list[dict]:
+    """Return one fixture-per-variant. No `variants:` key = single anonymous run.
+
+    Each returned fixture has `_variant_name` set (None for non-variant fixtures).
+    Variant-specific overrides apply on top of the shared `inputs:` block —
+    today only `memories` is overridable; widening the surface is a future change.
+    """
+    if "variants" not in fixture:
+        return [{**fixture, "_variant_name": None}]
+
+    base_inputs = fixture.get("inputs", {})
+    expanded: list[dict] = []
+    for index, variant in enumerate(fixture["variants"]):
+        variant_inputs = {
+            **base_inputs,
+            "memories": variant.get("memories", base_inputs.get("memories", [])),
+        }
+        expanded.append({
+            **fixture,
+            "inputs": variant_inputs,
+            "expected": variant.get("expected", fixture.get("expected", {})),
+            "_variant_name": variant.get("name", f"variant_{index}"),
+        })
+    return expanded
+
+
+def _scenario_display_name(fixture_path: Path, variant_name: str | None) -> str:
+    base = fixture_path.stem
+    return f"{base} [{variant_name}]" if variant_name else base
+
+
+async def _run_one_variant_async(
+    fixture: dict,
+    fixture_path: Path,
+    *,
+    model: str | None = None,
+    baseline_actions: list[dict] | None = None,
+) -> ScenarioResult:
+    """Run a single (possibly variant-overlaid) fixture through the executor.
+
+    `baseline_actions` is the first variant's executed actions, threaded
+    through to `evaluate()` so `differs_from_baseline_by` assertions can
+    compare against it. None for the baseline variant itself.
+    """
     from evaluation.assertions import evaluate
 
-    name = fixture_path.stem
-    fixture = _load_fixture(fixture_path)
+    name = _scenario_display_name(fixture_path, fixture.get("_variant_name"))
 
     if _is_real_screenshot_scenario(fixture):
         return ScenarioResult(
@@ -365,7 +418,10 @@ async def _run_scenario_async(fixture_path: Path, *, model: str | None = None) -
                 duration_s=time.monotonic() - started,
             )
 
-    failures = evaluate(expected, actions=actions, reasoning=reasoning) if expected else []
+    failures = (
+        evaluate(expected, actions=actions, reasoning=reasoning, baseline_actions=baseline_actions)
+        if expected else []
+    )
     return ScenarioResult(
         name=name,
         passed=(not failures),
@@ -377,28 +433,57 @@ async def _run_scenario_async(fixture_path: Path, *, model: str | None = None) -
     )
 
 
+async def _run_scenario_async(
+    fixture_path: Path, *, model: str | None = None,
+) -> list[ScenarioResult]:
+    """Run all variants of a scenario. Returns one ScenarioResult per variant.
+
+    The first variant's executed actions become the baseline for any
+    subsequent variants that use `differs_from_baseline_by`.
+    Non-variant fixtures produce a single-element list with no baseline.
+    """
+    fixture = _load_fixture(fixture_path)
+    variants = _expand_variants(fixture)
+    results: list[ScenarioResult] = []
+    baseline_actions: list[dict] | None = None
+    for index, variant_fixture in enumerate(variants):
+        result = await _run_one_variant_async(
+            variant_fixture, fixture_path,
+            model=model,
+            baseline_actions=baseline_actions,
+        )
+        results.append(result)
+        if index == 0 and not result.skipped:
+            baseline_actions = result.actions
+    return results
+
+
 async def _run_all_async(
     fixtures: list[Path],
     *,
     model: str | None,
     on_each: callable = lambda result: None,
 ) -> list[ScenarioResult]:
-    """Run every scenario in a SINGLE shared event loop.
+    """Run every scenario (possibly multi-variant) in a SINGLE shared event loop.
 
-    Each scenario gets its own ClaudeProvider (so memories are correctly
+    Each variant gets its own ClaudeProvider (so memories are correctly
     isolated) but they share the asyncio loop, which prevents httpx
     transport cleanup from racing against a closed loop.
     """
     results: list[ScenarioResult] = []
     for path in fixtures:
-        result = await _run_scenario_async(path, model=model)
-        results.append(result)
-        on_each(result)
+        for result in await _run_scenario_async(path, model=model):
+            results.append(result)
+            on_each(result)
     return results
 
 
-def run_scenario(fixture_path: Path, *, model: str | None = None) -> ScenarioResult:
-    """Synchronous entry point for one-off use (e.g. pytest)."""
+def run_scenario(fixture_path: Path, *, model: str | None = None) -> list[ScenarioResult]:
+    """Synchronous entry point for one-off use (e.g. pytest).
+
+    Returns a list — one ScenarioResult per variant, or a single-element
+    list for non-variant fixtures.
+    """
     return asyncio.run(_run_scenario_async(fixture_path, model=model))
 
 
@@ -444,7 +529,7 @@ def _print_summary(results: list[ScenarioResult]) -> None:
 def _resolve_fixtures(args: argparse.Namespace) -> list[Path]:
     if args.all:
         scenarios_dir = REPO / "evaluation" / "scenarios"
-        return sorted(scenarios_dir.glob("*.yaml"))
+        return sorted(scenarios_dir.rglob("*.yaml"))
     return [Path(p) for p in args.fixtures]
 
 
