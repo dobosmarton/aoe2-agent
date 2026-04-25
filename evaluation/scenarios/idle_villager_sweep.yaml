@@ -1,0 +1,35 @@
+name: idle_villager_sweep
+description: |
+  Multiple idle villagers visible (no current task). Per core.md item 1
+  (THIS IS THE HIGHEST PRIORITY) the agent must send idle villagers to a
+  resource using either send_villager or press(.) + right_click. Tests that
+  idle-sweep stays the top priority.
+
+inputs:
+  age: Dark Age
+  resources:
+    food: 150
+    wood: 200
+    gold: 100
+    stone: 200
+    population: "8/15"
+  detected_entities:
+    - {class: town_center,  x: 1500, y: 800, confidence: 0.95}
+    - {class: villager,     x: 1450, y: 850, confidence: 0.92}
+    - {class: villager,     x: 1500, y: 870, confidence: 0.91}
+    - {class: villager,     x: 1480, y: 860, confidence: 0.90}
+    - {class: villager,     x: 1520, y: 880, confidence: 0.89}
+    - {class: sheep,        x: 1700, y: 900, confidence: 0.85}
+    - {class: tree,         x: 1100, y: 600, confidence: 0.87}
+    - {class: mill,         x: 2400, y: 850, confidence: 0.90}
+    - {class: lumber_camp,  x: 1200, y: 700, confidence: 0.89}
+  goals:
+    - {name: "Grow population to 22", type: local, metric: population, target: 22, priority: 9}
+  memories: []
+  recent_turns: []
+
+screenshot: null
+
+expected:
+  count_at_least:
+    {type: send_villager, n: 1}

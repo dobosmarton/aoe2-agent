@@ -1,0 +1,33 @@
+name: housing_at_pop_cap_minus_5
+description: |
+  Population at exactly pop_cap − 5 (25/30 in Dark Age). Per core.md item 4
+  (after today's unification) the agent should build ONE house — not multiple,
+  not zero. Catches both directions of regression on the housing rule.
+
+inputs:
+  age: Dark Age
+  resources:
+    food: 200
+    wood: 300
+    gold: 100
+    stone: 200
+    population: "25/30"
+  detected_entities:
+    - {class: town_center,  x: 1500, y: 800, confidence: 0.95}
+    - {class: villager,     x: 1450, y: 850, confidence: 0.88}
+    - {class: villager,     x: 1500, y: 870, confidence: 0.92}
+    - {class: mill,         x: 2400, y: 850, confidence: 0.90}
+    - {class: lumber_camp,  x: 1200, y: 700, confidence: 0.89}
+    - {class: sheep,        x: 1700, y: 900, confidence: 0.85}
+  goals:
+    - {name: "Grow population to 28", type: local, metric: population, target: 28, priority: 8}
+  memories: []
+  recent_turns: []
+
+screenshot: null
+
+expected:
+  count_at_least:
+    {type: build, building_key: q, n: 1}
+  count_at_most:
+    {type: build, building_key: q, n: 1}

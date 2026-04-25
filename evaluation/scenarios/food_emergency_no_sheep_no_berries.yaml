@@ -1,0 +1,31 @@
+name: food_emergency_no_sheep_no_berries
+description: |
+  Food crisis: no sheep, no berry_bush detected, food=29. Per dark.md "Mill +
+  Farms emergency" rule, the agent must build at least 1 Mill (if missing) and
+  start farms this turn. The trim consolidated 4 separate food-emergency
+  sections — this scenario ensures the consolidation didn't lose the rule.
+
+inputs:
+  age: Dark Age
+  resources:
+    food: 29
+    wood: 250
+    gold: 50
+    stone: 200
+    population: "15/20"
+  detected_entities:
+    - {class: town_center,  x: 1500, y: 800, confidence: 0.95}
+    - {class: villager,     x: 1450, y: 850, confidence: 0.88}
+    - {class: villager,     x: 1500, y: 870, confidence: 0.92}
+    - {class: villager,     x: 1480, y: 860, confidence: 0.90}
+    - {class: lumber_camp,  x: 1200, y: 700, confidence: 0.89}
+  goals:
+    - {name: "Build Mill + farms", type: local, metric: food, target: 200, priority: 10}
+  memories: []
+  recent_turns: []
+
+screenshot: null
+
+expected:
+  count_at_least:
+    - {type: build, building_key: a, n: 1}    # at least 1 farm

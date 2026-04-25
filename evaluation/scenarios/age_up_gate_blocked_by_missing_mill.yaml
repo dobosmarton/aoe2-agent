@@ -1,0 +1,31 @@
+name: age_up_gate_blocked_by_missing_mill
+description: |
+  Same situation as age_up_gate_fires (food=520, pop=22) but NO Mill detected.
+  Per core.md the gate requires Mill AND Lumber Camp prereq buildings — without
+  one, the agent must NOT press Z this turn. Should focus on building the
+  missing Mill instead.
+
+inputs:
+  age: Dark Age
+  resources:
+    food: 520
+    wood: 200
+    gold: 100
+    stone: 200
+    population: "22/25"
+  detected_entities:
+    - {class: town_center,  x: 1500, y: 800, confidence: 0.95}
+    - {class: villager,     x: 1450, y: 850, confidence: 0.88}
+    - {class: villager,     x: 1500, y: 870, confidence: 0.92}
+    - {class: lumber_camp,  x: 1200, y: 700, confidence: 0.89}
+    - {class: berry_bush,   x: 2350, y: 800, confidence: 0.78}
+  goals:
+    - {name: "Advance to Feudal Age", type: global, metric: age, target: "Feudal Age", priority: 9}
+  memories: []
+  recent_turns: []
+
+screenshot: null
+
+expected:
+  must_not_include:
+    - {type: press, key: z}

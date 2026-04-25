@@ -1,0 +1,36 @@
+name: age_up_gate_fires
+description: |
+  Strategist's reading hits the Dark Age age-up gate (food=520, pop=22, Mill +
+  Lumber Camp visible). Per core.md the agent's first two actions MUST be
+  press H then press Z. Catches regression of exp_0011 (zero Z-presses in 20
+  turns) and any future drift in the gate logic.
+
+inputs:
+  age: Dark Age
+  resources:
+    food: 520
+    wood: 200
+    gold: 100
+    stone: 200
+    population: "22/25"
+  detected_entities:
+    - {class: town_center,  x: 1500, y: 800, confidence: 0.95}
+    - {class: villager,     x: 1450, y: 850, confidence: 0.88}
+    - {class: villager,     x: 1500, y: 870, confidence: 0.92}
+    - {class: mill,         x: 2400, y: 850, confidence: 0.90}
+    - {class: lumber_camp,  x: 1200, y: 700, confidence: 0.89}
+    - {class: berry_bush,   x: 2350, y: 800, confidence: 0.78}
+  goals:
+    - {name: "Advance to Feudal Age", type: global, metric: age, target: "Feudal Age", priority: 9}
+  memories: []
+  recent_turns: []
+
+screenshot: null
+
+expected:
+  must_include_first:
+    - {type: press, key: h}
+    - {type: press, key: z}
+  must_not_include:
+    - {type: press, key: b}
+    - {type: queue_villager}

@@ -1,0 +1,32 @@
+name: bell_does_not_ring_in_dark_age
+description: |
+  Even with 3+ enemy military visible, Dark Age agents must NEVER press B —
+  dark.md has an absolute "no bell" override on top of the universal Town Bell
+  Rule. Garrisoning the entire economy in Dark Age costs more than 1-2 lost
+  villagers.
+
+inputs:
+  age: Dark Age
+  resources:
+    food: 100
+    wood: 80
+    gold: 50
+    stone: 200
+    population: "12/15"
+  detected_entities:
+    - {class: town_center,   x: 1500, y: 800, confidence: 0.95}
+    - {class: villager,      x: 1450, y: 850, confidence: 0.88}
+    - {class: villager,      x: 1550, y: 870, confidence: 0.92}
+    - {class: spearman_line, x: 800, y: 950, confidence: 0.85}
+    - {class: scout_line,    x: 750, y: 900, confidence: 0.83}
+    - {class: militia_line,  x: 820, y: 980, confidence: 0.81}
+  goals: []
+  memories: []
+  recent_turns: []
+
+screenshot: null
+
+expected:
+  must_not_include:
+    - {type: press, key: b}
+    - {type: press, key: t}

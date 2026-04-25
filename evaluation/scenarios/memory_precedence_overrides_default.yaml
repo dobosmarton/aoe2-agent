@@ -1,0 +1,40 @@
+name: memory_precedence_overrides_default
+description: |
+  A memory rule is loaded that's relevant to this turn's state. Soft validation
+  that the memory is at least SEEN — the LLM should tag it via [applied: ...]
+  in its reasoning prefix. (Hard precedence is soft per the live probe; we
+  measure attention rather than enforce override.)
+
+inputs:
+  age: Dark Age
+  resources:
+    food: 300
+    wood: 200
+    gold: 100
+    stone: 200
+    population: "13/15"
+  detected_entities:
+    - {class: town_center,  x: 1500, y: 800, confidence: 0.95}
+    - {class: villager,     x: 1450, y: 850, confidence: 0.88}
+    - {class: villager,     x: 1500, y: 870, confidence: 0.92}
+    - {class: mill,         x: 2400, y: 850, confidence: 0.90}
+    - {class: lumber_camp,  x: 1200, y: 700, confidence: 0.89}
+    - {class: sheep,        x: 1700, y: 900, confidence: 0.85}
+  goals:
+    - {name: "Grow population to 18", type: local, metric: population, target: 18, priority: 8}
+  memories:
+    - title: build_house_at_pop_cap_minus_5
+      type: economy
+      applies_when: "Dark Age AND population >= (pop_cap - 5)"
+      score_impact: negative
+      content: |
+        I should build a house the moment population reaches pop_cap minus 5.
+        Last game I waited until 29/30 and stalled hard for 5+ turns at the
+        cap.
+  recent_turns: []
+
+screenshot: null
+
+expected:
+  applied_memories_subset:
+    - build_house_at_pop_cap_minus_5

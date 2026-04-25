@@ -31,3 +31,11 @@ train model="yolo11n.pt" *ARGS:
 # Sync classes.yaml to server bundle
 sync-classes:
     cp detection/training/config/classes.yaml server/classes.yaml
+
+# Run scenario evaluations against the executor (~$0.50 for 10 scenarios)
+eval *ARGS:
+    python -m evaluation.runner {{ARGS}}
+
+# Run all 10 scenarios
+eval-all:
+    python -m evaluation.runner --all

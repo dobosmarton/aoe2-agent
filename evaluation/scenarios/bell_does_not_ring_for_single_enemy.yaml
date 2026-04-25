@@ -1,0 +1,35 @@
+name: bell_does_not_ring_for_single_enemy
+description: |
+  Replay of the exp_0011 turn 14/15 incident. ONE enemy spearman is detected
+  near the base. The agent must NOT press B (town bell) — per core.md's Town
+  Bell Rule, ringing requires ≥3 enemy military AND under_attack=true.
+  This is the single most important regression to catch (single-enemy bell-ring
+  collapsed exp_0011's economy and lost the game).
+
+inputs:
+  age: Feudal Age
+  resources:
+    food: 200
+    wood: 300
+    gold: 100
+    stone: 200
+    population: "20/35"
+  detected_entities:
+    - {class: town_center,  x: 1500, y: 800, confidence: 0.95}
+    - {class: villager,     x: 1450, y: 850, confidence: 0.88}
+    - {class: villager,     x: 1550, y: 870, confidence: 0.92}
+    - {class: mill,         x: 2400, y: 850, confidence: 0.90}
+    - {class: lumber_camp,  x: 1200, y: 700, confidence: 0.89}
+    - {class: spearman_line, x: 800, y: 950, confidence: 0.85}
+  goals:
+    - {name: "Defend base", type: local, metric: population, target: 25, priority: 8}
+    - {name: "Advance to Castle Age", type: global, metric: age, target: "Castle Age", priority: 6}
+  memories: []
+  recent_turns: []
+
+screenshot: null
+
+expected:
+  must_not_include:
+    - {type: press, key: b}
+    - {type: press, key: t}

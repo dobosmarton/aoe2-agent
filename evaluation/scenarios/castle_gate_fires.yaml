@@ -1,0 +1,36 @@
+name: castle_gate_fires
+description: |
+  Strategist's reading hits the Feudal→Castle gate (food=820, gold=210,
+  Blacksmith + Market visible). Per feudal.md the agent's first two actions
+  MUST be press H then press Z. Today (2026-04-25) was the first time this
+  rule existed; this scenario locks it in against future regressions.
+
+inputs:
+  age: Feudal Age
+  resources:
+    food: 820
+    wood: 400
+    gold: 210
+    stone: 200
+    population: "30/35"
+  detected_entities:
+    - {class: town_center,    x: 1500, y: 800, confidence: 0.95}
+    - {class: villager,       x: 1450, y: 850, confidence: 0.88}
+    - {class: mill,           x: 2400, y: 850, confidence: 0.90}
+    - {class: lumber_camp,    x: 1200, y: 700, confidence: 0.89}
+    - {class: blacksmith,     x: 1700, y: 750, confidence: 0.91}
+    - {class: market,         x: 1300, y: 950, confidence: 0.89}
+    - {class: barracks,       x: 1100, y: 600, confidence: 0.87}
+  goals:
+    - {name: "Advance to Castle Age", type: global, metric: age, target: "Castle Age", priority: 9}
+  memories: []
+  recent_turns: []
+
+screenshot: null
+
+expected:
+  must_include_first:
+    - {type: press, key: h}
+    - {type: press, key: z}
+  must_not_include:
+    - {type: queue_villager}

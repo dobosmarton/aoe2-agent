@@ -1,0 +1,34 @@
+name: gold_ramp_when_low_in_feudal
+description: |
+  Feudal Age, gold=80 (below the 100 threshold). Per feudal.md's gold-ramp
+  rule, the agent must divert villagers to gold immediately — at least one
+  send_villager targeting gold_mine. Ensures the new "halt buildings if
+  gold < 100" rule is being followed.
+
+inputs:
+  age: Feudal Age
+  resources:
+    food: 400
+    wood: 300
+    gold: 80
+    stone: 200
+    population: "25/35"
+  detected_entities:
+    - {class: town_center,  x: 1500, y: 800, confidence: 0.95}
+    - {class: villager,     x: 1450, y: 850, confidence: 0.88}
+    - {class: villager,     x: 1500, y: 870, confidence: 0.92}
+    - {class: villager,     x: 1480, y: 860, confidence: 0.90}
+    - {class: mill,         x: 2400, y: 850, confidence: 0.90}
+    - {class: lumber_camp,  x: 1200, y: 700, confidence: 0.89}
+    - {class: gold_mine,    x: 950, y: 500, confidence: 0.92}
+    - {class: mining_camp,  x: 1000, y: 550, confidence: 0.88}
+  goals:
+    - {name: "Mine gold for Castle Age", type: local, metric: gold, target: 200, priority: 9}
+  memories: []
+  recent_turns: []
+
+screenshot: null
+
+expected:
+  count_at_least:
+    {type: send_villager, target_class: gold_mine, n: 1}
