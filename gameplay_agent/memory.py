@@ -141,17 +141,14 @@ class AgentMemory:
             self.highest_age = age
 
     def get_context_for_llm(self) -> str:
-        """Build context string for LLM prompt."""
-        parts = []
+        """Build context string for LLM prompt.
 
-        # Cross-game learned observations (loaded from memories/ directory)
-        try:
-            from autoresearch.memory_chain import MemoryChain
-            learned = MemoryChain().load_memories(max_tokens=800)
-            if learned:
-                parts.append(learned)
-        except ImportError:
-            pass
+        NOTE: cross-game memories are NOT loaded here anymore. They live in the
+        cached system prompt block (see ClaudeProvider._load_prompts) so they're
+        paid once per game instead of every turn. This method only returns
+        per-turn state.
+        """
+        parts = []
 
         # Current game state
         parts.append(f"## Current Game State\n{self._format_game_state()}")

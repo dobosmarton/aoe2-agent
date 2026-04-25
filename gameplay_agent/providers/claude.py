@@ -211,7 +211,7 @@ class ClaudeProvider(BaseLLMProvider):
     _FALLBACK_PROMPT = "You are playing Age of Empires 2: Definitive Edition. Your goal is to defeat the enemy AI. Play to win!"
 
     def _load_prompts(self) -> None:
-        """Load all prompt files once (core + age-specific)."""
+        """Load all prompt files once (core + age-specific + cross-game memories)."""
         if self._core_prompt is not None:
             return
 
@@ -228,6 +228,21 @@ class ClaudeProvider(BaseLLMProvider):
 
         if hotkeys_file.exists():
             self._core_prompt += "\n\n" + hotkeys_file.read_text()
+
+        # Append cross-game memories to the cached core block, so they're paid
+        # once per game and hit the prompt cache for every turn after the first.
+        # Loaded lazily via MemoryChain — falls back gracefully if the module or
+        # the memories/ directory is missing.
+        try:
+            from autoresearch.memory_chain import MemoryChain
+            memory_prelude = MemoryChain().load_memories(max_tokens=800)
+            if memory_prelude:
+                self._core_prompt += "\n\n" + memory_prelude
+                log.info("cross_game_memories_loaded", chars=len(memory_prelude))
+        except ImportError:
+            log.debug("memory_chain_unavailable")
+        except Exception as e:
+            log.warning("memory_load_failed", error=str(e))
 
         ages_dir = PROMPTS_DIR / "ages"
         for age_name in self._AGE_NAMES:
