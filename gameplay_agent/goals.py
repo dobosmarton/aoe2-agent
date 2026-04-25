@@ -279,11 +279,19 @@ class GoalManager:
             for entity in candidates:
                 threats_found.append(extract_attrs(entity).class_name)
 
-        if threats_found:
+        # Require at least 3 enemy military units before raising the alarm.
+        # exp_0013 (turn 14) showed a single spearman triggered alarm reasoning
+        # that led the executor to ring the town bell, garrisoning all villagers
+        # and collapsing economy. A single scout / spearman is not a threat —
+        # the TC's auto-arrows handle one stray unit.
+        if len(threats_found) >= 3:
             self._alarm_active = True
-            log.warning("alarm_triggered", threats=threats_found[:5])
+            log.warning("alarm_triggered", threats=threats_found[:5], count=len(threats_found))
             self._inject_emergency_goals(threats_found)
             return True
+
+        if threats_found:
+            log.debug("alarm_below_threshold", threats=threats_found, count=len(threats_found))
 
         self._alarm_active = False
         return False

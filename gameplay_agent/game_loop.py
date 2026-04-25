@@ -1,6 +1,7 @@
 """Main game loop for AoE2 LLM Agent."""
 
 import asyncio
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -26,6 +27,34 @@ from .screen import capture_screenshot, save_screenshot
 from .window import ensure_game_focused, get_game_window_rect, is_game_running
 
 log = structlog.get_logger()
+
+# Per-turn cross-game memory attribution. The LLM is instructed (in core.md)
+# to prefix its `reasoning` with `[applied: title1, title2]` when a memory
+# rule directly drove its decision this turn. We strip the prefix before the
+# reasoning is stored in working_memory so the tag doesn't pollute future
+# turns' context.
+_APPLIED_RE = re.compile(r"^\s*\[applied:\s*([^\]]+)\]", re.IGNORECASE)
+
+
+def _extract_applied_memories(
+    reasoning: str, loaded_titles: set[str]
+) -> tuple[list[str], list[str], str]:
+    """Parse the `[applied: ...]` prefix from a reasoning string.
+
+    Returns (known_titles, unknown_titles, cleaned_reasoning):
+      - known_titles: titles that match `loaded_titles` (counted in metrics)
+      - unknown_titles: titles the LLM made up — logged as a warning
+      - cleaned_reasoning: reasoning without the prefix
+    """
+    m = _APPLIED_RE.match(reasoning or "")
+    if not m:
+        return [], [], reasoning
+    raw = [t.strip() for t in m.group(1).split(",") if t.strip()]
+    known = [t for t in raw if t in loaded_titles]
+    unknown = [t for t in raw if t not in loaded_titles]
+    cleaned = reasoning[m.end():].lstrip()
+    return known, unknown, cleaned
+
 
 # Optional detection module (graceful fallback if not available)
 try:
@@ -356,6 +385,19 @@ def _process_response(
     observations = response.get("observations", {})
     actions = response.get("actions", [])
 
+    # Extract `[applied: ...]` attribution prefix BEFORE logging/storing the
+    # reasoning so the tag stays out of working_memory and downstream context.
+    loaded = set(memory.memories_loaded)
+    known_titles, unknown_titles, reasoning = _extract_applied_memories(reasoning, loaded)
+    if known_titles:
+        memory.record_memories_applied(known_titles)
+        log.info("memories_applied", iteration=iteration, titles=known_titles)
+    if unknown_titles:
+        log.warning("memories_applied_unknown",
+                    iteration=iteration,
+                    titles=unknown_titles,
+                    loaded=sorted(loaded))
+
     log.info(
         "llm_response",
         iteration=iteration,
@@ -490,6 +532,15 @@ async def game_loop(
     iteration = 0
     alarm = False
     strategist_task: asyncio.Task | None = None
+
+    # Propagate cross-game memory titles from the provider onto memory so
+    # _process_response can validate `[applied: ...]` prefixes against the set
+    # of titles that were actually injected into the system prompt this game.
+    memory.memories_loaded = list(getattr(provider, "loaded_memory_titles", []))
+    log.info("memories_loaded",
+             count=len(memory.memories_loaded),
+             titles=memory.memories_loaded)
+
     log.info("game_loop_start", provider=type(provider).__name__,
              detection=detector is not None,
              executor_model=config.model,

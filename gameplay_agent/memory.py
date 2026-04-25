@@ -71,6 +71,12 @@ class AgentMemory:
         self.highest_age: str = "Dark Age"
         self.game_start_time: datetime | None = None
         self.game_end_reason: str = ""  # "victory", "defeat", "timeout", ""
+        # Cross-game memory attribution. memories_loaded is the list of titles
+        # injected into the system prompt at game start; memories_applied_count
+        # accumulates how often the LLM tagged each title via [applied: ...]
+        # in its reasoning. See _extract_applied_memories in game_loop.py.
+        self.memories_loaded: list[str] = []
+        self.memories_applied_count: dict[str, int] = {}
 
     def add_turn(self, turn: Turn) -> None:
         """Add a turn to working memory."""
@@ -100,6 +106,17 @@ class AgentMemory:
         # Update resources
         if "resources" in observations:
             self.game_state.resources.update(observations["resources"])
+            # Track peak food across the game — fixes total_food_gathered=0 bug.
+            # The strategist's readings flow through this method (via
+            # GoalManager.update_resource_readings); the executor's also do via
+            # create_turn. max() makes it idempotent across both paths.
+            food = observations["resources"].get("food", 0)
+            try:
+                food_int = int(food)
+            except (TypeError, ValueError):
+                food_int = 0
+            if food_int > 0:
+                self.total_food_gathered = max(self.total_food_gathered, food_int)
 
         # Update population
         if "population" in observations:
@@ -218,6 +235,16 @@ class AgentMemory:
         # total_actions already tracked in add_turn, but correct if executor filtered some
         pass
 
+    def record_memories_applied(self, titles: list[str]) -> None:
+        """Increment per-title attribution counts.
+
+        Called from game_loop when the executor's reasoning had an
+        `[applied: title1, title2]` prefix and the titles matched ones loaded
+        into the cached system prompt.
+        """
+        for t in titles:
+            self.memories_applied_count[t] = self.memories_applied_count.get(t, 0) + 1
+
     def get_game_duration_seconds(self) -> float:
         """Get elapsed game time in seconds."""
         if self.game_start_time is None:
@@ -241,6 +268,8 @@ class AgentMemory:
             ),
             "turn_count": self.turn_count,
             "game_end_reason": self.game_end_reason,
+            "memories_loaded": list(self.memories_loaded),
+            "memories_used": dict(self.memories_applied_count),
         }
 
     def reset(self) -> None:
@@ -256,6 +285,8 @@ class AgentMemory:
         self.highest_age = "Dark Age"
         self.game_start_time = None
         self.game_end_reason = ""
+        self.memories_loaded = []
+        self.memories_applied_count = {}
 
     def create_turn(
         self,

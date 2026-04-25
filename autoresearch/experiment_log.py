@@ -31,16 +31,48 @@ HEADER = [
     "turn_count",
     "accepted",
     "git_sha",
+    # New columns are appended (not inserted) so existing TSV rows on the VM
+    # remain aligned when read with csv.DictReader — missing values become None.
+    "memories_loaded",
+    "memories_used_count",
 ]
 
 
 def _ensure_results_file() -> None:
-    """Create results file with header if it doesn't exist."""
+    """Create results file with header if missing, or upgrade a stale header.
+
+    When new columns are appended to HEADER, old rows still have the original
+    column count. csv.DictReader handles that gracefully (missing trailing
+    fields read as None). The header line itself, however, must reflect the
+    current HEADER so subsequent writes line up — otherwise new rows would
+    have more fields than the header advertises, producing a "rest" key in
+    DictReader output.
+    """
     RESULTS_FILE.parent.mkdir(parents=True, exist_ok=True)
     if not RESULTS_FILE.exists():
         with open(RESULTS_FILE, "w", newline="") as f:
             writer = csv.writer(f, delimiter="\t")
             writer.writerow(HEADER)
+        return
+
+    # File exists — check whether the header needs upgrading.
+    with open(RESULTS_FILE, "r", newline="") as f:
+        existing_lines = f.readlines()
+    if not existing_lines:
+        with open(RESULTS_FILE, "w", newline="") as f:
+            csv.writer(f, delimiter="\t").writerow(HEADER)
+        return
+
+    current_header = existing_lines[0].rstrip("\n").split("\t")
+    if current_header == HEADER:
+        return
+
+    # Header is stale — rewrite it, leaving data rows unchanged.
+    log.info("results_tsv_header_upgraded",
+             old_cols=len(current_header), new_cols=len(HEADER))
+    with open(RESULTS_FILE, "w", newline="") as f:
+        f.write("\t".join(HEADER) + "\n")
+        f.writelines(existing_lines[1:])
 
 
 def get_git_sha() -> str:
@@ -83,6 +115,10 @@ def log_experiment(
     if git_sha is None:
         git_sha = get_git_sha()
 
+    memories_used = score.raw_metrics.get("memories_used", {}) or {}
+    memories_loaded = score.raw_metrics.get("memories_loaded", []) or []
+    memories_used_count = sum(int(v) for v in memories_used.values())
+
     row = [
         experiment_id,
         datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -98,6 +134,8 @@ def log_experiment(
         str(score.raw_metrics.get("turn_count", 0)),
         "true" if accepted else "false",
         git_sha if accepted else "(reverted)",
+        str(len(memories_loaded)),
+        str(memories_used_count),
     ]
 
     with open(RESULTS_FILE, "a", newline="") as f:

@@ -177,7 +177,16 @@ class MemoryChain:
 
         header = (
             "## Notes to Myself from Previous Games\n"
-            "Each bullet is a rule I wrote for myself after finishing a game. "
+            "Each bullet is a rule I wrote for myself after finishing a game, based "
+            "on what actually happened.\n"
+            "\n"
+            "**Precedence: when a memory rule conflicts with a rule in core.md or "
+            "the age-specific section, follow the MEMORY.** Memories reflect "
+            "concrete evidence from my own games; the defaults are pre-game "
+            "heuristics. If two memories conflict, prefer the one whose "
+            "`(when: …)` trigger is more specific or matches my current state "
+            "more tightly.\n"
+            "\n"
             "I should apply any rule whose trigger matches my current state.\n"
         )
         char_budget = max_tokens * 4
@@ -206,10 +215,19 @@ class MemoryChain:
             text = f.read_text()
             meta = self._parse_frontmatter(text)
             content = self._strip_frontmatter(text).strip()
+            # Title comes from frontmatter (added 2026-04-25). Fall back to the
+            # filename suffix for older files that predate the title field.
+            title = meta.get("title")
+            if not title:
+                match = re.match(r"\d+_(.+)\.md$", f.name)
+                title = match.group(1) if match else f.stem
             result.append({
                 "file": f.name,
+                "title": title,
                 "type": meta.get("type", "unknown"),
                 "game_id": meta.get("game_id", "unknown"),
+                "applies_when": meta.get("applies_when", ""),
+                "score_impact": meta.get("score_impact", "neutral"),
                 "content": content,
             })
         return result

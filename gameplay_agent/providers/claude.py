@@ -192,6 +192,10 @@ class ClaudeProvider(BaseLLMProvider):
         self.client = anthropic.AsyncAnthropic(api_key=self.api_key, max_retries=3)
         self._core_prompt: str | None = None
         self._age_prompts: dict[str, str] = {}
+        # Titles of cross-game memories loaded into the cached system block.
+        # Populated in _load_prompts() so game_loop can propagate them onto
+        # AgentMemory.memories_loaded for per-turn attribution tracking.
+        self.loaded_memory_titles: list[str] = []
         self.use_dynamic_context = use_dynamic_context and GAME_KNOWLEDGE_AVAILABLE
         self._game_db: Optional["GameKnowledge"] = None
         self._total_input_tokens: int = 0
@@ -235,10 +239,19 @@ class ClaudeProvider(BaseLLMProvider):
         # the memories/ directory is missing.
         try:
             from autoresearch.memory_chain import MemoryChain
-            memory_prelude = MemoryChain().load_memories(max_tokens=800)
+            chain = MemoryChain()
+            memory_prelude = chain.load_memories(max_tokens=800)
             if memory_prelude:
                 self._core_prompt += "\n\n" + memory_prelude
-                log.info("cross_game_memories_loaded", chars=len(memory_prelude))
+                # Capture titles for downstream attribution (game_loop reads
+                # this and copies it onto AgentMemory.memories_loaded).
+                self.loaded_memory_titles = [
+                    m["title"] for m in chain.list_memories()
+                    if m.get("title") and m.get("content")
+                ]
+                log.info("cross_game_memories_loaded",
+                         chars=len(memory_prelude),
+                         titles=self.loaded_memory_titles)
         except ImportError:
             log.debug("memory_chain_unavailable")
         except Exception as e:

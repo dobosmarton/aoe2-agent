@@ -4,6 +4,9 @@ Dispatches validated actions to per-type handler functions.
 """
 
 import asyncio
+import math
+import random
+import time
 from collections.abc import Callable, Awaitable
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -139,11 +142,23 @@ def _translate(x: int, y: int) -> tuple[int, int]:
 # ---------------------------------------------------------------------------
 
 BUILD_PLACEMENT_KEYWORDS = ("place", "build")
-BUILD_PLACEMENT_OFFSET = 80
+# Random angular retries — large enough to escape dense tree/building clusters
+# that broke the old 80px cardinal-offset retry (exp_0013 logged 63 retries
+# across 35 turns, many on the same blocked terrain).
+BUILD_RETRY_RADIUS_MIN = 250
+BUILD_RETRY_RADIUS_MAX = 350
+BUILD_RETRY_ATTEMPTS = 2
 BUILD_SETTLE_DELAY = 0.15
 BUILD_RETRY_DELAY = 0.1
 RESCAN_SETTLE_DELAY = 0.3
 DEFAULT_WAIT_MS = 100
+
+# Module-level cumulative retry telemetry (resets per process / per game).
+# Surfaced via build_placement_retry log lines so the user can grep
+# `total_count`/`total_seconds` to see how much turn budget got eaten by
+# failed placements.
+_build_retry_total_seconds: float = 0.0
+_build_retry_count: int = 0
 
 
 async def _handle_click(action_dict: dict[str, object], intent: str) -> ActionResult:
@@ -158,18 +173,36 @@ async def _handle_click(action_dict: dict[str, object], intent: str) -> ActionRe
     log.info("click", x=x, y=y, screen_x=screen_x, screen_y=screen_y,
              target_id=action_dict.get("target_id", ""), intent=intent)
 
-    # Building placement retry — try offset positions if first click was invalid
+    # Building placement retry — if first click was invalid (tree/building/water),
+    # try `BUILD_RETRY_ATTEMPTS` random angular offsets at 250–350 px from the
+    # original. Replaces the previous 4 cardinal 80 px offsets, which often hit
+    # the same blocked terrain because tree clusters and building footprints
+    # are larger than 80 px.
     intent_lower = intent.lower()
     if any(word in intent_lower for word in BUILD_PLACEMENT_KEYWORDS):
+        global _build_retry_total_seconds, _build_retry_count
+        retry_start = time.monotonic()
         await asyncio.sleep(BUILD_SETTLE_DELAY)
-        for dx, dy in [
-            (BUILD_PLACEMENT_OFFSET, 0), (0, BUILD_PLACEMENT_OFFSET),
-            (-BUILD_PLACEMENT_OFFSET, 0), (0, -BUILD_PLACEMENT_OFFSET),
-        ]:
+        offsets: list[tuple[int, int]] = []
+        for _ in range(BUILD_RETRY_ATTEMPTS):
+            angle = random.uniform(0.0, 2.0 * math.pi)
+            radius = random.uniform(BUILD_RETRY_RADIUS_MIN, BUILD_RETRY_RADIUS_MAX)
+            dx = int(radius * math.cos(angle))
+            dy = int(radius * math.sin(angle))
+            offsets.append((dx, dy))
             pyautogui.click(screen_x + dx, screen_y + dy)
             await asyncio.sleep(BUILD_RETRY_DELAY)
+        # Cancel any remaining ghost — right-click on the original spot.
         pyautogui.rightClick(screen_x, screen_y)
-        log.debug("build_placement_retry", x=x, y=y)
+        elapsed = time.monotonic() - retry_start
+        _build_retry_total_seconds += elapsed
+        _build_retry_count += 1
+        log.debug("build_placement_retry",
+                  x=x, y=y,
+                  offsets=offsets,
+                  elapsed_s=round(elapsed, 3),
+                  total_count=_build_retry_count,
+                  total_seconds=round(_build_retry_total_seconds, 1))
 
     return ActionResult(True, "ok")
 
