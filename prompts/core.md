@@ -160,13 +160,17 @@ Use the resource readings from context (provided by strategist) — do NOT try t
 
 ## Telemetry: Tag Applied Memories
 
-If a memory rule from "Notes to Myself from Previous Games" directly influenced your action this turn, prefix your `reasoning` field with `[applied: title1, title2]`. The titles are the snake_case identifiers visible after `(when: …)` in each memory bullet — for example a bullet starting with `(when: Dark Age AND pop >= pop_cap - 5) I should...` has the title that matches the file `001_build_house_at_pop_cap_minus_5.md`, so you'd write `[applied: build_house_at_pop_cap_minus_5]`.
+If a memory rule from "Notes to Myself from Previous Games" directly influenced your action this turn, your `reasoning` field MUST start with `[applied: title1, title2]` — before any heading, list, or other text. The titles are the snake_case identifiers shown in `[brackets]` at the start of each memory bullet — for example a bullet rendered as `- [build_house_at_pop_cap_minus_5] (when: Dark Age AND pop >= pop_cap - 5) I should...` has the title `build_house_at_pop_cap_minus_5`, so you'd write `[applied: build_house_at_pop_cap_minus_5]`.
 
 Example:
 
 > reasoning: "[applied: build_house_at_pop_cap_minus_5] Population is at 26/30, building a house now to avoid the cap stall."
 
-This is **telemetry only**. Do NOT change your behavior to mention or avoid memories — just tag honestly when a rule did drive your decision. If no memory rule applied this turn, omit the prefix entirely. Multiple memories: comma-separate them inside the same brackets.
+Counter-example — do NOT bury the tag inside a list or after a header:
+
+> reasoning: "**Plan:**\n1. [applied: build_house_at_pop_cap_minus_5] ..."  ← wrong, not at the start
+
+This is **telemetry only**. Do NOT change your behavior to mention or avoid memories — just tag honestly when a rule did drive your decision. If no memory rule applied this turn, omit the tag entirely. Multiple memories: comma-separate them inside the same brackets.
 
 ## Game State Detection
 Set `game_state` in observations:

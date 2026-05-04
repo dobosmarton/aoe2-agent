@@ -232,6 +232,63 @@ def test_specific_trigger_renders_when_prefix(memories_dir: Path):
     assert "(when: Dark Age AND food < 50)" in _bullets(rendered)
 
 
+def test_bullet_starts_with_bracketed_title(memories_dir: Path):
+    """Each rendered bullet exposes its snake_case title in `[brackets]`.
+
+    The model relies on this to emit the `[applied: title]` reasoning prefix
+    described in prompts/core.md (Telemetry: Tag Applied Memories). If the
+    title isn't surfaced, the model has no way to honestly tag.
+    """
+    from autoresearch.memory_chain import MemoryChain
+
+    _write_memory(
+        memories_dir, file_num=1, title="build_house_at_pop_cap_minus_5",
+        applies_when="Dark Age AND pop >= pop_cap - 5",
+        content="I should build a house immediately.",
+    )
+    _write_memory(
+        memories_dir, file_num=2, title="rule_with_no_trigger",
+        applies_when="any",
+        content="I should always do this.",
+    )
+    rendered = MemoryChain(memories_dir=memories_dir).load_memories(
+        max_tokens=GENEROUS_TOKEN_BUDGET,
+    )
+    bullets = _bullets(rendered)
+    # Title bracketed at the bullet start, before the `(when: ...)` prefix.
+    assert "- [build_house_at_pop_cap_minus_5] (when: Dark Age" in bullets
+    # `applies_when=any` still suppresses the (when: ...) part but keeps the title.
+    assert "- [rule_with_no_trigger] I should always do this." in bullets
+
+
+def test_title_falls_back_to_filename_when_frontmatter_missing(memories_dir: Path):
+    """Older memory files lacking `title:` frontmatter still get a bracketed title.
+
+    Mirrors list_memories()' fallback: title comes from the `NNN_<title>.md`
+    filename pattern. Protects forward-compatibility for memories created
+    before the title field was introduced.
+    """
+    from autoresearch.memory_chain import MemoryChain
+
+    # Hand-write a frontmatter block with NO title field — pre-2026-04-25 layout.
+    path = memories_dir / "007_legacy_rule_no_title_field.md"
+    path.write_text(
+        "---\n"
+        "type: economy\n"
+        "game_id: legacy\n"
+        "applies_when: any\n"
+        "score_impact: negative\n"
+        "created: 2026-01-01T00:00:00+00:00\n"
+        "---\n\n"
+        "I should follow the legacy rule.\n"
+    )
+
+    rendered = MemoryChain(memories_dir=memories_dir).load_memories(
+        max_tokens=GENEROUS_TOKEN_BUDGET,
+    )
+    assert "- [legacy_rule_no_title_field]" in _bullets(rendered)
+
+
 # ---------------------------------------------------------------------------
 # Empty-content rejection (defensive — defense-in-depth alongside _save_memory)
 # ---------------------------------------------------------------------------

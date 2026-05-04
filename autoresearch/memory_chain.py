@@ -154,7 +154,7 @@ class MemoryChain:
         if not files:
             return ""
 
-        entries: list[tuple[int, str, str, str]] = []  # (rank, created, applies_when, content)
+        entries: list[tuple[int, str, str, str, str]] = []  # (rank, created, title, applies_when, content)
         for f in files:
             text = f.read_text()
             meta = self._parse_frontmatter(text)
@@ -164,7 +164,14 @@ class MemoryChain:
             rank = self._IMPACT_RANK.get(meta.get("score_impact", "neutral"), 2)
             created = meta.get("created", "")
             applies_when = meta.get("applies_when", "").strip()
-            entries.append((rank, created, applies_when, content))
+            # Title resolution mirrors list_memories(): frontmatter first, then
+            # filename suffix for older files. The model needs this to emit the
+            # `[applied: title]` reasoning prefix described in prompts/core.md.
+            title = meta.get("title")
+            if not title:
+                match = re.match(r"\d+_(.+)\.md$", f.name)
+                title = match.group(1) if match else f.stem
+            entries.append((rank, created, title, applies_when, content))
 
         if not entries:
             return ""
@@ -193,11 +200,13 @@ class MemoryChain:
         lines: list[str] = []
         total_chars = len(header)
 
-        for _rank, _created, applies_when, content in ordered:
+        for _rank, _created, title, applies_when, content in ordered:
             # First line of content keeps the bullet compact; multi-sentence
             # content is preserved verbatim after the trigger prefix.
-            prefix = f"(when: {applies_when}) " if applies_when and applies_when != "any" else ""
-            line = f"- {prefix}{content}"
+            when_prefix = f"(when: {applies_when}) " if applies_when and applies_when != "any" else ""
+            # `[title]` makes the snake_case identifier visible to the model so it
+            # can emit the `[applied: title]` reasoning prefix per prompts/core.md.
+            line = f"- [{title}] {when_prefix}{content}"
             if total_chars + len(line) + 1 > char_budget:
                 break
             lines.append(line)

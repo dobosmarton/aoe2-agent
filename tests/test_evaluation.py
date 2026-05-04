@@ -114,6 +114,28 @@ def test_applied_memories_subset_extras_ok(actions):
     assert failures == []
 
 
+def test_applied_memories_tag_anywhere_in_reasoning(actions):
+    """Tag is recognised when it appears mid-reasoning, not only as a prefix.
+
+    Models often emit the tag inside a markdown list or after a header
+    (`**Plan:**\n1. [applied: foo] ...`). The contract is "model self-reports
+    somewhere", so position should not gate the assertion.
+    """
+    from evaluation.assertions import evaluate
+    reasoning = "**Plan:**\n1. [applied: foo] Population is at 13/15, build a house now."
+    failures = evaluate({"applied_memories_subset": ["foo"]},
+                        actions=actions, reasoning=reasoning)
+    assert failures == []
+
+
+def test_applied_memories_no_tag_still_fails(actions):
+    """Sanity: missing-tag still produces a failure (regex change didn't go too far)."""
+    from evaluation.assertions import evaluate
+    failures = evaluate({"applied_memories_subset": ["foo"]},
+                        actions=actions, reasoning="No tag here, just prose.")
+    assert any("applied_memories_subset FAILED" in f for f in failures)
+
+
 def test_reasoning_contains_case_insensitive(actions):
     from evaluation.assertions import evaluate
     failures = evaluate({"reasoning_contains": "FEUDAL"}, actions=actions,

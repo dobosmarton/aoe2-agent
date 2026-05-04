@@ -180,29 +180,39 @@ def differs_from_baseline_by(
 # Reasoning + memory assertions
 # ---------------------------------------------------------------------------
 
-_APPLIED_RE = re.compile(r"^\s*\[applied:\s*([^\]]+)\]", re.IGNORECASE)
+_APPLIED_RE = re.compile(r"\[applied:\s*([^\]]+)\]", re.IGNORECASE)
 
 
 def _extract_applied_titles(reasoning: str) -> list[str]:
-    match = _APPLIED_RE.match(reasoning or "")
-    if not match:
-        return []
-    return [title.strip() for title in match.group(1).split(",") if title.strip()]
+    """Extract titles from any `[applied: t1, t2]` tag in reasoning.
+
+    Was anchored to start-of-string (`re.match`), but the model often emits
+    the tag inside a numbered list or after a header (e.g. `**Plan:**\n1. [applied: ...]`).
+    Position is incidental — the contract is "model self-reports applied
+    memories somewhere in its response" — so we search instead of match.
+    Multiple `[applied: ...]` tags are unioned.
+    """
+    titles: list[str] = []
+    for match in _APPLIED_RE.finditer(reasoning or ""):
+        titles.extend(t.strip() for t in match.group(1).split(",") if t.strip())
+    # Preserve first-seen order while deduping (deterministic for assertions).
+    seen: set[str] = set()
+    return [t for t in titles if not (t in seen or seen.add(t))]
 
 
 def applied_memories(reasoning: str, expected: list[str], **_) -> list[str]:
-    """Reasoning's `[applied: ...]` prefix tags exactly these titles (set-equal)."""
+    """Reasoning's `[applied: ...]` tag names exactly these titles (set-equal)."""
     actual = _extract_applied_titles(reasoning)
     if set(actual) != set(expected):
         return [
             f"applied_memories FAILED — expected {sorted(expected)!r}, "
-            f"got {sorted(actual)!r}.\n  Reasoning prefix: {_preview(reasoning)}"
+            f"got {sorted(actual)!r}.\n  Reasoning: {_preview(reasoning)}"
         ]
     return []
 
 
 def applied_memories_subset(reasoning: str, expected: list[str], **_) -> list[str]:
-    """Reasoning's `[applied: ...]` prefix tags AT LEAST these titles (extras allowed)."""
+    """Reasoning's `[applied: ...]` tag names AT LEAST these titles (extras allowed)."""
     actual = set(_extract_applied_titles(reasoning))
     missing = set(expected) - actual
     if missing:
