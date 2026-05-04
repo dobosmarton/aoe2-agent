@@ -1,0 +1,57 @@
+name: age_up_within_15_turns
+description: >
+  Agent starts in Dark Age with all Feudal Age prereqs already met
+  (food ≥ 500, pop = 22, mill + lumber camp present).
+  The world simulator evolves state across turns. The test asserts the
+  agent advances to Feudal Age within 15 turns — catching regressions
+  where the agent ignores the age-up gate in core.md.
+
+inputs:
+  age: "Dark Age"
+  resources:
+    food: 520
+    wood: 200
+    gold: 0
+    stone: 0
+    population: "22/25"
+  detected_entities:
+    - class: town_center
+      x: 960
+      y: 540
+    - class: mill
+      x: 820
+      y: 620
+    - class: lumber_camp
+      x: 1100
+      y: 620
+    - class: villager
+      x: 870
+      y: 500
+    - class: villager
+      x: 920
+      y: 480
+    - class: sheep
+      x: 1000
+      y: 700
+  goals:
+    - name: "Advance to Feudal Age"
+      type: global
+      metric: age
+      target: "Feudal Age"
+      priority: 9
+      created_turn: 1
+    - name: "Grow population to 25"
+      type: global
+      metric: population
+      target: 25
+      priority: 6
+      created_turn: 1
+
+multi_turn:
+  max_turns: 15
+  end_state:
+    age: "Feudal Age"
+  expected:
+    must_not_include:
+      type: press
+      key: b

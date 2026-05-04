@@ -433,16 +433,116 @@ async def _run_one_variant_async(
     )
 
 
+async def _run_multi_turn_scenario_async(
+    fixture: dict,
+    fixture_path: Path,
+    *,
+    model: str | None = None,
+) -> list[ScenarioResult]:
+    """Run a multi-turn scenario through the world simulator.
+
+    Each turn: tick world state → build context → invoke executor → apply actions.
+    The world simulator evolves resources, population, and age across N turns
+    without booting the real game. Only `execute_action` is mocked.
+
+    Fixture schema (under `multi_turn:`):
+      max_turns: int          — how many turns to run (default 10)
+      end_state:              — WorldState fields to assert after the final turn
+        age: "Feudal Age"       (string → exact equality)
+        population: 15          (int/float → ≥ semantics)
+      eventually_includes:    — action pattern that must appear in ANY turn
+        type: press
+        key: z
+      expected:               — assertion block applied to EACH turn's actions
+        must_not_include: {type: press, key: b}
+    """
+    from evaluation.assertions import evaluate, _matches
+    from evaluation.world_sim import (
+        apply_actions, evaluate_end_state,
+        init_from_fixture, state_to_fixture_inputs, tick,
+    )
+
+    name = fixture_path.stem
+    multi_cfg = fixture["multi_turn"]
+    max_turns = int(multi_cfg.get("max_turns", 10))
+    per_turn_expected = multi_cfg.get("expected", {})
+    end_state_spec = multi_cfg.get("end_state", {})
+    eventually_pattern = multi_cfg.get("eventually_includes")
+
+    base_inputs = fixture.get("inputs", {})
+    world_state = init_from_fixture(base_inputs)
+    fixture_memories = base_inputs.get("memories", [])
+
+    all_actions: list[dict] = []
+    all_failures: list[str] = []
+    total_cost = 0.0
+    started = time.monotonic()
+    recent_turns: list[dict] = []
+
+    with _isolate_memories_dir(fixture_memories), _mock_executor():
+        for turn_num in range(1, max_turns + 1):
+            current_inputs = state_to_fixture_inputs(world_state, base_inputs)
+            current_inputs = {**current_inputs, "recent_turns": recent_turns[-3:]}
+            current_fixture = {**fixture, "inputs": current_inputs}
+
+            try:
+                actions, reasoning, cost = await _invoke_executor(current_fixture, model)
+            except Exception as exc:
+                all_failures.append(
+                    f"turn {turn_num}: runner exception: {type(exc).__name__}: {exc}"
+                )
+                break
+
+            total_cost += cost
+            all_actions.extend(actions)
+
+            if per_turn_expected:
+                for failure in evaluate(per_turn_expected, actions=actions, reasoning=reasoning):
+                    all_failures.append(f"turn {turn_num}: {failure}")
+
+            world_state = apply_actions(world_state, actions)
+            world_state = tick(world_state)
+            recent_turns.append({"iteration": turn_num, "reasoning": reasoning})
+
+    if end_state_spec:
+        all_failures.extend(evaluate_end_state(end_state_spec, world_state))
+
+    if eventually_pattern is not None:
+        if not any(_matches(a, eventually_pattern) for a in all_actions):
+            all_failures.append(
+                f"eventually_includes FAILED — no turn produced an action matching "
+                f"{eventually_pattern!r} across {max_turns} turns"
+            )
+
+    return [ScenarioResult(
+        name=name,
+        passed=not all_failures,
+        failures=all_failures,
+        cost_usd=round(total_cost, COST_DECIMAL_PLACES),
+        duration_s=time.monotonic() - started,
+        actions=all_actions,
+        reasoning=f"(multi-turn: {world_state.turn} turns run)",
+    )]
+
+
 async def _run_scenario_async(
     fixture_path: Path, *, model: str | None = None,
 ) -> list[ScenarioResult]:
     """Run all variants of a scenario. Returns one ScenarioResult per variant.
+
+    Multi-turn fixtures (containing `multi_turn:` key) are handled by
+    `_run_multi_turn_scenario_async`; everything else goes through the
+    single-turn variant path.
 
     The first variant's executed actions become the baseline for any
     subsequent variants that use `differs_from_baseline_by`.
     Non-variant fixtures produce a single-element list with no baseline.
     """
     fixture = _load_fixture(fixture_path)
+
+    if "multi_turn" in fixture:
+        return await _run_multi_turn_scenario_async(fixture, fixture_path, model=model)
+
     variants = _expand_variants(fixture)
     results: list[ScenarioResult] = []
     baseline_actions: list[dict] | None = None

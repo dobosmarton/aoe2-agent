@@ -357,8 +357,9 @@ def test_fixture_lint(fixture_path):
 
     has_expected = "expected" in data
     has_variants = "variants" in data
-    assert has_expected or has_variants, (
-        f"{fixture_path.name}: needs either top-level 'expected' or 'variants' block"
+    has_multi_turn = "multi_turn" in data
+    assert has_expected or has_variants or has_multi_turn, (
+        f"{fixture_path.name}: needs either top-level 'expected', 'variants', or 'multi_turn' block"
     )
 
     inputs = data["inputs"]
