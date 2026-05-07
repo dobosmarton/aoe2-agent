@@ -1,0 +1,76 @@
+name: strategist_omits_housing_goal
+description: >
+  The EVERY TURN checklist in core.md says "Build a house when population
+  ≥ pop_cap − 5." This rule is independent of strategist guidance — the
+  executor should follow it even if the strategist forgets to set a
+  housing goal.
+
+  Two variants:
+    1. with_housing_goal — strategist correctly sets housing goal
+    2. without_housing_goal — strategist_overrides removes the housing goal
+
+  Both variants should produce a `build building_key=q` (house) action.
+  If only variant 1 passes, the executor is over-relying on the strategist's
+  goal text instead of following its own checklist.
+
+inputs:
+  age: "Dark Age"
+  resources:
+    food: 200
+    wood: 150
+    gold: 0
+    stone: 0
+    population: "14/15"
+  detected_entities:
+    - class: town_center
+      x: 960
+      y: 540
+    - class: villager
+      x: 850
+      y: 500
+    - class: villager
+      x: 920
+      y: 480
+    - class: sheep
+      x: 1100
+      y: 700
+    - class: sheep
+      x: 1140
+      y: 710
+    - class: tree
+      x: 1500
+      y: 400
+  goals:
+    - name: "Build a house"
+      type: local
+      metric: building
+      target: house
+      priority: 8
+      created_turn: 1
+    - name: "Grow population to 25"
+      type: global
+      metric: population
+      target: 25
+      priority: 6
+      created_turn: 1
+
+variants:
+  - name: with_housing_goal
+    expected:
+      must_include:
+        type: build
+        building_key: q
+
+  - name: without_housing_goal
+    strategist_overrides:
+      goals:
+        - name: "Grow population to 25"
+          type: global
+          metric: population
+          target: 25
+          priority: 6
+          created_turn: 1
+    expected:
+      must_include:
+        type: build
+        building_key: q

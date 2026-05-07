@@ -259,6 +259,107 @@ def test_expand_variants_inherits_base_memories_when_variant_omits():
     assert expanded[0]["inputs"]["memories"] == [base_mem]
 
 
+def test_expand_variants_overrides_strategist_overrides_per_variant():
+    """Each variant can carry its own `strategist_overrides:` block."""
+    from evaluation.runner import _expand_variants
+    fixture = {
+        "name": "x",
+        "inputs": {"age": "Dark Age", "resources": {"food": 200}},
+        "variants": [
+            {"name": "no_override", "expected": {}},
+            {
+                "name": "with_override",
+                "strategist_overrides": {"resources": {"food": 800}},
+                "expected": {},
+            },
+        ],
+    }
+    expanded = _expand_variants(fixture)
+    assert "strategist_overrides" not in expanded[0]["inputs"]
+    assert expanded[1]["inputs"]["strategist_overrides"]["resources"]["food"] == 800
+
+
+# ---------------------------------------------------------------------------
+# Layer 1d: strategist_overrides merge logic (offline, no LLM)
+# ---------------------------------------------------------------------------
+
+
+def test_apply_strategist_overrides_resources_shallow_merge():
+    """Override only specified resource fields; preserve the rest."""
+    from evaluation.runner import _apply_strategist_overrides
+    inputs = {
+        "resources": {"food": 200, "wood": 150, "gold": 50},
+        "strategist_overrides": {"resources": {"food": 800}},
+    }
+    result = _apply_strategist_overrides(inputs)
+    assert result["resources"]["food"] == 800     # overridden
+    assert result["resources"]["wood"] == 150     # preserved
+    assert result["resources"]["gold"] == 50      # preserved
+
+
+def test_apply_strategist_overrides_goals_replace_entirely():
+    """Goals are a list; partial-merge is ambiguous, so we replace wholesale."""
+    from evaluation.runner import _apply_strategist_overrides
+    inputs = {
+        "goals": [{"name": "old", "priority": 9}],
+        "strategist_overrides": {"goals": []},
+    }
+    result = _apply_strategist_overrides(inputs)
+    assert result["goals"] == []
+
+
+def test_apply_strategist_overrides_no_overrides_passes_through():
+    from evaluation.runner import _apply_strategist_overrides
+    inputs = {"resources": {"food": 200}, "goals": [{"name": "x"}]}
+    result = _apply_strategist_overrides(inputs)
+    assert result["resources"] == {"food": 200}
+    assert result["goals"] == [{"name": "x"}]
+
+
+def test_apply_strategist_overrides_does_not_mutate_input():
+    """Critical: Phase 1 multi-turn calls _build_context per turn — mutation
+    would corrupt the fixture across turns."""
+    from evaluation.runner import _apply_strategist_overrides
+    inputs = {
+        "resources": {"food": 200, "wood": 150},
+        "strategist_overrides": {"resources": {"food": 800}},
+    }
+    _apply_strategist_overrides(inputs)
+    assert inputs["resources"]["food"] == 200      # unchanged
+    assert inputs["resources"]["wood"] == 150      # unchanged
+
+
+def test_apply_strategist_overrides_empty_dict_is_noop():
+    """A `strategist_overrides: {}` key means "no overrides" — just like absent."""
+    from evaluation.runner import _apply_strategist_overrides
+    inputs = {"resources": {"food": 200}, "strategist_overrides": {}}
+    result = _apply_strategist_overrides(inputs)
+    assert result["resources"] == {"food": 200}
+
+
+def test_build_context_applies_strategist_overrides():
+    """End-to-end: _build_context emits strategist-overridden values in the LLM prompt."""
+    from evaluation.runner import _build_context
+    fixture = {
+        "inputs": {
+            "age": "Dark Age",
+            "resources": {"food": 200, "wood": 150, "gold": 0, "stone": 0,
+                          "population": "10/15"},
+            "detected_entities": [],
+            "goals": [{"name": "real goal", "priority": 9, "metric": "x", "target": 1}],
+            "strategist_overrides": {
+                "resources": {"food": 800},
+                "goals": [{"name": "fake goal", "priority": 5, "metric": "y", "target": 2}],
+            },
+        }
+    }
+    context = _build_context(fixture)
+    assert "Food: 800" in context        # override applied
+    assert "Wood: 150" in context        # preserved
+    assert "fake goal" in context        # goals replaced
+    assert "real goal" not in context    # original goal gone
+
+
 def test_scenario_display_name_with_and_without_variant():
     from evaluation.runner import _scenario_display_name
     from pathlib import Path

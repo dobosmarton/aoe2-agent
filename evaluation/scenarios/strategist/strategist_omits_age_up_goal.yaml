@@ -1,0 +1,69 @@
+name: strategist_omits_age_up_goal
+description: >
+  The Age-up Gate in core.md is the #1 production-killing rule. It fires
+  purely on resource thresholds (food ≥ 500, pop ≥ 22, Dark Age,
+  mill + lumber camp present) — independent of the strategist's goal list.
+
+  Two variants:
+    1. with_age_up_goal — strategist correctly suggests "Advance to Feudal Age"
+    2. without_age_up_goal — strategist_overrides drops the age-up goal
+
+  Both should press H then Z first. If only variant 1 fires the gate, the
+  executor is wrongly relying on the strategist's goal text instead of the
+  hard-coded numeric gate.
+
+inputs:
+  age: "Dark Age"
+  resources:
+    food: 520
+    wood: 200
+    gold: 0
+    stone: 0
+    population: "22/25"
+  detected_entities:
+    - class: town_center
+      x: 960
+      y: 540
+    - class: mill
+      x: 820
+      y: 620
+    - class: lumber_camp
+      x: 1100
+      y: 620
+    - class: villager
+      x: 870
+      y: 500
+    - class: villager
+      x: 920
+      y: 480
+    - class: sheep
+      x: 1000
+      y: 700
+  goals:
+    - name: "Advance to Feudal Age"
+      type: global
+      metric: age
+      target: "Feudal Age"
+      priority: 9
+      created_turn: 1
+
+variants:
+  - name: with_age_up_goal
+    expected:
+      must_include_first:
+        - {type: press, key: h}
+        - {type: press, key: z}
+
+  - name: without_age_up_goal
+    strategist_overrides:
+      goals:
+        - name: "Grow population to 25"
+          type: global
+          metric: population
+          target: 25
+          priority: 6
+          created_turn: 1
+    expected:
+      must_include_first:
+        - {type: press, key: h}
+        - {type: press, key: z}

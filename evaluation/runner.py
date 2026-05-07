@@ -289,12 +289,41 @@ def _build_recent_turns_block(recent_turns: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _apply_strategist_overrides(inputs: dict) -> dict:
+    """Merge `strategist_overrides:` on top of base inputs.
+
+    The strategist normally provides resource readings and goals to the
+    executor. This helper lets a fixture express "what if the strategist
+    output something different?" without running the real strategist.
+
+    Merge semantics:
+      resources  — shallow merge (override individual fields, preserve others)
+      goals      — replace entirely (lists have no canonical partial-merge)
+
+    Returns a new dict; the original is never mutated.
+    """
+    overrides = inputs.get("strategist_overrides") or {}
+    if not overrides:
+        return inputs
+
+    merged = {**inputs}
+    if "resources" in overrides:
+        merged["resources"] = {
+            **inputs.get("resources", {}),
+            **overrides["resources"],
+        }
+    if "goals" in overrides:
+        merged["goals"] = overrides["goals"]
+    return merged
+
+
 def _build_context(fixture: dict) -> str:
     """Assemble the context string the same way game_loop._build_llm_context does.
 
     Order matches the production assembly: entities → goals → resources → state → recent.
     """
     inputs = fixture.get("inputs", {})
+    inputs = _apply_strategist_overrides(inputs)
     resources = inputs.get("resources", {})
     age = inputs.get("age", DEFAULT_AGE)
 
@@ -349,12 +378,16 @@ async def _invoke_executor(fixture: dict, model: str | None) -> tuple[list[dict]
             await provider.client.close()
 
 
+_VARIANT_OVERRIDABLE_INPUTS = ("memories", "strategist_overrides")
+
+
 def _expand_variants(fixture: dict) -> list[dict]:
     """Return one fixture-per-variant. No `variants:` key = single anonymous run.
 
     Each returned fixture has `_variant_name` set (None for non-variant fixtures).
-    Variant-specific overrides apply on top of the shared `inputs:` block —
-    today only `memories` is overridable; widening the surface is a future change.
+    Variants can override these `inputs:` keys: `memories`, `strategist_overrides`.
+    Each variant's `expected:` block is its own; falls back to the top-level one
+    if the variant doesn't supply its own.
     """
     if "variants" not in fixture:
         return [{**fixture, "_variant_name": None}]
@@ -362,10 +395,10 @@ def _expand_variants(fixture: dict) -> list[dict]:
     base_inputs = fixture.get("inputs", {})
     expanded: list[dict] = []
     for index, variant in enumerate(fixture["variants"]):
-        variant_inputs = {
-            **base_inputs,
-            "memories": variant.get("memories", base_inputs.get("memories", [])),
-        }
+        variant_inputs = {**base_inputs}
+        for key in _VARIANT_OVERRIDABLE_INPUTS:
+            if key in variant:
+                variant_inputs[key] = variant[key]
         expanded.append({
             **fixture,
             "inputs": variant_inputs,
