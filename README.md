@@ -47,8 +47,9 @@ Each iteration (~3-5 seconds):
 
 ```bash
 python -m venv venv
-venv\Scripts\activate
-pip install -r gameplay_agent/requirements.txt
+venv\Scripts\activate          # Windows; on macOS/Linux: source venv/bin/activate
+pip install -e .               # core agent
+pip install -e ".[dev,server]" # add dev tooling + detection server
 ```
 
 ## Configuration
@@ -101,12 +102,11 @@ agent/
 │   ├── goals.py                   # Goal management, alarm system, rewards
 │   ├── screen.py                  # Screenshot capture via mss
 │   ├── window.py                  # AoE2 window detection and focus
-│   ├── providers/                 # LLM providers (Claude executor + strategist)
-│   └── requirements.txt           # Agent dependencies
+│   └── providers/                 # LLM providers (Claude executor + strategist)
 ├── server/                        # Detection API server (macOS host)
 │   ├── app.py                     # FastAPI + CoreML/ONNX inference
-│   ├── classes.yaml               # Bundled class definitions
-│   └── requirements.txt           # Server dependencies
+│   └── classes.yaml               # Bundled class definitions
+├── pyproject.toml                 # Project + tool config; single source of truth for deps
 ├── detection/                     # YOLO entity detection (shared)
 │   ├── inference/
 │   │   ├── detector.py            # EntityDetector, 60 classes, tracking

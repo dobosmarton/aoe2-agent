@@ -1,19 +1,14 @@
 """Pytest configuration for the evaluation framework.
 
-Registers the `live` marker (used by tests that call the real Anthropic API),
-adds a --runlive flag that gates whether those tests actually run, and adds
-the repo root to sys.path so individual test files can import sibling packages
-(`evaluation`, `autoresearch`, `gameplay_agent`) without per-file boilerplate.
+Registers the `live` marker (used by tests that call the real Anthropic API)
+and adds a --runlive flag that gates whether those tests actually run.
+
+The project is installed as a package (`pip install -e .`), so test files
+import siblings as `from gameplay_agent.X import Y` directly — no sys.path
+manipulation required.
 """
 
-import sys
-from pathlib import Path
-
 import pytest
-
-_REPO = Path(__file__).resolve().parent.parent
-if str(_REPO) not in sys.path:
-    sys.path.insert(0, str(_REPO))
 
 
 def pytest_addoption(parser):

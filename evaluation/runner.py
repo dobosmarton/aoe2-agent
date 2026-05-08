@@ -23,13 +23,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO))
-
-# Sibling modules — must be imported AFTER the sys.path mutation above so a
-# direct `python evaluation/runner.py` invocation can resolve the package.
-from evaluation.assertions import evaluate, matches  # noqa: E402
-from evaluation.world_sim import (  # noqa: E402
+from evaluation.assertions import evaluate, matches
+from evaluation.world_sim import (
     WorldState,
     apply_actions,
     evaluate_end_state,
@@ -37,6 +32,8 @@ from evaluation.world_sim import (  # noqa: E402
     state_to_fixture_inputs,
     tick,
 )
+
+REPO = Path(__file__).resolve().parent.parent
 
 # ---------------------------------------------------------------------------
 # Constants — named so a future reader doesn't have to guess

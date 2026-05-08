@@ -8,17 +8,21 @@ agent *ARGS:
 server *ARGS:
     python -m server {{ARGS}}
 
-# Install agent dependencies
-install-agent:
-    pip install -r gameplay_agent/requirements.txt
+# Editable install — agent core only.
+install:
+    pip install -e .
 
-# Install server dependencies
-install-server:
-    pip install -r server/requirements.txt
-
-# Install dev tooling (ruff, pytest)
+# Editable install with dev tooling (ruff, pytest, pyright, pre-commit).
 install-dev:
-    pip install -r requirements-dev.txt
+    pip install -e ".[dev]"
+
+# Editable install + the detection server extras (fastapi, uvicorn).
+install-server:
+    pip install -e ".[server]"
+
+# Everything for full local work: agent + server + dev tooling.
+install-all:
+    pip install -e ".[dev,server]"
 
 # Lint with ruff (report only)
 lint:

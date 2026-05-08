@@ -14,19 +14,37 @@ coverage.xml
 .idea/
 .DS_Store
 .env.*
+
+# Logs / debug captures (any pattern at repo root or nested)
 logs.*
+logs[0-9]*.txt
+logs_*.txt
 
 game_graphics/
 tmp/
+.superset/
+
+# Build / packaging artifacts (created by pip install -e .)
+*.egg-info/
+build/
+dist/
+
+# WIP scratch dirs / files (kept out of git deliberately)
+experiments/
+eval_virtual_box_ideas.md
+overlay-update.zip
 
 # Detection data (large files)
 detection/**/training_data*/
 detection/real_screenshots/
 detection/labeling/output/
+training_data*.tar.gz
 
 # Model weights (except deployed models)
 **/models/*.pt
 **/models/*.onnx
 **/models/*.mlpackage/
+yolov8n.pt
+yolo11n.pt
 !detection/inference/models/aoe2_yolo_v5.pt
 !detection/inference/models/aoe2_yolo_v5.onnx

@@ -1,3 +1,83 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+
+# ---------------------------------------------------------------------------
+# Project metadata (PEP 621)
+# ---------------------------------------------------------------------------
+# Single source of truth for dependencies and scripts. Install with:
+#   pip install -e .                  # core agent (Mac dev)
+#   pip install -e ".[server]"        # also install the detection server
+#   pip install -e ".[dev]"           # core + dev tooling (ruff, pytest, ...)
+#   pip install -e ".[server,dev]"    # everything for full local work
+#   pip install -e ".[coreml]"        # macOS-only CoreML inference
+[project]
+name = "aoe2-agent"
+version = "0.1.0"
+description = "AoE2 LLM Arena — gameplay agent + detection server + evaluation framework"
+requires-python = ">=3.11"
+authors = [{ name = "Marton Dobos" }]
+readme = { file = "README.md", content-type = "text/markdown" }
+
+# Core runtime — used by gameplay_agent and indirectly by tests.
+# Mirrors gameplay_agent/requirements.txt; the .txt file is kept as a
+# convenience alias but `pip install -e .` is the source of truth.
+dependencies = [
+    "anthropic>=0.84.0",
+    "colorama>=0.4.6",
+    "httpx>=0.27.0",
+    "mss>=9.0.0",
+    "numpy>=1.24.0",
+    "onnxruntime>=1.17.0",
+    "Pillow>=10.0.0",
+    "pyautogui>=0.9.54",
+    "pydantic>=2.5.0",
+    "pygetwindow>=0.0.9",
+    "python-multipart>=0.0.7",
+    "pyyaml>=6.0",
+    "scipy>=1.11.0",
+    "structlog>=24.1.0",
+    "tenacity>=8.2.0",
+]
+
+[project.optional-dependencies]
+server = [
+    "fastapi>=0.115.0",
+    "uvicorn>=0.30.0",
+]
+dev = [
+    "ruff>=0.15.0",
+    "pytest>=9.0.0",
+    "pytest-cov>=5.0.0",
+    "pyright>=1.1.400",
+    "pre-commit>=4.0.0",
+]
+# macOS-only — install separately when running CoreML inference.
+coreml = [
+    "coremltools>=8.0",
+]
+
+[project.scripts]
+aoe2-agent = "gameplay_agent.main:main"
+aoe2-server = "server.app:main"
+
+[tool.setuptools.packages.find]
+include = [
+    "gameplay_agent*",
+    "autoresearch*",
+    "evaluation*",
+    "server*",
+    "detection*",
+    "data*",
+]
+exclude = ["tests*", "experiments*", "venv*", "memories*", "logs*", "tmp*"]
+
+
+# ---------------------------------------------------------------------------
+# Ruff
+# ---------------------------------------------------------------------------
+
 [tool.ruff]
 target-version = "py311"
 line-length = 100

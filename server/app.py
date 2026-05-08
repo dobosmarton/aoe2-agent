@@ -24,6 +24,13 @@ import numpy as np
 from fastapi import FastAPI, File, Query, UploadFile
 from pydantic import BaseModel, ConfigDict
 
+from detection.inference.thresholds import (
+    CLASS_THRESHOLDS,
+)
+from detection.inference.thresholds import (
+    get_threshold as _get_threshold,
+)
+
 if TYPE_CHECKING:
     from PIL import Image
 
@@ -67,17 +74,6 @@ class HealthResponse(BaseModel):
     backend: Backend
     num_classes: int
 
-
-# ---------------------------------------------------------------------------
-# Per-class confidence thresholds (single source of truth)
-# ---------------------------------------------------------------------------
-
-from detection.inference.thresholds import (  # noqa: E402  # imported after sys.path mutation
-    CLASS_THRESHOLDS,
-)
-from detection.inference.thresholds import (  # noqa: E402
-    get_threshold as _get_threshold,
-)
 
 # ---------------------------------------------------------------------------
 # Class names loader
