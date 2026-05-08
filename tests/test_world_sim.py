@@ -19,19 +19,19 @@ from __future__ import annotations
 def _state(**kwargs):
     from evaluation.world_sim import WorldState
 
-    defaults = dict(
-        food=200.0,
-        wood=150.0,
-        gold=0.0,
-        stone=0.0,
-        population=8,
-        pop_cap=25,
-        age="Dark Age",
-        buildings=[],
-        villager_queue=[],
-        age_up_ticks_remaining=0,
-        turn=0,
-    )
+    defaults = {
+        "food": 200.0,
+        "wood": 150.0,
+        "gold": 0.0,
+        "stone": 0.0,
+        "population": 8,
+        "pop_cap": 25,
+        "age": "Dark Age",
+        "buildings": [],
+        "villager_queue": [],
+        "age_up_ticks_remaining": 0,
+        "turn": 0,
+    }
     defaults.update(kwargs)
     return WorldState(**defaults)
 

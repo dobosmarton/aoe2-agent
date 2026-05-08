@@ -94,7 +94,9 @@ extend-exclude = [
 ]
 
 [tool.ruff.lint]
-# Conservative starter set. Add more (PL, ANN, S, ...) once the baseline is clean.
+# Active rule set. Rules that have been baselined and triaged are below;
+# deliberately deferred rules + the reason are listed in the comment block
+# after `select`.
 select = [
     "E",   # pycodestyle errors
     "F",   # pyflakes (unused imports, undefined names)
@@ -108,7 +110,22 @@ select = [
     "DTZ", # flake8-datetimez (require explicit tz on datetime calls)
     "RET", # flake8-return (drop superfluous else-after-return / build-then-return)
     "TCH", # flake8-type-checking (push type-only imports under TYPE_CHECKING)
+    "C4",  # flake8-comprehensions (idiomatic comprehensions / dict construction)
 ]
+# Rules audited and intentionally NOT enabled (re-evaluate when the
+# corresponding baseline shrinks or a contributor wants to do the cleanup):
+#   ANN   — 249 missing-annotation errors. Worth attacking once core
+#           modules have full type hints; doing it as a global pass would
+#           churn 30+ files for low marginal value.
+#   BLE001 — 41 broad `except Exception:` sites, all legitimate boundary
+#           catches (anthropic SDK, optional-resource init, harness
+#           tolerance). See note in `ignore` below.
+#   S     — 348 hits dominated by S101 (267 `assert` in tests; the standard
+#           way to write pytest assertions) and S311 (67 random.*; used for
+#           game-variety, not crypto). Real signal would be drowned.
+#   N     — naming. Several established names (e.g. `_DETECTED_ENTITIES`)
+#           would flip on enabling.
+#   PL    — pylint-style rules; ~1k findings, mostly stylistic.
 ignore = [
     "E501",   # line-too-long: ruff format handles formatting; long literals are fine
     "B008",   # function-call-in-default-argument: common with FastAPI Depends() etc.

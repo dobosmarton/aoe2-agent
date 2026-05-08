@@ -264,7 +264,7 @@ class EntityDetector:
 
     def _reset_counters(self):
         """Reset entity ID counters for new detection."""
-        self._class_counters = {name: 0 for name in self.class_names}
+        self._class_counters = dict.fromkeys(self.class_names, 0)
 
     def _generate_id(self, class_name: str) -> str:
         """Generate unique ID for detected entity."""
