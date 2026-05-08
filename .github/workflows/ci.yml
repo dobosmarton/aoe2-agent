@@ -27,12 +27,15 @@ jobs:
           cache-dependency-path: |
             requirements-dev.txt
             gameplay_agent/requirements.txt
+            server/requirements.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # Runtime deps so pyright can resolve imports (anthropic, structlog, ...).
+          # Runtime deps so pyright can resolve imports (anthropic, structlog,
+          # fastapi, uvicorn, ...). Skips coremltools (macOS-only optional dep).
           pip install -r gameplay_agent/requirements.txt
+          pip install -r server/requirements.txt
           # Dev tooling.
           pip install -r requirements-dev.txt
 

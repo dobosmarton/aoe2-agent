@@ -62,12 +62,9 @@ exclude = [
     "memories",
     "data",
 ]
-# Point pyright at the project venv so third-party imports (anthropic,
-# structlog, mss, ...) resolve. Without this, pre-commit's pyright runs
-# in a sandboxed env without our deps and floods the report with bogus
-# "Import could not be resolved" errors.
-venvPath = "."
-venv = "venv"
+# No venv= config: pre-commit runs `venv/bin/pyright` directly via the
+# `language: system` hook, which finds its own site-packages. CI runs
+# pyright from the system Python after `pip install -r ...`.
 typeCheckingMode = "basic"
 pythonVersion = "3.11"
 # Treat third-party packages without stubs as untyped rather than failing.

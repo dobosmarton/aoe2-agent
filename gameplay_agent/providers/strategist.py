@@ -3,7 +3,7 @@
 import base64
 import contextlib
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar, cast
 
 import anthropic
 import structlog
@@ -126,9 +126,13 @@ class StrategistProvider:
 
         SDK handles retry (429/5xx) with exponential backoff automatically.
         """
-        # `messages.parse` is the structured-output method — present at runtime
-        # but not in the public AsyncMessages stubs that pyright sees.
-        response = await self.client.messages.parse(  # pyright: ignore[reportAttributeAccessIssue]
+        # `messages.parse` is the structured-output method — runtime-only,
+        # absent from public AsyncMessages stubs. cast() the client to Any so
+        # both the attribute access and the strict TypedDict argument types
+        # become opaque to the checker (anthropic SDK versions disagree on
+        # the exact MessageParam union shape, which would break CI otherwise).
+        client_any = cast(Any, self.client)
+        response = await client_any.messages.parse(
             model=self.model,
             max_tokens=768,
             system=self.get_system_prompt(),
@@ -142,7 +146,7 @@ class StrategistProvider:
         log.info(
             "strategist_usage", input_tokens=usage.input_tokens, output_tokens=usage.output_tokens
         )
-        return response.parsed_output
+        return cast(StrategistResponse, response.parsed_output)
 
     async def generate_goals(
         self,
