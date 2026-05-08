@@ -109,11 +109,13 @@ ignore = [
     "E501",   # line-too-long: ruff format handles formatting; long literals are fine
     "B008",   # function-call-in-default-argument: common with FastAPI Depends() etc.
     "SIM108", # use ternary: not always more readable
-]
-
-[tool.ruff.lint.per-file-ignores]
-"tests/**" = [
-    "E402",  # module-level import not at top: tests sometimes set sys.path first
+    # BLE001 (blind-except) deliberately NOT enabled. Audited 2026-05: all 41
+    # `except Exception:` sites are legitimate boundary catches (anthropic API
+    # calls, optional-resource init, scenario-harness tolerance, file-parser
+    # robustness, Tkinter overlay, conftest GUI-import shim). Narrowing them
+    # would mean every new exception type from a third-party SDK becomes an
+    # unhandled crash. Re-run `ruff check . --select BLE001` for an ad-hoc
+    # audit before adding new broad catches.
 ]
 
 [tool.ruff.format]
