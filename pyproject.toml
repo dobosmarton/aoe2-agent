@@ -73,3 +73,39 @@ pythonVersion = "3.11"
 # Treat third-party packages without stubs as untyped rather than failing.
 reportMissingTypeStubs = false
 reportMissingImports = "warning"
+
+
+# ---------------------------------------------------------------------------
+# Coverage (pytest-cov)
+# ---------------------------------------------------------------------------
+# Default `pytest --cov` to scope to first-party source dirs. Tests
+# themselves are excluded from coverage measurement (they're not what
+# we're trying to cover).
+[tool.coverage.run]
+source = [
+    "gameplay_agent",
+    "autoresearch",
+    "evaluation",
+    "server",
+    "detection",
+]
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+    "venv/*",
+    "experiments/*",
+]
+branch = true
+
+[tool.coverage.report]
+# Show the missing line numbers — much more actionable than a bare percentage.
+show_missing = true
+# Skip files with 100% coverage to keep the report focused on gaps.
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "\\.\\.\\.",
+]
