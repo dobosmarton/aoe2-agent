@@ -1,0 +1,5 @@
+# Dev-only tooling. Install with: pip install -r requirements-dev.txt
+# Runtime deps live in gameplay_agent/requirements.txt and server/requirements.txt.
+
+ruff>=0.15.0
+pytest>=9.0.0

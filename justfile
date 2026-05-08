@@ -16,6 +16,29 @@ install-agent:
 install-server:
     pip install -r server/requirements.txt
 
+# Install dev tooling (ruff, pytest)
+install-dev:
+    pip install -r requirements-dev.txt
+
+# Lint with ruff (report only)
+lint:
+    ruff check .
+
+# Auto-fix lint issues that ruff considers safe
+lint-fix:
+    ruff check . --fix
+
+# Format with ruff
+format:
+    ruff format .
+
+# Run tests
+test *ARGS:
+    pytest {{ARGS}}
+
+# Full local quality gate: lint + tests
+check: lint test
+
 # Export model to ONNX
 export-onnx model="detection/inference/models/aoe2_yolo_v5.pt":
     python -m detection.training.export_onnx --model {{model}}

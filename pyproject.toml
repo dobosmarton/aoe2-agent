@@ -1,0 +1,41 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+# Skip vendored / data / non-source dirs. Ruff's defaults already exclude
+# venv, build, dist, etc., but spell out the project-specific ones.
+extend-exclude = [
+    "experiments",
+    "data",
+    "logs",
+    "tmp",
+    "memories",
+    "game_graphics",
+]
+
+[tool.ruff.lint]
+# Conservative starter set. Add more (PL, ANN, S, ...) once the baseline is clean.
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes (unused imports, undefined names)
+    "W",   # pycodestyle warnings
+    "I",   # isort
+    "UP",  # pyupgrade (modern Python idioms)
+    "B",   # flake8-bugbear (likely bugs)
+    "SIM", # flake8-simplify
+    "RUF", # ruff-specific
+]
+ignore = [
+    "E501",   # line-too-long: ruff format handles formatting; long literals are fine
+    "B008",   # function-call-in-default-argument: common with FastAPI Depends() etc.
+    "SIM108", # use ternary: not always more readable
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "E402",  # module-level import not at top: tests sometimes set sys.path first
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
