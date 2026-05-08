@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 
 def _run(coro: Awaitable[object]) -> object:
     """Drive a coroutine to completion in a fresh event loop."""
-    return asyncio.run(coro)  # type: ignore[arg-type]
+    return asyncio.run(coro)
 
 
 class _FakePyautogui:

@@ -57,12 +57,24 @@ def set_rescan_full_fn(fn: Callable[[], Awaitable[None]]) -> None:
 
 
 def set_detected_entities(entities: Sequence[object]) -> None:
-    """Cache detected entities for target_id/target_class resolution."""
+    """Cache detected entities for target_id/target_class resolution.
+
+    Accepts either DetectedEntity instances (with `.to_dict()`) or already-
+    serialized dict shapes — normalizes both into the dict cache.
+    """
     global _detected_entities
-    _detected_entities = [
-        e.to_dict() if hasattr(e, "to_dict") else e  # type: ignore[union-attr]
-        for e in entities
-    ]
+    normalized: list[dict] = []
+    for e in entities:
+        to_dict = getattr(e, "to_dict", None)
+        if callable(to_dict):
+            converted = to_dict()
+            if isinstance(converted, dict):
+                normalized.append(converted)
+        elif isinstance(e, dict):
+            normalized.append(e)
+        else:
+            log.warning("detected_entity_unrecognized_type", entity_type=type(e).__name__)
+    _detected_entities = normalized
     log.debug("detected_entities_set", count=len(_detected_entities))
 
 
@@ -102,6 +114,18 @@ def _resolve_target_class(target_class: str) -> tuple[int, int] | None:
     return None
 
 
+def _to_int(value: object) -> int:
+    """Narrow an action-dict value (typed `object`) to int.
+
+    Action dicts come from LLM output via `dict[str, object]` — the runtime
+    values are always int / float / str-of-digits at integer call sites,
+    but pyright can't prove that without an explicit narrowing.
+    """
+    if isinstance(value, (int, float, str)):
+        return int(value)
+    raise TypeError(f"Expected int-coercible value, got {type(value).__name__}")
+
+
 def _resolve_coords(action_dict: dict[str, object]) -> tuple[str, tuple[int, int] | None]:
     """Resolve action coordinates from target_id, target_class, or x/y fields.
 
@@ -125,7 +149,7 @@ def _resolve_coords(action_dict: dict[str, object]) -> tuple[str, tuple[int, int
 
     x, y = action_dict.get("x"), action_dict.get("y")
     if x is not None and y is not None:
-        ix, iy = int(x), int(y)  # type: ignore[arg-type]
+        ix, iy = _to_int(x), _to_int(y)
         if ix == 0 and iy == 0:
             log.warning("placeholder_coords_rejected")
             return ("(0, 0) placeholder coordinates rejected", None)
@@ -295,10 +319,10 @@ async def _handle_press(action_dict: dict[str, object], intent: str) -> ActionRe
 
 
 async def _handle_drag(action_dict: dict[str, object], intent: str) -> ActionResult:
-    sx = int(action_dict["start_x"])  # type: ignore[arg-type]
-    sy = int(action_dict["start_y"])  # type: ignore[arg-type]
-    ex = int(action_dict["end_x"])  # type: ignore[arg-type]
-    ey = int(action_dict["end_y"])  # type: ignore[arg-type]
+    sx = _to_int(action_dict["start_x"])
+    sy = _to_int(action_dict["start_y"])
+    ex = _to_int(action_dict["end_x"])
+    ey = _to_int(action_dict["end_y"])
     screen_sx, screen_sy = _translate(sx, sy)
     screen_ex, screen_ey = _translate(ex, ey)
     pyautogui.moveTo(screen_sx, screen_sy)
@@ -308,10 +332,10 @@ async def _handle_drag(action_dict: dict[str, object], intent: str) -> ActionRes
 
 
 async def _handle_scroll(action_dict: dict[str, object], intent: str) -> ActionResult:
-    clicks = int(action_dict["clicks"])  # type: ignore[arg-type]
+    clicks = _to_int(action_dict["clicks"])
     x, y = action_dict.get("x"), action_dict.get("y")
     if x is not None and y is not None:
-        screen_x, screen_y = _translate(int(x), int(y))  # type: ignore[arg-type]
+        screen_x, screen_y = _translate(_to_int(x), _to_int(y))
         pyautogui.scroll(clicks, x=screen_x, y=screen_y)
     else:
         pyautogui.scroll(clicks)
@@ -329,7 +353,7 @@ async def _handle_detect(_action_dict: dict[str, object], intent: str) -> Action
 
 
 async def _handle_wait(action_dict: dict[str, object], intent: str) -> ActionResult:
-    ms = int(action_dict.get("ms", DEFAULT_WAIT_MS))  # type: ignore[arg-type]
+    ms = _to_int(action_dict.get("ms", DEFAULT_WAIT_MS))
     await asyncio.sleep(ms / 1000)
     log.info("wait", ms=ms, intent=intent)
     return ActionResult(True, "ok")

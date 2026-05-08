@@ -290,4 +290,4 @@ def test_observations_full_payload() -> None:
 
 def test_observations_invalid_game_state_rejected() -> None:
     with pytest.raises(ValidationError):
-        Observations(game_state="paused")  # type: ignore[arg-type]
+        Observations(game_state="paused")

@@ -6,10 +6,25 @@ Entities may arrive as DetectedEntity objects (from YOLO) or plain dicts
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from detection.inference.ownership import Owner
+
+
+@runtime_checkable
+class _EntityLike(Protocol):
+    """The object-shaped flavor of a detected entity (DetectedEntity).
+
+    Marked `runtime_checkable` so `isinstance(entity, _EntityLike)` works
+    at runtime — a DetectedEntity passes because it has all four attrs.
+    The `object | dict` distinction is otherwise too loose to type-check.
+    """
+
+    id: str
+    class_name: str
+    center: tuple[float, float]
+    confidence: float
 
 
 class EntityAttrs(NamedTuple):
@@ -23,12 +38,12 @@ class EntityAttrs(NamedTuple):
 
 def extract_attrs(entity: object) -> EntityAttrs:
     """Extract normalized attributes from a DetectedEntity or dict."""
-    if hasattr(entity, "id"):
+    if isinstance(entity, _EntityLike):
         return EntityAttrs(
-            entity_id=entity.id,  # type: ignore[union-attr]
-            class_name=entity.class_name,  # type: ignore[union-attr]
-            center=entity.center,  # type: ignore[union-attr]
-            confidence=entity.confidence,  # type: ignore[union-attr]
+            entity_id=entity.id,
+            class_name=entity.class_name,
+            center=entity.center,
+            confidence=entity.confidence,
         )
     # Dict-style access (serialized entities)
     d = entity if isinstance(entity, dict) else {}

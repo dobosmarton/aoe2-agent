@@ -14,8 +14,10 @@ Usage:
 Lambda Labs Training:
     1. Upload dataset: scp -r detection/training_data_v3 ubuntu@<IP>:/home/ubuntu/
     2. Upload script:  scp train_yolo.py ubuntu@<IP>:/home/ubuntu/
-    3. SSH and run:    python train_yolo.py --export-onnx
-    4. Download:       scp ubuntu@<IP>:/home/ubuntu/runs/<name>/weights/best.pt ./
+    3. SSH and run:
+    python train_yolo.py --export-onnx
+    4. Download:
+    scp ubuntu@<IP>:/home/ubuntu/runs/<name>/weights/best.pt ./
 
 Estimated training time: ~1-2 hours on A100 for 150 epochs
 """

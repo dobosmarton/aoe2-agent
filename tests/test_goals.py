@@ -48,7 +48,7 @@ def _g(
 ) -> Goal:
     return Goal(
         name=name,
-        type=type_,  # type: ignore[arg-type]
+        type=type_,
         metric=metric,
         target=target,
         priority=priority,

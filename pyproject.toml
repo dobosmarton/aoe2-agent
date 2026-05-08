@@ -112,6 +112,7 @@ select = [
     "TCH", # flake8-type-checking (push type-only imports under TYPE_CHECKING)
     "C4",  # flake8-comprehensions (idiomatic comprehensions / dict construction)
     "ANN", # flake8-annotations (require type hints on AI-agent code)
+    "PGH", # pygrep-hooks: forbid blanket `# type: ignore` without a code; flag eval/exec usage
 ]
 # Rules audited and intentionally NOT enabled (re-evaluate when the
 # corresponding baseline shrinks or a contributor wants to do the cleanup):

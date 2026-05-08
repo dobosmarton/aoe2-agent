@@ -17,7 +17,7 @@ import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, TypeAlias
+from typing import TYPE_CHECKING, Literal, Protocol, TypeAlias, cast
 
 import numpy as np
 from fastapi import FastAPI, File, Query, UploadFile
@@ -162,6 +162,19 @@ def _load_class_names() -> tuple[str, ...]:
 # ---------------------------------------------------------------------------
 
 
+class _CoreMLModel(Protocol):
+    """Subset of ct.models.MLModel API used here."""
+
+    def get_spec(self) -> object: ...
+    def predict(self, inputs: dict[str, object]) -> dict[str, object]: ...
+
+
+class _ONNXSession(Protocol):
+    """Subset of ort.InferenceSession API used here."""
+
+    def run(self, output_names: object, input_feed: dict[str, object]) -> list[object]: ...
+
+
 @dataclass(frozen=True, slots=True)
 class ModelState:
     backend: Backend
@@ -174,8 +187,8 @@ class ModelState:
 
 def _get_coreml_input_size(model: object) -> int:
     """Read the native input resolution from a CoreML model spec."""
-    spec = model.get_spec()  # type: ignore[union-attr]
-    input_desc = spec.description.input[0]
+    spec = cast("_CoreMLModel", model).get_spec()
+    input_desc = spec.description.input[0]  # pyright: ignore[reportAttributeAccessIssue] — coremltools proto descriptor
     input_type = input_desc.type.WhichOneof("Type")
     if input_type == "imageType":
         return int(input_desc.type.imageType.width)
@@ -274,14 +287,16 @@ def _preprocess(image: Image.Image, target_size: int) -> tuple[np.ndarray, int, 
 
 def _run_onnx_batch(state: ModelState, batch: np.ndarray) -> np.ndarray:
     """Run batched ONNX inference. batch shape: (N, 3, H, W)."""
-    outputs = state.model.run(None, {state.input_name: batch})  # type: ignore[union-attr]
-    return outputs[0]
+    session = cast("_ONNXSession", state.model)
+    outputs = session.run(None, {state.input_name: batch})
+    return cast("np.ndarray", outputs[0])
 
 
 def _run_coreml_single(state: ModelState, chw: np.ndarray) -> np.ndarray:
     """Run single-image CoreML inference. chw shape: (3, H, W)."""
-    spec = state.model.get_spec()  # type: ignore[union-attr]
-    input_desc = spec.description.input[0]
+    model = cast("_CoreMLModel", state.model)
+    spec = model.get_spec()
+    input_desc = spec.description.input[0]  # pyright: ignore[reportAttributeAccessIssue]
     input_key = input_desc.name
 
     # CoreML models can expect either PIL Image or numpy array
@@ -295,9 +310,8 @@ def _run_coreml_single(state: ModelState, chw: np.ndarray) -> np.ndarray:
     else:
         input_data = np.expand_dims(chw, axis=0)  # (1, 3, H, W)
 
-    prediction = state.model.predict({input_key: input_data})  # type: ignore[union-attr]
-
-    output_key = spec.description.output[0].name
+    prediction = model.predict({input_key: input_data})
+    output_key = spec.description.output[0].name  # pyright: ignore[reportAttributeAccessIssue]
     result = prediction[output_key]
 
     if not isinstance(result, np.ndarray):

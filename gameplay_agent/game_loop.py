@@ -199,52 +199,52 @@ def _register_rescan_callbacks(
 
     async def _rescan() -> None:
         if overlay:
-            overlay.hide()  # type: ignore[union-attr]
+            overlay.hide()
         screenshot, _, _ = capture_screenshot(quality=RESCAN_SCREENSHOT_QUALITY)
 
         # Frame diff — did the camera move?
-        if frame_differ and not frame_differ.has_changed(screenshot):  # type: ignore[union-attr]
+        if frame_differ and not frame_differ.has_changed(screenshot):
             if (
                 detector.tracker
                 and detector.tracker.get_confidence() > TRACKER_CONFIDENCE_THRESHOLD
-            ):  # type: ignore[union-attr]
-                predicted = detector.tracker.predict()  # type: ignore[union-attr]
+            ):
+                predicted = detector.tracker.predict()
                 set_detected_entities(predicted)
                 if overlay:
-                    overlay.show(predicted, get_game_window_rect())  # type: ignore[union-attr]
-                log.debug("rescan_predicted", entity_count=len(predicted))
+                    overlay.show(predicted, get_game_window_rect())
+                    log.debug("rescan_predicted", entity_count=len(predicted))
                 return
             log.debug("rescan_skipped", reason="no_change")
             if overlay:
-                overlay.show(detector._previous_entities, get_game_window_rect())  # type: ignore[union-attr]
-            return
+                overlay.show(detector._previous_entities, get_game_window_rect())
+                return
 
         # Frame changed — run actual detection
         entities = await _invoke_detector(detector, "detect_fast_multi", screenshot)
         if (
             detector.tracker
-            and detector._previous_entities  # type: ignore[union-attr]
-            and len(entities) < len(detector._previous_entities) * ENTITY_DROP_RATIO  # type: ignore[union-attr]
+            and detector._previous_entities
+            and len(entities) < len(detector._previous_entities) * ENTITY_DROP_RATIO
         ):
             detector.tracker.reset()
             log.debug("tracker_reset", reason="camera_moved")
         set_detected_entities(entities)
         if overlay:
-            overlay.show(entities, get_game_window_rect())  # type: ignore[union-attr]
-        log.debug("rescan_complete", entity_count=len(entities), mode="fast")
+            overlay.show(entities, get_game_window_rect())
+            log.debug("rescan_complete", entity_count=len(entities), mode="fast")
 
     async def _rescan_full() -> None:
         if overlay:
-            overlay.hide()  # type: ignore[union-attr]
-        screenshot_full, _, _ = capture_screenshot(quality=85)
+            overlay.hide()
+            screenshot_full, _, _ = capture_screenshot(quality=85)
         if frame_differ:
-            frame_differ.reset()  # type: ignore[union-attr]
-        entities = await _invoke_detector(detector, "detect", screenshot_full)
-        if detector.tracker:  # type: ignore[union-attr]
-            detector.tracker.reset()  # type: ignore[union-attr]
+            frame_differ.reset()
+            entities = await _invoke_detector(detector, "detect", screenshot_full)
+        if detector.tracker:
+            detector.tracker.reset()
         set_detected_entities(entities)
         if overlay:
-            overlay.show(entities, get_game_window_rect())  # type: ignore[union-attr]
+            overlay.show(entities, get_game_window_rect())
         log.info("rescan_full_complete", entity_count=len(entities))
 
     set_rescan_fn(_rescan)
@@ -258,8 +258,8 @@ async def _capture_screenshot(
 ) -> tuple[bytes, int, int]:
     """Capture game screenshot, optionally saving to disk."""
     if overlay:
-        overlay.hide()  # type: ignore[union-attr]
-    screenshot, width, height = capture_screenshot()
+        overlay.hide()
+        screenshot, width, height = capture_screenshot()
     log.debug("screenshot_captured", width=width, height=height)
 
     if config.save_screenshots and screenshots_dir:

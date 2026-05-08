@@ -8,6 +8,7 @@ from typing import ClassVar
 import anthropic
 import structlog
 from anthropic.types import ToolUseBlock
+from pydantic import BaseModel
 
 from ..config import config
 from ..executor import execute_action, get_detected_entities
@@ -430,7 +431,7 @@ class ClaudeProvider(BaseLLMProvider):
             result_data["entities"] = self._entity_snapshot()
         return {
             "type": "tool_result",
-            "tool_use_id": block.id,  # type: ignore[union-attr]
+            "tool_use_id": block.id,
             "content": json.dumps(result_data),
         }
 
@@ -441,10 +442,12 @@ class ClaudeProvider(BaseLLMProvider):
         Composite action dicts don't match the Action union type, so we
         serialize each action individually to avoid PydanticSerializationUnexpectedValue.
         """
-        actions: list[dict[str, object]] = [
-            a.model_dump() if hasattr(a, "model_dump") else a  # type: ignore[union-attr]
-            for a in result.actions
-        ]
+        actions: list[dict[str, object]] = []
+        for a in result.actions:
+            if isinstance(a, BaseModel):
+                actions.append(a.model_dump())
+            elif isinstance(a, dict):
+                actions.append(a)
         return LLMResult(
             reasoning=result.reasoning,
             observations=result.observations.model_dump()
@@ -452,7 +455,7 @@ class ClaudeProvider(BaseLLMProvider):
             else {},
             actions=actions,
             actions_already_executed=True,
-            success_count=getattr(result, "_success_count", len(actions)),
+            success_count=result._success_count if result._success_count else len(actions),
         )
 
     async def _run_steps(self, composite_name: str, steps: list[dict]) -> tuple[bool, str]:
@@ -483,7 +486,7 @@ class ClaudeProvider(BaseLLMProvider):
         (±80px) if placement fails.  If the spot is truly blocked,
         the LLM will choose a different position next turn.
         """
-        inp = block.input  # type: ignore[union-attr]
+        inp = block.input
         intent = inp.get("intent", "Build")
         steps = [
             {"type": "press", "key": ".", "intent": f"Select idle villager ({intent})"},
@@ -502,7 +505,7 @@ class ClaudeProvider(BaseLLMProvider):
         The "." press moves the camera, so we rescan to get fresh entity
         positions before right-clicking.
         """
-        inp = block.input  # type: ignore[union-attr]
+        inp = block.input
         intent = inp.get("intent", "Send villager")
 
         rc_action: dict[str, object] = {"type": "right_click", "intent": intent}
@@ -528,7 +531,7 @@ class ClaudeProvider(BaseLLMProvider):
 
     async def _execute_queue_villager(self, block: ToolUseBlock) -> tuple[dict, dict]:
         """Composite: press h → press q."""
-        inp = block.input  # type: ignore[union-attr]
+        inp = block.input
         intent = inp.get("intent", "Queue villager")
         steps = [
             {"type": "press", "key": "h", "intent": f"Go to TC ({intent})"},
@@ -549,22 +552,20 @@ class ClaudeProvider(BaseLLMProvider):
 
     async def _execute_tool_call(self, block: ToolUseBlock) -> tuple[dict, dict]:
         """Execute a single tool call and build the result payload."""
-        tool_name = block.name  # type: ignore[union-attr]
-
+        tool_name = block.name
         handler_name = self._COMPOSITE_HANDLERS.get(tool_name)
         if handler_name:
             return await getattr(self, handler_name)(block)
 
-        action_dict = {"type": tool_name, **block.input}  # type: ignore[union-attr]
+        action_dict = {"type": tool_name, **block.input}
         result = await execute_action(action_dict)
         log.info(
             "tool_executed",
             action=tool_name,
             intent=block.input.get("intent", ""),
             success=result.success,
-        )  # type: ignore[union-attr]
-
-        include_entities = tool_name == "press" and bool(block.input.get("rescan"))  # type: ignore[union-attr]
+        )
+        include_entities = tool_name == "press" and bool(block.input.get("rescan"))
         tool_result = self._make_tool_result(
             block, result.success, result.detail, include_entities=include_entities
         )
@@ -639,7 +640,7 @@ class ClaudeProvider(BaseLLMProvider):
             observations=Observations(),
             reasoning=" ".join(reasoning_parts),
         )
-        result._success_count = success_count  # type: ignore[attr-defined]
+        result._success_count = success_count
         return result
 
     def _cumulative_cost_usd(self) -> float:

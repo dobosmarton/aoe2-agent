@@ -65,7 +65,7 @@ def test_extract_attrs_dict_with_missing_fields_uses_defaults() -> None:
 
 def test_extract_attrs_non_dict_non_object_falls_back_to_unknown() -> None:
     """A None/string/number gets the all-unknown default."""
-    attrs = extract_attrs(None)  # type: ignore[arg-type]
+    attrs = extract_attrs(None)
     assert attrs.entity_id == "unknown"
     assert attrs.class_name == "unknown"
 

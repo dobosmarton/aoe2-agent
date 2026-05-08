@@ -6,6 +6,7 @@ from pydantic import (
     BaseModel,
     Discriminator,
     Field,
+    PrivateAttr,
     ValidationError,
     field_validator,
     model_validator,
@@ -243,6 +244,12 @@ class LLMResponse(BaseModel):
     actions: list[Action] = Field(default_factory=list)
     observations: Observations = Field(default_factory=Observations)
     reasoning: str = ""
+
+    # Side-channel: how many actions actually succeeded when the executor ran
+    # the composite-tool loop locally. Set by ClaudeProvider._call_api after
+    # tool execution; read by _serialize_response. PrivateAttr keeps it out
+    # of model serialization and Pydantic field validation.
+    _success_count: int = PrivateAttr(default=0)
 
     @field_validator("actions", mode="before")
     @classmethod

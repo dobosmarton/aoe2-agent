@@ -317,6 +317,8 @@ def evaluate(
             if action_fn is not None:
                 failures.extend(action_fn(actions, item, baseline_actions=baseline_actions))
             else:
-                failures.extend(reasoning_fn(reasoning, item))  # type: ignore[misc]
-
+                # The early `if action_fn is None and reasoning_fn is None`
+                # branch above already continued past keys with neither.
+                assert reasoning_fn is not None
+                failures.extend(reasoning_fn(reasoning, item))
     return failures
