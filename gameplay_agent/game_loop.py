@@ -3,7 +3,7 @@
 import asyncio
 import contextlib
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -246,7 +246,7 @@ async def _capture_screenshot(
     log.debug("screenshot_captured", width=width, height=height)
 
     if config.save_screenshots and screenshots_dir:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         path = screenshots_dir / f"{timestamp}_{iteration:05d}.jpg"
         save_screenshot(screenshot, str(path))
 
@@ -747,7 +747,7 @@ async def run_single_iteration(
     if memory is None:
         memory = AgentMemory()
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     screenshot, width, height = capture_screenshot()
 
     log_dir = Path(config.log_dir)

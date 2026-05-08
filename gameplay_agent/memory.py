@@ -300,7 +300,7 @@ class AgentMemory:
         """Create a new turn and add it to memory."""
         turn = Turn(
             iteration=self.turn_count + 1,
-            timestamp=datetime.now().strftime("%Y%m%d_%H%M%S"),
+            timestamp=datetime.now(UTC).strftime("%Y%m%d_%H%M%S"),
             reasoning=reasoning,
             actions=actions,
             observed_resources=observations.get("resources") if observations else None,

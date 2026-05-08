@@ -105,6 +105,7 @@ select = [
     "SIM", # flake8-simplify
     "RUF", # ruff-specific
     "PTH", # flake8-use-pathlib (prefer Path over os.path/builtin open)
+    "DTZ", # flake8-datetimez (require explicit tz on datetime calls)
 ]
 ignore = [
     "E501",   # line-too-long: ruff format handles formatting; long literals are fine

@@ -1,6 +1,6 @@
 """Goal tracking logger for AoE2 LLM Agent."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .goals import Goal
@@ -14,7 +14,7 @@ class GoalLogger:
         log_dir.mkdir(parents=True, exist_ok=True)
         # Write header
         with self.log_path.open("a") as f:
-            f.write(f"\n=== Game started {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+            f.write(f"\n=== Game started {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')} ===\n")
 
     def _write(self, text: str) -> None:
         with self.log_path.open("a") as f:

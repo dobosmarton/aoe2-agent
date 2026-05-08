@@ -27,7 +27,7 @@ import argparse
 import json
 import shutil
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 try:
@@ -197,7 +197,7 @@ def prepare_batch(
     print(f"\nPreparing batch of {len(batch)} images...")
 
     # Create batch directory
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M")
     batch_dir = output_dir / f"batch_{timestamp}"
     images_dir = batch_dir / "images"
     labels_dir = batch_dir / "labels"
