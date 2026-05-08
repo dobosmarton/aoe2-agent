@@ -32,7 +32,7 @@ class PointTargetAction(BaseModel):
     intent: str = ""
 
     @model_validator(mode="after")
-    def check_coords_or_target(self):
+    def check_coords_or_target(self) -> "PointTargetAction":
         """Ensure either coordinates, target_id, or target_class is provided."""
         has_coords = self.x is not None and self.y is not None
         has_target = self.target_id is not None

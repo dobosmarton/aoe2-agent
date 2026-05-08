@@ -51,7 +51,7 @@ AGE_SCORES = {
 class AgentMemory:
     """Manages agent memory across turns."""
 
-    def __init__(self, working_memory_size: int = 10):
+    def __init__(self, working_memory_size: int = 10) -> None:
         """
         Initialize memory system.
 

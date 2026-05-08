@@ -31,7 +31,7 @@ EPSILON = 0.02  # Accept if score >= best - epsilon
 class Orchestrator:
     """Coordinates the prompt optimization experiment loop."""
 
-    def __init__(self, epsilon: float = EPSILON):
+    def __init__(self, epsilon: float = EPSILON) -> None:
         self.mutator = PromptMutator()
         self.best_score = get_best_score(loop="prompt")
         self.epsilon = epsilon
@@ -170,7 +170,7 @@ class Orchestrator:
         max_experiments: int | None = None,
         time_budget: float = 1200,
         run_baseline_first: bool = True,
-    ):
+    ) -> None:
         """Run the autonomous experiment loop.
 
         Human starts each game manually (Phase 1).
@@ -282,7 +282,7 @@ class Orchestrator:
         )
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Run autoresearch prompt optimization loop")
     parser.add_argument(
         "--max-experiments",

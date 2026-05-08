@@ -64,7 +64,7 @@ class Goal:
 class GoalManager:
     """Manages active and completed goals, computes progress and rewards."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.active_goals: list[Goal] = []
         self.completed_goals: list[Goal] = []
         self._prev_state: dict | None = None

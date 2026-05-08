@@ -86,7 +86,7 @@ class StrategistProvider:
     or immediately when an alarm is triggered (e.g. enemy attack).
     """
 
-    def __init__(self, model: str | None = None):
+    def __init__(self, model: str | None = None) -> None:
         self.model = model or config.strategist_model
         self.client = anthropic.AsyncAnthropic(api_key=config.anthropic_api_key, max_retries=2)
         self.refresh_interval = config.strategist_interval

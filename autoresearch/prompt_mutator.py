@@ -50,7 +50,7 @@ and set new_text to that same line PLUS your addition after it."""
 class PromptMutator:
     """Proposes, applies, and reverts changes to the system prompt."""
 
-    def __init__(self, model: str = "claude-haiku-4-5-20251001"):
+    def __init__(self, model: str = "claude-haiku-4-5-20251001") -> None:
         self.client = anthropic.Anthropic()
         self.model = model
 

@@ -142,7 +142,7 @@ async def run_and_log(
     return result
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Run AoE2 agent and collect metrics")
     parser.add_argument(
         "--time-budget",

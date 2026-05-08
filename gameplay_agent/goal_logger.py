@@ -9,7 +9,7 @@ from .goals import Goal
 class GoalLogger:
     """Writes structured goal tracking to logs/goals.log."""
 
-    def __init__(self, log_dir: Path):
+    def __init__(self, log_dir: Path) -> None:
         self.log_path = log_dir / "goals.log"
         log_dir.mkdir(parents=True, exist_ok=True)
         # Write header

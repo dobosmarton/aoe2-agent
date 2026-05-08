@@ -34,7 +34,9 @@ from evaluation.world_sim import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
+
+    from gameplay_agent.executor import ActionResult
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -101,7 +103,7 @@ class ScenarioResult:
 
 
 @contextlib.contextmanager
-def _isolate_memories_dir(fixture_memories: list[dict]):
+def _isolate_memories_dir(fixture_memories: list[dict]) -> Iterator[None]:
     """Back up existing memories/, plant fixture memories, restore on exit.
 
     Refuses to run if an orphan `<memories>_eval_backup` directory exists
@@ -164,7 +166,7 @@ def _write_fixture_memory(memories_dir: Path, memory: dict, index: int) -> None:
 
 
 @contextlib.contextmanager
-def _mock_executor():
+def _mock_executor() -> Iterator[None]:
     """Patch execute_action in both the canonical module and the import in claude.py.
 
     The executor's tool loop calls execute_action for every action; without
@@ -177,7 +179,7 @@ def _mock_executor():
     real_canonical = ex.execute_action
     real_in_claude = claude_mod.execute_action
 
-    async def fake_execute_action(action_dict):
+    async def fake_execute_action(action_dict: dict) -> ActionResult:
         return ex.ActionResult(success=True, detail="ok (eval)")
 
     ex.execute_action = fake_execute_action

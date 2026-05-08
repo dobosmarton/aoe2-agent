@@ -64,7 +64,7 @@ class DetectionOverlay:
 
     OVERLAY_TITLE = "AoE2 Detection Overlay"
 
-    def __init__(self):
+    def __init__(self) -> None:
         import tkinter as tk
 
         self._root = tk.Tk()
@@ -92,7 +92,7 @@ class DetectionOverlay:
 
         logger.info("Detection overlay initialized")
 
-    def _make_click_through(self):
+    def _make_click_through(self) -> None:
         """Set WS_EX_TRANSPARENT + WS_EX_LAYERED so clicks pass through."""
         if sys.platform != "win32":
             logger.warning("Overlay click-through only works on Windows")
@@ -125,7 +125,7 @@ class DetectionOverlay:
         except Exception as e:
             logger.warning("Failed to set click-through: %s", e)
 
-    def hide(self):
+    def hide(self) -> None:
         """Hide overlay (call before screenshot capture)."""
         if self._visible:
             self._root.withdraw()
@@ -136,7 +136,7 @@ class DetectionOverlay:
         self,
         entities: list[DetectedEntity],
         window_rect: tuple[int, int, int, int] | None,
-    ):
+    ) -> None:
         """Draw detection boxes and show the overlay.
 
         Args:
@@ -197,7 +197,7 @@ class DetectionOverlay:
         self._root.update_idletasks()
         self._root.update()
 
-    def close(self):
+    def close(self) -> None:
         """Destroy the overlay window."""
         with contextlib.suppress(Exception):
             self._root.destroy()

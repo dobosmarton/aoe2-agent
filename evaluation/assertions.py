@@ -50,7 +50,7 @@ def _preview(reasoning: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def must_include(actions: list[dict], pattern: dict, **_) -> list[str]:
+def must_include(actions: list[dict], pattern: dict, **_: object) -> list[str]:
     """Action list contains at least one action matching the pattern (anywhere)."""
     if not isinstance(pattern, dict):
         return [f"must_include expected a dict, got {type(pattern).__name__}"]
@@ -62,7 +62,7 @@ def must_include(actions: list[dict], pattern: dict, **_) -> list[str]:
     ]
 
 
-def must_include_first(actions: list[dict], patterns: list[dict], **_) -> list[str]:
+def must_include_first(actions: list[dict], patterns: list[dict], **_: object) -> list[str]:
     """First N actions match exactly (ordered prefix)."""
     if not isinstance(patterns, list):
         return [f"must_include_first expected a list, got {type(patterns).__name__}"]
@@ -81,7 +81,7 @@ def must_include_first(actions: list[dict], patterns: list[dict], **_) -> list[s
     return []
 
 
-def must_not_include(actions: list[dict], pattern: dict, **_) -> list[str]:
+def must_not_include(actions: list[dict], pattern: dict, **_: object) -> list[str]:
     """Action list contains NO action matching the pattern."""
     if not isinstance(pattern, dict):
         return [f"must_not_include expected a dict, got {type(pattern).__name__}"]
@@ -102,7 +102,7 @@ def _count_matches(actions: list[dict], spec: dict, default_n: int) -> tuple[int
     return expected_n, actual_count, pattern
 
 
-def count_at_least(actions: list[dict], spec: dict, **_) -> list[str]:
+def count_at_least(actions: list[dict], spec: dict, **_: object) -> list[str]:
     """At least N actions match the type/pattern."""
     expected_n, actual, pattern = _count_matches(actions, spec, default_n=1)
     if actual < expected_n:
@@ -113,7 +113,7 @@ def count_at_least(actions: list[dict], spec: dict, **_) -> list[str]:
     return []
 
 
-def count_at_most(actions: list[dict], spec: dict, **_) -> list[str]:
+def count_at_most(actions: list[dict], spec: dict, **_: object) -> list[str]:
     """At most N actions match the type/pattern (n: 0 forbids the type entirely)."""
     expected_n, actual, pattern = _count_matches(actions, spec, default_n=0)
     if actual > expected_n:
@@ -129,7 +129,7 @@ def differs_from_baseline_by(
     spec: dict,
     *,
     baseline_actions: list[dict] | None = None,
-    **_,
+    **_: object,
 ) -> list[str]:
     """Differential assertion: this variant's action list differs from the baseline.
 
@@ -199,7 +199,7 @@ def _extract_applied_titles(reasoning: str) -> list[str]:
     return list(dict.fromkeys(titles))
 
 
-def applied_memories(reasoning: str, expected: list[str], **_) -> list[str]:
+def applied_memories(reasoning: str, expected: list[str], **_: object) -> list[str]:
     """Reasoning's `[applied: ...]` tag names exactly these titles (set-equal)."""
     actual = _extract_applied_titles(reasoning)
     if set(actual) != set(expected):
@@ -210,7 +210,7 @@ def applied_memories(reasoning: str, expected: list[str], **_) -> list[str]:
     return []
 
 
-def applied_memories_subset(reasoning: str, expected: list[str], **_) -> list[str]:
+def applied_memories_subset(reasoning: str, expected: list[str], **_: object) -> list[str]:
     """Reasoning's `[applied: ...]` tag names AT LEAST these titles (extras allowed)."""
     actual = set(_extract_applied_titles(reasoning))
     missing = set(expected) - actual
@@ -222,7 +222,7 @@ def applied_memories_subset(reasoning: str, expected: list[str], **_) -> list[st
     return []
 
 
-def reasoning_contains(reasoning: str, expected: str, **_) -> list[str]:
+def reasoning_contains(reasoning: str, expected: str, **_: object) -> list[str]:
     """Reasoning string contains the substring (case-insensitive)."""
     if not isinstance(expected, str):
         return [f"reasoning_contains expected a string, got {type(expected).__name__}"]
@@ -234,7 +234,7 @@ def reasoning_contains(reasoning: str, expected: str, **_) -> list[str]:
     return []
 
 
-def reasoning_excludes(reasoning: str, expected: str, **_) -> list[str]:
+def reasoning_excludes(reasoning: str, expected: str, **_: object) -> list[str]:
     """Reasoning string does NOT contain the substring (case-insensitive)."""
     if not isinstance(expected, str):
         return [f"reasoning_excludes expected a string, got {type(expected).__name__}"]
@@ -273,7 +273,7 @@ _TAKES_LIST_AS_VALUE = {
 }
 
 
-def _normalize_value(key: str, value):
+def _normalize_value(key: str, value: object) -> list[object]:
     """Wrap scalars in a list so the caller can always iterate.
 
     Lists become [item, item, ...] (one assertion call per item) UNLESS the

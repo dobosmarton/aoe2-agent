@@ -28,7 +28,7 @@ structlog.configure(
 log = structlog.get_logger()
 
 
-def create_provider(provider_name: str):
+def create_provider(provider_name: str) -> ClaudeProvider:
     """Create an LLM provider by name."""
     providers = {
         "claude": ClaudeProvider,
@@ -44,7 +44,7 @@ def create_provider(provider_name: str):
     return providers[provider_name]()
 
 
-async def main_async(args):
+async def main_async(args: argparse.Namespace) -> None:
     """Async main function."""
     # Validate API key
     if not config.anthropic_api_key:
@@ -71,7 +71,7 @@ async def main_async(args):
         await game_loop(provider, max_iterations=args.iterations, use_overlay=args.overlay)
 
 
-def main():
+def main() -> None:
     """Main entry point."""
     parser = argparse.ArgumentParser(
         description="AoE2 LLM Agent - Play Age of Empires 2 using vision LLM"

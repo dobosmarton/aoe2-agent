@@ -7,14 +7,20 @@ context, enabling learning from experience.
 Memory files are human-readable and reviewable — delete any bad ones.
 """
 
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import anthropic
 import structlog
+
+if TYPE_CHECKING:
+    from autoresearch.metrics import GameScore
+    from gameplay_agent.memory import AgentMemory
 
 log = structlog.get_logger()
 
@@ -93,15 +99,15 @@ genuinely new happened, write 0 or 1 notes."""
 class MemoryChain:
     """Manages persistent cross-game memory fragments."""
 
-    def __init__(self, memories_dir: Path | str = MEMORIES_DIR):
+    def __init__(self, memories_dir: Path | str = MEMORIES_DIR) -> None:
         self.memories_dir = Path(memories_dir)
         self.memories_dir.mkdir(parents=True, exist_ok=True)
         self.client = anthropic.Anthropic()
 
     def extract_memories(
         self,
-        memory,
-        score,
+        memory: AgentMemory,
+        score: GameScore,
         game_id: str,
         model: str = "claude-haiku-4-5-20251001",
     ) -> list[Path]:
@@ -274,7 +280,7 @@ class MemoryChain:
             )
         return result
 
-    def _build_game_summary(self, memory, score) -> str:
+    def _build_game_summary(self, memory: AgentMemory, score: GameScore) -> str:
         """Build a text summary of the game for the extraction LLM."""
         parts = []
 

@@ -208,7 +208,7 @@ class ClaudeProvider(BaseLLMProvider):
         api_key: str | None = None,
         model: str | None = None,
         use_dynamic_context: bool = True,
-    ):
+    ) -> None:
         """
         Initialize Claude provider.
 
