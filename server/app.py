@@ -338,7 +338,7 @@ def _parse_raw_output(
         mask = best_conf >= min_thresh
         boxes, best_cls, best_conf = boxes[mask], best_cls[mask], best_conf[mask]
         preds = []
-        for box, cls_id, conf in zip(boxes, best_cls, best_conf, strict=False):
+        for box, cls_id, conf in zip(boxes, best_cls, best_conf, strict=True):
             xc, yc, w, h = box
             preds.append([xc - w / 2, yc - h / 2, xc + w / 2, yc + h / 2, conf, cls_id])
         predictions = np.array(preds) if preds else np.array([]).reshape(0, 6)
@@ -446,7 +446,7 @@ def _detect_sahi(
 
     if state.backend == "coreml":
         # CoreML: sequential per-tile (no dynamic batch support)
-        for chw, (x_off, y_off, tw, th) in zip(tiles, offsets, strict=False):
+        for chw, (x_off, y_off, tw, th) in zip(tiles, offsets, strict=True):
             raw = _run_coreml_single(state, chw)
             dets = _parse_raw_output(
                 raw,

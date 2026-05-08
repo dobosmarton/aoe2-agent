@@ -140,7 +140,7 @@ def _run_standard_detection(
     img_w, img_h = results[0].orig_shape[1], results[0].orig_shape[0]
 
     detections = []
-    for box, cls_id, conf in zip(boxes.xyxy, boxes.cls, boxes.conf, strict=False):
+    for box, cls_id, conf in zip(boxes.xyxy, boxes.cls, boxes.conf, strict=True):
         detections.append(
             {
                 "bbox": tuple(box.tolist()),

@@ -809,7 +809,7 @@ class EntityDetector:
                         result.boxes.xyxy.cpu().numpy(),
                         result.boxes.cls.cpu().numpy(),
                         result.boxes.conf.cpu().numpy(),
-                        strict=False,
+                        strict=True,
                     ):
                         x1, y1, x2, y2 = box.tolist()
                         class_idx = int(cls_id)
@@ -920,7 +920,7 @@ class EntityDetector:
                         result.boxes.xyxy.cpu().numpy(),
                         result.boxes.cls.cpu().numpy(),
                         result.boxes.conf.cpu().numpy(),
-                        strict=False,
+                        strict=True,
                     ):
                         x1, y1, x2, y2 = box.tolist()
                         class_idx = int(cls_id)
@@ -1035,7 +1035,7 @@ class EntityDetector:
             mask = best_conf >= min_thresh
             boxes, best_cls, best_conf = boxes[mask], best_cls[mask], best_conf[mask]
             predictions = []
-            for box, cls_id, conf in zip(boxes, best_cls, best_conf, strict=False):
+            for box, cls_id, conf in zip(boxes, best_cls, best_conf, strict=True):
                 xc, yc, w, h = box
                 predictions.append([xc - w / 2, yc - h / 2, xc + w / 2, yc + h / 2, conf, cls_id])
             predictions = np.array(predictions) if predictions else np.array([]).reshape(0, 6)
@@ -1091,7 +1091,7 @@ class EntityDetector:
                 boxes.xyxy.cpu().numpy(),
                 boxes.cls.cpu().numpy(),
                 boxes.conf.cpu().numpy(),
-                strict=False,
+                strict=True,
             ):
                 x1, y1, x2, y2 = box.tolist()
                 class_idx = int(cls_id)
@@ -1191,7 +1191,7 @@ class EntityDetector:
 
             # Convert from x_center, y_center, w, h to x1, y1, x2, y2
             predictions = []
-            for box, cls_id, conf in zip(boxes, best_class_idx, best_confidence, strict=False):
+            for box, cls_id, conf in zip(boxes, best_class_idx, best_confidence, strict=True):
                 x_c, y_c, w, h = box
                 x1 = x_c - w / 2
                 y1 = y_c - h / 2

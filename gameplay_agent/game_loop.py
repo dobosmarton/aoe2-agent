@@ -500,7 +500,7 @@ async def _execute_turn_actions(
 
         # Build feedback from failed actions
         verification_lines = []
-        for action, result in zip(actions, results, strict=False):
+        for action, result in zip(actions, results, strict=True):
             if not result.success:
                 a_intent = action.get("intent", "") if isinstance(action, dict) else ""
                 a_type = action.get("type", "") if isinstance(action, dict) else ""

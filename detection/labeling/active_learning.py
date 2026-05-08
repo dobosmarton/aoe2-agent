@@ -239,7 +239,7 @@ def prepare_batch(
                 results[0].boxes.xyxy,
                 results[0].boxes.cls,
                 results[0].boxes.conf,
-                strict=False,
+                strict=True,
             ):
                 v1_id = int(cls_id.item())
                 if v1_id not in id_mapping:

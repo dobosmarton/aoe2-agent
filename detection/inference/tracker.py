@@ -142,7 +142,7 @@ class EntityTracker:
         matched_tracks: set[int] = set()
         matched_dets: set[int] = set()
 
-        for t_idx, d_idx in zip(track_indices, det_indices, strict=False):
+        for t_idx, d_idx in zip(track_indices, det_indices, strict=True):
             if cost_matrix[t_idx, d_idx] < (1.0 - self.iou_threshold):
                 meas = _bbox_to_measurement(detections[d_idx].bbox)
                 _kalman_update(self.tracks[t_idx], meas)

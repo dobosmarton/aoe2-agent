@@ -136,7 +136,7 @@ def main():
 
                 # Count by class
                 for cls_id, conf in zip(
-                    boxes.cls.cpu().numpy(), boxes.conf.cpu().numpy(), strict=False
+                    boxes.cls.cpu().numpy(), boxes.conf.cpu().numpy(), strict=True
                 ):
                     class_idx = int(cls_id)
                     class_name = model.names.get(class_idx, f"class_{class_idx}")
@@ -150,7 +150,7 @@ def main():
                         boxes.xyxy.cpu().numpy(),
                         boxes.cls.cpu().numpy(),
                         boxes.conf.cpu().numpy(),
-                        strict=False,
+                        strict=True,
                     ):
                         class_name = model.names.get(int(cls_id), "unknown")
                         x1, y1, x2, y2 = box
