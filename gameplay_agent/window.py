@@ -1,7 +1,7 @@
 """Window management for AoE2 LLM Agent."""
 
 import time
-from typing import Any
+from typing import Protocol
 
 import structlog
 
@@ -19,14 +19,32 @@ except ImportError:
 AOE2_WINDOW_TITLE = "Age of Empires II: Definitive Edition"
 
 
-def find_game_window() -> Any | None:
+class GameWindow(Protocol):
+    """Subset of the pygetwindow Window API that this module relies on.
+
+    Defined as a Protocol because pygetwindow's Window class differs by
+    platform (Win32Window on Windows, nothing on Linux) and the import is
+    conditional. Structural typing avoids the platform-specific class.
+    """
+
+    @property
+    def isActive(self) -> bool: ...
+    @property
+    def left(self) -> int: ...
+    @property
+    def top(self) -> int: ...
+    @property
+    def width(self) -> int: ...
+    @property
+    def height(self) -> int: ...
+    def activate(self) -> None: ...
+
+
+def find_game_window() -> GameWindow | None:
     """
     Find the AoE2 window.
 
-    Returns the window object or None if not found. Typed as `Any` because
-    pygetwindow's Window class differs by platform (Win32Window on Windows,
-    no Linux backend) and the import is conditional (see PYGETWINDOW_AVAILABLE).
-    Callers use the .isActive / .activate / .left etc. attrs.
+    Returns the window object or None if not found.
     """
     if not PYGETWINDOW_AVAILABLE:
         return None

@@ -131,8 +131,10 @@ ignore = [
     "E501",   # line-too-long: ruff format handles formatting; long literals are fine
     "B008",   # function-call-in-default-argument: common with FastAPI Depends() etc.
     "SIM108", # use ternary: not always more readable
-    "ANN401", # `Any` is sometimes the right choice (third-party SDK shapes,
-              # decorator factories, optional-import variables).
+    # ANN401 (`Any` in type annotations) IS enforced. The codebase aims to have
+    # zero `Any` annotations. SDK boundaries that genuinely need to escape the
+    # type system use `# pyright: ignore[reportArgumentType]` per-line instead
+    # of the previous `cast(Any, ...)` pattern.
     # BLE001 (blind-except) deliberately NOT enabled. Audited 2026-05: all 41
     # `except Exception:` sites are legitimate boundary catches (anthropic API
     # calls, optional-resource init, scenario-harness tolerance, file-parser
@@ -185,6 +187,11 @@ pythonVersion = "3.11"
 # Treat third-party packages without stubs as untyped rather than failing.
 reportMissingTypeStubs = false
 reportMissingImports = "warning"
+# Enforce no `Any` annotations and no `cast(Any, ...)` escape hatches.
+# SDK boundaries that genuinely need to escape the type system use
+# `# pyright: ignore[reportArgumentType]` per-line instead.
+reportExplicitAny = "error"
+reportAny = "error"
 
 # Per-directory strict mode via executionEnvironments. Each scoped dir
 # runs its own files under strict rules but treats dependencies as

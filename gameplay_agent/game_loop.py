@@ -1,13 +1,29 @@
 """Main game loop for AoE2 LLM Agent."""
 
+from __future__ import annotations
+
 import asyncio
 import contextlib
 import re
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 import structlog
+
+if TYPE_CHECKING:
+    from detection.inference.detector import DetectedEntity, EntityDetector
+    from detection.inference.frame_diff import FrameDiffer
+    from detection.inference.remote_detector import RemoteDetector
+
+    from .overlay import DetectionOverlay
+    from .providers.base import BaseLLMProvider, LLMResult
+
+    # Both detector types are valid — they share a duck-typed interface but
+    # don't inherit from a common base. The game loop calls `.tracker`,
+    # `.use_mock`, `.backend`, `.confidence_threshold` and the methods
+    # invoked through `_invoke_detector(...)`.
+    Detector = EntityDetector | RemoteDetector
 
 from .config import config
 from .entity_utils import build_entity_summary
@@ -22,7 +38,6 @@ from .goal_logger import GoalLogger
 from .goals import GoalManager
 from .memory import AgentMemory, GameState
 from .models import validate_actions
-from .providers.base import BaseLLMProvider
 from .providers.strategist import StrategistProvider, get_default_goals
 from .screen import capture_screenshot, save_screenshot
 from .window import ensure_game_focused, get_game_window_rect, is_game_running
@@ -72,8 +87,15 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 
-async def _invoke_detector(det: object, method: str, *args: object, **kwargs: object) -> list:
-    """Call a detector method, handling both sync and async implementations."""
+async def _invoke_detector(
+    det: Detector, method: str, *args: object, **kwargs: object
+) -> list[DetectedEntity]:
+    """Call a detector method, handling both sync and async implementations.
+
+    All EntityDetector / RemoteDetector inference methods return
+    `list[DetectedEntity]` — pyright can't see that through `getattr`,
+    so the return type is asserted here.
+    """
     fn = getattr(det, method)
     if asyncio.iscoroutinefunction(fn):
         return await fn(*args, **kwargs)
@@ -136,7 +158,7 @@ def _get_maintenance_actions(memory: AgentMemory) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
-def _init_detector() -> object | None:
+def _init_detector() -> Detector | None:
     """Initialize YOLO detector (remote or local)."""
     if not DETECTION_AVAILABLE:
         return None
@@ -158,7 +180,7 @@ def _init_detector() -> object | None:
         return None
 
 
-def _init_frame_differ() -> object | None:
+def _init_frame_differ() -> FrameDiffer | None:
     """Initialize frame differ for skipping redundant rescans."""
     try:
         from detection.inference.frame_diff import FrameDiffer
@@ -169,16 +191,11 @@ def _init_frame_differ() -> object | None:
 
 
 def _register_rescan_callbacks(
-    detector: Any,
-    overlay: Any | None,
-    frame_differ: Any | None,
+    detector: Detector,
+    overlay: DetectionOverlay | None,
+    frame_differ: FrameDiffer | None,
 ) -> None:
-    """Register rescan + full detection callbacks on the executor module.
-
-    Typed as Any because the detector is built from a try/except optional
-    import; tightening to a Protocol would require restructuring the
-    optional-import dance.
-    """
+    """Register rescan + full detection callbacks on the executor module."""
 
     async def _rescan() -> None:
         if overlay:
@@ -235,7 +252,7 @@ def _register_rescan_callbacks(
 
 
 async def _capture_screenshot(
-    overlay: object | None,
+    overlay: DetectionOverlay | None,
     screenshots_dir: Path | None,
     iteration: int,
 ) -> tuple[bytes, int, int]:
@@ -254,11 +271,11 @@ async def _capture_screenshot(
 
 
 async def _run_detection(
-    detector: object,
+    detector: Detector,
     screenshot: bytes,
     iteration: int,
     alarm: bool,
-) -> list:
+) -> list[DetectedEntity]:
     """Run entity detection, choosing adaptive SAHI or standard mode."""
     try:
         if config.adaptive_sahi:
@@ -404,13 +421,13 @@ def _build_llm_context(
 
 
 def _process_response(
-    response: dict,
+    response: LLMResult,
     memory: AgentMemory,
     goal_manager: GoalManager,
     iteration: int,
     goal_logger: GoalLogger,
     time_budget: float | None,
-) -> tuple[list, str | None]:
+) -> tuple[list[dict[str, object]], str | None]:
     """Parse LLM response, update memory/goals, check for game-over.
 
     Returns (actions, game_end_reason). game_end_reason is None if game continues.
@@ -781,8 +798,9 @@ async def run_single_iteration(
         observations=response.get("observations", {}),
     )
 
-    if execute and response.get("actions"):
-        await execute_actions(response["actions"])
+    actions = response.get("actions") or []
+    if execute and actions:
+        await execute_actions(actions)
 
     clear_detected_entities()
 

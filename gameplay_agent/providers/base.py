@@ -1,7 +1,23 @@
 """Base LLM provider interface for AoE2 Agent."""
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import TypedDict
+
+
+class LLMResult(TypedDict, total=False):
+    """Structured payload returned by `BaseLLMProvider.get_actions`.
+
+    `total=False` makes every key Optional — the provider may omit
+    fields when nothing of interest happened that turn (e.g. an empty
+    response). Consumers should `.get(...)` with a default rather than
+    indexing directly.
+    """
+
+    reasoning: str
+    actions: list[dict[str, object]]
+    observations: dict[str, object] | None
+    actions_already_executed: bool
+    success_count: int
 
 
 class BaseLLMProvider(ABC):
@@ -13,7 +29,7 @@ class BaseLLMProvider(ABC):
         context: str,
         width: int = 1920,
         height: int = 1080,
-    ) -> dict[str, Any]:
+    ) -> LLMResult:
         """
         Send game state to LLM and get actions back.
 
@@ -23,14 +39,12 @@ class BaseLLMProvider(ABC):
             height: Game window height in pixels (for coordinate reference)
 
         Returns:
-            Dictionary containing:
-                - reasoning: str - LLM's explanation of what it sees and plans
-                - actions: list[dict] - List of action dictionaries to execute
+            An LLMResult dict with reasoning, actions, observations, etc.
         """
         pass
 
     @abstractmethod
-    def get_system_prompt(self, age: str = "Dark Age") -> str | list[dict]:
+    def get_system_prompt(self, age: str = "Dark Age") -> str | list[dict[str, object]]:
         """Get the system prompt for this provider.
 
         Returns either a plain string or a list of content blocks

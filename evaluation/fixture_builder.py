@@ -23,7 +23,6 @@ import re
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -64,10 +63,8 @@ def _parse_kv_line(line: str) -> dict[str, str]:
     return result
 
 
-def _coerce_scalar(value: str) -> Any:
+def _coerce_scalar(value: str) -> int | float | str:
     """Convert a stringified scalar to int/float when it looks numeric, else keep as str."""
-    if value is None:
-        return value
     if re.fullmatch(r"-?\d+", value):
         return int(value)
     if re.fullmatch(r"-?\d+\.\d+", value):
@@ -75,13 +72,13 @@ def _coerce_scalar(value: str) -> Any:
     return value
 
 
-def _parse_resources_dict(text: str) -> dict[str, Any]:
+def _parse_resources_dict(text: str) -> dict[str, int | float | str]:
     """Parse a Python-style dict like '{food: 200, age: \"Dark Age\"}'.
 
     The log uses repr-style output — we use a permissive regex parser to
     avoid eval().
     """
-    parsed: dict[str, Any] = {}
+    parsed: dict[str, int | float | str] = {}
     pattern = re.compile(r"['\"]?(\w+)['\"]?\s*:\s*('([^']*)'|\"([^\"]*)\"|([\d/\.]+))")
     for match in pattern.finditer(text):
         key = match.group(1)
@@ -90,14 +87,14 @@ def _parse_resources_dict(text: str) -> dict[str, Any]:
     return parsed
 
 
-def _latest_strategist_resources(lines: list[str]) -> dict[str, Any]:
+def _latest_strategist_resources(lines: list[str]) -> dict[str, int | float | str]:
     """Return the resources dict from the LATEST strategist_response line.
 
     The strategist runs roughly every 10 turns, so for any specific target turn
     the nearest strategist reading may be several turns old. We pick the most
     recent one for simplicity — fixture authors should hand-correct if needed.
     """
-    latest: dict[str, Any] = {}
+    latest: dict[str, int | float | str] = {}
     for line in lines:
         if "strategist_response" not in line:
             continue
@@ -165,7 +162,7 @@ def _description(log_path: Path, turn: int) -> str:
     )
 
 
-def _resources_block(scraped: dict[str, Any]) -> dict[str, Any]:
+def _resources_block(scraped: dict[str, int | float | str]) -> dict[str, int | float | str]:
     return {
         "food": scraped.get("food", 0),
         "wood": scraped.get("wood", 0),

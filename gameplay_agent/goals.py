@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal
 
 import structlog
 
@@ -52,7 +52,7 @@ class Goal:
     name: str
     type: Literal["local", "global"]
     metric: str  # "population", "food", "wood", "gold", "stone", "age", "building"
-    target: Any  # Numeric value or string (e.g., "Feudal Age")
+    target: int | float | str  # Numeric for resource/pop goals, string for "Feudal Age"
     priority: int  # 1-10 (10 = most urgent)
     created_turn: int
     deadline_turns: int | None = None
@@ -122,12 +122,12 @@ class GoalManager:
         except (ValueError, TypeError):
             return 0.0
 
-        if metric == "age":
+        if metric == "age" and isinstance(target, str):
             current_score = AGE_SCORES.get(state.current_age, 0.0)
             target_score = AGE_SCORES.get(target, 1.0)
             return current_score / target_score if target_score > 0 else 0.0
 
-        # Unknown metric — can't compute
+        # Unknown metric (or age with a non-string target) — can't compute
         return 0.0
 
     def compute_turn_reward(self, prev_state: GameState, curr_state: GameState) -> dict:

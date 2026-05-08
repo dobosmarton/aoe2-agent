@@ -18,6 +18,8 @@ import sys
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from detection.inference.detector import DetectedEntity
 
 logger = logging.getLogger(__name__)
@@ -134,7 +136,7 @@ class DetectionOverlay:
 
     def show(
         self,
-        entities: list[DetectedEntity],
+        entities: Sequence[DetectedEntity],
         window_rect: tuple[int, int, int, int] | None,
     ) -> None:
         """Draw detection boxes and show the overlay.

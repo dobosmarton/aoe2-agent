@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import random
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
-def _run(coro: Awaitable[Any]) -> Any:
+def _run(coro: Awaitable[object]) -> object:
     """Drive a coroutine to completion in a fresh event loop."""
     return asyncio.run(coro)  # type: ignore[arg-type]
 
@@ -41,12 +41,12 @@ class _FakePyautogui:
     """Records every call so tests can assert what would have happened."""
 
     def __init__(self) -> None:
-        self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+        self.calls: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
         self.FAILSAFE = False  # the real module attribute the executor reads
         self.PAUSE = 0.0
 
     def _record(self, name: str) -> Callable[..., None]:
-        def fn(*args: Any, **kwargs: Any) -> None:
+        def fn(*args: object, **kwargs: object) -> None:
             self.calls.append((name, args, kwargs))
 
         return fn
@@ -202,7 +202,7 @@ def test_set_detected_entities_calls_to_dict(fake_pyautogui: _FakePyautogui) -> 
     """Entities with a `to_dict()` method are converted; raw dicts pass through."""
 
     class FakeEntity:
-        def to_dict(self) -> dict[str, Any]:
+        def to_dict(self) -> dict[str, object]:
             return {"id": "from_obj", "class": "tree"}
 
     ex.set_detected_entities([FakeEntity(), {"id": "raw", "class": "sheep"}])

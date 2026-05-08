@@ -3,15 +3,16 @@
 import json
 import re
 from pathlib import Path
-from typing import Any, ClassVar, cast
+from typing import ClassVar
 
 import anthropic
 import structlog
+from anthropic.types import ToolUseBlock
 
 from ..config import config
 from ..executor import execute_action, get_detected_entities
 from ..models import LLMResponse, Observations, validate_actions
-from .base import BaseLLMProvider
+from .base import BaseLLMProvider, LLMResult
 
 # Pricing per million tokens (claude-sonnet-4-6)
 _PRICE_INPUT = 3.00
@@ -417,14 +418,14 @@ class ClaudeProvider(BaseLLMProvider):
 
     def _make_tool_result(
         self,
-        block: Any,
+        block: ToolUseBlock,
         success: bool,
         detail: str,
         *,
         include_entities: bool = False,
     ) -> dict:
         """Build the tool_result dict returned to Claude."""
-        result_data: dict[str, Any] = {"success": success, "detail": detail}
+        result_data: dict[str, object] = {"success": success, "detail": detail}
         if include_entities:
             result_data["entities"] = self._entity_snapshot()
         return {
@@ -434,22 +435,25 @@ class ClaudeProvider(BaseLLMProvider):
         }
 
     @staticmethod
-    def _serialize_response(result: LLMResponse) -> dict[str, Any]:
+    def _serialize_response(result: LLMResponse) -> LLMResult:
         """Convert LLMResponse to a plain dict without Pydantic serialization warnings.
 
         Composite action dicts don't match the Action union type, so we
         serialize each action individually to avoid PydanticSerializationUnexpectedValue.
         """
-        actions = [a.model_dump() if hasattr(a, "model_dump") else a for a in result.actions]
-        return {
-            "reasoning": result.reasoning,
-            "observations": result.observations.model_dump()
+        actions: list[dict[str, object]] = [
+            a.model_dump() if hasattr(a, "model_dump") else a  # type: ignore[union-attr]
+            for a in result.actions
+        ]
+        return LLMResult(
+            reasoning=result.reasoning,
+            observations=result.observations.model_dump()
             if hasattr(result.observations, "model_dump")
             else {},
-            "actions": actions,
-            "actions_already_executed": True,
-            "success_count": getattr(result, "_success_count", len(actions)),
-        }
+            actions=actions,
+            actions_already_executed=True,
+            success_count=getattr(result, "_success_count", len(actions)),
+        )
 
     async def _run_steps(self, composite_name: str, steps: list[dict]) -> tuple[bool, str]:
         """Execute action steps sequentially, stop on first failure."""
@@ -471,7 +475,7 @@ class ClaudeProvider(BaseLLMProvider):
 
     _COMPOSITE_NAMES: ClassVar[set[str]] = {"build", "send_villager", "queue_villager"}
 
-    async def _execute_build(self, block: Any) -> tuple[dict, dict]:
+    async def _execute_build(self, block: ToolUseBlock) -> tuple[dict, dict]:
         """Composite: press . → q (econ menu) → building_key → click(x,y).
 
         Uses the LLM-provided coordinates directly.  The executor's
@@ -492,7 +496,7 @@ class ClaudeProvider(BaseLLMProvider):
         tool_result = self._make_tool_result(block, success, detail, include_entities=True)
         return action_dict, tool_result
 
-    async def _execute_send_villager(self, block: Any) -> tuple[dict, dict]:
+    async def _execute_send_villager(self, block: ToolUseBlock) -> tuple[dict, dict]:
         """Composite: press . (with rescan) → right_click target.
 
         The "." press moves the camera, so we rescan to get fresh entity
@@ -501,7 +505,7 @@ class ClaudeProvider(BaseLLMProvider):
         inp = block.input  # type: ignore[union-attr]
         intent = inp.get("intent", "Send villager")
 
-        rc_action: dict[str, Any] = {"type": "right_click", "intent": intent}
+        rc_action: dict[str, object] = {"type": "right_click", "intent": intent}
         if "target_class" in inp:
             rc_action["target_class"] = inp["target_class"]
         else:
@@ -522,7 +526,7 @@ class ClaudeProvider(BaseLLMProvider):
         tool_result = self._make_tool_result(block, success, detail, include_entities=True)
         return action_dict, tool_result
 
-    async def _execute_queue_villager(self, block: Any) -> tuple[dict, dict]:
+    async def _execute_queue_villager(self, block: ToolUseBlock) -> tuple[dict, dict]:
         """Composite: press h → press q."""
         inp = block.input  # type: ignore[union-attr]
         intent = inp.get("intent", "Queue villager")
@@ -543,7 +547,7 @@ class ClaudeProvider(BaseLLMProvider):
         "queue_villager": "_execute_queue_villager",
     }
 
-    async def _execute_tool_call(self, block: Any) -> tuple[dict, dict]:
+    async def _execute_tool_call(self, block: ToolUseBlock) -> tuple[dict, dict]:
         """Execute a single tool call and build the result payload."""
         tool_name = block.name  # type: ignore[union-attr]
 
@@ -560,7 +564,7 @@ class ClaudeProvider(BaseLLMProvider):
             success=result.success,
         )  # type: ignore[union-attr]
 
-        include_entities = tool_name == "press" and block.input.get("rescan")  # type: ignore[union-attr]
+        include_entities = tool_name == "press" and bool(block.input.get("rescan"))  # type: ignore[union-attr]
         tool_result = self._make_tool_result(
             block, result.success, result.detail, include_entities=include_entities
         )
@@ -581,15 +585,17 @@ class ClaudeProvider(BaseLLMProvider):
         system_prompt = self.get_system_prompt(age)
 
         for _ in range(config.max_tool_iterations):
-            # cast() — anthropic SDK types these args with strict TypedDicts
-            # (MessageParam, ToolUnionParam, etc.). Our dicts are runtime-equivalent;
-            # we'd need TypedDict aliases everywhere upstream to satisfy pyright.
+            # The anthropic SDK types these args with strict TypedDicts
+            # (MessageParam, ToolUnionParam, etc.). Our dicts are runtime-
+            # equivalent; matching the TypedDicts everywhere upstream is more
+            # churn than the safety buys, so we tell pyright to skip these
+            # three argument-type checks specifically.
             response = await self.client.messages.create(
                 model=self.model,
                 max_tokens=config.max_tokens,
-                system=cast("Any", system_prompt),
-                messages=cast("Any", messages),
-                tools=cast("Any", _ACTION_TOOLS),
+                system=system_prompt,  # pyright: ignore[reportArgumentType]
+                messages=messages,  # pyright: ignore[reportArgumentType]
+                tools=_ACTION_TOOLS,  # pyright: ignore[reportArgumentType]
             )
 
             # Accumulate token usage (cache fields may be None when caching is off)
@@ -650,7 +656,7 @@ class ClaudeProvider(BaseLLMProvider):
         context: str,
         width: int = 1920,
         height: int = 1080,
-    ) -> dict[str, Any]:
+    ) -> LLMResult:
         """
         Send text context to Claude and get actions back.
 
@@ -690,10 +696,10 @@ class ClaudeProvider(BaseLLMProvider):
             log.error("claude_error", error=str(e))
             return self._error_response(f"Error: {e}")
 
-    def _error_response(self, message: str) -> dict[str, Any]:
+    def _error_response(self, message: str) -> LLMResult:
         """Return a safe error response with a wait action."""
-        return {
-            "reasoning": message,
-            "observations": {},
-            "actions": [{"type": "wait", "ms": 1000, "intent": "Error recovery"}],
-        }
+        return LLMResult(
+            reasoning=message,
+            observations={},
+            actions=[{"type": "wait", "ms": 1000, "intent": "Error recovery"}],
+        )

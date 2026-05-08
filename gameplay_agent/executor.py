@@ -9,7 +9,6 @@ import random
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from typing import Any
 
 import pyautogui
 import structlog
@@ -57,7 +56,7 @@ def set_rescan_full_fn(fn: Callable[[], Awaitable[None]]) -> None:
     _rescan_full_fn = fn
 
 
-def set_detected_entities(entities: list[object]) -> None:
+def set_detected_entities(entities: Sequence[object]) -> None:
     """Cache detected entities for target_id/target_class resolution."""
     global _detected_entities
     _detected_entities = [
@@ -356,7 +355,7 @@ _ACTION_HANDLERS: dict[
 # ---------------------------------------------------------------------------
 
 
-async def execute_action(action: dict[str, Any] | Action) -> ActionResult:
+async def execute_action(action: dict[str, object] | Action) -> ActionResult:
     """Execute a single action from LLM output."""
     # Normalize to dict — isinstance(BaseModel) narrows the type for pyright,
     # which `hasattr` does not.
@@ -403,7 +402,7 @@ async def execute_action(action: dict[str, Any] | Action) -> ActionResult:
         return ActionResult(False, f"execution error: {e}")
 
 
-async def execute_actions(actions: Sequence[dict[str, Any] | Action]) -> list[ActionResult]:
+async def execute_actions(actions: Sequence[dict[str, object] | Action]) -> list[ActionResult]:
     """Execute a list of actions sequentially."""
     if not ensure_game_focused():
         log.warning("could_not_focus_before_actions")
