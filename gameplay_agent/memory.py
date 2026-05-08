@@ -181,11 +181,14 @@ class AgentMemory:
             for turn in recent_turns:
                 # Summarize actions with target info
                 action_summary = ", ".join(
-                    f"{a.get('type', '?')}({a.get('key', '')})" if a.get('type') == 'press'
+                    f"{a.get('type', '?')}({a.get('key', '')})"
+                    if a.get("type") == "press"
                     else f"{a.get('type', '?')}({a.get('target_id') or ''} @ {a.get('x', '?')},{a.get('y', '?')})"
                     for a in turn.actions[:5]
                 )
-                line = f"Turn {turn.iteration}: {turn.reasoning[:100]}...\n  Actions: {action_summary}"
+                line = (
+                    f"Turn {turn.iteration}: {turn.reasoning[:100]}...\n  Actions: {action_summary}"
+                )
                 if turn.verification:
                     line += f"\n  Result: {turn.verification[:150]}"
                 recent_lines.append(line)
@@ -193,7 +196,9 @@ class AgentMemory:
             # Stuck-loop detection: count consecutive failures
             no_change_count = 0
             for turn in reversed(recent_turns):
-                if turn.verification and ("no visible change" in turn.verification or "FAILED" in turn.verification):
+                if turn.verification and (
+                    "no visible change" in turn.verification or "FAILED" in turn.verification
+                ):
                     no_change_count += 1
                 else:
                     break
@@ -262,9 +267,7 @@ class AgentMemory:
             "total_actions": self.total_actions,
             "successful_actions": self.successful_actions,
             "action_success_rate": (
-                self.successful_actions / self.total_actions
-                if self.total_actions > 0
-                else 0.0
+                self.successful_actions / self.total_actions if self.total_actions > 0 else 0.0
             ),
             "turn_count": self.turn_count,
             "game_end_reason": self.game_end_reason,

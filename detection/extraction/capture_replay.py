@@ -35,54 +35,38 @@ from pathlib import Path
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Capture screenshots from AoE2 for training data"
-    )
+    parser = argparse.ArgumentParser(description="Capture screenshots from AoE2 for training data")
     parser.add_argument(
-        "--output", "-o",
+        "--output",
+        "-o",
         default="detection/real_screenshots/raw",
-        help="Output directory for screenshots"
+        help="Output directory for screenshots",
     )
     parser.add_argument(
-        "--count", "-n",
+        "--count",
+        "-n",
         type=int,
         default=200,
-        help="Number of screenshots to capture (default: 200)"
+        help="Number of screenshots to capture (default: 200)",
     )
     parser.add_argument(
-        "--interval", "-i",
-        type=float,
-        default=5.0,
-        help="Seconds between captures (default: 5.0)"
+        "--interval", "-i", type=float, default=5.0, help="Seconds between captures (default: 5.0)"
     )
     parser.add_argument(
-        "--prefix", "-p",
-        default="replay",
-        help="Filename prefix (default: replay)"
+        "--prefix", "-p", default="replay", help="Filename prefix (default: replay)"
     )
     parser.add_argument(
-        "--monitor",
-        type=int,
-        default=1,
-        help="Monitor number to capture (default: 1 = primary)"
+        "--monitor", type=int, default=1, help="Monitor number to capture (default: 1 = primary)"
     )
+    parser.add_argument("--quality", type=int, default=90, help="JPEG quality 1-100 (default: 90)")
     parser.add_argument(
-        "--quality",
-        type=int,
-        default=90,
-        help="JPEG quality 1-100 (default: 90)"
-    )
-    parser.add_argument(
-        "--format",
-        choices=["png", "jpg"],
-        default="png",
-        help="Output format (default: png)"
+        "--format", choices=["png", "jpg"], default="png", help="Output format (default: png)"
     )
     parser.add_argument(
         "--delay",
         type=float,
         default=5.0,
-        help="Initial delay before starting capture (default: 5.0)"
+        help="Initial delay before starting capture (default: 5.0)",
     )
 
     args = parser.parse_args()
@@ -144,11 +128,12 @@ def main():
                     # Convert to PIL and save as JPEG
                     try:
                         from PIL import Image
-                        img = Image.frombytes('RGB', screenshot.size, screenshot.rgb)
-                        img.save(str(filepath), 'JPEG', quality=args.quality)
+
+                        img = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
+                        img.save(str(filepath), "JPEG", quality=args.quality)
                     except ImportError:
                         # Fallback to PNG if PIL not available
-                        png_path = filepath.with_suffix('.png')
+                        png_path = filepath.with_suffix(".png")
                         mss.tools.to_png(screenshot.rgb, screenshot.size, output=str(png_path))
                         print("Warning: PIL not available, saved as PNG instead")
 
@@ -156,8 +141,10 @@ def main():
                 elapsed = i * args.interval
                 remaining = (args.count - i - 1) * args.interval
 
-                print(f"[{i+1:4d}/{args.count}] Captured: {filename} "
-                      f"(elapsed: {elapsed:.0f}s, remaining: ~{remaining:.0f}s)")
+                print(
+                    f"[{i + 1:4d}/{args.count}] Captured: {filename} "
+                    f"(elapsed: {elapsed:.0f}s, remaining: ~{remaining:.0f}s)"
+                )
 
                 if i < args.count - 1:
                     time.sleep(args.interval)

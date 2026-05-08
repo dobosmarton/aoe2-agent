@@ -3,7 +3,7 @@
 import json
 import re
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 import anthropic
 import structlog
@@ -27,7 +27,10 @@ def _click_schema(description: str) -> dict:
         "properties": {
             "x": {"type": "integer", "description": "X coordinate on game screen"},
             "y": {"type": "integer", "description": "Y coordinate on game screen"},
-            "target_class": {"type": "string", "description": "Entity class to target nearest of, e.g. 'sheep'"},
+            "target_class": {
+                "type": "string",
+                "description": "Entity class to target nearest of, e.g. 'sheep'",
+            },
             "intent": {"type": "string", "description": description},
         },
         "required": ["x", "y", "intent"],
@@ -39,8 +42,16 @@ def _click_schema(description: str) -> dict:
 # Each tool has its own enforced schema, preventing field confusion
 # that occurred with structured output union types.
 _ACTION_TOOLS: list[dict] = [
-    {"name": "click", "description": "Left click at screen coordinates. Use for building placement and UI interaction.", "input_schema": _click_schema("What this click does")},
-    {"name": "right_click", "description": "Right click at screen coordinates. Use for resource gathering, setting gather points, and unit commands.", "input_schema": _click_schema("What this right click does")},
+    {
+        "name": "click",
+        "description": "Left click at screen coordinates. Use for building placement and UI interaction.",
+        "input_schema": _click_schema("What this click does"),
+    },
+    {
+        "name": "right_click",
+        "description": "Right click at screen coordinates. Use for resource gathering, setting gather points, and unit commands.",
+        "input_schema": _click_schema("What this right click does"),
+    },
     {
         "name": "press",
         "description": "Press a keyboard key. Use for hotkeys, queuing units, opening build menus.",
@@ -48,8 +59,15 @@ _ACTION_TOOLS: list[dict] = [
             "type": "object",
             "properties": {
                 "key": {"type": "string", "description": "Key to press, e.g. 'h', 'q', '.', ','"},
-                "rescan": {"type": "boolean", "description": "Take fresh screenshot+detection after this key press"},
-                "modifiers": {"type": "array", "items": {"type": "string"}, "description": "Modifier keys e.g. ['ctrl']"},
+                "rescan": {
+                    "type": "boolean",
+                    "description": "Take fresh screenshot+detection after this key press",
+                },
+                "modifiers": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Modifier keys e.g. ['ctrl']",
+                },
                 "intent": {"type": "string", "description": "What this key press does"},
             },
             "required": ["key", "intent"],
@@ -91,7 +109,10 @@ _ACTION_TOOLS: list[dict] = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "clicks": {"type": "integer", "description": "Positive = zoom in, negative = zoom out"},
+                "clicks": {
+                    "type": "integer",
+                    "description": "Positive = zoom in, negative = zoom out",
+                },
                 "intent": {"type": "string"},
             },
             "required": ["clicks", "intent"],
@@ -117,7 +138,10 @@ _ACTION_TOOLS: list[dict] = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "building_key": {"type": "string", "description": "Hotkey for the building: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm"},
+                "building_key": {
+                    "type": "string",
+                    "description": "Hotkey for the building: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm",
+                },
                 "x": {"type": "integer", "description": "X coordinate for placement"},
                 "y": {"type": "integer", "description": "Y coordinate for placement"},
                 "intent": {"type": "string", "description": "What you are building and why"},
@@ -134,8 +158,14 @@ _ACTION_TOOLS: list[dict] = [
             "properties": {
                 "x": {"type": "integer", "description": "X coordinate to right-click"},
                 "y": {"type": "integer", "description": "Y coordinate to right-click"},
-                "target_class": {"type": "string", "description": "Entity class to target (e.g. 'sheep', 'tree', 'berry_bush')"},
-                "intent": {"type": "string", "description": "Where you are sending the villager and why"},
+                "target_class": {
+                    "type": "string",
+                    "description": "Entity class to target (e.g. 'sheep', 'tree', 'berry_bush')",
+                },
+                "intent": {
+                    "type": "string",
+                    "description": "Where you are sending the villager and why",
+                },
             },
             "required": ["intent"],
             "additionalProperties": False,
@@ -163,6 +193,7 @@ PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
 # Optional game knowledge database for dynamic context injection
 try:
     from data.game_knowledge import GameKnowledge, get_db
+
     GAME_KNOWLEDGE_AVAILABLE = True
 except ImportError:
     GAME_KNOWLEDGE_AVAILABLE = False
@@ -239,6 +270,7 @@ class ClaudeProvider(BaseLLMProvider):
         # the memories/ directory is missing.
         try:
             from autoresearch.memory_chain import MemoryChain
+
             chain = MemoryChain()
             memory_prelude = chain.load_memories(max_tokens=800)
             if memory_prelude:
@@ -246,12 +278,13 @@ class ClaudeProvider(BaseLLMProvider):
                 # Capture titles for downstream attribution (game_loop reads
                 # this and copies it onto AgentMemory.memories_loaded).
                 self.loaded_memory_titles = [
-                    m["title"] for m in chain.list_memories()
-                    if m.get("title") and m.get("content")
+                    m["title"] for m in chain.list_memories() if m.get("title") and m.get("content")
                 ]
-                log.info("cross_game_memories_loaded",
-                         chars=len(memory_prelude),
-                         titles=self.loaded_memory_titles)
+                log.info(
+                    "cross_game_memories_loaded",
+                    chars=len(memory_prelude),
+                    titles=self.loaded_memory_titles,
+                )
         except ImportError:
             log.debug("memory_chain_unavailable")
         except Exception as e:
@@ -348,9 +381,7 @@ class ClaudeProvider(BaseLLMProvider):
             log.warning("dynamic_context_error", error=str(e))
             return context
 
-    def _build_content(
-        self, context: str, width: int, height: int
-    ) -> list[dict]:
+    def _build_content(self, context: str, width: int, height: int) -> list[dict]:
         """Build the message content for Claude.
 
         Pure text content with YOLO-detected entities, goals, cached resources,
@@ -384,11 +415,16 @@ class ClaudeProvider(BaseLLMProvider):
         """Return truncated entity list for tool results."""
         return [
             {"id": e.get("id", ""), "class": e.get("class", ""), "center": e.get("center", [])}
-            for e in get_detected_entities()[:self.ENTITY_RESULT_LIMIT]
+            for e in get_detected_entities()[: self.ENTITY_RESULT_LIMIT]
         ]
 
     def _make_tool_result(
-        self, block: object, success: bool, detail: str, *, include_entities: bool = False,
+        self,
+        block: Any,
+        success: bool,
+        detail: str,
+        *,
+        include_entities: bool = False,
     ) -> dict:
         """Build the tool_result dict returned to Claude."""
         result_data: dict[str, Any] = {"success": success, "detail": detail}
@@ -410,7 +446,9 @@ class ClaudeProvider(BaseLLMProvider):
         actions = [a.model_dump() if hasattr(a, "model_dump") else a for a in result.actions]
         return {
             "reasoning": result.reasoning,
-            "observations": result.observations.model_dump() if hasattr(result.observations, "model_dump") else {},
+            "observations": result.observations.model_dump()
+            if hasattr(result.observations, "model_dump")
+            else {},
             "actions": actions,
             "actions_already_executed": True,
             "success_count": getattr(result, "_success_count", len(actions)),
@@ -420,8 +458,13 @@ class ClaudeProvider(BaseLLMProvider):
         """Execute action steps sequentially, stop on first failure."""
         for step in steps:
             r = await execute_action(step)
-            log.info("composite_step", composite=composite_name,
-                     action=step["type"], key=step.get("key", ""), success=r.success)
+            log.info(
+                "composite_step",
+                composite=composite_name,
+                action=step["type"],
+                key=step.get("key", ""),
+                success=r.success,
+            )
             if not r.success:
                 return False, f"failed at {step['intent']}"
         return True, "ok"
@@ -431,7 +474,7 @@ class ClaudeProvider(BaseLLMProvider):
 
     _COMPOSITE_NAMES: ClassVar[set[str]] = {"build", "send_villager", "queue_villager"}
 
-    async def _execute_build(self, block: object) -> tuple[dict, dict]:
+    async def _execute_build(self, block: Any) -> tuple[dict, dict]:
         """Composite: press . → q (econ menu) → building_key → click(x,y).
 
         Uses the LLM-provided coordinates directly.  The executor's
@@ -452,7 +495,7 @@ class ClaudeProvider(BaseLLMProvider):
         tool_result = self._make_tool_result(block, success, detail, include_entities=True)
         return action_dict, tool_result
 
-    async def _execute_send_villager(self, block: object) -> tuple[dict, dict]:
+    async def _execute_send_villager(self, block: Any) -> tuple[dict, dict]:
         """Composite: press . (with rescan) → right_click target.
 
         The "." press moves the camera, so we rescan to get fresh entity
@@ -469,8 +512,12 @@ class ClaudeProvider(BaseLLMProvider):
             rc_action["y"] = inp["y"]
 
         steps: list[dict] = [
-            {"type": "press", "key": ".", "rescan": True,
-             "intent": f"Select idle villager ({intent})"},
+            {
+                "type": "press",
+                "key": ".",
+                "rescan": True,
+                "intent": f"Select idle villager ({intent})",
+            },
             rc_action,
         ]
         success, detail = await self._run_steps("send_villager", steps)
@@ -478,7 +525,7 @@ class ClaudeProvider(BaseLLMProvider):
         tool_result = self._make_tool_result(block, success, detail, include_entities=True)
         return action_dict, tool_result
 
-    async def _execute_queue_villager(self, block: object) -> tuple[dict, dict]:
+    async def _execute_queue_villager(self, block: Any) -> tuple[dict, dict]:
         """Composite: press h → press q."""
         inp = block.input  # type: ignore[union-attr]
         intent = inp.get("intent", "Queue villager")
@@ -499,7 +546,7 @@ class ClaudeProvider(BaseLLMProvider):
         "queue_villager": "_execute_queue_villager",
     }
 
-    async def _execute_tool_call(self, block: object) -> tuple[dict, dict]:
+    async def _execute_tool_call(self, block: Any) -> tuple[dict, dict]:
         """Execute a single tool call and build the result payload."""
         tool_name = block.name  # type: ignore[union-attr]
 
@@ -509,12 +556,17 @@ class ClaudeProvider(BaseLLMProvider):
 
         action_dict = {"type": tool_name, **block.input}  # type: ignore[union-attr]
         result = await execute_action(action_dict)
-        log.info("tool_executed", action=tool_name,
-                 intent=block.input.get("intent", ""), success=result.success)  # type: ignore[union-attr]
+        log.info(
+            "tool_executed",
+            action=tool_name,
+            intent=block.input.get("intent", ""),
+            success=result.success,
+        )  # type: ignore[union-attr]
 
         include_entities = tool_name == "press" and block.input.get("rescan")  # type: ignore[union-attr]
-        tool_result = self._make_tool_result(block, result.success, result.detail,
-                                             include_entities=include_entities)
+        tool_result = self._make_tool_result(
+            block, result.success, result.detail, include_entities=include_entities
+        )
         return action_dict, tool_result
 
     async def _call_api(self, content: list[dict], age: str = "Dark Age") -> LLMResponse:
@@ -532,12 +584,15 @@ class ClaudeProvider(BaseLLMProvider):
         system_prompt = self.get_system_prompt(age)
 
         for _ in range(config.max_tool_iterations):
+            # cast() — anthropic SDK types these args with strict TypedDicts
+            # (MessageParam, ToolUnionParam, etc.). Our dicts are runtime-equivalent;
+            # we'd need TypedDict aliases everywhere upstream to satisfy pyright.
             response = await self.client.messages.create(
                 model=self.model,
                 max_tokens=config.max_tokens,
-                system=system_prompt,
-                messages=messages,
-                tools=_ACTION_TOOLS,
+                system=cast(Any, system_prompt),
+                messages=cast(Any, messages),
+                tools=cast(Any, _ACTION_TOOLS),
             )
 
             # Accumulate token usage (cache fields may be None when caching is off)
@@ -572,7 +627,9 @@ class ClaudeProvider(BaseLLMProvider):
 
         # Validate standard actions; keep composite actions as-is (already executed).
         _COMPOSITE_NAMES = self._COMPOSITE_NAMES
-        validated = validate_actions([a for a in executed_actions if a.get("type") not in _COMPOSITE_NAMES])
+        validated = validate_actions(
+            [a for a in executed_actions if a.get("type") not in _COMPOSITE_NAMES]
+        )
         composite = [a for a in executed_actions if a.get("type") in _COMPOSITE_NAMES]
         result = LLMResponse.model_construct(
             actions=validated + composite,
@@ -618,12 +675,14 @@ class ClaudeProvider(BaseLLMProvider):
             result = await self._call_api(content, age=age)
             log.debug("claude_response", age=age, reasoning=result.reasoning[:200])
 
-            log.info("api_cost",
-                     input_tokens=self._total_input_tokens,
-                     output_tokens=self._total_output_tokens,
-                     cache_read_tokens=self._total_cache_read_tokens,
-                     cache_write_tokens=self._total_cache_write_tokens,
-                     cumulative_cost_usd=round(self._cumulative_cost_usd(), 4))
+            log.info(
+                "api_cost",
+                input_tokens=self._total_input_tokens,
+                output_tokens=self._total_output_tokens,
+                cache_read_tokens=self._total_cache_read_tokens,
+                cache_write_tokens=self._total_cache_write_tokens,
+                cumulative_cost_usd=round(self._cumulative_cost_usd(), 4),
+            )
 
             return self._serialize_response(result)
 

@@ -17,9 +17,10 @@ from pathlib import Path
 @dataclass
 class SLDHeader:
     """SLD file header."""
-    signature: bytes      # "SLDX"
-    version: int         # Usually 4
-    num_frames: int      # Number of animation frames
+
+    signature: bytes  # "SLDX"
+    version: int  # Usually 4
+    num_frames: int  # Number of animation frames
     unknown1: int
     unknown2: int
     unknown3: int
@@ -28,11 +29,12 @@ class SLDHeader:
 @dataclass
 class SLDFrameHeader:
     """SLD frame header."""
+
     canvas_width: int
     canvas_height: int
     hotspot_x: int
     hotspot_y: int
-    frame_type: int      # Bit field for layer presence
+    frame_type: int  # Bit field for layer presence
     unknown1: int
     frame_index: int
 
@@ -40,6 +42,7 @@ class SLDFrameHeader:
 @dataclass
 class ExtractedFrame:
     """Extracted frame data."""
+
     index: int
     width: int
     height: int
@@ -51,19 +54,20 @@ class ExtractedFrame:
 # Player color palette for AoE2:DE
 # These colors are applied to player-colorable pixels in sprites
 PLAYER_COLORS = {
-    'blue': (0, 80, 255),
-    'red': (255, 50, 50),
-    'green': (0, 200, 0),
-    'yellow': (255, 220, 0),
-    'cyan': (0, 220, 220),
-    'purple': (200, 0, 200),
-    'gray': (128, 128, 128),
-    'orange': (255, 140, 0),
+    "blue": (0, 80, 255),
+    "red": (255, 50, 50),
+    "green": (0, 200, 0),
+    "yellow": (255, 220, 0),
+    "cyan": (0, 220, 220),
+    "purple": (200, 0, 200),
+    "gray": (128, 128, 128),
+    "orange": (255, 140, 0),
 }
 
 
-def apply_player_color(pixels: bytes, width: int, height: int,
-                       player_color: tuple[int, int, int] = (0, 80, 255)) -> bytes:
+def apply_player_color(
+    pixels: bytes, width: int, height: int, player_color: tuple[int, int, int] = (0, 80, 255)
+) -> bytes:
     """
     Apply team color to player-colorable pixels in the sprite.
 
@@ -84,7 +88,7 @@ def apply_player_color(pixels: bytes, width: int, height: int,
     target_r, target_g, target_b = player_color
 
     for i in range(0, len(pixel_array), 4):
-        r, g, b, a = pixel_array[i:i+4]
+        r, g, b, a = pixel_array[i : i + 4]
 
         if a == 0:  # Skip transparent pixels
             continue
@@ -97,9 +101,9 @@ def apply_player_color(pixels: bytes, width: int, height: int,
             luminance = (r * 0.299 + g * 0.587 + b * 0.114) / 255.0
 
             # Apply player color with luminance variation
-            pixel_array[i] = min(255, int(target_r * luminance * 1.2))      # R
-            pixel_array[i+1] = min(255, int(target_g * luminance * 1.2))    # G
-            pixel_array[i+2] = min(255, int(target_b * luminance * 1.2))    # B
+            pixel_array[i] = min(255, int(target_r * luminance * 1.2))  # R
+            pixel_array[i + 1] = min(255, int(target_g * luminance * 1.2))  # G
+            pixel_array[i + 2] = min(255, int(target_b * luminance * 1.2))  # B
             # Keep original alpha
 
     return bytes(pixel_array)
@@ -125,8 +129,8 @@ def decode_dxt1_block(block_data: bytes) -> list[tuple[int, int, int, int]]:
         return [(0, 0, 0, 0)] * 16
 
     # Read two 16-bit colors in RGB565 format
-    color0_565 = struct.unpack('<H', block_data[0:2])[0]
-    color1_565 = struct.unpack('<H', block_data[2:4])[0]
+    color0_565 = struct.unpack("<H", block_data[0:2])[0]
+    color1_565 = struct.unpack("<H", block_data[2:4])[0]
 
     # Convert RGB565 to RGB888
     def rgb565_to_rgb888(c):
@@ -153,26 +157,21 @@ def decode_dxt1_block(block_data: bytes) -> list[tuple[int, int, int, int]]:
             (2 * c0[0] + c1[0]) // 3,
             (2 * c0[1] + c1[1]) // 3,
             (2 * c0[2] + c1[2]) // 3,
-            255
+            255,
         )
         colors[3] = (
             (c0[0] + 2 * c1[0]) // 3,
             (c0[1] + 2 * c1[1]) // 3,
             (c0[2] + 2 * c1[2]) // 3,
-            255
+            255,
         )
     else:
         # 3-color + transparent mode
-        colors[2] = (
-            (c0[0] + c1[0]) // 2,
-            (c0[1] + c1[1]) // 2,
-            (c0[2] + c1[2]) // 2,
-            255
-        )
+        colors[2] = ((c0[0] + c1[0]) // 2, (c0[1] + c1[1]) // 2, (c0[2] + c1[2]) // 2, 255)
         colors[3] = (0, 0, 0, 0)  # Transparent
 
     # Read 4 bytes of indices (16 2-bit values)
-    indices = struct.unpack('<I', block_data[4:8])[0]
+    indices = struct.unpack("<I", block_data[4:8])[0]
 
     # Decode 16 pixels
     pixels = []
@@ -217,7 +216,7 @@ def decode_bc4_block(block_data: bytes) -> list[int]:
         alphas[7] = 255
 
     # Read 6 bytes of indices (16 3-bit values packed)
-    index_bits = int.from_bytes(block_data[2:8], 'little')
+    index_bits = int.from_bytes(block_data[2:8], "little")
 
     pixels = []
     for i in range(16):
@@ -240,37 +239,32 @@ class SLDExtractor:
     def _read(self, fmt: str) -> tuple:
         """Read and unpack data at current offset."""
         size = struct.calcsize(fmt)
-        result = struct.unpack(fmt, self.data[self.offset:self.offset + size])
+        result = struct.unpack(fmt, self.data[self.offset : self.offset + size])
         self.offset += size
         return result
 
     def _read_bytes(self, n: int) -> bytes:
         """Read n bytes at current offset."""
-        result = self.data[self.offset:self.offset + n]
+        result = self.data[self.offset : self.offset + n]
         self.offset += n
         return result
 
     def parse_header(self) -> SLDHeader:
         """Parse SLD file header."""
-        sig, ver, frames, u1, u2, u3 = self._read('< 4s 4H I')
+        sig, ver, frames, u1, u2, u3 = self._read("< 4s 4H I")
 
-        if sig != b'SLDX':
+        if sig != b"SLDX":
             raise ValueError(f"Invalid SLD signature: {sig}")
 
         self.header = SLDHeader(
-            signature=sig,
-            version=ver,
-            num_frames=frames,
-            unknown1=u1,
-            unknown2=u2,
-            unknown3=u3
+            signature=sig, version=ver, num_frames=frames, unknown1=u1, unknown2=u2, unknown3=u3
         )
         return self.header
 
     def parse_frame(self, frame_idx: int) -> ExtractedFrame | None:
         """Parse a single frame."""
         # Read frame header (12 bytes)
-        w, h, hx, hy, ftype, u1, fidx = self._read('< 4H 2B H')
+        w, h, hx, hy, ftype, u1, fidx = self._read("< 4H 2B H")
 
         _frame_header = SLDFrameHeader(
             canvas_width=w,
@@ -279,15 +273,15 @@ class SLDExtractor:
             hotspot_y=hy,
             frame_type=ftype,
             unknown1=u1,
-            frame_index=fidx
+            frame_index=fidx,
         )
 
         # Check which layers are present (bits from LSB)
-        has_main = (ftype & 0x01) != 0      # Bit 0: Main graphics
-        has_shadow = (ftype & 0x02) != 0    # Bit 1: Shadow
-        has_unknown = (ftype & 0x04) != 0   # Bit 2: Unknown
-        has_damage = (ftype & 0x08) != 0    # Bit 3: Damage mask
-        has_player = (ftype & 0x10) != 0    # Bit 4: Player color
+        has_main = (ftype & 0x01) != 0  # Bit 0: Main graphics
+        has_shadow = (ftype & 0x02) != 0  # Bit 1: Shadow
+        has_unknown = (ftype & 0x04) != 0  # Bit 2: Unknown
+        has_damage = (ftype & 0x08) != 0  # Bit 3: Damage mask
+        has_player = (ftype & 0x10) != 0  # Bit 4: Player color
 
         pixels = None
         layer_width = w
@@ -312,11 +306,7 @@ class SLDExtractor:
             return None
 
         return ExtractedFrame(
-            index=frame_idx,
-            width=layer_width,
-            height=layer_height,
-            hotspot=(hx, hy),
-            pixels=pixels
+            index=frame_idx, width=layer_width, height=layer_height, hotspot=(hx, hy), pixels=pixels
         )
 
     def _parse_dxt1_layer(self, width: int, height: int) -> tuple[bytes, int, int]:
@@ -326,25 +316,25 @@ class SLDExtractor:
             Tuple of (pixel_data, layer_width, layer_height)
         """
         # Read content length (4 bytes) - note: we calculate actual end position ourselves
-        _content_length = self._read('< I')[0]
+        _content_length = self._read("< I")[0]
         layer_start = self.offset
 
         # Layer header: 10 bytes
         # x1, y1, x2, y2 (4 * uint16) + flag1, unknown (2 * uint8)
-        x1, y1, x2, y2 = self._read('< 4H')
-        _flag1, _unk_byte = self._read('< 2B')
+        x1, y1, x2, y2 = self._read("< 4H")
+        _flag1, _unk_byte = self._read("< 2B")
 
         layer_width = x2 - x1
         layer_height = y2 - y1
 
         # Command array length (2 bytes) - this is the NUMBER of command pairs, not bytes
-        num_commands = self._read('< H')[0]
+        num_commands = self._read("< H")[0]
 
         # Read commands (2 bytes each: skip_count, draw_count)
         commands = []
         total_draw_blocks = 0
         for _ in range(num_commands):
-            skip_count, draw_count = self._read('< 2B')
+            skip_count, draw_count = self._read("< 2B")
             commands.append((skip_count, draw_count))
             total_draw_blocks += draw_count
 
@@ -383,7 +373,7 @@ class SLDExtractor:
                             pixel_idx = py * 4 + px
                             r, g, b, a = pixels[pixel_idx]
                             offset = (iy * layer_width + ix) * 4
-                            img_data[offset:offset + 4] = bytes([r, g, b, a])
+                            img_data[offset : offset + 4] = bytes([r, g, b, a])
 
                 block_idx += 1
 
@@ -394,8 +384,12 @@ class SLDExtractor:
 
         return bytes(img_data), layer_width, layer_height
 
-    def _skip_layer(self, is_mask_layer: bool = False, use_content_length: bool = False,
-                    check_marker: bool = False):
+    def _skip_layer(
+        self,
+        is_mask_layer: bool = False,
+        use_content_length: bool = False,
+        check_marker: bool = False,
+    ):
         """Skip a layer we don't need.
 
         Args:
@@ -410,14 +404,16 @@ class SLDExtractor:
         if check_marker:
             # Check if there's a 0x0000 marker before content_length
             # Only treat as marker if next 4 bytes look like a reasonable content_length
-            marker = struct.unpack('< H', self.data[self.offset:self.offset+2])[0]
+            marker = struct.unpack("< H", self.data[self.offset : self.offset + 2])[0]
             if marker == 0:
-                potential_len = struct.unpack('< I', self.data[self.offset+2:self.offset+6])[0]
+                potential_len = struct.unpack("< I", self.data[self.offset + 2 : self.offset + 6])[
+                    0
+                ]
                 # Only skip marker if the resulting content_length is reasonable (<1MB)
                 if 0 < potential_len < 1000000:
-                    self._read('< H')  # Skip the marker
+                    self._read("< H")  # Skip the marker
 
-        content_length = self._read('< I')[0]
+        content_length = self._read("< I")[0]
         layer_start = self.offset
 
         if use_content_length:
@@ -431,20 +427,20 @@ class SLDExtractor:
 
         if is_mask_layer:
             # Mask Layer Header: 2 bytes (flag1, unknown) — read for pointer advancement only
-            self._read('< 2B')
+            self._read("< 2B")
             header_size = 2
         else:
             # Graphics Layer Header: 10 bytes — read for pointer advancement only
-            self._read('< 4H')  # x1, y1, x2, y2
-            self._read('< 2B')  # flag1, unk_byte
+            self._read("< 4H")  # x1, y1, x2, y2
+            self._read("< 2B")  # flag1, unk_byte
             header_size = 10
 
-        num_commands = self._read('< H')[0]
+        num_commands = self._read("< H")[0]
 
         # Count draw blocks
         total_draw_blocks = 0
         for _ in range(num_commands):
-            _skip_count, draw_count = self._read('< 2B')
+            _skip_count, draw_count = self._read("< 2B")
             total_draw_blocks += draw_count
 
         # Skip pixel data
@@ -481,9 +477,13 @@ class SLDExtractor:
             return self.parse_frame(0)
         return None
 
-    def save_as_png(self, frame: ExtractedFrame, output_path: str,
-                    apply_color: bool = False,
-                    player_color: tuple[int, int, int] | None = None):
+    def save_as_png(
+        self,
+        frame: ExtractedFrame,
+        output_path: str,
+        apply_color: bool = False,
+        player_color: tuple[int, int, int] | None = None,
+    ):
         """Save extracted frame as PNG.
 
         Args:
@@ -500,7 +500,7 @@ class SLDExtractor:
                 color = player_color or get_random_player_color()
                 pixels = apply_player_color(pixels, frame.width, frame.height, color)
 
-            img = Image.frombytes('RGBA', (frame.width, frame.height), pixels)
+            img = Image.frombytes("RGBA", (frame.width, frame.height), pixels)
             img.save(output_path)
             return True
         except ImportError:
@@ -508,9 +508,13 @@ class SLDExtractor:
             return False
 
 
-def extract_sprite(sld_path: str, output_path: str, frame_index: int = 0,
-                   apply_player_color: bool = False,
-                   player_color: tuple[int, int, int] | None = None) -> bool:
+def extract_sprite(
+    sld_path: str,
+    output_path: str,
+    frame_index: int = 0,
+    apply_player_color: bool = False,
+    player_color: tuple[int, int, int] | None = None,
+) -> bool:
     """
     Extract a sprite from an SLD file.
 
@@ -533,7 +537,7 @@ def extract_sprite(sld_path: str, output_path: str, frame_index: int = 0,
                 frames[frame_index],
                 output_path,
                 apply_color=apply_player_color,
-                player_color=player_color
+                player_color=player_color,
             )
         else:
             print(f"Frame {frame_index} not found (file has {len(frames)} frames)")
@@ -543,10 +547,14 @@ def extract_sprite(sld_path: str, output_path: str, frame_index: int = 0,
         return False
 
 
-def extract_multiple_frames(sld_path: str, output_dir: str, class_name: str,
-                           variant_idx: int = 0,
-                           frame_indices: list[int] | None = None,
-                           apply_player_color: bool = False) -> int:
+def extract_multiple_frames(
+    sld_path: str,
+    output_dir: str,
+    class_name: str,
+    variant_idx: int = 0,
+    frame_indices: list[int] | None = None,
+    apply_player_color: bool = False,
+) -> int:
     """
     Extract multiple animation frames from an SLD file.
 
@@ -578,9 +586,12 @@ def extract_multiple_frames(sld_path: str, output_dir: str, class_name: str,
             if frame_idx < len(frames):
                 out_file = output_path / f"{class_name}_{variant_idx:02d}_f{frame_idx}.png"
                 color = get_random_player_color() if apply_player_color else None
-                if extractor.save_as_png(frames[frame_idx], str(out_file),
-                                        apply_color=apply_player_color,
-                                        player_color=color):
+                if extractor.save_as_png(
+                    frames[frame_idx],
+                    str(out_file),
+                    apply_color=apply_player_color,
+                    player_color=color,
+                ):
                     extracted += 1
 
         return extracted
@@ -635,5 +646,5 @@ if __name__ == "__main__":
         batch_extract(sys.argv[2], sys.argv[3], patterns)
     else:
         input_file = sys.argv[1]
-        output_file = sys.argv[2] if len(sys.argv) > 2 else input_file.replace('.sld', '.png')
+        output_file = sys.argv[2] if len(sys.argv) > 2 else input_file.replace(".sld", ".png")
         extract_sprite(input_file, output_file)

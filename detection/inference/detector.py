@@ -27,12 +27,13 @@ if TYPE_CHECKING:
 @dataclass
 class DetectedEntity:
     """Represents a detected game entity."""
-    id: str                          # Unique ID: e.g., "sheep_0", "villager_1"
-    class_name: str                  # Entity class: "sheep", "villager", "tc"
+
+    id: str  # Unique ID: e.g., "sheep_0", "villager_1"
+    class_name: str  # Entity class: "sheep", "villager", "tc"
     bbox: tuple[float, float, float, float]  # (x1, y1, x2, y2)
-    center: tuple[float, float]      # Center point (x, y)
-    confidence: float                # Detection confidence 0-1
-    area: float = field(default=0)   # Bounding box area in pixels
+    center: tuple[float, float]  # Center point (x, y)
+    confidence: float  # Detection confidence 0-1
+    area: float = field(default=0)  # Bounding box area in pixels
 
     def to_dict(self) -> dict:
         """Convert to dictionary for LLM context."""
@@ -41,7 +42,7 @@ class DetectedEntity:
             "class": self.class_name,
             "bbox": list(self.bbox),
             "center": self.center,
-            "confidence": self.confidence
+            "confidence": self.confidence,
         }
 
 
@@ -55,6 +56,7 @@ def _load_default_classes() -> list[str]:
     yaml_path = Path(__file__).parent.parent / "training" / "config" / "classes.yaml"
     try:
         import yaml
+
         with open(yaml_path) as f:
             data = yaml.safe_load(f)
         classes = sorted(data["classes"], key=lambda c: c["id"])
@@ -62,18 +64,66 @@ def _load_default_classes() -> list[str]:
     except Exception:
         logger.warning("Could not load classes.yaml, using minimal fallback")
         return [
-            "tree", "gold_mine", "stone_mine", "berry_bush", "relic",
-            "deer", "boar", "wolf", "sheep", "town_center", "house",
-            "lumber_camp", "mining_camp", "mill", "market", "dock", "farm",
-            "barracks", "archery_range", "stable", "blacksmith", "siege_workshop",
-            "monastery", "castle", "university", "gate", "wall", "tower",
-            "wonder", "krepost", "villager", "trade_cart", "fishing_ship",
-            "scout_line", "knight_line", "camel_line", "battle_elephant",
-            "archer_line", "skirmisher_line", "cavalry_archer", "hand_cannoneer",
-            "militia_line", "spearman_line", "eagle_line", "ram", "mangonel_line",
-            "scorpion", "trebuchet", "monk", "king", "unique_archer",
-            "unique_cavalry", "unique_infantry", "unique_siege", "unique_ship",
-            "fish", "galley", "fire_galley", "siege_tower", "goose",
+            "tree",
+            "gold_mine",
+            "stone_mine",
+            "berry_bush",
+            "relic",
+            "deer",
+            "boar",
+            "wolf",
+            "sheep",
+            "town_center",
+            "house",
+            "lumber_camp",
+            "mining_camp",
+            "mill",
+            "market",
+            "dock",
+            "farm",
+            "barracks",
+            "archery_range",
+            "stable",
+            "blacksmith",
+            "siege_workshop",
+            "monastery",
+            "castle",
+            "university",
+            "gate",
+            "wall",
+            "tower",
+            "wonder",
+            "krepost",
+            "villager",
+            "trade_cart",
+            "fishing_ship",
+            "scout_line",
+            "knight_line",
+            "camel_line",
+            "battle_elephant",
+            "archer_line",
+            "skirmisher_line",
+            "cavalry_archer",
+            "hand_cannoneer",
+            "militia_line",
+            "spearman_line",
+            "eagle_line",
+            "ram",
+            "mangonel_line",
+            "scorpion",
+            "trebuchet",
+            "monk",
+            "king",
+            "unique_archer",
+            "unique_cavalry",
+            "unique_infantry",
+            "unique_siege",
+            "unique_ship",
+            "fish",
+            "galley",
+            "fire_galley",
+            "siege_tower",
+            "goose",
         ]
 
 
@@ -110,6 +160,7 @@ class EntityDetector:
         self.confidence_threshold = confidence_threshold
         # Per-class thresholds from shared config
         from detection.inference.thresholds import CLASS_THRESHOLDS
+
         self.class_thresholds: dict[str, float] = dict(CLASS_THRESHOLDS)
         self.use_mock = use_mock
         self.use_sahi = use_sahi
@@ -126,6 +177,7 @@ class EntityDetector:
         self.tracker = None
         try:
             from .tracker import EntityTracker
+
             self.tracker = EntityTracker()
         except Exception:
             logger.debug("Tracker not available, using greedy IoU ID assignment")
@@ -138,8 +190,8 @@ class EntityDetector:
         path = Path(model_path)
 
         # Check for ONNX version if .pt specified but not found
-        if not path.exists() and path.suffix == '.pt':
-            onnx_path = path.with_suffix('.onnx')
+        if not path.exists() and path.suffix == ".pt":
+            onnx_path = path.with_suffix(".onnx")
             if onnx_path.exists():
                 path = onnx_path
                 model_path = str(onnx_path)
@@ -150,7 +202,7 @@ class EntityDetector:
             return
 
         # Load based on file extension
-        if path.suffix == '.onnx':
+        if path.suffix == ".onnx":
             self._load_onnx(model_path)
         else:
             self._load_pytorch(model_path)
@@ -159,17 +211,20 @@ class EntityDetector:
         """Load PyTorch YOLO model."""
         try:
             from ultralytics import YOLO
+
             self.model = YOLO(model_path)
-            self.backend = 'pytorch'
+            self.backend = "pytorch"
             self.use_mock = False
             # Use class names from the model itself (authoritative)
-            if hasattr(self.model, 'names') and self.model.names:
+            if hasattr(self.model, "names") and self.model.names:
                 self.class_names = list(self.model.names.values())
-            print(f"Loaded PyTorch model: {model_path} ({len(self.class_names)} classes, SAHI={'on' if self.use_sahi else 'off'})")
+            print(
+                f"Loaded PyTorch model: {model_path} ({len(self.class_names)} classes, SAHI={'on' if self.use_sahi else 'off'})"
+            )
         except ImportError:
             print("WARNING: ultralytics not installed. Trying ONNX...")
             # Try ONNX fallback
-            onnx_path = Path(model_path).with_suffix('.onnx')
+            onnx_path = Path(model_path).with_suffix(".onnx")
             if onnx_path.exists():
                 self._load_onnx(str(onnx_path))
             else:
@@ -185,6 +240,7 @@ class EntityDetector:
             import os
 
             import onnxruntime as ort
+
             sess_options = ort.SessionOptions()
             sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
             num_threads = min(os.cpu_count() or 4, 8)
@@ -192,12 +248,11 @@ class EntityDetector:
             sess_options.inter_op_num_threads = max(1, num_threads // 2)
             # Auto-detect best available provider
             available = ort.get_available_providers()
-            providers = [p for p in ['DmlExecutionProvider', 'CPUExecutionProvider']
-                         if p in available]
-            self.onnx_session = ort.InferenceSession(
-                model_path, sess_options, providers=providers
-            )
-            self.backend = 'onnx'
+            providers = [
+                p for p in ["DmlExecutionProvider", "CPUExecutionProvider"] if p in available
+            ]
+            self.onnx_session = ort.InferenceSession(model_path, sess_options, providers=providers)
+            self.backend = "onnx"
             self.use_mock = False
             print(f"Loaded ONNX model: {model_path} (providers={providers})")
         except ImportError:
@@ -273,14 +328,16 @@ class EntityDetector:
             List of detected entities sorted by class, then by confidence
         """
         import time
+
         t0 = time.monotonic()
         self._reset_counters()
 
         if self.use_mock:
             entities = self._mock_detect(screenshot)
-        elif self.backend == 'onnx' and self.use_sahi:
+        elif self.backend == "onnx" and self.use_sahi:
             # ONNX + SAHI: batch all tiles in one inference call
             from PIL import Image as PILImage
+
             if isinstance(screenshot, bytes):
                 image = PILImage.open(io.BytesIO(screenshot))
             else:
@@ -289,7 +346,7 @@ class EntityDetector:
                 entities = self._onnx_sahi_detect(image)
             else:
                 entities = self._onnx_detect(screenshot)
-        elif self.backend == 'onnx':
+        elif self.backend == "onnx":
             entities = self._onnx_detect(screenshot)
         else:
             entities = self._pytorch_detect(screenshot)
@@ -304,9 +361,12 @@ class EntityDetector:
             entities = self._assign_persistent_ids(entities)
 
         elapsed = time.monotonic() - t0
-        logger.info("detect_full elapsed=%.2fs entities=%d mode=%s",
-                     elapsed, len(entities),
-                     "onnx_sahi" if self.backend == 'onnx' and self.use_sahi else self.backend)
+        logger.info(
+            "detect_full elapsed=%.2fs entities=%d mode=%s",
+            elapsed,
+            len(entities),
+            "onnx_sahi" if self.backend == "onnx" and self.use_sahi else self.backend,
+        )
 
         return entities
 
@@ -318,22 +378,25 @@ class EntityDetector:
         the initial per-turn detection, and detect_fast() for rescans.
         """
         import time
+
         t0 = time.monotonic()
         self._reset_counters()
 
         if self.use_mock:
             entities = self._mock_detect(screenshot)
-        elif self.backend == 'onnx':
+        elif self.backend == "onnx":
             entities = self._onnx_detect(screenshot)
         else:
             from PIL import Image as PILImage
+
             if isinstance(screenshot, bytes):
                 image = PILImage.open(io.BytesIO(screenshot))
             else:
                 image = screenshot
             # Single-pass inference — skip SAHI
-            results = self.model(image, conf=self.confidence_threshold,
-                                 imgsz=self.input_size, verbose=False)
+            results = self.model(
+                image, conf=self.confidence_threshold, imgsz=self.input_size, verbose=False
+            )
             entities = self._parse_yolo_results(results)
 
         entities = self._nms(entities, iou_threshold=0.5)
@@ -362,6 +425,7 @@ class EntityDetector:
         import time
 
         from PIL import Image as PILImage
+
         t0 = time.monotonic()
         self._reset_counters()
 
@@ -372,7 +436,7 @@ class EntityDetector:
 
         if self.use_mock:
             entities = self._mock_detect(screenshot)
-        elif self.backend == 'onnx':
+        elif self.backend == "onnx":
             # Pass 1: full image at input_size (1280)
             full_entities = self._onnx_detect(screenshot)
 
@@ -397,12 +461,18 @@ class EntityDetector:
                 e.center = ((e.bbox[0] + e.bbox[2]) / 2, (e.bbox[1] + e.bbox[3]) / 2)
 
             entities = full_entities + crop_entities
-            logger.debug("detect_fast_multi: full=%d crop=%d", len(full_entities), len(crop_entities))
+            logger.debug(
+                "detect_fast_multi: full=%d crop=%d", len(full_entities), len(crop_entities)
+            )
         else:
             # PyTorch: same two-pass approach
             w, h = image.size
-            results = self.model(image, conf=min(self.class_thresholds.values()),
-                                 imgsz=self.input_size, verbose=False)
+            results = self.model(
+                image,
+                conf=min(self.class_thresholds.values()),
+                imgsz=self.input_size,
+                verbose=False,
+            )
             full_entities = self._parse_yolo_results(results)
 
             crop_x1 = w // 4
@@ -410,8 +480,9 @@ class EntityDetector:
             crop_x2 = w - crop_x1
             crop_y2 = h - crop_y1
             center_crop = image.crop((crop_x1, crop_y1, crop_x2, crop_y2))
-            results = self.model(center_crop, conf=min(self.class_thresholds.values()),
-                                 imgsz=640, verbose=False)
+            results = self.model(
+                center_crop, conf=min(self.class_thresholds.values()), imgsz=640, verbose=False
+            )
             crop_entities = self._parse_yolo_results(results)
             for e in crop_entities:
                 x1, y1, x2, y2 = e.bbox
@@ -447,6 +518,7 @@ class EntityDetector:
             force_full: If True, run full SAHI scan (e.g., first turn, alarm)
         """
         import time
+
         t0 = time.monotonic()
         self._reset_counters()
 
@@ -455,6 +527,7 @@ class EntityDetector:
             return self.detect(screenshot)
 
         from PIL import Image as PILImage
+
         if isinstance(screenshot, bytes):
             image = PILImage.open(io.BytesIO(screenshot))
         else:
@@ -463,11 +536,12 @@ class EntityDetector:
         # 1. Fast single-pass scan (raw detections, no NMS/IDs yet)
         if self.use_mock:
             fast_entities = self._mock_detect(screenshot)
-        elif self.backend == 'onnx':
+        elif self.backend == "onnx":
             fast_entities = self._onnx_detect(screenshot)
         else:
-            results = self.model(image, conf=self.confidence_threshold,
-                                 imgsz=self.input_size, verbose=False)
+            results = self.model(
+                image, conf=self.confidence_threshold, imgsz=self.input_size, verbose=False
+            )
             fast_entities = self._parse_yolo_results(results)
 
         # 2. Compute ROI regions around entity clusters
@@ -481,8 +555,11 @@ class EntityDetector:
             else:
                 entities = self._assign_persistent_ids(entities)
             elapsed = time.monotonic() - t0
-            logger.info("detect_adaptive elapsed=%.2fs entities=%d rois=0 mode=fast_only",
-                         elapsed, len(entities))
+            logger.info(
+                "detect_adaptive elapsed=%.2fs entities=%d rois=0 mode=fast_only",
+                elapsed,
+                len(entities),
+            )
             return entities
 
         # 3. Check if adaptive is worth it — count ROI tiles vs full SAHI tiles
@@ -498,8 +575,9 @@ class EntityDetector:
         w, h = image.size
         full_tile_count = max(1, -(-w // stride)) * max(1, -(-h // stride))
         if roi_tile_count >= full_tile_count * 0.7:
-            logger.info("adaptive_fallback roi_tiles=%d >= 70%% of full=%d",
-                        roi_tile_count, full_tile_count)
+            logger.info(
+                "adaptive_fallback roi_tiles=%d >= 70%% of full=%d", roi_tile_count, full_tile_count
+            )
             return self.detect(screenshot)
 
         # Run SAHI only on ROI tiles
@@ -516,8 +594,12 @@ class EntityDetector:
             merged = self._assign_persistent_ids(merged)
 
         elapsed = time.monotonic() - t0
-        logger.info("detect_adaptive elapsed=%.2fs entities=%d rois=%d mode=adaptive",
-                     elapsed, len(merged), len(rois))
+        logger.info(
+            "detect_adaptive elapsed=%.2fs entities=%d rois=%d mode=adaptive",
+            elapsed,
+            len(merged),
+            len(rois),
+        )
         return merged
 
     def _compute_sahi_rois(
@@ -559,11 +641,15 @@ class EntityDetector:
                 parent[a] = b
 
         for i in range(n):
-            ci = ((all_bboxes[i][0] + all_bboxes[i][2]) / 2,
-                  (all_bboxes[i][1] + all_bboxes[i][3]) / 2)
+            ci = (
+                (all_bboxes[i][0] + all_bboxes[i][2]) / 2,
+                (all_bboxes[i][1] + all_bboxes[i][3]) / 2,
+            )
             for j in range(i + 1, n):
-                cj = ((all_bboxes[j][0] + all_bboxes[j][2]) / 2,
-                      (all_bboxes[j][1] + all_bboxes[j][3]) / 2)
+                cj = (
+                    (all_bboxes[j][0] + all_bboxes[j][2]) / 2,
+                    (all_bboxes[j][1] + all_bboxes[j][3]) / 2,
+                )
                 dist = ((ci[0] - cj[0]) ** 2 + (ci[1] - cj[1]) ** 2) ** 0.5
                 if dist < 200:
                     union(i, j)
@@ -685,12 +771,12 @@ class EntityDetector:
 
         all_entities: list[DetectedEntity] = []
 
-        if self.backend == 'onnx' and self.onnx_session:
+        if self.backend == "onnx" and self.onnx_session:
             # Batch ONNX inference (same approach as _onnx_sahi_detect)
-            batch = np.stack([
-                np.transpose(np.array(t).astype(np.float32) / 255.0, (2, 0, 1))
-                for t in tiles
-            ], axis=0)
+            batch = np.stack(
+                [np.transpose(np.array(t).astype(np.float32) / 255.0, (2, 0, 1)) for t in tiles],
+                axis=0,
+            )
             input_name = self.onnx_session.get_inputs()[0].name
             outputs = self.onnx_session.run(None, {input_name: batch})
             raw_output = outputs[0]
@@ -698,17 +784,23 @@ class EntityDetector:
             for tile_idx in range(len(tiles)):
                 x_off, y_off, tw, th = offsets[tile_idx]
                 tile_entities = self._parse_onnx_tile(
-                    raw_output, tile_idx, num_classes,
-                    scale_x=1.0, scale_y=1.0,
-                    x_offset=x_off, y_offset=y_off,
-                    clip_w=tw, clip_h=th,
+                    raw_output,
+                    tile_idx,
+                    num_classes,
+                    scale_x=1.0,
+                    scale_y=1.0,
+                    x_offset=x_off,
+                    y_offset=y_off,
+                    clip_w=tw,
+                    clip_h=th,
                 )
                 all_entities.extend(tile_entities)
         else:
             # Sequential PyTorch
             for tile_idx, tile in enumerate(tiles):
-                results = self.model(tile, conf=self.confidence_threshold,
-                                     imgsz=tile_size, verbose=False)
+                results = self.model(
+                    tile, conf=self.confidence_threshold, imgsz=tile_size, verbose=False
+                )
                 x_off, y_off, tw, th = offsets[tile_idx]
                 for result in results:
                     if result.boxes is None:
@@ -721,23 +813,27 @@ class EntityDetector:
                     ):
                         x1, y1, x2, y2 = box.tolist()
                         class_idx = int(cls_id)
-                        class_name = (self.class_names[class_idx]
-                                      if class_idx < len(self.class_names)
-                                      else f"unknown_{class_idx}")
+                        class_name = (
+                            self.class_names[class_idx]
+                            if class_idx < len(self.class_names)
+                            else f"unknown_{class_idx}"
+                        )
                         abs_x1 = x1 + x_off
                         abs_y1 = y1 + y_off
                         abs_x2 = min(x2 + x_off, x_off + tw)
                         abs_y2 = min(y2 + y_off, y_off + th)
                         if abs_x2 <= abs_x1 or abs_y2 <= abs_y1:
                             continue
-                        all_entities.append(DetectedEntity(
-                            id=self._generate_id(class_name),
-                            class_name=class_name,
-                            bbox=(abs_x1, abs_y1, abs_x2, abs_y2),
-                            center=((abs_x1 + abs_x2) / 2, (abs_y1 + abs_y2) / 2),
-                            confidence=float(conf),
-                            area=(abs_x2 - abs_x1) * (abs_y2 - abs_y1)
-                        ))
+                        all_entities.append(
+                            DetectedEntity(
+                                id=self._generate_id(class_name),
+                                class_name=class_name,
+                                bbox=(abs_x1, abs_y1, abs_x2, abs_y2),
+                                center=((abs_x1 + abs_x2) / 2, (abs_y1 + abs_y2) / 2),
+                                confidence=float(conf),
+                                area=(abs_x2 - abs_x1) * (abs_y2 - abs_y1),
+                            )
+                        )
 
         logger.debug("SAHI ROI tiles=%d entities=%d", len(tiles), len(all_entities))
         return all_entities
@@ -758,10 +854,7 @@ class EntityDetector:
         # Keep fast entities whose centers are outside all ROI regions
         for e in fast_entities:
             cx, cy = e.center
-            in_roi = any(
-                rx1 <= cx <= rx2 and ry1 <= cy <= ry2
-                for rx1, ry1, rx2, ry2 in rois
-            )
+            in_roi = any(rx1 <= cx <= rx2 and ry1 <= cy <= ry2 for rx1, ry1, rx2, ry2 in rois)
             if not in_roi:
                 merged.append(e)
 
@@ -789,7 +882,9 @@ class EntityDetector:
             return self._sahi_detect(image)
 
         # Standard inference for small images
-        results = self.model(image, conf=self.confidence_threshold, imgsz=self.input_size, verbose=False)
+        results = self.model(
+            image, conf=self.confidence_threshold, imgsz=self.input_size, verbose=False
+        )
         return self._parse_yolo_results(results)
 
     def _sahi_detect(self, image: Image.Image) -> list[DetectedEntity]:
@@ -814,8 +909,9 @@ class EntityDetector:
                 y_end = min(y_start + tile_size, height)
 
                 tile = image.crop((x_start, y_start, x_end, y_end))
-                results = self.model(tile, conf=self.confidence_threshold,
-                                     imgsz=tile_size, verbose=False)
+                results = self.model(
+                    tile, conf=self.confidence_threshold, imgsz=tile_size, verbose=False
+                )
 
                 for result in results:
                     if result.boxes is None:
@@ -828,9 +924,11 @@ class EntityDetector:
                     ):
                         x1, y1, x2, y2 = box.tolist()
                         class_idx = int(cls_id)
-                        class_name = (self.class_names[class_idx]
-                                      if class_idx < len(self.class_names)
-                                      else f"unknown_{class_idx}")
+                        class_name = (
+                            self.class_names[class_idx]
+                            if class_idx < len(self.class_names)
+                            else f"unknown_{class_idx}"
+                        )
 
                         # Offset coordinates to original image space
                         abs_x1 = x1 + x_start
@@ -838,14 +936,16 @@ class EntityDetector:
                         abs_x2 = x2 + x_start
                         abs_y2 = y2 + y_start
 
-                        all_entities.append(DetectedEntity(
-                            id=self._generate_id(class_name),
-                            class_name=class_name,
-                            bbox=(abs_x1, abs_y1, abs_x2, abs_y2),
-                            center=((abs_x1 + abs_x2) / 2, (abs_y1 + abs_y2) / 2),
-                            confidence=float(conf),
-                            area=(abs_x2 - abs_x1) * (abs_y2 - abs_y1)
-                        ))
+                        all_entities.append(
+                            DetectedEntity(
+                                id=self._generate_id(class_name),
+                                class_name=class_name,
+                                bbox=(abs_x1, abs_y1, abs_x2, abs_y2),
+                                center=((abs_x1 + abs_x2) / 2, (abs_y1 + abs_y2) / 2),
+                                confidence=float(conf),
+                                area=(abs_x2 - abs_x1) * (abs_y2 - abs_y1),
+                            )
+                        )
 
         # Sort by class name, then by confidence (highest first)
         all_entities.sort(key=lambda e: (e.class_name, -e.confidence))
@@ -863,10 +963,9 @@ class EntityDetector:
             return []
 
         # 2. Pre-process all tiles into a single batch
-        batch = np.stack([
-            np.transpose(np.array(t).astype(np.float32) / 255.0, (2, 0, 1))
-            for t in tiles
-        ], axis=0)  # (N, 3, 640, 640)
+        batch = np.stack(
+            [np.transpose(np.array(t).astype(np.float32) / 255.0, (2, 0, 1)) for t in tiles], axis=0
+        )  # (N, 3, 640, 640)
 
         # 3. Single ONNX inference call
         input_name = self.onnx_session.get_inputs()[0].name
@@ -882,10 +981,15 @@ class EntityDetector:
         for tile_idx in range(len(tiles)):
             x_start, y_start, tile_w, tile_h = offsets[tile_idx]
             tile_entities = self._parse_onnx_tile(
-                raw_output, tile_idx, num_classes,
-                scale_x=1.0, scale_y=1.0,  # Tiles are already at native 640x640
-                x_offset=x_start, y_offset=y_start,
-                clip_w=tile_w, clip_h=tile_h,
+                raw_output,
+                tile_idx,
+                num_classes,
+                scale_x=1.0,
+                scale_y=1.0,  # Tiles are already at native 640x640
+                x_offset=x_start,
+                y_offset=y_start,
+                clip_w=tile_w,
+                clip_h=tile_h,
             )
             all_entities.extend(tile_entities)
 
@@ -893,10 +997,16 @@ class EntityDetector:
         return all_entities
 
     def _parse_onnx_tile(
-        self, raw_output: np.ndarray, tile_idx: int, num_classes: int,
-        scale_x: float, scale_y: float,
-        x_offset: float = 0, y_offset: float = 0,
-        clip_w: float = 640, clip_h: float = 640,
+        self,
+        raw_output: np.ndarray,
+        tile_idx: int,
+        num_classes: int,
+        scale_x: float,
+        scale_y: float,
+        x_offset: float = 0,
+        y_offset: float = 0,
+        clip_w: float = 640,
+        clip_h: float = 640,
     ) -> list[DetectedEntity]:
         """Parse ONNX output for a single tile from a batched result.
 
@@ -917,13 +1027,17 @@ class EntityDetector:
             best_cls = np.argmax(class_scores, axis=1)
             best_conf = np.max(class_scores, axis=1)
             # Use lowest per-class threshold for initial bulk filter
-            min_thresh = min(self.class_thresholds.values()) if self.class_thresholds else self.confidence_threshold
+            min_thresh = (
+                min(self.class_thresholds.values())
+                if self.class_thresholds
+                else self.confidence_threshold
+            )
             mask = best_conf >= min_thresh
             boxes, best_cls, best_conf = boxes[mask], best_cls[mask], best_conf[mask]
             predictions = []
             for box, cls_id, conf in zip(boxes, best_cls, best_conf, strict=False):
                 xc, yc, w, h = box
-                predictions.append([xc - w/2, yc - h/2, xc + w/2, yc + h/2, conf, cls_id])
+                predictions.append([xc - w / 2, yc - h / 2, xc + w / 2, yc + h / 2, conf, cls_id])
             predictions = np.array(predictions) if predictions else np.array([]).reshape(0, 6)
         else:
             return []
@@ -931,9 +1045,11 @@ class EntityDetector:
         for pred in predictions:
             x1, y1, x2, y2, confidence, class_id = pred
             class_idx = int(class_id)
-            class_name = (self.class_names[class_idx]
-                          if class_idx < len(self.class_names)
-                          else f"unknown_{class_idx}")
+            class_name = (
+                self.class_names[class_idx]
+                if class_idx < len(self.class_names)
+                else f"unknown_{class_idx}"
+            )
             if confidence < self._get_threshold(class_name):
                 continue
 
@@ -950,14 +1066,16 @@ class EntityDetector:
             if abs_x2 <= abs_x1 or abs_y2 <= abs_y1:
                 continue
 
-            entities.append(DetectedEntity(
-                id=self._generate_id(class_name),
-                class_name=class_name,
-                bbox=(float(abs_x1), float(abs_y1), float(abs_x2), float(abs_y2)),
-                center=((abs_x1 + abs_x2) / 2, (abs_y1 + abs_y2) / 2),
-                confidence=float(confidence),
-                area=float((abs_x2 - abs_x1) * (abs_y2 - abs_y1)),
-            ))
+            entities.append(
+                DetectedEntity(
+                    id=self._generate_id(class_name),
+                    class_name=class_name,
+                    bbox=(float(abs_x1), float(abs_y1), float(abs_x2), float(abs_y2)),
+                    center=((abs_x1 + abs_x2) / 2, (abs_y1 + abs_y2) / 2),
+                    confidence=float(confidence),
+                    area=float((abs_x2 - abs_x1) * (abs_y2 - abs_y1)),
+                )
+            )
 
         return entities
 
@@ -993,7 +1111,7 @@ class EntityDetector:
                     bbox=(x1, y1, x2, y2),
                     center=(center_x, center_y),
                     confidence=float(conf),
-                    area=area
+                    area=area,
                 )
                 entities.append(entity)
 
@@ -1059,7 +1177,11 @@ class EntityDetector:
             best_confidence = np.max(class_scores, axis=1)
 
             # Filter by confidence (use lowest per-class threshold for bulk filter)
-            min_thresh = min(self.class_thresholds.values()) if self.class_thresholds else self.confidence_threshold
+            min_thresh = (
+                min(self.class_thresholds.values())
+                if self.class_thresholds
+                else self.confidence_threshold
+            )
             mask = best_confidence >= min_thresh
             boxes = boxes[mask]
             best_class_idx = best_class_idx[mask]
@@ -1091,9 +1213,11 @@ class EntityDetector:
 
             # Per-class confidence threshold
             class_idx = int(class_id)
-            class_name = (self.class_names[class_idx]
-                          if class_idx < len(self.class_names)
-                          else f"unknown_{class_idx}")
+            class_name = (
+                self.class_names[class_idx]
+                if class_idx < len(self.class_names)
+                else f"unknown_{class_idx}"
+            )
             if confidence < self._get_threshold(class_name):
                 continue
 
@@ -1124,7 +1248,7 @@ class EntityDetector:
                 bbox=(float(x1), float(y1), float(x2), float(y2)),
                 center=(float(center_x), float(center_y)),
                 confidence=float(confidence),
-                area=float(area)
+                area=float(area),
             )
             entities.append(entity)
 
@@ -1135,7 +1259,9 @@ class EntityDetector:
 
         return entities
 
-    def _nms(self, entities: list[DetectedEntity], iou_threshold: float = 0.5) -> list[DetectedEntity]:
+    def _nms(
+        self, entities: list[DetectedEntity], iou_threshold: float = 0.5
+    ) -> list[DetectedEntity]:
         """Simple non-maximum suppression."""
         if not entities:
             return []
@@ -1150,7 +1276,8 @@ class EntityDetector:
 
             # Filter out overlapping boxes of the same class
             entities = [
-                e for e in entities
+                e
+                for e in entities
                 if e.class_name != best.class_name or self._iou(best.bbox, e.bbox) < iou_threshold
             ]
 
@@ -1186,7 +1313,7 @@ class EntityDetector:
         if isinstance(screenshot, bytes):
             image = Image.open(io.BytesIO(screenshot))
             width, height = image.size
-        elif hasattr(screenshot, 'size'):
+        elif hasattr(screenshot, "size"):
             width, height = screenshot.size
         else:
             width, height = 1920, 1080  # Default fallback
@@ -1199,52 +1326,60 @@ class EntityDetector:
         # Town Center - usually center of screen
         tc_x = width * 0.5 + random.uniform(-100, 100)
         tc_y = height * 0.5 + random.uniform(-50, 50)
-        entities.append(DetectedEntity(
-            id=self._generate_id("town_center"),
-            class_name="town_center",
-            bbox=(tc_x - 80, tc_y - 60, tc_x + 80, tc_y + 60),
-            center=(tc_x, tc_y),
-            confidence=0.95,
-            area=160 * 120
-        ))
+        entities.append(
+            DetectedEntity(
+                id=self._generate_id("town_center"),
+                class_name="town_center",
+                bbox=(tc_x - 80, tc_y - 60, tc_x + 80, tc_y + 60),
+                center=(tc_x, tc_y),
+                confidence=0.95,
+                area=160 * 120,
+            )
+        )
 
         # Sheep - typically 2-4 near TC at game start
         for _ in range(random.randint(2, 4)):
             sheep_x = tc_x + random.uniform(-200, 200)
             sheep_y = tc_y + random.uniform(-150, 150)
-            entities.append(DetectedEntity(
-                id=self._generate_id("sheep"),
-                class_name="sheep",
-                bbox=(sheep_x - 15, sheep_y - 10, sheep_x + 15, sheep_y + 10),
-                center=(sheep_x, sheep_y),
-                confidence=random.uniform(0.7, 0.95),
-                area=30 * 20
-            ))
+            entities.append(
+                DetectedEntity(
+                    id=self._generate_id("sheep"),
+                    class_name="sheep",
+                    bbox=(sheep_x - 15, sheep_y - 10, sheep_x + 15, sheep_y + 10),
+                    center=(sheep_x, sheep_y),
+                    confidence=random.uniform(0.7, 0.95),
+                    area=30 * 20,
+                )
+            )
 
         # Villagers - 3 starting villagers
         for _ in range(3):
             vill_x = tc_x + random.uniform(-150, 150)
             vill_y = tc_y + random.uniform(-100, 100)
-            entities.append(DetectedEntity(
-                id=self._generate_id("villager"),
-                class_name="villager",
-                bbox=(vill_x - 12, vill_y - 20, vill_x + 12, vill_y + 5),
-                center=(vill_x, vill_y),
-                confidence=random.uniform(0.75, 0.92),
-                area=24 * 25
-            ))
+            entities.append(
+                DetectedEntity(
+                    id=self._generate_id("villager"),
+                    class_name="villager",
+                    bbox=(vill_x - 12, vill_y - 20, vill_x + 12, vill_y + 5),
+                    center=(vill_x, vill_y),
+                    confidence=random.uniform(0.75, 0.92),
+                    area=24 * 25,
+                )
+            )
 
         # Scout - usually exploring
         scout_x = random.uniform(100, width - 100)
         scout_y = random.uniform(100, height - 100)
-        entities.append(DetectedEntity(
-            id=self._generate_id("scout"),
-            class_name="scout",
-            bbox=(scout_x - 15, scout_y - 18, scout_x + 15, scout_y + 8),
-            center=(scout_x, scout_y),
-            confidence=0.88,
-            area=30 * 26
-        ))
+        entities.append(
+            DetectedEntity(
+                id=self._generate_id("scout"),
+                class_name="scout",
+                bbox=(scout_x - 15, scout_y - 18, scout_x + 15, scout_y + 8),
+                center=(scout_x, scout_y),
+                confidence=0.88,
+                area=30 * 26,
+            )
+        )
 
         # Sort by class name, then by confidence
         entities.sort(key=lambda e: (e.class_name, -e.confidence))
@@ -1259,9 +1394,7 @@ class EntityDetector:
         return [e.to_dict() for e in self.detect(screenshot)]
 
     def find_entity_by_id(
-        self,
-        entities: list[DetectedEntity],
-        target_id: str
+        self, entities: list[DetectedEntity], target_id: str
     ) -> DetectedEntity | None:
         """Find an entity by its ID.
 
@@ -1278,9 +1411,7 @@ class EntityDetector:
         return None
 
     def find_entities_by_class(
-        self,
-        entities: list[DetectedEntity],
-        class_name: str
+        self, entities: list[DetectedEntity], class_name: str
     ) -> list[DetectedEntity]:
         """Find all entities of a given class.
 
@@ -1299,7 +1430,7 @@ class EntityDetector:
         self,
         entities: list[DetectedEntity],
         point: tuple[float, float],
-        class_filter: str | None = None
+        class_filter: str | None = None,
     ) -> DetectedEntity | None:
         """Find the nearest entity to a point.
 
@@ -1328,6 +1459,7 @@ class EntityDetector:
 
 # Singleton instance for easy access
 _instance: EntityDetector | None = None
+
 
 def get_detector(
     model_path: str | None = None,

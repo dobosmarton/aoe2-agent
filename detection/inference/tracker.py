@@ -22,34 +22,41 @@ logger = logging.getLogger(__name__)
 @dataclass
 class TrackedEntity:
     """An entity being tracked across frames."""
+
     id: str
     class_name: str
-    state: np.ndarray          # [x_center, y_center, vx, vy, width, height]
-    covariance: np.ndarray     # 6x6 covariance matrix
-    hits: int = 1              # consecutive successful matches
-    misses: int = 0            # consecutive frames without a match
-    confidence: float = 0.0    # last detection confidence
+    state: np.ndarray  # [x_center, y_center, vx, vy, width, height]
+    covariance: np.ndarray  # 6x6 covariance matrix
+    hits: int = 1  # consecutive successful matches
+    misses: int = 0  # consecutive frames without a match
+    confidence: float = 0.0  # last detection confidence
 
 
 # Kalman filter constants (shared across all tracks)
 
 # Transition matrix F: constant velocity model (x += vx, y += vy)
-_F = np.array([
-    [1, 0, 1, 0, 0, 0],
-    [0, 1, 0, 1, 0, 0],
-    [0, 0, 1, 0, 0, 0],
-    [0, 0, 0, 1, 0, 0],
-    [0, 0, 0, 0, 1, 0],
-    [0, 0, 0, 0, 0, 1],
-], dtype=np.float64)
+_F = np.array(
+    [
+        [1, 0, 1, 0, 0, 0],
+        [0, 1, 0, 1, 0, 0],
+        [0, 0, 1, 0, 0, 0],
+        [0, 0, 0, 1, 0, 0],
+        [0, 0, 0, 0, 1, 0],
+        [0, 0, 0, 0, 0, 1],
+    ],
+    dtype=np.float64,
+)
 
 # Measurement matrix H: observe [x_center, y_center, width, height]
-_H = np.array([
-    [1, 0, 0, 0, 0, 0],
-    [0, 1, 0, 0, 0, 0],
-    [0, 0, 0, 0, 1, 0],
-    [0, 0, 0, 0, 0, 1],
-], dtype=np.float64)
+_H = np.array(
+    [
+        [1, 0, 0, 0, 0, 0],
+        [0, 1, 0, 0, 0, 0],
+        [0, 0, 0, 0, 1, 0],
+        [0, 0, 0, 0, 0, 1],
+    ],
+    dtype=np.float64,
+)
 
 # Process noise Q: tuned for AoE2 unit speeds (~5-20 px/frame)
 _Q = np.diag([10.0, 10.0, 5.0, 5.0, 2.0, 2.0]) ** 2
@@ -192,19 +199,22 @@ class EntityTracker:
             if track.misses > 0:
                 continue  # Only return actively tracked entities
             bbox = _state_to_bbox(track.state)
-            entities.append(DetectedEntity(
-                id=track.id,
-                class_name=track.class_name,
-                bbox=(float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])),
-                center=(float(track.state[0]), float(track.state[1])),
-                confidence=track.confidence,
-                area=float(max(1, track.state[4]) * max(1, track.state[5])),
-            ))
+            entities.append(
+                DetectedEntity(
+                    id=track.id,
+                    class_name=track.class_name,
+                    bbox=(float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])),
+                    center=(float(track.state[0]), float(track.state[1])),
+                    confidence=track.confidence,
+                    area=float(max(1, track.state[4]) * max(1, track.state[5])),
+                )
+            )
         entities.sort(key=lambda e: (e.class_name, -e.confidence))
         return entities
 
 
 # --- Module-level helper functions ---
+
 
 def _kalman_predict(track: TrackedEntity):
     """Kalman predict step: advance state using constant velocity model."""
@@ -253,6 +263,7 @@ def _solve_assignment(cost_matrix: np.ndarray) -> tuple[list[int], list[int]]:
     """Solve the assignment problem (Hungarian algorithm with greedy fallback)."""
     try:
         from scipy.optimize import linear_sum_assignment
+
         row_ind, col_ind = linear_sum_assignment(cost_matrix)
         return list(row_ind), list(col_ind)
     except ImportError:

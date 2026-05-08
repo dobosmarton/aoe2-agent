@@ -5,6 +5,7 @@ import contextlib
 import re
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import structlog
 
@@ -52,7 +53,7 @@ def _extract_applied_memories(
     raw = [t.strip() for t in m.group(1).split(",") if t.strip()]
     known = [t for t in raw if t in loaded_titles]
     unknown = [t for t in raw if t not in loaded_titles]
-    cleaned = reasoning[m.end():].lstrip()
+    cleaned = reasoning[m.end() :].lstrip()
     return known, unknown, cleaned
 
 
@@ -69,6 +70,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Async detection helper
 # ---------------------------------------------------------------------------
+
 
 async def _invoke_detector(det: object, method: str, *args: object, **kwargs: object) -> list:
     """Call a detector method, handling both sync and async implementations."""
@@ -98,7 +100,11 @@ def _get_ground_commands(iteration: int) -> list[dict]:
     if iteration != 1:
         return []
     return [
-        {"type": "scroll", "clicks": INITIAL_ZOOM_CLICKS, "intent": "Zoom in for better object detection"},
+        {
+            "type": "scroll",
+            "clicks": INITIAL_ZOOM_CLICKS,
+            "intent": "Zoom in for better object detection",
+        },
         {"type": "press", "key": ",", "intent": "Select scout (ground cmd)"},
         {"type": "press", "key": "g", "intent": "Auto Scout (ground cmd)"},
     ]
@@ -129,6 +135,7 @@ def _get_maintenance_actions(memory: AgentMemory) -> list[dict]:
 # Phase functions (extracted from game_loop body)
 # ---------------------------------------------------------------------------
 
+
 def _init_detector() -> object | None:
     """Initialize YOLO detector (remote or local)."""
     if not DETECTION_AVAILABLE:
@@ -142,8 +149,9 @@ def _init_detector() -> object | None:
             return detector
         detector = get_detector(use_mock=False, imgsz=config.detection_imgsz)
         backend = "mock" if detector.use_mock else detector.backend or "yolo"
-        log.info("detector_initialized", mode=backend,
-                 confidence_threshold=detector.confidence_threshold)
+        log.info(
+            "detector_initialized", mode=backend, confidence_threshold=detector.confidence_threshold
+        )
         return detector
     except Exception as e:
         log.warning("detector_init_failed", error=str(e))
@@ -154,15 +162,23 @@ def _init_frame_differ() -> object | None:
     """Initialize frame differ for skipping redundant rescans."""
     try:
         from detection.inference.frame_diff import FrameDiffer
+
         return FrameDiffer(threshold=FRAME_DIFFER_THRESHOLD)
     except ImportError:
         return None
 
 
 def _register_rescan_callbacks(
-    detector: object, overlay: object | None, frame_differ: object | None,
+    detector: Any,
+    overlay: Any | None,
+    frame_differ: Any | None,
 ) -> None:
-    """Register rescan + full detection callbacks on the executor module."""
+    """Register rescan + full detection callbacks on the executor module.
+
+    Typed as Any because the detector is built from a try/except optional
+    import; tightening to a Protocol would require restructuring the
+    optional-import dance.
+    """
 
     async def _rescan() -> None:
         if overlay:
@@ -171,7 +187,10 @@ def _register_rescan_callbacks(
 
         # Frame diff — did the camera move?
         if frame_differ and not frame_differ.has_changed(screenshot):  # type: ignore[union-attr]
-            if detector.tracker and detector.tracker.get_confidence() > TRACKER_CONFIDENCE_THRESHOLD:  # type: ignore[union-attr]
+            if (
+                detector.tracker
+                and detector.tracker.get_confidence() > TRACKER_CONFIDENCE_THRESHOLD
+            ):  # type: ignore[union-attr]
                 predicted = detector.tracker.predict()  # type: ignore[union-attr]
                 set_detected_entities(predicted)
                 if overlay:
@@ -216,7 +235,9 @@ def _register_rescan_callbacks(
 
 
 async def _capture_screenshot(
-    overlay: object | None, screenshots_dir: Path | None, iteration: int,
+    overlay: object | None,
+    screenshots_dir: Path | None,
+    iteration: int,
 ) -> tuple[bytes, int, int]:
     """Capture game screenshot, optionally saving to disk."""
     if overlay:
@@ -233,18 +254,20 @@ async def _capture_screenshot(
 
 
 async def _run_detection(
-    detector: object, screenshot: bytes, iteration: int, alarm: bool,
+    detector: object,
+    screenshot: bytes,
+    iteration: int,
+    alarm: bool,
 ) -> list:
     """Run entity detection, choosing adaptive SAHI or standard mode."""
     try:
         if config.adaptive_sahi:
-            force_full = (
-                iteration == 1
-                or iteration % config.full_sahi_interval == 0
-                or alarm
-            )
+            force_full = iteration == 1 or iteration % config.full_sahi_interval == 0 or alarm
             entities = await _invoke_detector(
-                detector, "detect_adaptive", screenshot, force_full=force_full,
+                detector,
+                "detect_adaptive",
+                screenshot,
+                force_full=force_full,
             )
         else:
             entities = await _invoke_detector(detector, "detect", screenshot)
@@ -258,7 +281,8 @@ async def _run_detection(
 
 
 def _classify_entities(
-    detected_entities: list, screenshot: bytes,
+    detected_entities: list,
+    screenshot: bytes,
 ) -> tuple[str, dict]:
     """Build entity summary and classify ownership of military units."""
     ownership_results: dict = {}
@@ -275,7 +299,9 @@ def _classify_entities(
         pass  # Non-critical — summary works without ownership tags
 
     entity_summary = build_entity_summary(
-        detected_entities, max_count=ENTITY_DISPLAY_LIMIT, ownership_results=ownership_results,
+        detected_entities,
+        max_count=ENTITY_DISPLAY_LIMIT,
+        ownership_results=ownership_results,
     )
     return entity_summary, ownership_results
 
@@ -306,8 +332,7 @@ async def _run_strategist_async(
         goal_logger.log_goals_created(iteration, new_goals)
         if prev_goals:
             goal_logger.log_strategist_update(iteration, prev_goals, new_goals)
-        log.info("strategist_goals_updated", turn=iteration,
-                 goal_count=len(new_goals), alarm=alarm)
+        log.info("strategist_goals_updated", turn=iteration, goal_count=len(new_goals), alarm=alarm)
     except Exception as e:
         log.warning("strategist_failed", error=str(e))
 
@@ -337,8 +362,14 @@ def _maybe_launch_strategist(
 
     task = asyncio.create_task(
         _run_strategist_async(
-            strategist, iteration, alarm, memory,
-            goal_manager, entity_summary, screenshot, goal_logger,
+            strategist,
+            iteration,
+            alarm,
+            memory,
+            goal_manager,
+            entity_summary,
+            screenshot,
+            goal_logger,
         ),
         name=f"strategist_turn_{iteration}",
     )
@@ -365,8 +396,7 @@ def _build_llm_context(
     if entity_summary:
         entity_context = (
             "\n## Detected Entities (from YOLO)\n"
-            "Use target_class or target_id to interact with these:\n"
-            + entity_summary + "\n"
+            "Use target_class or target_id to interact with these:\n" + entity_summary + "\n"
         )
         context = entity_context + "\n" + context
 
@@ -397,10 +427,12 @@ def _process_response(
         memory.record_memories_applied(known_titles)
         log.info("memories_applied", iteration=iteration, titles=known_titles)
     if unknown_titles:
-        log.warning("memories_applied_unknown",
-                    iteration=iteration,
-                    titles=unknown_titles,
-                    loaded=sorted(loaded))
+        log.warning(
+            "memories_applied_unknown",
+            iteration=iteration,
+            titles=unknown_titles,
+            loaded=sorted(loaded),
+        )
 
     log.info(
         "llm_response",
@@ -447,7 +479,10 @@ def _process_response(
 
 
 async def _execute_turn_actions(
-    actions: list, iteration: int, memory: AgentMemory, reasoning: str,
+    actions: list,
+    iteration: int,
+    memory: AgentMemory,
+    reasoning: str,
 ) -> None:
     """Execute LLM actions or fallback actions.
 
@@ -459,8 +494,9 @@ async def _execute_turn_actions(
         results = await execute_actions(actions)
         success_count = sum(1 for r in results if r.success)
         memory.record_action_results(success_count, len(actions))
-        log.info("actions_executed", iteration=iteration,
-                 total=len(actions), successful=success_count)
+        log.info(
+            "actions_executed", iteration=iteration, total=len(actions), successful=success_count
+        )
 
         # Build feedback from failed actions
         verification_lines = []
@@ -476,7 +512,12 @@ async def _execute_turn_actions(
         fallback = [
             {"type": "press", "key": "h", "intent": "Go to TC (fallback)"},
             {"type": "press", "key": "q", "intent": "Queue villager (fallback)"},
-            {"type": "press", "key": ".", "rescan": True, "intent": "Select idle villager (fallback)"},
+            {
+                "type": "press",
+                "key": ".",
+                "rescan": True,
+                "intent": "Select idle villager (fallback)",
+            },
         ]
         fallback_actions = validate_actions(fallback)
         if fallback_actions:
@@ -490,6 +531,7 @@ async def _execute_turn_actions(
 # ---------------------------------------------------------------------------
 # Main game loop
 # ---------------------------------------------------------------------------
+
 
 async def game_loop(
     provider: BaseLLMProvider,
@@ -510,6 +552,7 @@ async def game_loop(
     if use_overlay:
         try:
             from .overlay import DetectionOverlay
+
             overlay = DetectionOverlay()
             log.info("overlay_enabled")
         except Exception as e:
@@ -541,14 +584,15 @@ async def game_loop(
     # _process_response can validate `[applied: ...]` prefixes against the set
     # of titles that were actually injected into the system prompt this game.
     memory.memories_loaded = list(getattr(provider, "loaded_memory_titles", []))
-    log.info("memories_loaded",
-             count=len(memory.memories_loaded),
-             titles=memory.memories_loaded)
+    log.info("memories_loaded", count=len(memory.memories_loaded), titles=memory.memories_loaded)
 
-    log.info("game_loop_start", provider=type(provider).__name__,
-             detection=detector is not None,
-             executor_model=config.model,
-             strategist_model=config.strategist_model)
+    log.info(
+        "game_loop_start",
+        provider=type(provider).__name__,
+        detection=detector is not None,
+        executor_model=config.model,
+        strategist_model=config.strategist_model,
+    )
 
     try:
         while max_iterations is None or iteration < max_iterations:
@@ -564,13 +608,18 @@ async def game_loop(
                 continue
 
             screenshot, width, height = await _capture_screenshot(
-                overlay, screenshots_dir, iteration,
+                overlay,
+                screenshots_dir,
+                iteration,
             )
 
             detected_entities = []
             if detector:
                 detected_entities = await _run_detection(
-                    detector, screenshot, iteration, alarm,
+                    detector,
+                    screenshot,
+                    iteration,
+                    alarm,
                 )
                 if overlay and detected_entities:
                     overlay.show(detected_entities, get_game_window_rect())
@@ -584,8 +633,14 @@ async def game_loop(
             )
 
             strategist_task = _maybe_launch_strategist(
-                strategist, iteration, alarm, memory,
-                goal_manager, entity_summary, screenshot, goal_logger,
+                strategist,
+                iteration,
+                alarm,
+                memory,
+                goal_manager,
+                entity_summary,
+                screenshot,
+                goal_logger,
                 strategist_task,
             )
 
@@ -601,8 +656,12 @@ async def game_loop(
                 if ground_actions:
                     gc_results = await execute_actions(ground_actions)
                     gc_count = sum(1 for r in gc_results if r.success)
-                    log.info("ground_commands_executed", iteration=iteration,
-                             count=gc_count, total=len(ground_actions))
+                    log.info(
+                        "ground_commands_executed",
+                        iteration=iteration,
+                        count=gc_count,
+                        total=len(ground_actions),
+                    )
 
             # Safe maintenance actions (queue villagers) while LLM is thinking.
             if not llm_task.done():
@@ -611,14 +670,20 @@ async def game_loop(
                     maint_actions = validate_actions(maint_cmds)
                     if maint_actions:
                         await execute_actions(maint_actions)
-                        log.info("maintenance_executed", iteration=iteration,
-                                 count=len(maint_actions))
+                        log.info(
+                            "maintenance_executed", iteration=iteration, count=len(maint_actions)
+                        )
 
             # Wait for LLM result.
             response = await llm_task
 
             actions, game_end_reason = _process_response(
-                response, memory, goal_manager, iteration, goal_logger, time_budget,
+                response,
+                memory,
+                goal_manager,
+                iteration,
+                goal_logger,
+                time_budget,
             )
             if game_end_reason:
                 break
@@ -626,11 +691,15 @@ async def game_loop(
             if response.get("actions_already_executed"):
                 success = response.get("success_count", len(actions))
                 memory.record_action_results(success, len(actions))
-                log.info("actions_executed", iteration=iteration,
-                         total=len(actions), successful=success)
+                log.info(
+                    "actions_executed", iteration=iteration, total=len(actions), successful=success
+                )
             else:
                 await _execute_turn_actions(
-                    actions, iteration, memory, response.get("reasoning", ""),
+                    actions,
+                    iteration,
+                    memory,
+                    response.get("reasoning", ""),
                 )
 
             await asyncio.sleep(config.loop_delay)
@@ -667,6 +736,7 @@ async def game_loop(
 # Single iteration (testing / debugging)
 # ---------------------------------------------------------------------------
 
+
 async def run_single_iteration(
     provider: BaseLLMProvider,
     memory: AgentMemory | None = None,
@@ -699,8 +769,7 @@ async def run_single_iteration(
         summary = build_entity_summary(detected_entities, max_count=ENTITY_DISPLAY_LIMIT)
         entity_context = (
             "\n## Detected Entities (from YOLO)\n"
-            "Use target_class or target_id to interact with these:\n"
-            + summary + "\n"
+            "Use target_class or target_id to interact with these:\n" + summary + "\n"
         )
         context = entity_context + "\n" + context
 

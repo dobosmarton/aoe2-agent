@@ -75,7 +75,9 @@ class PromptMutator:
             Dict with description, old_text, new_text, rationale. None on failure.
         """
         experiment_summary = self._format_experiments(recent_experiments)
-        failure_summary = "\n".join(f"- {f}" for f in failure_modes) if failure_modes else "None identified yet"
+        failure_summary = (
+            "\n".join(f"- {f}" for f in failure_modes) if failure_modes else "None identified yet"
+        )
 
         user_msg = f"""Current system prompt:
 ```
@@ -97,7 +99,11 @@ Propose ONE targeted change to improve the agent's game performance."""
                 system=MUTATOR_SYSTEM,
                 messages=[{"role": "user", "content": user_msg}],
             )
-            return self._parse_response(response.content[0].text)
+            block = response.content[0]
+            if not isinstance(block, anthropic.types.TextBlock):
+                log.error("prompt_mutator_unexpected_block", block_type=type(block).__name__)
+                return None
+            return self._parse_response(block.text)
         except Exception as e:
             log.error("prompt_mutator_error", error=str(e))
             return None

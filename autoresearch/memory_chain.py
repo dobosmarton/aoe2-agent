@@ -39,11 +39,13 @@ def _resolve_memory_title(meta: dict, file: Path) -> str:
 @dataclass
 class _MemoryEntry:
     """One ranked memory fragment loaded for context assembly."""
+
     rank: int
     created: str
     title: str
     applies_when: str
     content: str
+
 
 EXTRACTION_SYSTEM = """You just finished an Age of Empires II game. Write 1-3 first-person notes to
 your future self — rules you should follow next game, based on what happened in this one.
@@ -127,7 +129,11 @@ class MemoryChain:
                 system=EXTRACTION_SYSTEM,
                 messages=[{"role": "user", "content": game_summary}],
             )
-            observations = self._parse_observations(response.content[0].text)
+            block = response.content[0]
+            if not isinstance(block, anthropic.types.TextBlock):
+                log.error("memory_extraction_unexpected_block", block_type=type(block).__name__)
+                return []
+            observations = self._parse_observations(block.text)
         except Exception as e:
             log.error("memory_extraction_failed", error=str(e))
             return []
@@ -144,7 +150,9 @@ class MemoryChain:
         created = []
         next_num = self._next_file_number()
         for obs in observations:
-            safe_title = re.sub(r"[^a-z0-9_]", "_", (obs.get("title") or "observation").lower())[:50]
+            safe_title = re.sub(r"[^a-z0-9_]", "_", (obs.get("title") or "observation").lower())[
+                :50
+            ]
             if safe_title in existing_titles:
                 log.info("memory_dedup_skipped", title=safe_title, type=obs.get("type"))
                 continue
@@ -187,13 +195,15 @@ class MemoryChain:
             content = self._strip_frontmatter(text).strip()
             if not content:
                 continue
-            entries.append(_MemoryEntry(
-                rank=self._IMPACT_RANK.get(meta.get("score_impact", "neutral"), 2),
-                created=meta.get("created", ""),
-                title=_resolve_memory_title(meta, f),
-                applies_when=meta.get("applies_when", "").strip(),
-                content=content,
-            ))
+            entries.append(
+                _MemoryEntry(
+                    rank=self._IMPACT_RANK.get(meta.get("score_impact", "neutral"), 2),
+                    created=meta.get("created", ""),
+                    title=_resolve_memory_title(meta, f),
+                    applies_when=meta.get("applies_when", "").strip(),
+                    content=content,
+                )
+            )
 
         if not entries:
             return ""
@@ -251,15 +261,17 @@ class MemoryChain:
             meta = self._parse_frontmatter(text)
             content = self._strip_frontmatter(text).strip()
             title = _resolve_memory_title(meta, f)
-            result.append({
-                "file": f.name,
-                "title": title,
-                "type": meta.get("type", "unknown"),
-                "game_id": meta.get("game_id", "unknown"),
-                "applies_when": meta.get("applies_when", ""),
-                "score_impact": meta.get("score_impact", "neutral"),
-                "content": content,
-            })
+            result.append(
+                {
+                    "file": f.name,
+                    "title": title,
+                    "type": meta.get("type", "unknown"),
+                    "game_id": meta.get("game_id", "unknown"),
+                    "applies_when": meta.get("applies_when", ""),
+                    "score_impact": meta.get("score_impact", "neutral"),
+                    "content": content,
+                }
+            )
         return result
 
     def _build_game_summary(self, memory, score) -> str:
@@ -269,9 +281,13 @@ class MemoryChain:
         # Metrics
         metrics = memory.get_metrics_snapshot()
         parts.append(f"Game Result: {metrics['game_end_reason'] or 'unknown'}")
-        parts.append(f"Score: {score.composite:.4f} (survival={score.survival:.2f}, pop={score.population:.2f}, age={score.age:.2f}, economy={score.economy:.2f}, actions={score.action_success:.2f})")
+        parts.append(
+            f"Score: {score.composite:.4f} (survival={score.survival:.2f}, pop={score.population:.2f}, age={score.age:.2f}, economy={score.economy:.2f}, actions={score.action_success:.2f})"
+        )
         parts.append(f"Duration: {metrics['survival_time']:.0f}s, Turns: {metrics['turn_count']}")
-        parts.append(f"Peak Population: {metrics['peak_population']}, Highest Age: {metrics['highest_age']}")
+        parts.append(
+            f"Peak Population: {metrics['peak_population']}, Highest Age: {metrics['highest_age']}"
+        )
         parts.append("")
 
         # Turn history
@@ -394,5 +410,5 @@ created: {now}
         """Remove frontmatter from text."""
         match = re.match(r"^---\n.+?\n---\n?", text, re.DOTALL)
         if match:
-            return text[match.end():]
+            return text[match.end() :]
         return text

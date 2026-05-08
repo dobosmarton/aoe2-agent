@@ -51,12 +51,12 @@ _DEFAULT_OUTPUT_DIR = _DETECTION_DIR / "labeling" / "output" / "prelabeled"
 
 # Colors for preview visualization (one per category)
 _CATEGORY_COLORS = {
-    "resource": (34, 139, 34),      # green
-    "building": (65, 105, 225),     # blue
-    "unit": (220, 20, 60),          # red
-    "animal": (255, 165, 0),        # orange
-    "defense": (148, 0, 211),       # purple
-    "special": (255, 215, 0),       # gold
+    "resource": (34, 139, 34),  # green
+    "building": (65, 105, 225),  # blue
+    "unit": (220, 20, 60),  # red
+    "animal": (255, 165, 0),  # orange
+    "defense": (148, 0, 211),  # purple
+    "special": (255, 215, 0),  # gold
 }
 
 # Map class names to categories for coloring
@@ -64,9 +64,22 @@ _CLASS_CATEGORIES = {}
 _RESOURCE_CLASSES = {"tree", "gold_mine", "stone_mine", "berry_bush", "relic"}
 _ANIMAL_CLASSES = {"sheep", "deer", "boar", "wolf"}
 _BUILDING_CLASSES = {
-    "town_center", "house", "lumber_camp", "mining_camp", "mill", "market",
-    "dock", "farm", "barracks", "archery_range", "stable", "blacksmith",
-    "siege_workshop", "monastery", "castle", "university",
+    "town_center",
+    "house",
+    "lumber_camp",
+    "mining_camp",
+    "mill",
+    "market",
+    "dock",
+    "farm",
+    "barracks",
+    "archery_range",
+    "stable",
+    "blacksmith",
+    "siege_workshop",
+    "monastery",
+    "castle",
+    "university",
 }
 _DEFENSE_CLASSES = {"gate", "wall", "tower", "wonder", "krepost"}
 
@@ -113,7 +126,9 @@ def _find_labeled_stems(training_dir: Path | None = None) -> set[str]:
 
 
 def _run_standard_detection(
-    model, img_path: Path, conf_threshold: float,
+    model,
+    img_path: Path,
+    conf_threshold: float,
 ) -> list[dict]:
     """Run standard YOLO inference on a single image."""
     results = model(str(img_path), conf=conf_threshold, verbose=False)
@@ -126,17 +141,21 @@ def _run_standard_detection(
 
     detections = []
     for box, cls_id, conf in zip(boxes.xyxy, boxes.cls, boxes.conf, strict=False):
-        detections.append({
-            "bbox": tuple(box.tolist()),
-            "class_id": int(cls_id.item()),
-            "confidence": float(conf.item()),
-            "img_size": (img_w, img_h),
-        })
+        detections.append(
+            {
+                "bbox": tuple(box.tolist()),
+                "class_id": int(cls_id.item()),
+                "confidence": float(conf.item()),
+                "img_size": (img_w, img_h),
+            }
+        )
     return detections
 
 
 def _run_sahi_detection(
-    sahi_model, img_path: Path, conf_threshold: float,
+    sahi_model,
+    img_path: Path,
+    conf_threshold: float,
 ) -> list[dict]:
     """Run SAHI sliced inference on a single image."""
     from sahi.predict import get_sliced_prediction
@@ -160,12 +179,14 @@ def _run_sahi_detection(
     detections = []
     for pred in result.object_prediction_list:
         bbox = pred.bbox
-        detections.append({
-            "bbox": (bbox.minx, bbox.miny, bbox.maxx, bbox.maxy),
-            "class_id": pred.category.id,
-            "confidence": pred.score.value,
-            "img_size": (img_w, img_h),
-        })
+        detections.append(
+            {
+                "bbox": (bbox.minx, bbox.miny, bbox.maxx, bbox.maxy),
+                "class_id": pred.category.id,
+                "confidence": pred.score.value,
+                "img_size": (img_w, img_h),
+            }
+        )
     return detections
 
 
@@ -204,6 +225,7 @@ def prelabel(
     if use_sahi:
         try:
             from sahi import AutoDetectionModel
+
             sahi_model = AutoDetectionModel.from_pretrained(
                 model_type="yolov8",
                 model_path=str(model_path),
@@ -270,10 +292,7 @@ def prelabel(
 
     # Find all screenshots
     image_extensions = {".png", ".jpg", ".jpeg", ".bmp"}
-    images = sorted([
-        p for p in screenshots_dir.iterdir()
-        if p.suffix.lower() in image_extensions
-    ])
+    images = sorted([p for p in screenshots_dir.iterdir() if p.suffix.lower() in image_extensions])
     print(f"Found {len(images)} screenshots in {screenshots_dir}")
 
     # Skip already-labeled images if requested
@@ -291,11 +310,15 @@ def prelabel(
         # Run detection (SAHI or standard)
         if use_sahi and sahi_model is not None:
             raw_detections = _run_sahi_detection(
-                sahi_model, img_path, conf_threshold,
+                sahi_model,
+                img_path,
+                conf_threshold,
             )
         else:
             raw_detections = _run_standard_detection(
-                model, img_path, conf_threshold,
+                model,
+                img_path,
+                conf_threshold,
             )
 
         if not raw_detections:
@@ -303,7 +326,7 @@ def prelabel(
             label_name = img_path.stem + ".txt"
             (labels_dir / label_name).write_text("")
             _link_image(img_path, images_dir)
-            print(f"  [{i+1}/{len(images)}] {img_path.name}: 0 detections")
+            print(f"  [{i + 1}/{len(images)}] {img_path.name}: 0 detections")
             continue
 
         img_w, img_h = raw_detections[0]["img_size"]
@@ -331,11 +354,13 @@ def prelabel(
             labels.append(f"{mapped_id} {x_center:.6f} {y_center:.6f} {w:.6f} {h:.6f}")
 
             # Track for preview and summary
-            detections_for_preview.append({
-                "bbox": (x1, y1, x2, y2),
-                "class_name": class_name,
-                "confidence": det["confidence"],
-            })
+            detections_for_preview.append(
+                {
+                    "bbox": (x1, y1, x2, y2),
+                    "class_name": class_name,
+                    "confidence": det["confidence"],
+                }
+            )
 
             summary[class_name] = summary.get(class_name, 0) + 1
             total_detections += 1
@@ -351,7 +376,7 @@ def prelabel(
         if save_preview and detections_for_preview:
             _save_preview(img_path, detections_for_preview, preview_dir)
 
-        print(f"  [{i+1}/{len(images)}] {img_path.name}: {len(labels)} detections")
+        print(f"  [{i + 1}/{len(images)}] {img_path.name}: {len(labels)} detections")
 
     # Write summary
     summary_data = {
@@ -430,35 +455,48 @@ def main():
         epilog=__doc__,
     )
     parser.add_argument(
-        "--model", type=str, default=str(_DEFAULT_MODEL),
+        "--model",
+        type=str,
+        default=str(_DEFAULT_MODEL),
         help="Path to YOLO model (default: inference/models/aoe2_yolo26.pt)",
     )
     parser.add_argument(
-        "--input", type=str, default=str(_DEFAULT_RAW_DIR),
+        "--input",
+        type=str,
+        default=str(_DEFAULT_RAW_DIR),
         help="Directory with raw screenshots (default: real_screenshots/raw/)",
     )
     parser.add_argument(
-        "--output", type=str, default=str(_DEFAULT_OUTPUT_DIR),
+        "--output",
+        type=str,
+        default=str(_DEFAULT_OUTPUT_DIR),
         help="Output directory (default: labeling/output/prelabeled/)",
     )
     parser.add_argument(
-        "--conf", type=float, default=0.25,
+        "--conf",
+        type=float,
+        default=0.25,
         help="Confidence threshold (default: 0.25, lower catches more)",
     )
     parser.add_argument(
-        "--schema", choices=["v1", "v2"], default="v2",
+        "--schema",
+        choices=["v1", "v2"],
+        default="v2",
         help="Class ID schema: v1 (46-class model) or v2 (55-class target)",
     )
     parser.add_argument(
-        "--no-preview", action="store_true",
+        "--no-preview",
+        action="store_true",
         help="Skip generating preview images",
     )
     parser.add_argument(
-        "--skip-labeled", action="store_true",
+        "--skip-labeled",
+        action="store_true",
         help="Skip images that already have manual annotations in training data",
     )
     parser.add_argument(
-        "--sahi", action="store_true",
+        "--sahi",
+        action="store_true",
         help="Use SAHI sliced inference (640x640 tiles) for better small object detection",
     )
     args = parser.parse_args()

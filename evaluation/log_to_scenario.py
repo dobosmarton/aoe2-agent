@@ -54,6 +54,7 @@ DEFAULT_PLACEHOLDER_ENTITIES = [
 # Data
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class TurnSnapshot:
     iteration: int
@@ -68,6 +69,7 @@ class TurnSnapshot:
 # ---------------------------------------------------------------------------
 # Parsing
 # ---------------------------------------------------------------------------
+
 
 def parse_log(log_path: Path) -> list[TurnSnapshot]:
     """Walk the log line-by-line, accumulating a TurnSnapshot per iteration.
@@ -150,6 +152,7 @@ def parse_log(log_path: Path) -> list[TurnSnapshot]:
 # Auto-detect interesting turns
 # ---------------------------------------------------------------------------
 
+
 def find_age_transitions(turns: list[TurnSnapshot]) -> list[TurnSnapshot]:
     """Flag turns where the age changed from the previous turn.
 
@@ -227,6 +230,7 @@ def emit_fixture(turn: TurnSnapshot, *, name: str | None = None) -> str:
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def _cmd_list(turns: list[TurnSnapshot]) -> None:
     """Print a one-line summary per turn."""
     print(f"Found {len(turns)} turn(s):\n")
@@ -234,8 +238,10 @@ def _cmd_list(turns: list[TurnSnapshot]) -> None:
         age = turn.age or "?"
         food = (turn.resources or {}).get("food", "?")
         pop = (turn.resources or {}).get("population", "?")
-        print(f"  turn {turn.iteration:>3}  {turn.timestamp}  "
-              f"age={age:<11}  food={food:<5}  pop={pop}")
+        print(
+            f"  turn {turn.iteration:>3}  {turn.timestamp}  "
+            f"age={age:<11}  food={food:<5}  pop={pop}"
+        )
 
 
 def _cmd_one_turn(turns: list[TurnSnapshot], turn_num: int, out: Path | None) -> int:
@@ -268,17 +274,21 @@ def _cmd_auto(turns: list[TurnSnapshot], out_dir: Path) -> int:
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n", 1)[0])
+    parser = argparse.ArgumentParser(
+        description="Convert a real-game structlog stream into scenario YAML stubs."
+    )
     parser.add_argument("log", type=Path, help="Path to logs/<date>/game.txt")
-    parser.add_argument("--list", action="store_true",
-                        help="Print one-line summary of every turn")
+    parser.add_argument("--list", action="store_true", help="Print one-line summary of every turn")
     parser.add_argument("--turn", type=int, help="Emit a single turn's fixture")
-    parser.add_argument("--auto", action="store_true",
-                        help="Auto-detect interesting turns and emit one fixture per turn")
-    parser.add_argument("--out", type=Path,
-                        help="Output path (single-turn mode); print to stdout if omitted")
-    parser.add_argument("--out-dir", type=Path,
-                        help="Output directory (auto mode)")
+    parser.add_argument(
+        "--auto",
+        action="store_true",
+        help="Auto-detect interesting turns and emit one fixture per turn",
+    )
+    parser.add_argument(
+        "--out", type=Path, help="Output path (single-turn mode); print to stdout if omitted"
+    )
+    parser.add_argument("--out-dir", type=Path, help="Output directory (auto mode)")
     return parser.parse_args()
 
 

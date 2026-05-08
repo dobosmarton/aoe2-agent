@@ -22,12 +22,14 @@ class Config(BaseModel):
 
     # Detection settings
     detection_imgsz: int = 1280  # YOLO inference resolution (higher = more detections, slower)
-    adaptive_sahi: bool = True   # Use adaptive SAHI (fast scan + targeted SAHI on entity clusters)
+    adaptive_sahi: bool = True  # Use adaptive SAHI (fast scan + targeted SAHI on entity clusters)
     full_sahi_interval: int = 5  # Force full SAHI scan every N turns
-    detection_host: str = ""     # Remote CoreML server URL (e.g., "http://192.168.64.1:8420")
+    detection_host: str = ""  # Remote CoreML server URL (e.g., "http://192.168.64.1:8420")
 
     # Timing settings
-    loop_delay: float = 0.3  # Seconds between decisions (pipeline latency provides additional pacing)
+    loop_delay: float = (
+        0.3  # Seconds between decisions (pipeline latency provides additional pacing)
+    )
     action_delay: float = 0.05  # Seconds between actions
 
     # Logging

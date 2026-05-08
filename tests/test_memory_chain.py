@@ -33,6 +33,7 @@ GENEROUS_TOKEN_BUDGET = 100_000  # high enough that the cap, not the budget, gov
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def memories_dir():
     path = Path(tempfile.mkdtemp(prefix="memory_chain_test_"))
@@ -83,6 +84,7 @@ def _bullets(rendered: str) -> str:
 # Cap tests
 # ---------------------------------------------------------------------------
 
+
 def test_load_memories_caps_at_20(memories_dir: Path):
     """25 input files → exactly 20 bullets in output (the rest get dropped)."""
     from autoresearch.memory_chain import MemoryChain
@@ -118,17 +120,24 @@ def test_load_memories_under_cap_returns_all(memories_dir: Path):
 # Ranking tests
 # ---------------------------------------------------------------------------
 
+
 def test_negative_impact_ranks_before_positive(memories_dir: Path):
     """Negative-impact memories (traps to avoid) appear before positive ones."""
     from autoresearch.memory_chain import MemoryChain
 
     _write_memory(
-        memories_dir, file_num=1, title="positive_rule",
-        score_impact="positive", content="I should do positive things.",
+        memories_dir,
+        file_num=1,
+        title="positive_rule",
+        score_impact="positive",
+        content="I should do positive things.",
     )
     _write_memory(
-        memories_dir, file_num=2, title="negative_rule",
-        score_impact="negative", content="I should avoid negative things.",
+        memories_dir,
+        file_num=2,
+        title="negative_rule",
+        score_impact="negative",
+        content="I should avoid negative things.",
     )
 
     rendered = MemoryChain(memories_dir=memories_dir).load_memories(
@@ -142,12 +151,18 @@ def test_positive_impact_ranks_before_neutral(memories_dir: Path):
     from autoresearch.memory_chain import MemoryChain
 
     _write_memory(
-        memories_dir, file_num=1, title="neutral_rule",
-        score_impact="neutral", content="I should do neutral things.",
+        memories_dir,
+        file_num=1,
+        title="neutral_rule",
+        score_impact="neutral",
+        content="I should do neutral things.",
     )
     _write_memory(
-        memories_dir, file_num=2, title="positive_rule",
-        score_impact="positive", content="I should do positive things.",
+        memories_dir,
+        file_num=2,
+        title="positive_rule",
+        score_impact="positive",
+        content="I should do positive things.",
     )
 
     rendered = MemoryChain(memories_dir=memories_dir).load_memories(
@@ -161,13 +176,19 @@ def test_within_tier_newer_first(memories_dir: Path):
     from autoresearch.memory_chain import MemoryChain
 
     _write_memory(
-        memories_dir, file_num=1, title="older_rule",
-        score_impact="negative", content="I should follow the older rule.",
+        memories_dir,
+        file_num=1,
+        title="older_rule",
+        score_impact="negative",
+        content="I should follow the older rule.",
         created="2026-01-01T10:00:00+00:00",
     )
     _write_memory(
-        memories_dir, file_num=2, title="newer_rule",
-        score_impact="negative", content="I should follow the newer rule.",
+        memories_dir,
+        file_num=2,
+        title="newer_rule",
+        score_impact="negative",
+        content="I should follow the newer rule.",
         created="2026-04-25T10:00:00+00:00",
     )
 
@@ -194,7 +215,9 @@ def test_cap_keeps_negatives_drops_neutrals(memories_dir: Path):
     # All 10 negatives + all 10 positives = 20 (the cap). Neutrals are dropped.
     assert _bullet_count(rendered) == CAP
     for i in range(10):
-        assert f"neg_{i}" not in rendered or "I should follow this rule." in rendered  # negatives kept
+        assert (
+            f"neg_{i}" not in rendered or "I should follow this rule." in rendered
+        )  # negatives kept
     assert "neu_0" not in rendered  # neutrals dropped
     assert "neu_4" not in rendered
 
@@ -203,13 +226,17 @@ def test_cap_keeps_negatives_drops_neutrals(memories_dir: Path):
 # Trigger-prefix rendering tests
 # ---------------------------------------------------------------------------
 
+
 def test_any_trigger_omits_when_prefix(memories_dir: Path):
     """A memory with applies_when=any renders WITHOUT a `(when: …)` prefix."""
     from autoresearch.memory_chain import MemoryChain
 
     _write_memory(
-        memories_dir, file_num=1, title="rule",
-        applies_when="any", content="I should do this always.",
+        memories_dir,
+        file_num=1,
+        title="rule",
+        applies_when="any",
+        content="I should do this always.",
     )
     rendered = MemoryChain(memories_dir=memories_dir).load_memories(
         max_tokens=GENEROUS_TOKEN_BUDGET,
@@ -222,7 +249,9 @@ def test_specific_trigger_renders_when_prefix(memories_dir: Path):
     from autoresearch.memory_chain import MemoryChain
 
     _write_memory(
-        memories_dir, file_num=1, title="rule",
+        memories_dir,
+        file_num=1,
+        title="rule",
         applies_when="Dark Age AND food < 50",
         content="I should plant farms.",
     )
@@ -242,12 +271,16 @@ def test_bullet_starts_with_bracketed_title(memories_dir: Path):
     from autoresearch.memory_chain import MemoryChain
 
     _write_memory(
-        memories_dir, file_num=1, title="build_house_at_pop_cap_minus_5",
+        memories_dir,
+        file_num=1,
+        title="build_house_at_pop_cap_minus_5",
         applies_when="Dark Age AND pop >= pop_cap - 5",
         content="I should build a house immediately.",
     )
     _write_memory(
-        memories_dir, file_num=2, title="rule_with_no_trigger",
+        memories_dir,
+        file_num=2,
+        title="rule_with_no_trigger",
         applies_when="any",
         content="I should always do this.",
     )
@@ -292,6 +325,7 @@ def test_title_falls_back_to_filename_when_frontmatter_missing(memories_dir: Pat
 # ---------------------------------------------------------------------------
 # Empty-content rejection (defensive — defense-in-depth alongside _save_memory)
 # ---------------------------------------------------------------------------
+
 
 def test_whitespace_only_content_is_dropped(memories_dir: Path):
     """A memory with only whitespace as content should not appear in output."""

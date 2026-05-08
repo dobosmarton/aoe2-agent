@@ -32,12 +32,20 @@ lint-fix:
 format:
     ruff format .
 
+# Static type-check with pyright (AI agent code only — see [tool.pyright])
+typecheck:
+    pyright
+
 # Run tests
 test *ARGS:
     pytest {{ARGS}}
 
-# Full local quality gate: lint + tests
-check: lint test
+# Test coverage report (term-missing format)
+coverage:
+    pytest --cov --cov-report=term-missing
+
+# Full local quality gate: lint + typecheck + tests
+check: lint typecheck test
 
 # Export model to ONNX
 export-onnx model="detection/inference/models/aoe2_yolo_v5.pt":

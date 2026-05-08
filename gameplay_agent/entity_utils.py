@@ -6,7 +6,7 @@ Entities may arrive as DetectedEntity objects (from YOLO) or plain dicts
 
 from __future__ import annotations
 
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 
 class EntityAttrs(NamedTuple):
@@ -40,7 +40,7 @@ def extract_attrs(entity: object) -> EntityAttrs:
 def build_entity_summary(
     entities: list[object],
     max_count: int = 20,
-    ownership_results: dict[str, object] | None = None,
+    ownership_results: dict[str, tuple[Any, float]] | None = None,
 ) -> str:
     """Build a text summary of detected entities for LLM context.
 

@@ -28,7 +28,9 @@ def find_game_window():
         return None
 
     try:
-        windows = gw.getWindowsWithTitle(AOE2_WINDOW_TITLE)
+        # getWindowsWithTitle is the Windows backend's API; pygetwindow stubs
+        # only expose cross-platform attrs.
+        windows = gw.getWindowsWithTitle(AOE2_WINDOW_TITLE)  # pyright: ignore[reportAttributeAccessIssue]
         return windows[0] if windows else None
     except Exception as e:
         log.warning("find_window_error", error=str(e))

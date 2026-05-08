@@ -22,12 +22,22 @@ sys.path.insert(0, str(REPO))
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _state(**kwargs):
     from evaluation.world_sim import WorldState
+
     defaults = dict(
-        food=200.0, wood=150.0, gold=0.0, stone=0.0,
-        population=8, pop_cap=25, age="Dark Age",
-        buildings=[], villager_queue=[], age_up_ticks_remaining=0, turn=0,
+        food=200.0,
+        wood=150.0,
+        gold=0.0,
+        stone=0.0,
+        population=8,
+        pop_cap=25,
+        age="Dark Age",
+        buildings=[],
+        villager_queue=[],
+        age_up_ticks_remaining=0,
+        turn=0,
     )
     defaults.update(kwargs)
     return WorldState(**defaults)
@@ -37,8 +47,10 @@ def _state(**kwargs):
 # init_from_fixture
 # ---------------------------------------------------------------------------
 
+
 def test_init_from_fixture_parses_population():
     from evaluation.world_sim import init_from_fixture
+
     inputs = {
         "age": "Dark Age",
         "resources": {"food": 300, "wood": 250, "gold": 0, "stone": 0, "population": "12/20"},
@@ -53,6 +65,7 @@ def test_init_from_fixture_parses_population():
 
 def test_init_from_fixture_seeds_buildings_from_entities():
     from evaluation.world_sim import init_from_fixture
+
     inputs = {
         "age": "Dark Age",
         "resources": {"food": 200, "wood": 200, "gold": 0, "stone": 0, "population": "8/25"},
@@ -72,8 +85,10 @@ def test_init_from_fixture_seeds_buildings_from_entities():
 # queue_villager
 # ---------------------------------------------------------------------------
 
+
 def test_queue_villager_deducts_50_food():
     from evaluation.world_sim import _apply_queue_villager
+
     state = _state(food=200.0)
     new_state = _apply_queue_villager(state)
     assert new_state.food == 150.0
@@ -83,6 +98,7 @@ def test_queue_villager_deducts_50_food():
 
 def test_queue_villager_noop_when_food_insufficient():
     from evaluation.world_sim import _apply_queue_villager
+
     state = _state(food=30.0)
     new_state = _apply_queue_villager(state)
     assert new_state.food == 30.0
@@ -91,6 +107,7 @@ def test_queue_villager_noop_when_food_insufficient():
 
 def test_multiple_queue_villager_accumulates():
     from evaluation.world_sim import _apply_queue_villager
+
     state = _state(food=200.0)
     state = _apply_queue_villager(state)
     state = _apply_queue_villager(state)
@@ -102,8 +119,10 @@ def test_multiple_queue_villager_accumulates():
 # Villager completion via tick
 # ---------------------------------------------------------------------------
 
+
 def test_villager_completes_after_3_ticks():
     from evaluation.world_sim import _apply_queue_villager, tick
+
     state = _state(food=200.0, population=8)
     state = _apply_queue_villager(state)
     assert state.population == 8
@@ -116,6 +135,7 @@ def test_villager_completes_after_3_ticks():
 
 def test_two_villagers_both_complete():
     from evaluation.world_sim import _apply_queue_villager, tick
+
     state = _state(food=200.0, population=8)
     state = _apply_queue_villager(state)
     state = _apply_queue_villager(state)
@@ -128,8 +148,10 @@ def test_two_villagers_both_complete():
 # build
 # ---------------------------------------------------------------------------
 
+
 def test_build_house_deducts_25_wood_and_expands_pop_cap():
     from evaluation.world_sim import _apply_build
+
     state = _state(wood=100.0, pop_cap=25, buildings=[])
     new_state = _apply_build(state, "q")  # q = house
     assert new_state.wood == 75.0
@@ -139,6 +161,7 @@ def test_build_house_deducts_25_wood_and_expands_pop_cap():
 
 def test_build_mill_deducts_100_wood():
     from evaluation.world_sim import _apply_build
+
     state = _state(wood=150.0, buildings=[])
     new_state = _apply_build(state, "w")  # w = mill
     assert new_state.wood == 50.0
@@ -147,6 +170,7 @@ def test_build_mill_deducts_100_wood():
 
 def test_build_noop_when_wood_insufficient():
     from evaluation.world_sim import _apply_build
+
     state = _state(wood=20.0, buildings=[])
     new_state = _apply_build(state, "q")  # house costs 25
     assert new_state.wood == 20.0
@@ -155,6 +179,7 @@ def test_build_noop_when_wood_insufficient():
 
 def test_build_noop_on_unknown_key():
     from evaluation.world_sim import _apply_build
+
     state = _state(wood=200.0, buildings=[])
     new_state = _apply_build(state, "x")
     assert new_state.buildings == []
@@ -164,10 +189,14 @@ def test_build_noop_on_unknown_key():
 # Age up
 # ---------------------------------------------------------------------------
 
+
 def test_age_up_starts_6_tick_timer_when_prereqs_met():
     from evaluation.world_sim import _apply_age_up
+
     state = _state(
-        food=600.0, population=22, age="Dark Age",
+        food=600.0,
+        population=22,
+        age="Dark Age",
         buildings=["mill", "lumber_camp"],
     )
     new_state = _apply_age_up(state)
@@ -177,40 +206,48 @@ def test_age_up_starts_6_tick_timer_when_prereqs_met():
 
 def test_age_up_noop_when_food_insufficient():
     from evaluation.world_sim import _apply_age_up
-    state = _state(food=400.0, population=22, age="Dark Age",
-                   buildings=["mill", "lumber_camp"])
+
+    state = _state(food=400.0, population=22, age="Dark Age", buildings=["mill", "lumber_camp"])
     new_state = _apply_age_up(state)
     assert new_state.age_up_ticks_remaining == 0
 
 
 def test_age_up_noop_when_population_insufficient():
     from evaluation.world_sim import _apply_age_up
-    state = _state(food=600.0, population=18, age="Dark Age",
-                   buildings=["mill", "lumber_camp"])
+
+    state = _state(food=600.0, population=18, age="Dark Age", buildings=["mill", "lumber_camp"])
     new_state = _apply_age_up(state)
     assert new_state.age_up_ticks_remaining == 0
 
 
 def test_age_up_noop_when_prereq_buildings_missing():
     from evaluation.world_sim import _apply_age_up
-    state = _state(food=600.0, population=22, age="Dark Age",
-                   buildings=["mill"])  # missing lumber_camp
+
+    state = _state(
+        food=600.0, population=22, age="Dark Age", buildings=["mill"]
+    )  # missing lumber_camp
     new_state = _apply_age_up(state)
     assert new_state.age_up_ticks_remaining == 0
 
 
 def test_age_up_noop_when_already_in_progress():
     from evaluation.world_sim import _apply_age_up
-    state = _state(food=600.0, population=22, age="Dark Age",
-                   buildings=["mill", "lumber_camp"], age_up_ticks_remaining=3)
+
+    state = _state(
+        food=600.0,
+        population=22,
+        age="Dark Age",
+        buildings=["mill", "lumber_camp"],
+        age_up_ticks_remaining=3,
+    )
     new_state = _apply_age_up(state)
     assert new_state.age_up_ticks_remaining == 3  # unchanged
 
 
 def test_age_advances_to_feudal_after_6_ticks():
     from evaluation.world_sim import _apply_age_up, tick
-    state = _state(food=600.0, population=22, age="Dark Age",
-                   buildings=["mill", "lumber_camp"])
+
+    state = _state(food=600.0, population=22, age="Dark Age", buildings=["mill", "lumber_camp"])
     state = _apply_age_up(state)
     for _ in range(6):
         state = tick(state)
@@ -222,8 +259,10 @@ def test_age_advances_to_feudal_after_6_ticks():
 # Resource gather tick
 # ---------------------------------------------------------------------------
 
+
 def test_tick_adds_gather_rates():
     from evaluation.world_sim import FOOD_GATHER_RATE, WOOD_GATHER_RATE, tick
+
     state = _state(food=100.0, wood=50.0)
     new_state = tick(state)
     assert new_state.food == 100.0 + FOOD_GATHER_RATE
@@ -232,6 +271,7 @@ def test_tick_adds_gather_rates():
 
 def test_tick_increments_turn():
     from evaluation.world_sim import tick
+
     state = _state(turn=4)
     new_state = tick(state)
     assert new_state.turn == 5
@@ -241,8 +281,10 @@ def test_tick_increments_turn():
 # apply_actions dispatch
 # ---------------------------------------------------------------------------
 
+
 def test_apply_actions_dispatches_queue_villager():
     from evaluation.world_sim import apply_actions
+
     state = _state(food=200.0)
     actions = [{"type": "queue_villager"}]
     new_state = apply_actions(state, actions)
@@ -251,6 +293,7 @@ def test_apply_actions_dispatches_queue_villager():
 
 def test_apply_actions_dispatches_build():
     from evaluation.world_sim import apply_actions
+
     state = _state(wood=150.0, buildings=[])
     actions = [{"type": "build", "building_key": "q"}]
     new_state = apply_actions(state, actions)
@@ -259,8 +302,8 @@ def test_apply_actions_dispatches_build():
 
 def test_apply_actions_dispatches_press_z():
     from evaluation.world_sim import apply_actions
-    state = _state(food=600.0, population=22, age="Dark Age",
-                   buildings=["mill", "lumber_camp"])
+
+    state = _state(food=600.0, population=22, age="Dark Age", buildings=["mill", "lumber_camp"])
     actions = [{"type": "press", "key": "z"}]
     new_state = apply_actions(state, actions)
     assert new_state.age_up_ticks_remaining == 6
@@ -268,6 +311,7 @@ def test_apply_actions_dispatches_press_z():
 
 def test_apply_actions_ignores_unrelated_presses():
     from evaluation.world_sim import apply_actions
+
     state = _state(food=200.0)
     actions = [
         {"type": "press", "key": "h"},
@@ -284,8 +328,10 @@ def test_apply_actions_ignores_unrelated_presses():
 # state_to_fixture_inputs round-trip
 # ---------------------------------------------------------------------------
 
+
 def test_state_to_fixture_inputs_encodes_population():
     from evaluation.world_sim import state_to_fixture_inputs
+
     state = _state(population=12, pop_cap=20, food=300.0, wood=250.0, gold=50.0, age="Feudal Age")
     base = {"resources": {"gold": 0, "stone": 100}}
     result = state_to_fixture_inputs(state, base)
@@ -293,15 +339,17 @@ def test_state_to_fixture_inputs_encodes_population():
     assert result["resources"]["population"] == "12/20"
     assert result["resources"]["food"] == 300
     assert result["resources"]["wood"] == 250
-    assert result["resources"]["gold"] == 50   # world state gold takes precedence
+    assert result["resources"]["gold"] == 50  # world state gold takes precedence
 
 
 # ---------------------------------------------------------------------------
 # evaluate_end_state
 # ---------------------------------------------------------------------------
 
+
 def test_evaluate_end_state_passes_on_age_match():
     from evaluation.world_sim import evaluate_end_state
+
     state = _state(age="Feudal Age", turn=8)
     failures = evaluate_end_state({"age": "Feudal Age"}, state)
     assert failures == []
@@ -309,6 +357,7 @@ def test_evaluate_end_state_passes_on_age_match():
 
 def test_evaluate_end_state_fails_on_age_mismatch():
     from evaluation.world_sim import evaluate_end_state
+
     state = _state(age="Dark Age", turn=15)
     failures = evaluate_end_state({"age": "Feudal Age"}, state)
     assert any("end_state FAILED" in f for f in failures)
@@ -317,6 +366,7 @@ def test_evaluate_end_state_fails_on_age_mismatch():
 
 def test_evaluate_end_state_numeric_uses_gte_semantics():
     from evaluation.world_sim import evaluate_end_state
+
     state = _state(population=18, turn=10)
     assert evaluate_end_state({"population": 15}, state) == []
     assert evaluate_end_state({"population": 18}, state) == []
@@ -326,6 +376,7 @@ def test_evaluate_end_state_numeric_uses_gte_semantics():
 
 def test_evaluate_end_state_unknown_field_is_failure():
     from evaluation.world_sim import evaluate_end_state
+
     state = _state(turn=5)
     failures = evaluate_end_state({"nonexistent_field": 42}, state)
     assert any("unknown WorldState field" in f for f in failures)

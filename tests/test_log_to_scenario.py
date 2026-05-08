@@ -42,6 +42,7 @@ def _write_log(tmp_path: Path) -> Path:
 # parse_log
 # ---------------------------------------------------------------------------
 
+
 def test_parse_log_extracts_three_turns(tmp_path):
     log = _write_log(tmp_path)
     turns = parse_log(log)
@@ -54,8 +55,12 @@ def test_parse_log_extracts_three_turns(tmp_path):
 def test_parse_log_extracts_resources_dict(tmp_path):
     turns = parse_log(_write_log(tmp_path))
     assert turns[0].resources == {
-        "food": 200, "wood": 200, "gold": 100, "stone": 200,
-        "population": "4/5", "age": "Dark Age",
+        "food": 200,
+        "wood": 200,
+        "gold": 100,
+        "stone": 200,
+        "population": "4/5",
+        "age": "Dark Age",
     }
 
 
@@ -113,11 +118,12 @@ def test_parse_log_skips_malformed_resources_dict(tmp_path):
 # find_age_transitions
 # ---------------------------------------------------------------------------
 
+
 def test_find_age_transitions_flags_transition(tmp_path):
     turns = parse_log(_write_log(tmp_path))
     interesting = find_age_transitions(turns)
     assert len(interesting) == 1
-    assert interesting[0].iteration == 3       # the Dark Age → Feudal Age transition
+    assert interesting[0].iteration == 3  # the Dark Age → Feudal Age transition
     assert interesting[0].age == "Feudal Age"
 
 
@@ -132,6 +138,7 @@ def test_find_age_transitions_empty_when_no_transitions():
 # ---------------------------------------------------------------------------
 # Carry-forward behaviour (strategist runs every 3-10 turns, not every turn)
 # ---------------------------------------------------------------------------
+
 
 def test_resources_carry_forward_when_no_strategist_response(tmp_path):
     """Turns without a strategist_response inherit the last strategist reading.
@@ -171,6 +178,7 @@ def test_strategist_age_takes_precedence_over_claude_age(tmp_path):
 # ---------------------------------------------------------------------------
 # emit_fixture
 # ---------------------------------------------------------------------------
+
 
 def test_emit_fixture_produces_valid_yaml(tmp_path):
     """The emitted YAML must parse and pass the same lint as hand-written fixtures."""

@@ -256,13 +256,21 @@ class Orchestrator:
             survival = float(latest.get("survival", 0))
 
             if pop < 0.2:
-                modes.append("Population stayed very low — agent may not be queueing villagers or is getting housed")
+                modes.append(
+                    "Population stayed very low — agent may not be queueing villagers or is getting housed"
+                )
             if age == 0:
-                modes.append("Agent never advanced past Dark Age — needs to accumulate 500 food and click age-up")
+                modes.append(
+                    "Agent never advanced past Dark Age — needs to accumulate 500 food and click age-up"
+                )
             if economy < 0.1:
-                modes.append("Very little food gathered — agent may not be assigning villagers to food sources")
+                modes.append(
+                    "Very little food gathered — agent may not be assigning villagers to food sources"
+                )
             if action_success < 0.3:
-                modes.append("Low action success rate — many actions failing, possibly clicking wrong coordinates")
+                modes.append(
+                    "Low action success rate — many actions failing, possibly clicking wrong coordinates"
+                )
             if survival < 0.5:
                 modes.append("Game ended early — agent may be dying or getting stuck")
 
@@ -272,7 +280,9 @@ class Orchestrator:
         except (ValueError, TypeError):
             pass
 
-        return modes if modes else ["No clear failure patterns — try optimizing strongest components"]
+        return (
+            modes if modes else ["No clear failure patterns — try optimizing strongest components"]
+        )
 
 
 def main():

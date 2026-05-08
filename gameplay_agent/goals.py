@@ -18,14 +18,31 @@ RESOURCE_REWARD_DIVISOR = 1000.0
 POPULATION_REWARD_FACTOR = 0.05
 MAX_DISPLAY_GOALS = 5
 
-THREAT_CLASSES = frozenset({
-    "militia_line", "spearman_line", "eagle_line",
-    "archer_line", "skirmisher_line", "cavalry_archer", "hand_cannoneer",
-    "scout_line", "knight_line", "camel_line", "battle_elephant",
-    "ram", "mangonel_line", "scorpion", "trebuchet", "siege_tower",
-    "unique_archer", "unique_cavalry", "unique_infantry", "unique_siege",
-    "monk",
-})
+THREAT_CLASSES = frozenset(
+    {
+        "militia_line",
+        "spearman_line",
+        "eagle_line",
+        "archer_line",
+        "skirmisher_line",
+        "cavalry_archer",
+        "hand_cannoneer",
+        "scout_line",
+        "knight_line",
+        "camel_line",
+        "battle_elephant",
+        "ram",
+        "mangonel_line",
+        "scorpion",
+        "trebuchet",
+        "siege_tower",
+        "unique_archer",
+        "unique_cavalry",
+        "unique_infantry",
+        "unique_siege",
+        "monk",
+    }
+)
 
 
 @dataclass
@@ -88,9 +105,7 @@ class GoalManager:
                     goal.failed = True
 
         # Remove completed/failed from active
-        self.active_goals = [
-            g for g in self.active_goals if not g.completed and not g.failed
-        ]
+        self.active_goals = [g for g in self.active_goals if not g.completed and not g.failed]
 
     def _compute_goal_progress(self, goal: Goal, state: GameState) -> float:
         """Compute progress (0-1) for a single goal against game state."""
@@ -152,7 +167,9 @@ class GoalManager:
 
         lines = ["## Active Goals (follow in priority order)"]
         for goal in top_goals:
-            priority_label = "HIGH" if goal.priority >= 8 else "MED" if goal.priority >= 5 else "LOW"
+            priority_label = (
+                "HIGH" if goal.priority >= 8 else "MED" if goal.priority >= 5 else "LOW"
+            )
             type_label = "LOCAL" if goal.type == "local" else "GLOBAL"
             pct = int(goal.progress * 100)
 
@@ -267,6 +284,7 @@ class GoalManager:
         if screenshot_bytes:
             try:
                 from detection.inference.ownership import Owner, classify_entities
+
                 results = classify_entities(screenshot_bytes, candidates, THREAT_CLASSES)
                 for eid, (owner, _ratio) in results.items():
                     if owner == Owner.ENEMY or owner == Owner.UNKNOWN:

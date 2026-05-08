@@ -7,12 +7,13 @@ import asyncio
 import math
 import random
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 import pyautogui
 import structlog
+from pydantic import BaseModel
 
 from .config import config
 from .models import Action, validate_action
@@ -42,6 +43,7 @@ class ActionResult:
 # ---------------------------------------------------------------------------
 # Entity cache management
 # ---------------------------------------------------------------------------
+
 
 def set_rescan_fn(fn: Callable[[], Awaitable[None]]) -> None:
     """Set the rescan callback for mid-turn screenshot+detection."""
@@ -79,6 +81,7 @@ def clear_detected_entities() -> None:
 # ---------------------------------------------------------------------------
 # Coordinate resolution
 # ---------------------------------------------------------------------------
+
 
 def _resolve_target_id(target_id: str) -> tuple[int, int] | None:
     """Resolve target_id to (x, y) coordinates from cached entities."""
@@ -170,8 +173,15 @@ async def _handle_click(action_dict: dict[str, object], intent: str) -> ActionRe
     x, y = coords
     screen_x, screen_y = _translate(x, y)
     pyautogui.click(screen_x, screen_y)
-    log.info("click", x=x, y=y, screen_x=screen_x, screen_y=screen_y,
-             target_id=action_dict.get("target_id", ""), intent=intent)
+    log.info(
+        "click",
+        x=x,
+        y=y,
+        screen_x=screen_x,
+        screen_y=screen_y,
+        target_id=action_dict.get("target_id", ""),
+        intent=intent,
+    )
 
     # Building placement retry — if first click was invalid (tree/building/water),
     # try `BUILD_RETRY_ATTEMPTS` random angular offsets at 250-350 px from the
@@ -197,12 +207,15 @@ async def _handle_click(action_dict: dict[str, object], intent: str) -> ActionRe
         elapsed = time.monotonic() - retry_start
         _build_retry_total_seconds += elapsed
         _build_retry_count += 1
-        log.debug("build_placement_retry",
-                  x=x, y=y,
-                  offsets=offsets,
-                  elapsed_s=round(elapsed, 3),
-                  total_count=_build_retry_count,
-                  total_seconds=round(_build_retry_total_seconds, 1))
+        log.debug(
+            "build_placement_retry",
+            x=x,
+            y=y,
+            offsets=offsets,
+            elapsed_s=round(elapsed, 3),
+            total_count=_build_retry_count,
+            total_seconds=round(_build_retry_total_seconds, 1),
+        )
 
     return ActionResult(True, "ok")
 
@@ -225,8 +238,14 @@ def _re_resolve_from_intent(x: int, y: int, intent: str) -> tuple[int, int]:
         if cls and cls not in _ACTOR_CLASSES and cls in intent_lower:
             resolved = _resolve_target_class(cls)
             if resolved:
-                log.debug("coords_re_resolved", cls=cls,
-                          old_x=x, old_y=y, new_x=resolved[0], new_y=resolved[1])
+                log.debug(
+                    "coords_re_resolved",
+                    cls=cls,
+                    old_x=x,
+                    old_y=y,
+                    new_x=resolved[0],
+                    new_y=resolved[1],
+                )
                 return resolved
             break
     return (x, y)
@@ -244,14 +263,22 @@ async def _handle_right_click(action_dict: dict[str, object], intent: str) -> Ac
 
     screen_x, screen_y = _translate(x, y)
     pyautogui.rightClick(screen_x, screen_y)
-    log.info("right_click", x=x, y=y, screen_x=screen_x, screen_y=screen_y,
-             target_id=action_dict.get("target_id", ""), intent=intent)
+    log.info(
+        "right_click",
+        x=x,
+        y=y,
+        screen_x=screen_x,
+        screen_y=screen_y,
+        target_id=action_dict.get("target_id", ""),
+        intent=intent,
+    )
     return ActionResult(True, "ok")
 
 
 async def _handle_press(action_dict: dict[str, object], intent: str) -> ActionResult:
     key = str(action_dict["key"])
-    modifiers = action_dict.get("modifiers", [])
+    raw_modifiers = action_dict.get("modifiers", [])
+    modifiers: list[str] = list(raw_modifiers) if isinstance(raw_modifiers, list) else []
     if modifiers:
         pyautogui.hotkey(*modifiers, key)
         log.info("press", key=key, modifiers=modifiers, intent=intent)
@@ -328,10 +355,12 @@ _ACTION_HANDLERS: dict[
 # Public API
 # ---------------------------------------------------------------------------
 
+
 async def execute_action(action: dict[str, Any] | Action) -> ActionResult:
     """Execute a single action from LLM output."""
-    # Normalize to dict
-    if hasattr(action, "model_dump"):
+    # Normalize to dict — isinstance(BaseModel) narrows the type for pyright,
+    # which `hasattr` does not.
+    if isinstance(action, BaseModel):
         action_dict = action.model_dump()
     else:
         validated = validate_action(action)
@@ -374,7 +403,7 @@ async def execute_action(action: dict[str, Any] | Action) -> ActionResult:
         return ActionResult(False, f"execution error: {e}")
 
 
-async def execute_actions(actions: list[dict[str, Any] | Action]) -> list[ActionResult]:
+async def execute_actions(actions: Sequence[dict[str, Any] | Action]) -> list[ActionResult]:
     """Execute a list of actions sequentially."""
     if not ensure_game_focused():
         log.warning("could_not_focus_before_actions")

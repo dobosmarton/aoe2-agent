@@ -126,7 +126,9 @@ def convert_coco_to_yolo_labels(
         else:
             print(f"  WARNING: COCO category '{cat_name}' not found in classes.yaml, skipping")
 
-    print(f"  Mapped {len(coco_cat_to_v2)}/{len(coco_data.get('categories', []))} COCO categories to v2 IDs")
+    print(
+        f"  Mapped {len(coco_cat_to_v2)}/{len(coco_data.get('categories', []))} COCO categories to v2 IDs"
+    )
 
     # Build image_id -> image info
     images_by_id = {}
@@ -359,7 +361,10 @@ def prepare_training(
     for i, export_dir in enumerate(cvat_export_dirs):
         export_dir = Path(export_dir)
         pairs, _ = _extract_labels_from_export(
-            export_dir, local_images, output_dir, tmp_suffix=f"_{i}",
+            export_dir,
+            local_images,
+            output_dir,
+            tmp_suffix=f"_{i}",
         )
         # Deduplicate by image stem (later exports override earlier ones)
         for img_path, label_path, n_labels in pairs:
@@ -367,9 +372,13 @@ def prepare_training(
                 seen_stems.add(img_path.stem)
                 real_pairs.append((img_path, label_path, n_labels))
             else:
-                print(f"  NOTE: Duplicate image '{img_path.stem}' from export {i+1}, using first occurrence")
+                print(
+                    f"  NOTE: Duplicate image '{img_path.stem}' from export {i + 1}, using first occurrence"
+                )
 
-    print(f"\nTotal: {len(real_pairs)} unique labeled real images from {len(cvat_export_dirs)} export(s)")
+    print(
+        f"\nTotal: {len(real_pairs)} unique labeled real images from {len(cvat_export_dirs)} export(s)"
+    )
 
     # Split real data into train/val
     random.seed(42)
@@ -490,7 +499,6 @@ def _copy_dir_contents(src: Path, dst: Path) -> int:
     return count
 
 
-
 def _copy_pair(
     img_path: Path,
     label_path: Path,
@@ -512,32 +520,45 @@ def main():
         epilog=__doc__,
     )
     parser.add_argument(
-        "--cvat-export", type=str, required=True, action="append",
+        "--cvat-export",
+        type=str,
+        required=True,
+        action="append",
         help="Path to unzipped CVAT export directory (COCO 1.0 or YOLO 1.1). "
-             "Can be specified multiple times to merge several exports.",
+        "Can be specified multiple times to merge several exports.",
     )
     parser.add_argument(
-        "--output", type=str, default=str(_DEFAULT_OUTPUT),
+        "--output",
+        type=str,
+        default=str(_DEFAULT_OUTPUT),
         help=f"Output directory (default: {_DEFAULT_OUTPUT})",
     )
     parser.add_argument(
-        "--images-dir", type=str, default=None,
+        "--images-dir",
+        type=str,
+        default=None,
         help="Directory with source images (default: real_screenshots/raw/)",
     )
     parser.add_argument(
-        "--synthetic", type=str, default=str(_SYNTHETIC_DIR),
+        "--synthetic",
+        type=str,
+        default=str(_SYNTHETIC_DIR),
         help="Path to existing synthetic training data",
     )
     parser.add_argument(
-        "--val-split", type=float, default=0.15,
+        "--val-split",
+        type=float,
+        default=0.15,
         help="Fraction of real images for validation (default: 0.15)",
     )
     parser.add_argument(
-        "--no-synthetic", action="store_true",
+        "--no-synthetic",
+        action="store_true",
         help="Exclude synthetic data (real images only)",
     )
     parser.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="Show what would happen without copying files",
     )
     args = parser.parse_args()

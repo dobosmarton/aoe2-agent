@@ -32,6 +32,7 @@ from evaluation.strategist_eval import (
 # Layer 1: Assertion DSL unit tests
 # ---------------------------------------------------------------------------
 
+
 def test_evaluate_range_match_passes():
     expected = {"food": {"min": 180, "max": 220}}
     actual = {"food": 200, "wood": 0}
@@ -118,6 +119,7 @@ def test_evaluate_range_with_string_actual_gives_clear_error():
 # Layer 2: Vision fixture path resolution + YAML lint
 # ---------------------------------------------------------------------------
 
+
 def test_resolve_screenshot_path_relative():
     fixture_path = Path("/tmp/fixtures/dark_age.yaml")
     resolved = resolve_screenshot_path(fixture_path, "screenshots/img.png")
@@ -141,11 +143,7 @@ def test_load_vision_fixture_round_trip(tmp_path):
     """A well-formed fixture loads cleanly with all required keys."""
     good = tmp_path / "good.yaml"
     good.write_text(
-        "name: test_fixture\n"
-        "screenshot: img.png\n"
-        "expected:\n"
-        "  food: 200\n"
-        "  age: \"Dark Age\"\n"
+        'name: test_fixture\nscreenshot: img.png\nexpected:\n  food: 200\n  age: "Dark Age"\n'
     )
     data = load_vision_fixture(good)
     assert data["name"] == "test_fixture"
@@ -153,8 +151,7 @@ def test_load_vision_fixture_round_trip(tmp_path):
     assert data["expected"]["food"] == 200
 
 
-@pytest.mark.parametrize("fixture_path", all_vision_fixtures(),
-                         ids=lambda p: p.stem)
+@pytest.mark.parametrize("fixture_path", all_vision_fixtures(), ids=lambda p: p.stem)
 def test_vision_fixture_lint(fixture_path):
     """Every vision fixture must have name, screenshot, expected — and the
     referenced screenshot file must exist."""
@@ -169,9 +166,9 @@ def test_vision_fixture_lint(fixture_path):
 # Layer 3: Live strategist runs (opt-in via --runlive)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.live
-@pytest.mark.parametrize("fixture_path", all_vision_fixtures(),
-                         ids=lambda p: p.stem)
+@pytest.mark.parametrize("fixture_path", all_vision_fixtures(), ids=lambda p: p.stem)
 def test_strategist_vision_reading(fixture_path):
     """Run the real strategist against a labeled screenshot."""
     _load_dotenv()
@@ -182,6 +179,5 @@ def test_strategist_vision_reading(fixture_path):
     if not result.passed:
         details = "\n  ".join(result.failures)
         pytest.fail(
-            f"\n{result.name} vision check failed:\n  {details}\n"
-            f"  Actual readings: {result.actual}"
+            f"\n{result.name} vision check failed:\n  {details}\n  Actual readings: {result.actual}"
         )

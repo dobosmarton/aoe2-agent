@@ -100,7 +100,7 @@ def classify_entity(
     # Region 2: Unit body top 30% (livery/clothing color)
     body_height = int((y2 - y1) * 0.3)
     if body_height >= 3:
-        body_region = img_array[y1:y1 + body_height, x1:x2]
+        body_region = img_array[y1 : y1 + body_height, x1:x2]
         if body_region.size >= _MIN_REGION_PX * 3:
             best_ratio = max(best_ratio, _blue_ratio(body_region))
 
@@ -147,6 +147,12 @@ def classify_entities(
 
         owner, ratio = classify_entity(img_array, bbox)
         results[eid] = (owner, ratio)
-        log.debug("ownership_classified", entity_id=eid, cls=cls, owner=owner.value, blue_ratio=f"{ratio:.3f}")
+        log.debug(
+            "ownership_classified",
+            entity_id=eid,
+            cls=cls,
+            owner=owner.value,
+            blue_ratio=f"{ratio:.3f}",
+        )
 
     return results

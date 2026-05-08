@@ -51,12 +51,30 @@ class StrategistResponse(BaseModel):
 def get_default_goals(turn: int = 0) -> list[Goal]:
     """Return sensible Dark Age starting goals used before the strategist responds."""
     return [
-        Goal(name="Queue villagers", type="local", metric="population",
-             target=10, priority=9, created_turn=turn),
-        Goal(name="Gather food", type="local", metric="food",
-             target=200, priority=8, created_turn=turn),
-        Goal(name="Advance to Feudal Age", type="global", metric="age",
-             target="Feudal Age", priority=4, created_turn=turn),
+        Goal(
+            name="Queue villagers",
+            type="local",
+            metric="population",
+            target=10,
+            priority=9,
+            created_turn=turn,
+        ),
+        Goal(
+            name="Gather food",
+            type="local",
+            metric="food",
+            target=200,
+            priority=8,
+            created_turn=turn,
+        ),
+        Goal(
+            name="Advance to Feudal Age",
+            type="global",
+            metric="age",
+            target="Feudal Age",
+            priority=4,
+            created_turn=turn,
+        ),
     ]
 
 
@@ -108,7 +126,9 @@ class StrategistProvider:
 
         SDK handles retry (429/5xx) with exponential backoff automatically.
         """
-        response = await self.client.messages.parse(
+        # `messages.parse` is the structured-output method — present at runtime
+        # but not in the public AsyncMessages stubs that pyright sees.
+        response = await self.client.messages.parse(  # pyright: ignore[reportAttributeAccessIssue]
             model=self.model,
             max_tokens=768,
             system=self.get_system_prompt(),
@@ -119,9 +139,9 @@ class StrategistProvider:
             raise ValueError("Strategist refused the request")
 
         usage = response.usage
-        log.info("strategist_usage",
-                 input_tokens=usage.input_tokens,
-                 output_tokens=usage.output_tokens)
+        log.info(
+            "strategist_usage", input_tokens=usage.input_tokens, output_tokens=usage.output_tokens
+        )
         return response.parsed_output
 
     async def generate_goals(
@@ -145,7 +165,7 @@ class StrategistProvider:
         prompt_text = f"""Turn: {turn}
 {alarm_banner}
 ## Current Game State (from previous readings)
-- Resources: Food={game_state.resources['food']}, Wood={game_state.resources['wood']}, Gold={game_state.resources['gold']}, Stone={game_state.resources['stone']}
+- Resources: Food={game_state.resources["food"]}, Wood={game_state.resources["wood"]}, Gold={game_state.resources["gold"]}, Stone={game_state.resources["stone"]}
 - Population: {game_state.population}/{game_state.population_cap}
 - Age: {game_state.current_age}
 - Under Attack: {game_state.under_attack}
@@ -163,14 +183,16 @@ Read the screenshot to get exact current resource values (food, wood, gold, ston
         content: list[dict] = []
         if screenshot_bytes:
             image_base64 = base64.standard_b64encode(screenshot_bytes).decode("utf-8")
-            content.append({
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": "image/jpeg",
-                    "data": image_base64,
-                },
-            })
+            content.append(
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/jpeg",
+                        "data": image_base64,
+                    },
+                }
+            )
         content.append({"type": "text", "text": prompt_text})
 
         try:

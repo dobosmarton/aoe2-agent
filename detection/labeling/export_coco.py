@@ -59,18 +59,17 @@ def yolo_to_coco(
     # Build COCO categories (1-indexed as per COCO convention)
     categories = []
     for class_id in sorted(v2_classes.keys()):
-        categories.append({
-            "id": class_id + 1,  # COCO is 1-indexed
-            "name": v2_classes[class_id],
-            "supercategory": "",
-        })
+        categories.append(
+            {
+                "id": class_id + 1,  # COCO is 1-indexed
+                "name": v2_classes[class_id],
+                "supercategory": "",
+            }
+        )
 
     # Find all images (follow symlinks)
     image_extensions = {".png", ".jpg", ".jpeg", ".bmp"}
-    image_paths = sorted([
-        p for p in images_dir.iterdir()
-        if p.suffix.lower() in image_extensions
-    ])
+    image_paths = sorted([p for p in images_dir.iterdir() if p.suffix.lower() in image_extensions])
 
     print(f"Processing {len(image_paths)} images...")
 
@@ -90,12 +89,14 @@ def yolo_to_coco(
         # Use the original filename (what CVAT sees)
         file_name = img_path.name
 
-        coco_images.append({
-            "id": image_id,
-            "file_name": file_name,
-            "width": img_w,
-            "height": img_h,
-        })
+        coco_images.append(
+            {
+                "id": image_id,
+                "file_name": file_name,
+                "width": img_w,
+                "height": img_h,
+            }
+        )
 
         # Read corresponding YOLO label
         label_path = labels_dir / (img_path.stem + ".txt")
@@ -124,20 +125,22 @@ def yolo_to_coco(
             bbox_x = (x_center * img_w) - (bbox_w / 2)
             bbox_y = (y_center * img_h) - (bbox_h / 2)
 
-            coco_annotations.append({
-                "id": ann_id,
-                "image_id": image_id,
-                "category_id": class_id + 1,  # COCO is 1-indexed
-                "bbox": [
-                    round(bbox_x, 2),
-                    round(bbox_y, 2),
-                    round(bbox_w, 2),
-                    round(bbox_h, 2),
-                ],
-                "area": round(bbox_w * bbox_h, 2),
-                "segmentation": [],
-                "iscrowd": 0,
-            })
+            coco_annotations.append(
+                {
+                    "id": ann_id,
+                    "image_id": image_id,
+                    "category_id": class_id + 1,  # COCO is 1-indexed
+                    "bbox": [
+                        round(bbox_x, 2),
+                        round(bbox_y, 2),
+                        round(bbox_w, 2),
+                        round(bbox_h, 2),
+                    ],
+                    "area": round(bbox_w * bbox_h, 2),
+                    "segmentation": [],
+                    "iscrowd": 0,
+                }
+            )
             ann_id += 1
 
     # Assemble COCO JSON
@@ -168,11 +171,15 @@ def main():
         description="Convert YOLO pre-labels to COCO JSON for CVAT import",
     )
     parser.add_argument(
-        "--input", type=str, default=str(_DEFAULT_INPUT),
+        "--input",
+        type=str,
+        default=str(_DEFAULT_INPUT),
         help="Prelabeled directory with images/ and labels/",
     )
     parser.add_argument(
-        "--output", type=str, default=str(_DEFAULT_OUTPUT),
+        "--output",
+        type=str,
+        default=str(_DEFAULT_OUTPUT),
         help="Output COCO JSON path",
     )
     args = parser.parse_args()

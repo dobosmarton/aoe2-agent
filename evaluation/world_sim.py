@@ -29,11 +29,11 @@ WOOD_GATHER_RATE = 15.0
 
 # Building costs (wood)
 BUILDING_COSTS: dict[str, int] = {
-    "q": 25,   # house
+    "q": 25,  # house
     "w": 100,  # mill
     "e": 100,  # mining camp
     "r": 100,  # lumber camp
-    "a": 60,   # farm
+    "a": 60,  # farm
     "s": 150,  # blacksmith
     "t": 150,  # dock
 }
@@ -52,7 +52,7 @@ VILLAGER_COST_FOOD = 50
 VILLAGER_PRODUCTION_TICKS = 3  # turns until a queued villager is added to pop
 
 AGE_UP_COST_FOOD = 500
-AGE_UP_TICKS = 6              # turns until age advance completes
+AGE_UP_TICKS = 6  # turns until age advance completes
 
 # Feudal Age prerequisites
 FEUDAL_PREREQ_BUILDINGS = frozenset({"mill", "lumber_camp"})
@@ -66,6 +66,7 @@ HOUSE_POP_SLOTS = 5
 # WorldState
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class WorldState:
     food: float
@@ -74,10 +75,10 @@ class WorldState:
     stone: float
     population: int
     pop_cap: int
-    age: str                         # "Dark Age" | "Feudal Age" | ...
-    buildings: list[str]             # may contain duplicates (e.g. multiple houses)
-    villager_queue: list[int]        # countdown ticks remaining per pending villager
-    age_up_ticks_remaining: int      # 0 = not in progress
+    age: str  # "Dark Age" | "Feudal Age" | ...
+    buildings: list[str]  # may contain duplicates (e.g. multiple houses)
+    villager_queue: list[int]  # countdown ticks remaining per pending villager
+    age_up_ticks_remaining: int  # 0 = not in progress
     turn: int = 0
 
 
@@ -127,12 +128,15 @@ def state_to_fixture_inputs(state: WorldState, base_inputs: dict) -> dict:
 # Action effect handlers (each returns a new WorldState)
 # ---------------------------------------------------------------------------
 
+
 def _apply_queue_villager(state: WorldState) -> WorldState:
     if state.food < VILLAGER_COST_FOOD:
         return state
-    return replace(state,
-                   food=state.food - VILLAGER_COST_FOOD,
-                   villager_queue=[*state.villager_queue, VILLAGER_PRODUCTION_TICKS])
+    return replace(
+        state,
+        food=state.food - VILLAGER_COST_FOOD,
+        villager_queue=[*state.villager_queue, VILLAGER_PRODUCTION_TICKS],
+    )
 
 
 def _apply_build(state: WorldState, building_key: str) -> WorldState:
@@ -141,10 +145,9 @@ def _apply_build(state: WorldState, building_key: str) -> WorldState:
     if not name or state.wood < cost:
         return state
     new_pop_cap = state.pop_cap + HOUSE_POP_SLOTS if name == "house" else state.pop_cap
-    return replace(state,
-                   wood=state.wood - cost,
-                   pop_cap=new_pop_cap,
-                   buildings=[*state.buildings, name])
+    return replace(
+        state, wood=state.wood - cost, pop_cap=new_pop_cap, buildings=[*state.buildings, name]
+    )
 
 
 def _feudal_prereqs_met(state: WorldState) -> bool:
@@ -162,9 +165,7 @@ def _apply_age_up(state: WorldState) -> WorldState:
         return state  # already in progress
     if not _feudal_prereqs_met(state):
         return state  # prereqs not met — no-op
-    return replace(state,
-                   food=state.food - AGE_UP_COST_FOOD,
-                   age_up_ticks_remaining=AGE_UP_TICKS)
+    return replace(state, food=state.food - AGE_UP_COST_FOOD, age_up_ticks_remaining=AGE_UP_TICKS)
 
 
 def apply_actions(state: WorldState, actions: list[dict]) -> WorldState:
@@ -183,6 +184,7 @@ def apply_actions(state: WorldState, actions: list[dict]) -> WorldState:
 # ---------------------------------------------------------------------------
 # World tick (call after apply_actions to advance one turn)
 # ---------------------------------------------------------------------------
+
 
 def _next_age(current_age: str) -> str:
     try:
@@ -215,20 +217,23 @@ def tick(state: WorldState) -> WorldState:
         if new_age_ticks == 0:
             new_age = _next_age(state.age)
 
-    return replace(state,
-                   food=state.food + FOOD_GATHER_RATE,
-                   wood=state.wood + WOOD_GATHER_RATE,
-                   population=new_pop,
-                   pop_cap=state.pop_cap,
-                   villager_queue=new_queue,
-                   age=new_age,
-                   age_up_ticks_remaining=new_age_ticks,
-                   turn=state.turn + 1)
+    return replace(
+        state,
+        food=state.food + FOOD_GATHER_RATE,
+        wood=state.wood + WOOD_GATHER_RATE,
+        population=new_pop,
+        pop_cap=state.pop_cap,
+        villager_queue=new_queue,
+        age=new_age,
+        age_up_ticks_remaining=new_age_ticks,
+        turn=state.turn + 1,
+    )
 
 
 # ---------------------------------------------------------------------------
 # End-state evaluation
 # ---------------------------------------------------------------------------
+
 
 def evaluate_end_state(end_state_spec: dict, state: WorldState) -> list[str]:
     """Check end-state assertions against the final WorldState.

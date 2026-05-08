@@ -24,55 +24,35 @@ from pathlib import Path
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Test YOLO detection on real game screenshots"
-    )
+    parser = argparse.ArgumentParser(description="Test YOLO detection on real game screenshots")
     parser.add_argument(
-        "--model", "-m",
+        "--model",
+        "-m",
         default="detection/inference/models/aoe2_yolo_v2.pt",
-        help="Path to YOLO model (default: detection/inference/models/aoe2_yolo_v2.pt)"
+        help="Path to YOLO model (default: detection/inference/models/aoe2_yolo_v2.pt)",
     )
     parser.add_argument(
-        "--images", "-i",
+        "--images",
+        "-i",
         default="detection/real_screenshots/test",
-        help="Directory containing test images"
+        help="Directory containing test images",
     )
     parser.add_argument(
-        "--conf",
-        type=float,
-        default=0.25,
-        help="Confidence threshold (default: 0.25)"
+        "--conf", type=float, default=0.25, help="Confidence threshold (default: 0.25)"
     )
+    parser.add_argument("--save", "-s", action="store_true", help="Save annotated images")
+    parser.add_argument("--show", action="store_true", help="Display images with detections")
     parser.add_argument(
-        "--save", "-s",
-        action="store_true",
-        help="Save annotated images"
+        "--limit", "-n", type=int, default=None, help="Limit number of images to test"
     )
-    parser.add_argument(
-        "--show",
-        action="store_true",
-        help="Display images with detections"
-    )
-    parser.add_argument(
-        "--limit", "-n",
-        type=int,
-        default=None,
-        help="Limit number of images to test"
-    )
-    parser.add_argument(
-        "--compare",
-        action="store_true",
-        help="Compare v1 vs v2 model performance"
-    )
+    parser.add_argument("--compare", action="store_true", help="Compare v1 vs v2 model performance")
     parser.add_argument(
         "--v1-model",
         default="detection/inference/models/aoe2_yolo26.pt",
-        help="Path to v1 model for comparison"
+        help="Path to v1 model for comparison",
     )
     parser.add_argument(
-        "--verbose", "-v",
-        action="store_true",
-        help="Show detailed detection results"
+        "--verbose", "-v", action="store_true", help="Show detailed detection results"
     )
 
     args = parser.parse_args()
@@ -98,7 +78,7 @@ def main():
     # Check paths
     if not model_path.exists():
         # Try ONNX version
-        onnx_path = model_path.with_suffix('.onnx')
+        onnx_path = model_path.with_suffix(".onnx")
         if onnx_path.exists():
             model_path = onnx_path
         else:
@@ -121,7 +101,7 @@ def main():
         return 1
 
     if args.limit:
-        image_files = image_files[:args.limit]
+        image_files = image_files[: args.limit]
 
     print("=" * 60)
     print("AoE2 YOLO Detection Test")
@@ -143,7 +123,7 @@ def main():
 
     # Test each image
     for i, img_path in enumerate(image_files):
-        print(f"\n[{i+1}/{len(image_files)}] {img_path.name}")
+        print(f"\n[{i + 1}/{len(image_files)}] {img_path.name}")
 
         results = model(str(img_path), conf=args.conf, save=args.save, verbose=False)
 
@@ -155,7 +135,9 @@ def main():
                 images_with_detections += 1
 
                 # Count by class
-                for cls_id, conf in zip(boxes.cls.cpu().numpy(), boxes.conf.cpu().numpy(), strict=False):
+                for cls_id, conf in zip(
+                    boxes.cls.cpu().numpy(), boxes.conf.cpu().numpy(), strict=False
+                ):
                     class_idx = int(cls_id)
                     class_name = model.names.get(class_idx, f"class_{class_idx}")
                     class_counts[class_name] = class_counts.get(class_name, 0) + 1
@@ -188,9 +170,11 @@ def main():
     print("DETECTION SUMMARY")
     print("=" * 60)
     print(f"Images tested: {len(image_files)}")
-    print(f"Images with detections: {images_with_detections} ({100*images_with_detections/len(image_files):.0f}%)")
+    print(
+        f"Images with detections: {images_with_detections} ({100 * images_with_detections / len(image_files):.0f}%)"
+    )
     print(f"Total detections: {total_detections}")
-    print(f"Average detections per image: {total_detections/len(image_files):.1f}")
+    print(f"Average detections per image: {total_detections / len(image_files):.1f}")
 
     if total_detections > 0:
         avg_conf = confidence_sum / total_detections
@@ -201,7 +185,7 @@ def main():
         print(f"  {class_name}: {count}")
 
     # Priority class check
-    priority_classes = ['villager', 'sheep', 'town_center', 'house', 'gold_mine']
+    priority_classes = ["villager", "sheep", "town_center", "house", "gold_mine"]
     print("\nPriority classes detected:")
     for cls in priority_classes:
         count = class_counts.get(cls, 0)
@@ -230,9 +214,11 @@ def main():
             print(f"v1 model ({args.v1_model}):")
             print(f"  Detections (5 images): {v1_detections}")
             if v1_detections > 0:
-                print(f"  Avg confidence: {v1_conf_sum/v1_detections:.2f}")
+                print(f"  Avg confidence: {v1_conf_sum / v1_detections:.2f}")
 
-            print(f"\nImprovement: v1={v1_detections}, v2={total_detections} on {len(image_files)} images")
+            print(
+                f"\nImprovement: v1={v1_detections}, v2={total_detections} on {len(image_files)} images"
+            )
         else:
             print(f"v1 model not found at {v1_path}")
 

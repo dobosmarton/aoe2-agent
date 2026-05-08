@@ -59,6 +59,7 @@ class RemoteDetector:
         self.tracker = None
         try:
             from .tracker import EntityTracker
+
             self.tracker = EntityTracker()
         except Exception:
             logger.debug("Tracker not available for RemoteDetector")
@@ -161,12 +162,17 @@ class RemoteDetector:
         elapsed = time.monotonic() - t0
         logger.info(
             "remote_detect_fast_multi elapsed=%.2fs entities=%d (full=%d crop=%d)",
-            elapsed, len(entities), len(full_entities), len(crop_entities),
+            elapsed,
+            len(entities),
+            len(full_entities),
+            len(crop_entities),
         )
         return entities
 
     async def detect_adaptive(
-        self, screenshot: bytes | Image.Image, force_full: bool = False,
+        self,
+        screenshot: bytes | Image.Image,
+        force_full: bool = False,
     ) -> list[DetectedEntity]:
         """Adaptive detection. With CoreML's speed, full SAHI is fast enough (~300ms).
 
@@ -180,7 +186,10 @@ class RemoteDetector:
     # ------------------------------------------------------------------
 
     async def _post_detect(
-        self, endpoint: str, image_bytes: bytes, **params: int,
+        self,
+        endpoint: str,
+        image_bytes: bytes,
+        **params: int,
     ) -> list[dict] | None:
         """POST image to server, return detections list or None on failure."""
         import httpx
@@ -247,19 +256,23 @@ class RemoteDetector:
             idx = counters.get(cls, 0)
             counters[cls] = idx + 1
 
-            entities.append(DetectedEntity(
-                id=f"{cls}_{idx}",
-                class_name=cls,
-                bbox=tuple(det["bbox"]),
-                center=tuple(det["center"]),
-                confidence=det["confidence"],
-                area=det.get("area", 0.0),
-            ))
+            entities.append(
+                DetectedEntity(
+                    id=f"{cls}_{idx}",
+                    class_name=cls,
+                    bbox=tuple(det["bbox"]),
+                    center=tuple(det["center"]),
+                    confidence=det["confidence"],
+                    area=det.get("area", 0.0),
+                )
+            )
 
         return entities
 
     async def _fallback_detect(
-        self, screenshot: bytes | Image.Image, method: str,
+        self,
+        screenshot: bytes | Image.Image,
+        method: str,
     ) -> list[DetectedEntity]:
         """Fall back to local ONNX detector."""
         if self._fallback is None:

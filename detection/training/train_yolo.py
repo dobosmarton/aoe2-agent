@@ -25,75 +25,49 @@ from pathlib import Path
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Train YOLO model for AoE2 detection"
-    )
+    parser = argparse.ArgumentParser(description="Train YOLO model for AoE2 detection")
     parser.add_argument(
-        "--data", "-d",
+        "--data",
+        "-d",
         default="detection/training_data_v3/dataset.yaml",
-        help="Path to dataset.yaml (default: detection/training_data_v3/dataset.yaml)"
+        help="Path to dataset.yaml (default: detection/training_data_v3/dataset.yaml)",
     )
     parser.add_argument(
-        "--model", "-m",
+        "--model",
+        "-m",
         default="yolo11n.pt",
-        help="Base pretrained model (e.g., yolo11n.pt, yolo26n.pt)"
+        help="Base pretrained model (e.g., yolo11n.pt, yolo26n.pt)",
     )
     parser.add_argument(
-        "--epochs", "-e",
-        type=int,
-        default=150,
-        help="Number of training epochs (default: 150)"
+        "--epochs", "-e", type=int, default=150, help="Number of training epochs (default: 150)"
     )
     parser.add_argument(
-        "--batch", "-b",
+        "--batch",
+        "-b",
         type=int,
         default=16,
-        help="Batch size (default: 16, adjust based on GPU memory)"
+        help="Batch size (default: 16, adjust based on GPU memory)",
+    )
+    parser.add_argument("--imgsz", type=int, default=640, help="Input image size (default: 640)")
+    parser.add_argument("--device", type=int, default=0, help="GPU device ID (default: 0)")
+    parser.add_argument(
+        "--workers", type=int, default=8, help="Number of data loader workers (default: 8)"
     )
     parser.add_argument(
-        "--imgsz",
-        type=int,
-        default=640,
-        help="Input image size (default: 640)"
+        "--patience", type=int, default=20, help="Early stopping patience (default: 20)"
     )
     parser.add_argument(
-        "--device",
-        type=int,
-        default=0,
-        help="GPU device ID (default: 0)"
-    )
-    parser.add_argument(
-        "--workers",
-        type=int,
-        default=8,
-        help="Number of data loader workers (default: 8)"
-    )
-    parser.add_argument(
-        "--patience",
-        type=int,
-        default=20,
-        help="Early stopping patience (default: 20)"
-    )
-    parser.add_argument(
-        "--project",
-        default="runs",
-        help="Project directory for outputs (default: runs)"
+        "--project", default="runs", help="Project directory for outputs (default: runs)"
     )
     parser.add_argument(
         "--name",
         default="aoe2_yolo_v5",
-        help="Run name and output model name (default: aoe2_yolo_v5)"
+        help="Run name and output model name (default: aoe2_yolo_v5)",
     )
     parser.add_argument(
-        "--resume",
-        action="store_true",
-        help="Resume training from last checkpoint"
+        "--resume", action="store_true", help="Resume training from last checkpoint"
     )
-    parser.add_argument(
-        "--export-onnx",
-        action="store_true",
-        help="Export to ONNX after training"
-    )
+    parser.add_argument("--export-onnx", action="store_true", help="Export to ONNX after training")
 
     args = parser.parse_args()
 
@@ -147,19 +121,17 @@ def main():
         device=args.device,
         workers=args.workers,
         patience=args.patience,
-
         # Augmentation settings optimized for isometric game graphics
-        hsv_h=0.015,          # Hue augmentation (slight)
-        hsv_s=0.7,            # Saturation augmentation
-        hsv_v=0.4,            # Value/brightness augmentation
-        degrees=10,           # Rotation (units can face different directions)
-        translate=0.1,        # Translation
-        scale=0.5,            # Scale augmentation (important for zoom levels)
-        flipud=0.0,           # No vertical flip (isometric view)
-        fliplr=0.5,           # Horizontal flip OK
-        mosaic=1.0,           # Mosaic augmentation
-        mixup=0.1,            # MixUp augmentation
-
+        hsv_h=0.015,  # Hue augmentation (slight)
+        hsv_s=0.7,  # Saturation augmentation
+        hsv_v=0.4,  # Value/brightness augmentation
+        degrees=10,  # Rotation (units can face different directions)
+        translate=0.1,  # Translation
+        scale=0.5,  # Scale augmentation (important for zoom levels)
+        flipud=0.0,  # No vertical flip (isometric view)
+        fliplr=0.5,  # Horizontal flip OK
+        mosaic=1.0,  # Mosaic augmentation
+        mixup=0.1,  # MixUp augmentation
         # Output settings
         project=args.project,
         name=args.name,
@@ -180,7 +152,10 @@ def main():
         print("\nExporting to ONNX (dynamic batch)...")
         best_model = YOLO(str(best_model_path))
         onnx_path = best_model.export(
-            format='onnx', imgsz=args.imgsz, simplify=True, dynamic=True,
+            format="onnx",
+            imgsz=args.imgsz,
+            simplify=True,
+            dynamic=True,
         )
         print(f"ONNX model: {onnx_path}")
 
@@ -189,6 +164,7 @@ def main():
         models_dir.mkdir(exist_ok=True)
 
         import shutil
+
         dest_pt = models_dir / f"{args.name}.pt"
         dest_onnx = models_dir / f"{args.name}.onnx"
 

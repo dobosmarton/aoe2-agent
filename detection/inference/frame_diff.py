@@ -15,7 +15,7 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 # Exclude top resource bar and bottom minimap area from comparison
-_TOP_CROP_RATIO = 0.04    # ~4% of height (resource bar)
+_TOP_CROP_RATIO = 0.04  # ~4% of height (resource bar)
 _BOTTOM_CROP_RATIO = 0.0  # minimap is in a corner, usually fine
 
 # Downscale resolution for fast comparison

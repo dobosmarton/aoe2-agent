@@ -20,12 +20,13 @@ if TYPE_CHECKING:
 @dataclass
 class SpriteConfig:
     """Configuration for a sprite type."""
-    class_id: int           # YOLO class ID
-    class_name: str         # Class name
-    sprite_files: list[str] # List of sprite file paths
+
+    class_id: int  # YOLO class ID
+    class_name: str  # Class name
+    sprite_files: list[str]  # List of sprite file paths
     scale_range: tuple[float, float] = (0.8, 1.2)  # Scale variation
     count_range: tuple[int, int] = (1, 4)  # How many to place per image
-    priority: int = 0       # Higher = placed later (on top)
+    priority: int = 0  # Higher = placed later (on top)
 
 
 # Default sprite configurations for AoE2
@@ -36,7 +37,7 @@ DEFAULT_SPRITE_CONFIGS = [
         sprite_files=["sheep_1.png", "sheep_2.png"],
         scale_range=(0.9, 1.1),
         count_range=(2, 4),
-        priority=1
+        priority=1,
     ),
     SpriteConfig(
         class_id=1,
@@ -44,7 +45,7 @@ DEFAULT_SPRITE_CONFIGS = [
         sprite_files=["villager_m.png", "villager_f.png"],
         scale_range=(0.9, 1.1),
         count_range=(3, 6),
-        priority=2
+        priority=2,
     ),
     SpriteConfig(
         class_id=2,
@@ -52,7 +53,7 @@ DEFAULT_SPRITE_CONFIGS = [
         sprite_files=["tc.png"],
         scale_range=(0.95, 1.05),
         count_range=(1, 1),
-        priority=0
+        priority=0,
     ),
     SpriteConfig(
         class_id=3,
@@ -60,7 +61,7 @@ DEFAULT_SPRITE_CONFIGS = [
         sprite_files=["house.png"],
         scale_range=(0.9, 1.1),
         count_range=(0, 3),
-        priority=0
+        priority=0,
     ),
     SpriteConfig(
         class_id=8,
@@ -68,7 +69,7 @@ DEFAULT_SPRITE_CONFIGS = [
         sprite_files=["scout.png"],
         scale_range=(0.9, 1.1),
         count_range=(1, 1),
-        priority=2
+        priority=2,
     ),
 ]
 
@@ -82,7 +83,7 @@ class SyntheticDataGenerator:
         backgrounds_dir: str,
         output_dir: str,
         sprite_configs: list[SpriteConfig] | None = None,
-        image_size: tuple[int, int] = (1280, 800)
+        image_size: tuple[int, int] = (1280, 800),
     ):
         """Initialize the generator.
 
@@ -247,10 +248,7 @@ class SyntheticDataGenerator:
         return image
 
     def generate_dataset(
-        self,
-        num_images: int = 1000,
-        train_split: float = 0.8,
-        seed: int = 42
+        self, num_images: int = 1000, train_split: float = 0.8, seed: int = 42
     ) -> dict:
         """Generate a complete training dataset.
 
@@ -311,7 +309,7 @@ class SyntheticDataGenerator:
             "train_images": len(train_images),
             "val_images": len(val_images),
             "classes": [c.class_name for c in self.sprite_configs],
-            "yaml_path": str(yaml_path)
+            "yaml_path": str(yaml_path),
         }
 
         print("\nDataset generated:")
@@ -330,7 +328,7 @@ class SyntheticDataGenerator:
             "train: train/images",
             "val: val/images",
             "",
-            "names:"
+            "names:",
         ]
 
         for class_id in sorted(class_names.keys()):
@@ -340,9 +338,7 @@ class SyntheticDataGenerator:
 
 
 def extract_sprites_from_game(
-    game_graphics_dir: str,
-    output_dir: str,
-    sprite_mapping: dict | None = None
+    game_graphics_dir: str, output_dir: str, sprite_mapping: dict | None = None
 ) -> int:
     """Extract sprite images from AoE2 game files.
 
@@ -412,7 +408,7 @@ For quick testing without extraction, you can:
             img = Image.new("RGBA", size, (0, 0, 0, 0))
             draw = ImageDraw.Draw(img)
             # Draw filled shape with slight transparency
-            draw.ellipse([2, 2, size[0]-2, size[1]-2], fill=(*color, 230))
+            draw.ellipse([2, 2, size[0] - 2, size[1] - 2], fill=(*color, 230))
             img.save(output_path / filename)
             count += 1
 
@@ -461,7 +457,7 @@ if __name__ == "__main__":
     generator = SyntheticDataGenerator(
         sprites_dir=str(sprites_dir),
         backgrounds_dir=str(backgrounds_dir),
-        output_dir=str(output_dir)
+        output_dir=str(output_dir),
     )
 
     # Generate small test dataset

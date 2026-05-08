@@ -54,7 +54,8 @@ def save_screenshot(data: bytes, path: str) -> None:
 
 
 def crop_resource_bar(
-    screenshot_bytes: bytes, bar_height: int = RESOURCE_BAR_HEIGHT,
+    screenshot_bytes: bytes,
+    bar_height: int = RESOURCE_BAR_HEIGHT,
 ) -> bytes:
     """Crop just the resource bar from the top of a screenshot.
 

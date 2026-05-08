@@ -19,6 +19,7 @@ import os
 import shutil
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -63,6 +64,7 @@ DEFAULT_AGE = "Dark Age"
 # Tiny .env loader (no python-dotenv dep)
 # ---------------------------------------------------------------------------
 
+
 def _load_dotenv() -> None:
     env_path = REPO / ".env"
     if not env_path.exists():
@@ -78,6 +80,7 @@ def _load_dotenv() -> None:
 # ---------------------------------------------------------------------------
 # Result type
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class ScenarioResult:
@@ -95,6 +98,7 @@ class ScenarioResult:
 # ---------------------------------------------------------------------------
 # Memory directory backup/restore + fixture planting
 # ---------------------------------------------------------------------------
+
 
 @contextlib.contextmanager
 def _isolate_memories_dir(fixture_memories: list[dict]):
@@ -158,6 +162,7 @@ def _write_fixture_memory(memories_dir: Path, memory: dict, index: int) -> None:
 # Executor mocking — patch execute_action so the agentic loop doesn't click
 # ---------------------------------------------------------------------------
 
+
 @contextlib.contextmanager
 def _mock_executor():
     """Patch execute_action in both the canonical module and the import in claude.py.
@@ -189,9 +194,11 @@ def _mock_executor():
 # Build inputs from a fixture (synthetic detection list + context string)
 # ---------------------------------------------------------------------------
 
+
 def _seed_detected_entities(entities: list[dict]) -> None:
     """Push fixture entities into executor module state so target_class resolution works."""
     import gameplay_agent.executor as ex
+
     ex._detected_entities = [_entity_dict(entity, index) for index, entity in enumerate(entities)]
 
 
@@ -205,8 +212,10 @@ def _entity_dict(entity: dict, index: int) -> dict:
         "class": class_name,
         "center": (x, y),
         "bbox": (
-            x - ENTITY_BBOX_HALF_SIZE, y - ENTITY_BBOX_HALF_SIZE,
-            x + ENTITY_BBOX_HALF_SIZE, y + ENTITY_BBOX_HALF_SIZE,
+            x - ENTITY_BBOX_HALF_SIZE,
+            y - ENTITY_BBOX_HALF_SIZE,
+            x + ENTITY_BBOX_HALF_SIZE,
+            y + ENTITY_BBOX_HALF_SIZE,
         ),
         "confidence": entity.get("confidence", DEFAULT_ENTITY_CONFIDENCE),
     }
@@ -237,15 +246,17 @@ def _priority_tier(priority: int) -> str:
 
 
 def _build_resource_block(resources: dict, age: str) -> str:
-    return "\n".join([
-        "## Resource Status (from strategist)",
-        f"- Food: {resources.get('food', '?')}",
-        f"- Wood: {resources.get('wood', '?')}",
-        f"- Gold: {resources.get('gold', '?')}",
-        f"- Stone: {resources.get('stone', '?')}",
-        f"- Population: {resources.get('population', '0/0')}",
-        f"- Age: {age}",
-    ])
+    return "\n".join(
+        [
+            "## Resource Status (from strategist)",
+            f"- Food: {resources.get('food', '?')}",
+            f"- Wood: {resources.get('wood', '?')}",
+            f"- Gold: {resources.get('gold', '?')}",
+            f"- Stone: {resources.get('stone', '?')}",
+            f"- Population: {resources.get('population', '0/0')}",
+            f"- Age: {age}",
+        ]
+    )
 
 
 def _build_goal_block(goals: list[dict]) -> str:
@@ -353,8 +364,10 @@ def _build_context(fixture: dict) -> str:
 # Scenario execution
 # ---------------------------------------------------------------------------
 
+
 def _load_fixture(fixture_path: Path) -> dict:
     import yaml
+
     return yaml.safe_load(fixture_path.read_text()) or {}
 
 
@@ -376,7 +389,9 @@ async def _invoke_executor(fixture: dict, model: str | None) -> tuple[list[dict]
 
     try:
         response = await provider.get_actions(
-            context, width=DEFAULT_GAME_WIDTH, height=DEFAULT_GAME_HEIGHT,
+            context,
+            width=DEFAULT_GAME_WIDTH,
+            height=DEFAULT_GAME_HEIGHT,
         )
         return (
             response.get("actions", []),
@@ -411,12 +426,14 @@ def _expand_variants(fixture: dict) -> list[dict]:
         for key in _VARIANT_OVERRIDABLE_INPUTS:
             if key in variant:
                 variant_inputs[key] = variant[key]
-        expanded.append({
-            **fixture,
-            "inputs": variant_inputs,
-            "expected": variant.get("expected", fixture.get("expected", {})),
-            "_variant_name": variant.get("name", f"variant_{index}"),
-        })
+        expanded.append(
+            {
+                **fixture,
+                "inputs": variant_inputs,
+                "expected": variant.get("expected", fixture.get("expected", {})),
+                "_variant_name": variant.get("name", f"variant_{index}"),
+            }
+        )
     return expanded
 
 
@@ -442,7 +459,9 @@ async def _run_one_variant_async(
 
     if _is_real_screenshot_scenario(fixture):
         return ScenarioResult(
-            name=name, passed=True, skipped=True,
+            name=name,
+            passed=True,
+            skipped=True,
             skip_reason="real-screenshot scenarios not yet supported in v1 runner",
         )
 
@@ -456,14 +475,16 @@ async def _run_one_variant_async(
             actions, reasoning, cost = await _invoke_executor(fixture, model)
         except Exception as exc:
             return ScenarioResult(
-                name=name, passed=False,
+                name=name,
+                passed=False,
                 failures=[f"runner exception: {type(exc).__name__}: {exc}"],
                 duration_s=time.monotonic() - started,
             )
 
     failures = (
         evaluate(expected, actions=actions, reasoning=reasoning, baseline_actions=baseline_actions)
-        if expected else []
+        if expected
+        else []
     )
     return ScenarioResult(
         name=name,
@@ -479,6 +500,7 @@ async def _run_one_variant_async(
 @dataclass
 class _MultiTurnConfig:
     """Parsed `multi_turn:` section of a scenario fixture."""
+
     max_turns: int
     per_turn_expected: dict
     end_state_spec: dict
@@ -582,11 +604,14 @@ async def _run_multi_turn_scenario_async(
     with _isolate_memories_dir(fixture_memories), _mock_executor():
         for turn_num in range(1, cfg.max_turns + 1):
             try:
-                world_state, actions, reasoning, cost, step_failures = (
-                    await _run_multi_turn_step(
-                        fixture, base_inputs, world_state, recent_turns,
-                        turn_num, cfg.per_turn_expected, model,
-                    )
+                world_state, actions, reasoning, cost, step_failures = await _run_multi_turn_step(
+                    fixture,
+                    base_inputs,
+                    world_state,
+                    recent_turns,
+                    turn_num,
+                    cfg.per_turn_expected,
+                    model,
                 )
             except Exception as exc:
                 # Executor crashed mid-run: stop the loop but still evaluate the
@@ -605,19 +630,23 @@ async def _run_multi_turn_scenario_async(
 
     all_failures.extend(_evaluate_multi_turn_end(cfg, world_state, all_actions))
 
-    return [ScenarioResult(
-        name=name,
-        passed=not all_failures,
-        failures=all_failures,
-        cost_usd=round(total_cost, COST_DECIMAL_PLACES),
-        duration_s=time.monotonic() - started,
-        actions=all_actions,
-        reasoning=f"(multi-turn: {world_state.turn} turns run)",
-    )]
+    return [
+        ScenarioResult(
+            name=name,
+            passed=not all_failures,
+            failures=all_failures,
+            cost_usd=round(total_cost, COST_DECIMAL_PLACES),
+            duration_s=time.monotonic() - started,
+            actions=all_actions,
+            reasoning=f"(multi-turn: {world_state.turn} turns run)",
+        )
+    ]
 
 
 async def _run_scenario_async(
-    fixture_path: Path, *, model: str | None = None,
+    fixture_path: Path,
+    *,
+    model: str | None = None,
 ) -> list[ScenarioResult]:
     """Run all variants of a scenario. Returns one ScenarioResult per variant.
 
@@ -639,7 +668,8 @@ async def _run_scenario_async(
     baseline_actions: list[dict] | None = None
     for index, variant_fixture in enumerate(variants):
         result = await _run_one_variant_async(
-            variant_fixture, fixture_path,
+            variant_fixture,
+            fixture_path,
             model=model,
             baseline_actions=baseline_actions,
         )
@@ -653,7 +683,7 @@ async def _run_all_async(
     fixtures: list[Path],
     *,
     model: str | None,
-    on_each: callable = lambda result: None,
+    on_each: Callable[[ScenarioResult], None] = lambda result: None,
 ) -> list[ScenarioResult]:
     """Run every scenario (possibly multi-variant) in a SINGLE shared event loop.
 
@@ -682,6 +712,7 @@ def run_scenario(fixture_path: Path, *, model: str | None = None) -> list[Scenar
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def _format_result(result: ScenarioResult) -> str:
     if result.skipped:
         return f"  ⚪ {result.name}  SKIPPED — {result.skip_reason}"
@@ -695,9 +726,7 @@ def _format_result(result: ScenarioResult) -> str:
     if not result.failures:
         return header
     failure_lines = "\n".join(
-        "      " + line
-        for failure in result.failures
-        for line in failure.splitlines()
+        "      " + line for failure in result.failures for line in failure.splitlines()
     )
     return f"{header}\n{failure_lines}"
 
@@ -725,12 +754,11 @@ def _resolve_fixtures(args: argparse.Namespace) -> list[Path]:
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Run scenario evaluations against ClaudeProvider"
-    )
+    parser = argparse.ArgumentParser(description="Run scenario evaluations against ClaudeProvider")
     parser.add_argument("fixtures", nargs="*", help="YAML fixture paths (or use --all)")
-    parser.add_argument("--all", action="store_true",
-                        help="Run every fixture in evaluation/scenarios/")
+    parser.add_argument(
+        "--all", action="store_true", help="Run every fixture in evaluation/scenarios/"
+    )
     parser.add_argument("--model", help="Override the model (default: config.model)")
     return parser.parse_args()
 
@@ -755,11 +783,13 @@ def main() -> int:
             print(f"  ⚠ {fixture_path}: not found")
 
     print(f"Running {len(valid_fixtures)} scenario(s)...\n")
-    results = asyncio.run(_run_all_async(
-        valid_fixtures,
-        model=args.model,
-        on_each=lambda result: print(_format_result(result)),
-    ))
+    results = asyncio.run(
+        _run_all_async(
+            valid_fixtures,
+            model=args.model,
+            on_each=lambda result: print(_format_result(result)),
+        )
+    )
     _print_summary(results)
 
     return 0 if all(r.passed or r.skipped for r in results) else 1

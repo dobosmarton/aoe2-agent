@@ -1,0 +1,39 @@
+# Pre-commit hooks: run on every `git commit`.
+# Install once with: pre-commit install
+# Run on all files (e.g. on first install): pre-commit run --all-files
+
+repos:
+  # Standard hygiene: whitespace, EOF, conflict markers, syntax of YAML/TOML.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=2048"]
+
+  # Ruff: fast Python linter + formatter. Auto-fixes safe issues.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.12
+    hooks:
+      - id: ruff-check
+        args: ["--fix"]
+      - id: ruff-format
+
+  # Pyright: static type checker. Runs via the project's venv so third-party
+  # imports (anthropic, structlog, mss, ...) resolve. The mirrors-pyright
+  # hook installs into an isolated env and would flood the report with bogus
+  # "Import could not be resolved" errors.
+  - repo: local
+    hooks:
+      - id: pyright
+        name: pyright
+        # Explicit scope: the hook ignores pyproject's `include` when given
+        # filenames, so pass the AI-agent dirs ourselves.
+        entry: venv/bin/pyright gameplay_agent autoresearch evaluation server
+        language: system
+        types: [python]
+        pass_filenames: false

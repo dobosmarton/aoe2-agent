@@ -50,6 +50,7 @@ _RESOURCES_RE = re.compile(r"resources=(\{[^}]+\})")
 # Log parsing helpers
 # ---------------------------------------------------------------------------
 
+
 def _parse_kv_line(line: str) -> dict[str, str]:
     """Parse 'key1=val1 key2='val 2' key3=true' into a dict.
 
@@ -82,9 +83,7 @@ def _parse_resources_dict(text: str) -> dict[str, Any]:
     avoid eval().
     """
     parsed: dict[str, Any] = {}
-    pattern = re.compile(
-        r"['\"]?(\w+)['\"]?\s*:\s*('([^']*)'|\"([^\"]*)\"|([\d/\.]+))"
-    )
+    pattern = re.compile(r"['\"]?(\w+)['\"]?\s*:\s*('([^']*)'|\"([^\"]*)\"|([\d/\.]+))")
     for match in pattern.finditer(text):
         key = match.group(1)
         value = match.group(3) or match.group(4) or match.group(5)
@@ -119,7 +118,7 @@ def _entity_classes_in_turn(lines: list[str], target_turn: int) -> dict[str, int
     for line in lines:
         turn_match = _TURN_RE.search(line)
         if turn_match:
-            in_target_turn = (int(turn_match.group(1)) == target_turn)
+            in_target_turn = int(turn_match.group(1)) == target_turn
         if in_target_turn and "ownership_classified" in line:
             class_name = _parse_kv_line(line).get("cls")
             if class_name:
@@ -136,8 +135,8 @@ def _placeholder_entity(class_name: str, class_index: int, instance_index: int) 
     return {
         "class": class_name,
         "x": PLACEHOLDER_BASE_X
-            + class_index * PLACEHOLDER_X_STEP_PER_CLASS
-            + instance_index * PLACEHOLDER_X_STEP_PER_INSTANCE,
+        + class_index * PLACEHOLDER_X_STEP_PER_CLASS
+        + instance_index * PLACEHOLDER_X_STEP_PER_INSTANCE,
         "y": PLACEHOLDER_BASE_Y + class_index * PLACEHOLDER_Y_STEP_PER_CLASS,
         "confidence": PLACEHOLDER_CONFIDENCE,
     }
@@ -156,6 +155,7 @@ def _entities_for_turn(lines: list[str], target_turn: int) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Fixture assembly
 # ---------------------------------------------------------------------------
+
 
 def _description(log_path: Path, turn: int) -> str:
     return (
@@ -206,6 +206,7 @@ def _build_fixture(log_path: Path, turn: int, name: str) -> dict:
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def _default_fixture_name(log_path: Path, turn: int) -> str:
     return f"regression_{log_path.parent.name}_turn_{turn:02d}"
 
@@ -221,8 +222,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("log", type=Path, help="Path to logs/<date>/game.txt")
     parser.add_argument("--turn", "-t", type=int, required=True, help="Iteration number")
     parser.add_argument("--name", help="Fixture name (default: derived from log + turn)")
-    parser.add_argument("--out", "-o", type=Path,
-                        help="Output YAML path (default: scenarios/regression/<name>.yaml)")
+    parser.add_argument(
+        "--out",
+        "-o",
+        type=Path,
+        help="Output YAML path (default: scenarios/regression/<name>.yaml)",
+    )
     return parser.parse_args()
 
 
@@ -250,6 +255,7 @@ def main() -> int:
 
     try:
         import yaml
+
         out.write_text(yaml.dump(fixture, sort_keys=False, default_flow_style=False))
     except ImportError:
         print("PyYAML not installed — cannot write fixture", file=sys.stderr)

@@ -68,8 +68,7 @@ def _ensure_results_file() -> None:
         return
 
     # Header is stale — rewrite it, leaving data rows unchanged.
-    log.info("results_tsv_header_upgraded",
-             old_cols=len(current_header), new_cols=len(HEADER))
+    log.info("results_tsv_header_upgraded", old_cols=len(current_header), new_cols=len(HEADER))
     with open(RESULTS_FILE, "w", newline="") as f:
         f.write("\t".join(HEADER) + "\n")
         f.writelines(existing_lines[1:])

@@ -23,11 +23,15 @@ class PointTargetAction(BaseModel):
 
     x: int | None = Field(default=None, ge=0, le=7680)
     y: int | None = Field(default=None, ge=0, le=4320)
-    target_id: str | None = Field(default=None, description="Entity ID from detection, e.g. 'sheep_0'")
-    target_class: str | None = Field(default=None, description="Entity class to target nearest of, e.g. 'sheep'")
+    target_id: str | None = Field(
+        default=None, description="Entity ID from detection, e.g. 'sheep_0'"
+    )
+    target_class: str | None = Field(
+        default=None, description="Entity class to target nearest of, e.g. 'sheep'"
+    )
     intent: str = ""
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def check_coords_or_target(self):
         """Ensure either coordinates, target_id, or target_class is provided."""
         has_coords = self.x is not None and self.y is not None
@@ -55,8 +59,12 @@ class PressAction(BaseModel):
 
     type: Literal["press"]
     key: str = Field(min_length=1, max_length=20)
-    modifiers: list[str] = Field(default_factory=list, description="Modifier keys, e.g. ['ctrl', 'shift']")
-    rescan: bool = Field(default=False, description="Take fresh screenshot+detection after this key press")
+    modifiers: list[str] = Field(
+        default_factory=list, description="Modifier keys, e.g. ['ctrl', 'shift']"
+    )
+    rescan: bool = Field(
+        default=False, description="Take fresh screenshot+detection after this key press"
+    )
     intent: str = ""
 
     @field_validator("key")
@@ -148,7 +156,9 @@ class ScrollAction(BaseModel):
     """Mouse scroll action (for zoom in/out)."""
 
     type: Literal["scroll"]
-    clicks: int = Field(description="Positive = scroll up (zoom in), negative = scroll down (zoom out)")
+    clicks: int = Field(
+        description="Positive = scroll up (zoom in), negative = scroll down (zoom out)"
+    )
     x: int | None = Field(default=None, ge=0, le=7680)
     y: int | None = Field(default=None, ge=0, le=4320)
     intent: str = ""
@@ -165,7 +175,13 @@ class DetectAction(BaseModel):
 # preventing the model from confusing field names across action types
 # (e.g., using DragAction's x1/y1 for ClickAction instead of x/y).
 Action = Annotated[
-    ClickAction | RightClickAction | PressAction | DragAction | WaitAction | ScrollAction | DetectAction,
+    ClickAction
+    | RightClickAction
+    | PressAction
+    | DragAction
+    | WaitAction
+    | ScrollAction
+    | DetectAction,
     Discriminator("type"),
 ]
 
@@ -182,7 +198,7 @@ class Observations(BaseModel):
     events: list[str] = Field(default_factory=list)
 
 
-_ACTION_TYPE_MAP: dict[str, type[BaseModel]] = {
+_ACTION_TYPE_MAP: dict[str, type[Action]] = {
     "click": ClickAction,
     "right_click": RightClickAction,
     "press": PressAction,
@@ -228,7 +244,7 @@ class LLMResponse(BaseModel):
     observations: Observations = Field(default_factory=Observations)
     reasoning: str = ""
 
-    @field_validator('actions', mode='before')
+    @field_validator("actions", mode="before")
     @classmethod
     def salvage_valid_actions(cls, v: list) -> list:
         """Validate actions individually, dropping invalid ones.

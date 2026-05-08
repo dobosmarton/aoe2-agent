@@ -39,3 +39,37 @@ ignore = [
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
+
+
+# ---------------------------------------------------------------------------
+# Pyright — static type checker
+# ---------------------------------------------------------------------------
+# Scoped to the AI agent code. detection/ is computer-vision/ML and uses
+# numpy/PIL shapes that grumble loudly under static checking; revisit later.
+[tool.pyright]
+include = [
+    "gameplay_agent",
+    "autoresearch",
+    "evaluation",
+    "server",
+]
+exclude = [
+    "venv",
+    "**/__pycache__",
+    "experiments",
+    "tmp",
+    "logs",
+    "memories",
+    "data",
+]
+# Point pyright at the project venv so third-party imports (anthropic,
+# structlog, mss, ...) resolve. Without this, pre-commit's pyright runs
+# in a sandboxed env without our deps and floods the report with bogus
+# "Import could not be resolved" errors.
+venvPath = "."
+venv = "venv"
+typeCheckingMode = "basic"
+pythonVersion = "3.11"
+# Treat third-party packages without stubs as untyped rather than failing.
+reportMissingTypeStubs = false
+reportMissingImports = "warning"

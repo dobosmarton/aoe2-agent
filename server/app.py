@@ -39,6 +39,7 @@ Backend: TypeAlias = Literal["coreml", "onnx_coreml", "onnx_cpu"]
 # Pydantic models (frozen — API boundary)
 # ---------------------------------------------------------------------------
 
+
 class DetectionResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -82,6 +83,7 @@ from detection.inference.thresholds import (  # noqa: E402
 # Class names loader
 # ---------------------------------------------------------------------------
 
+
 def _load_class_names() -> tuple[str, ...]:
     """Load class names from bundled classes.yaml."""
     yaml_path = Path(__file__).parent / "classes.yaml"
@@ -95,24 +97,73 @@ def _load_class_names() -> tuple[str, ...]:
     except (FileNotFoundError, KeyError, ValueError):
         logger.warning("Could not load classes.yaml, using hardcoded fallback")
         return (
-            "tree", "gold_mine", "stone_mine", "berry_bush", "relic",
-            "deer", "boar", "wolf", "sheep", "town_center", "house",
-            "lumber_camp", "mining_camp", "mill", "market", "dock", "farm",
-            "barracks", "archery_range", "stable", "blacksmith", "siege_workshop",
-            "monastery", "castle", "university", "gate", "wall", "tower",
-            "wonder", "krepost", "villager", "trade_cart", "fishing_ship",
-            "scout_line", "knight_line", "camel_line", "battle_elephant",
-            "archer_line", "skirmisher_line", "cavalry_archer", "hand_cannoneer",
-            "militia_line", "spearman_line", "eagle_line", "ram", "mangonel_line",
-            "scorpion", "trebuchet", "monk", "king", "unique_archer",
-            "unique_cavalry", "unique_infantry", "unique_siege", "unique_ship",
-            "fish", "galley", "fire_galley", "siege_tower", "goose",
+            "tree",
+            "gold_mine",
+            "stone_mine",
+            "berry_bush",
+            "relic",
+            "deer",
+            "boar",
+            "wolf",
+            "sheep",
+            "town_center",
+            "house",
+            "lumber_camp",
+            "mining_camp",
+            "mill",
+            "market",
+            "dock",
+            "farm",
+            "barracks",
+            "archery_range",
+            "stable",
+            "blacksmith",
+            "siege_workshop",
+            "monastery",
+            "castle",
+            "university",
+            "gate",
+            "wall",
+            "tower",
+            "wonder",
+            "krepost",
+            "villager",
+            "trade_cart",
+            "fishing_ship",
+            "scout_line",
+            "knight_line",
+            "camel_line",
+            "battle_elephant",
+            "archer_line",
+            "skirmisher_line",
+            "cavalry_archer",
+            "hand_cannoneer",
+            "militia_line",
+            "spearman_line",
+            "eagle_line",
+            "ram",
+            "mangonel_line",
+            "scorpion",
+            "trebuchet",
+            "monk",
+            "king",
+            "unique_archer",
+            "unique_cavalry",
+            "unique_infantry",
+            "unique_siege",
+            "unique_ship",
+            "fish",
+            "galley",
+            "fire_galley",
+            "siege_tower",
+            "goose",
         )
 
 
 # ---------------------------------------------------------------------------
 # Model state
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True, slots=True)
 class ModelState:
@@ -210,6 +261,7 @@ def _load_onnx(onnx_path: str, class_names: tuple[str, ...]) -> ModelState:
 # Inference helpers
 # ---------------------------------------------------------------------------
 
+
 def _preprocess(image: Image.Image, target_size: int) -> tuple[np.ndarray, int, int]:
     """Resize + normalize a PIL Image for YOLO inference.
 
@@ -239,6 +291,7 @@ def _run_coreml_single(state: ModelState, chw: np.ndarray) -> np.ndarray:
     input_type = input_desc.type.WhichOneof("Type")
     if input_type == "imageType":
         from PIL import Image as PILImage
+
         hwc = np.transpose(chw, (1, 2, 0))  # CHW → HWC
         hwc_uint8 = (hwc * 255).astype(np.uint8)
         input_data = PILImage.fromarray(hwc_uint8, mode="RGB")
@@ -300,7 +353,9 @@ def _parse_raw_output(
     for pred in predictions:
         x1, y1, x2, y2, confidence, class_id = pred
         class_idx = int(class_id)
-        class_name = class_names[class_idx] if class_idx < len(class_names) else f"unknown_{class_idx}"
+        class_name = (
+            class_names[class_idx] if class_idx < len(class_names) else f"unknown_{class_idx}"
+        )
 
         if confidence < _get_threshold(class_name):
             continue
@@ -318,13 +373,15 @@ def _parse_raw_output(
         if abs_x2 <= abs_x1 or abs_y2 <= abs_y1:
             continue
 
-        results.append(DetectionResult(
-            class_name=class_name,
-            bbox=(float(abs_x1), float(abs_y1), float(abs_x2), float(abs_y2)),
-            center=((abs_x1 + abs_x2) / 2, (abs_y1 + abs_y2) / 2),
-            confidence=float(confidence),
-            area=float((abs_x2 - abs_x1) * (abs_y2 - abs_y1)),
-        ))
+        results.append(
+            DetectionResult(
+                class_name=class_name,
+                bbox=(float(abs_x1), float(abs_y1), float(abs_x2), float(abs_y2)),
+                center=((abs_x1 + abs_x2) / 2, (abs_y1 + abs_y2) / 2),
+                confidence=float(confidence),
+                area=float((abs_x2 - abs_x1) * (abs_y2 - abs_y1)),
+            )
+        )
 
     return results
 
@@ -396,10 +453,16 @@ def _detect_sahi(
         for chw, (x_off, y_off, tw, th) in zip(tiles, offsets, strict=False):
             raw = _run_coreml_single(state, chw)
             dets = _parse_raw_output(
-                raw, 0, num_classes, state.class_names,
-                scale_x=1.0, scale_y=1.0,
-                x_offset=x_off, y_offset=y_off,
-                clip_w=tw, clip_h=th,
+                raw,
+                0,
+                num_classes,
+                state.class_names,
+                scale_x=1.0,
+                scale_y=1.0,
+                x_offset=x_off,
+                y_offset=y_off,
+                clip_w=tw,
+                clip_h=th,
             )
             all_detections.extend(dets)
     else:
@@ -409,10 +472,16 @@ def _detect_sahi(
 
         for tile_idx, (x_off, y_off, tw, th) in enumerate(offsets):
             dets = _parse_raw_output(
-                raw, tile_idx, num_classes, state.class_names,
-                scale_x=1.0, scale_y=1.0,
-                x_offset=x_off, y_offset=y_off,
-                clip_w=tw, clip_h=th,
+                raw,
+                tile_idx,
+                num_classes,
+                state.class_names,
+                scale_x=1.0,
+                scale_y=1.0,
+                x_offset=x_off,
+                y_offset=y_off,
+                clip_w=tw,
+                clip_h=th,
             )
             all_detections.extend(dets)
 
@@ -498,7 +567,11 @@ def create_app(model_path: str) -> FastAPI:
 
         t0 = time.monotonic()
         detections, tile_count = await asyncio.to_thread(
-            _detect_sahi, _model_state, image, tile_size, overlap,
+            _detect_sahi,
+            _model_state,
+            image,
+            tile_size,
+            overlap,
         )
         elapsed_ms = (time.monotonic() - t0) * 1000
 
@@ -515,6 +588,7 @@ def create_app(model_path: str) -> FastAPI:
 # ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")

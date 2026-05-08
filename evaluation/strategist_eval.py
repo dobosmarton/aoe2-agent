@@ -53,6 +53,7 @@ class VisionResult:
 # Assertion DSL — independent of LLM, fully testable offline
 # ---------------------------------------------------------------------------
 
+
 def evaluate_resource_readings(expected: dict, actual: dict) -> list[str]:
     """Compare strategist readings against expected, returning failure messages.
 
@@ -83,24 +84,19 @@ def evaluate_resource_readings(expected: dict, actual: dict) -> list[str]:
                 )
                 continue
             if "min" in spec and actual_value < spec["min"]:
-                failures.append(
-                    f"{field_name}={actual_value} below min={spec['min']}"
-                )
+                failures.append(f"{field_name}={actual_value} below min={spec['min']}")
             if "max" in spec and actual_value > spec["max"]:
-                failures.append(
-                    f"{field_name}={actual_value} above max={spec['max']}"
-                )
+                failures.append(f"{field_name}={actual_value} above max={spec['max']}")
         else:
             if actual_value != spec:
-                failures.append(
-                    f"{field_name}={actual_value!r} != expected {spec!r}"
-                )
+                failures.append(f"{field_name}={actual_value!r} != expected {spec!r}")
     return failures
 
 
 # ---------------------------------------------------------------------------
 # Fixture loading
 # ---------------------------------------------------------------------------
+
 
 def load_vision_fixture(fixture_path: Path) -> dict:
     """Load and validate a vision fixture YAML."""
@@ -132,8 +128,8 @@ def all_vision_fixtures() -> list[Path]:
 # Live strategist invocation
 # ---------------------------------------------------------------------------
 
-async def _invoke_strategist_async(screenshot_bytes: bytes,
-                                   model: str | None = None) -> dict:
+
+async def _invoke_strategist_async(screenshot_bytes: bytes, model: str | None = None) -> dict:
     """Call StrategistProvider against a screenshot, return its resource_readings dict.
 
     A minimal `GameState` is supplied — only `current_age` matters for the
@@ -168,7 +164,8 @@ def run_vision_check(fixture_path: Path, *, model: str | None = None) -> VisionR
 
     if not screenshot_path.exists():
         return VisionResult(
-            name=name, passed=False,
+            name=name,
+            passed=False,
             failures=[f"screenshot not found: {screenshot_path}"],
         )
 
@@ -178,7 +175,8 @@ def run_vision_check(fixture_path: Path, *, model: str | None = None) -> VisionR
         readings = asyncio.run(_invoke_strategist_async(screenshot_bytes, model=model))
     except Exception as exc:
         return VisionResult(
-            name=name, passed=False,
+            name=name,
+            passed=False,
             failures=[f"strategist invocation failed: {type(exc).__name__}: {exc}"],
         )
 

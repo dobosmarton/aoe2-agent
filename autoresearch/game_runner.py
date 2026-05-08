@@ -90,8 +90,11 @@ async def run_game(
                 game_id=game_id or "unknown",
             )
             if memory_files:
-                log.info("memories_extracted", count=len(memory_files),
-                         files=[f.name for f in memory_files])
+                log.info(
+                    "memories_extracted",
+                    count=len(memory_files),
+                    files=[f.name for f in memory_files],
+                )
         except Exception as e:
             log.warning("memory_extraction_error", error=str(e))
 

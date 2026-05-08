@@ -83,10 +83,7 @@ def triage(
     output_dir = Path(output_dir)
 
     image_extensions = {".png", ".jpg", ".jpeg", ".bmp"}
-    images = sorted([
-        p for p in raw_dir.iterdir()
-        if p.suffix.lower() in image_extensions
-    ])
+    images = sorted([p for p in raw_dir.iterdir() if p.suffix.lower() in image_extensions])
 
     print(f"Triaging {len(images)} images...")
 
@@ -95,15 +92,17 @@ def triage(
         results = model(str(img_path), conf=0.05, verbose=False)
 
         if results[0].boxes is None or len(results[0].boxes) == 0:
-            scored.append({
-                "path": str(img_path),
-                "name": img_path.name,
-                "score": 15,
-                "n_detections": 0,
-                "n_uncertain": 0,
-                "n_low": 0,
-                "reason": "no_detections",
-            })
+            scored.append(
+                {
+                    "path": str(img_path),
+                    "name": img_path.name,
+                    "score": 15,
+                    "n_detections": 0,
+                    "n_uncertain": 0,
+                    "n_low": 0,
+                    "reason": "no_detections",
+                }
+            )
             continue
 
         confs = results[0].boxes.conf.cpu().numpy()
@@ -119,18 +118,20 @@ def triage(
         if n_total < 5:
             score += 5
 
-        scored.append({
-            "path": str(img_path),
-            "name": img_path.name,
-            "score": score,
-            "n_detections": n_total,
-            "n_uncertain": n_uncertain,
-            "n_low": n_low,
-            "n_high": n_high,
-        })
+        scored.append(
+            {
+                "path": str(img_path),
+                "name": img_path.name,
+                "score": score,
+                "n_detections": n_total,
+                "n_uncertain": n_uncertain,
+                "n_low": n_low,
+                "n_high": n_high,
+            }
+        )
 
         if (i + 1) % 20 == 0:
-            print(f"  [{i+1}/{len(images)}] processed")
+            print(f"  [{i + 1}/{len(images)}] processed")
 
     # Sort by score descending (most informative first)
     scored.sort(key=lambda x: -x["score"])
@@ -235,7 +236,9 @@ def prepare_batch(
             img_w, img_h = results[0].orig_shape[1], results[0].orig_shape[0]
 
             for box, cls_id, _conf in zip(
-                results[0].boxes.xyxy, results[0].boxes.cls, results[0].boxes.conf,
+                results[0].boxes.xyxy,
+                results[0].boxes.cls,
+                results[0].boxes.conf,
                 strict=False,
             ):
                 v1_id = int(cls_id.item())
@@ -371,10 +374,10 @@ def main():
 
     # Integrate
     integrate_parser = subparsers.add_parser("integrate", help="Integrate CVAT export")
-    integrate_parser.add_argument("--cvat-export", type=str, required=True,
-                                  help="Path to CVAT YOLO export directory")
-    integrate_parser.add_argument("--training-data", type=str,
-                                  default=str(_TRAINING_DATA_DIR))
+    integrate_parser.add_argument(
+        "--cvat-export", type=str, required=True, help="Path to CVAT YOLO export directory"
+    )
+    integrate_parser.add_argument("--training-data", type=str, default=str(_TRAINING_DATA_DIR))
 
     args = parser.parse_args()
 
@@ -382,8 +385,12 @@ def main():
         triage(Path(args.model), Path(args.input), Path(args.output))
     elif args.command == "prepare":
         prepare_batch(
-            Path(args.model), Path(args.input), Path(args.output),
-            args.batch_size, args.conf, args.schema,
+            Path(args.model),
+            Path(args.input),
+            Path(args.output),
+            args.batch_size,
+            args.conf,
+            args.schema,
         )
     elif args.command == "integrate":
         integrate(Path(args.cvat_export), Path(args.training_data))

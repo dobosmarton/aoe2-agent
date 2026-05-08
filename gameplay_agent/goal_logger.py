@@ -47,15 +47,11 @@ class GoalLogger:
 
     def log_goal_completed(self, turn: int, goal: Goal) -> None:
         turns_taken = turn - goal.created_turn
-        self._write(
-            f"[T{turn:03d}] COMPLETED: \"{goal.name}\" in {turns_taken} turns"
-        )
+        self._write(f'[T{turn:03d}] COMPLETED: "{goal.name}" in {turns_taken} turns')
 
     def log_goal_failed(self, turn: int, goal: Goal, reason: str = "") -> None:
         reason_str = f" -- {reason}" if reason else ""
-        self._write(
-            f"[T{turn:03d}] FAILED: \"{goal.name}\"{reason_str}"
-        )
+        self._write(f'[T{turn:03d}] FAILED: "{goal.name}"{reason_str}')
 
     def log_strategist_update(
         self, turn: int, old_goals: list[Goal], new_goals: list[Goal]
@@ -80,7 +76,4 @@ class GoalLogger:
         self._write("\n".join(lines))
 
     def log_game_end(self, turn: int, reason: str, completed_count: int) -> None:
-        self._write(
-            f"[T{turn:03d}] GAME END: {reason} "
-            f"({completed_count} goals completed)"
-        )
+        self._write(f"[T{turn:03d}] GAME END: {reason} ({completed_count} goals completed)")
