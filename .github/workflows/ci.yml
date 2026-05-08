@@ -11,6 +11,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Opt JavaScript-based actions onto the Node 24 runtime ahead of GitHub's
+# June 2026 forced cutover. Removes the Node-20 deprecation annotation.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   lint-typecheck-test:
     runs-on: ubuntu-latest
