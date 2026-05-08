@@ -13,17 +13,18 @@ from unittest.mock import MagicMock
 
 import pytest
 
-# pyautogui reads $DISPLAY at import time on Linux. On a headless CI runner
-# that raises KeyError during test collection — even for tests that never
-# actually drive the mouse. If the real import fails, install a MagicMock
-# so any `import pyautogui` downstream gets a no-op shim. Tests that need
-# specific pyautogui behavior continue to install their own fakes via
-# monkeypatch.setattr(executor, "pyautogui", ...).
-try:
-    import pyautogui  # noqa: F401
-except (KeyError, ImportError):
-    sys.modules.pop("pyautogui", None)
-    sys.modules["pyautogui"] = MagicMock()
+# Native-GUI deps that don't load on a headless Linux CI runner:
+#   - pyautogui reads $DISPLAY at import time → KeyError on Linux without X.
+#   - pygetwindow raises NotImplementedError on Linux ("does not support Linux").
+# When the real import fails for any reason, install a MagicMock so downstream
+# `import pyautogui` / `import pygetwindow` gets a no-op shim. Tests that need
+# specific behavior continue to install their own fakes via monkeypatch.
+for _mod_name in ("pyautogui", "pygetwindow"):
+    try:
+        __import__(_mod_name)
+    except Exception:
+        sys.modules.pop(_mod_name, None)
+        sys.modules[_mod_name] = MagicMock()
 
 
 def pytest_addoption(parser):
