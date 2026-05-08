@@ -1128,7 +1128,7 @@ class TrainingDataGenerator:
 
             img, labels = self.generate_image(i)
             img.save(train_img_dir / f"img_{i:05d}.jpg", quality=90)
-            with open(train_lbl_dir / f"img_{i:05d}.txt", "w") as f:
+            with (train_lbl_dir / f"img_{i:05d}.txt").open("w") as f:
                 f.write("\n".join(labels))
 
         print(f"\nGenerating {num_val} validation images...")
@@ -1138,7 +1138,7 @@ class TrainingDataGenerator:
 
             img, labels = self.generate_image(num_train + i)
             img.save(val_img_dir / f"img_{i:05d}.jpg", quality=90)
-            with open(val_lbl_dir / f"img_{i:05d}.txt", "w") as f:
+            with (val_lbl_dir / f"img_{i:05d}.txt").open("w") as f:
                 f.write("\n".join(labels))
 
         # Create dataset.yaml

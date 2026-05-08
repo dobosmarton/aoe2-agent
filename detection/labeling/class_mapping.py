@@ -22,7 +22,7 @@ def load_classes_yaml(path: Path | None = None) -> dict[int, str]:
         Dict mapping class ID -> class name.
     """
     path = path or (_CONFIG_DIR / "classes.yaml")
-    with open(path) as f:
+    with path.open() as f:
         data = yaml.safe_load(f)
 
     return {entry["id"]: entry["name"] for entry in data["classes"]}
@@ -35,7 +35,7 @@ def load_dataset_yaml(path: Path | None = None) -> dict[int, str]:
         Dict mapping class ID -> class name.
     """
     path = path or _DATASET_YAML
-    with open(path) as f:
+    with path.open() as f:
         data = yaml.safe_load(f)
 
     return {int(k): v for k, v in data["names"].items()}
@@ -116,7 +116,7 @@ def convert_label_file(
         Number of labels written.
     """
     lines_out = []
-    with open(input_path) as f:
+    with input_path.open() as f:
         for line in f:
             parts = line.strip().split()
             if len(parts) < 5:

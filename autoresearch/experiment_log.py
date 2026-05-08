@@ -50,16 +50,16 @@ def _ensure_results_file() -> None:
     """
     RESULTS_FILE.parent.mkdir(parents=True, exist_ok=True)
     if not RESULTS_FILE.exists():
-        with open(RESULTS_FILE, "w", newline="") as f:
+        with RESULTS_FILE.open("w", newline="") as f:
             writer = csv.writer(f, delimiter="\t")
             writer.writerow(HEADER)
         return
 
     # File exists — check whether the header needs upgrading.
-    with open(RESULTS_FILE, newline="") as f:
+    with RESULTS_FILE.open(newline="") as f:
         existing_lines = f.readlines()
     if not existing_lines:
-        with open(RESULTS_FILE, "w", newline="") as f:
+        with RESULTS_FILE.open("w", newline="") as f:
             csv.writer(f, delimiter="\t").writerow(HEADER)
         return
 
@@ -69,7 +69,7 @@ def _ensure_results_file() -> None:
 
     # Header is stale — rewrite it, leaving data rows unchanged.
     log.info("results_tsv_header_upgraded", old_cols=len(current_header), new_cols=len(HEADER))
-    with open(RESULTS_FILE, "w", newline="") as f:
+    with RESULTS_FILE.open("w", newline="") as f:
         f.write("\t".join(HEADER) + "\n")
         f.writelines(existing_lines[1:])
 
@@ -92,7 +92,7 @@ def get_next_experiment_id() -> str:
     """Generate next experiment ID based on existing entries."""
     _ensure_results_file()
     count = 0
-    with open(RESULTS_FILE) as f:
+    with RESULTS_FILE.open() as f:
         reader = csv.reader(f, delimiter="\t")
         next(reader, None)  # skip header
         for _ in reader:
@@ -137,7 +137,7 @@ def log_experiment(
         str(memories_used_count),
     ]
 
-    with open(RESULTS_FILE, "a", newline="") as f:
+    with RESULTS_FILE.open("a", newline="") as f:
         writer = csv.writer(f, delimiter="\t")
         writer.writerow(row)
 
@@ -155,7 +155,7 @@ def get_recent_experiments(n: int = 5) -> list[dict]:
     _ensure_results_file()
 
     rows = []
-    with open(RESULTS_FILE) as f:
+    with RESULTS_FILE.open() as f:
         reader = csv.DictReader(f, delimiter="\t")
         for row in reader:
             rows.append(dict(row))
@@ -168,7 +168,7 @@ def get_best_score(loop: str | None = None) -> float:
     _ensure_results_file()
 
     best = 0.0
-    with open(RESULTS_FILE) as f:
+    with RESULTS_FILE.open() as f:
         reader = csv.DictReader(f, delimiter="\t")
         for row in reader:
             if row.get("accepted") == "true" and (loop is None or row.get("loop") == loop):

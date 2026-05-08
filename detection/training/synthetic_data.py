@@ -221,7 +221,7 @@ class SyntheticDataGenerator:
 
         # Save labels
         label_path = self.labels_dir / f"image_{index:05d}.txt"
-        with open(label_path, "w") as f:
+        with label_path.open("w") as f:
             f.write("\n".join(labels))
 
         return image_path, label_path
@@ -301,7 +301,7 @@ class SyntheticDataGenerator:
         # Create dataset YAML for YOLO training
         yaml_content = self._create_dataset_yaml()
         yaml_path = self.output_dir / "dataset.yaml"
-        with open(yaml_path, "w") as f:
+        with yaml_path.open("w") as f:
             f.write(yaml_content)
 
         stats = {

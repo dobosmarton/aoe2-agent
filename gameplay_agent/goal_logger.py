@@ -13,11 +13,11 @@ class GoalLogger:
         self.log_path = log_dir / "goals.log"
         log_dir.mkdir(parents=True, exist_ok=True)
         # Write header
-        with open(self.log_path, "a") as f:
+        with self.log_path.open("a") as f:
             f.write(f"\n=== Game started {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===\n")
 
     def _write(self, text: str) -> None:
-        with open(self.log_path, "a") as f:
+        with self.log_path.open("a") as f:
             f.write(text + "\n")
 
     def log_goals_created(self, turn: int, goals: list[Goal]) -> None:

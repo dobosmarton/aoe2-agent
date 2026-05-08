@@ -1,6 +1,7 @@
 """Screen capture module for AoE2 LLM Agent."""
 
 import io
+from pathlib import Path
 
 import mss
 from PIL import Image
@@ -49,7 +50,7 @@ def capture_screenshot(monitor: int = 1, quality: int | None = None) -> tuple[by
 
 def save_screenshot(data: bytes, path: str) -> None:
     """Save screenshot bytes to a file."""
-    with open(path, "wb") as f:
+    with Path(path).open("wb") as f:
         f.write(data)
 
 

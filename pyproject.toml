@@ -104,6 +104,7 @@ select = [
     "B",   # flake8-bugbear (likely bugs)
     "SIM", # flake8-simplify
     "RUF", # ruff-specific
+    "PTH", # flake8-use-pathlib (prefer Path over os.path/builtin open)
 ]
 ignore = [
     "E501",   # line-too-long: ruff format handles formatting; long literals are fine

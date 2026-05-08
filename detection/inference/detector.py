@@ -57,7 +57,7 @@ def _load_default_classes() -> list[str]:
     try:
         import yaml
 
-        with open(yaml_path) as f:
+        with yaml_path.open() as f:
             data = yaml.safe_load(f)
         classes = sorted(data["classes"], key=lambda c: c["id"])
         return [c["name"] for c in classes]

@@ -463,7 +463,7 @@ def prepare_training(
     }
 
     yaml_path = output_dir / "dataset.yaml"
-    with open(yaml_path, "w") as f:
+    with yaml_path.open("w") as f:
         yaml.dump(dataset_yaml, f, default_flow_style=False, sort_keys=False)
 
     print(f"\nDataset written to: {output_dir}")
