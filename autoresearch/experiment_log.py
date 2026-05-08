@@ -5,7 +5,7 @@ Maintains experiments/results.tsv with one row per experiment.
 
 import csv
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import structlog
@@ -56,7 +56,7 @@ def _ensure_results_file() -> None:
         return
 
     # File exists — check whether the header needs upgrading.
-    with open(RESULTS_FILE, "r", newline="") as f:
+    with open(RESULTS_FILE, newline="") as f:
         existing_lines = f.readlines()
     if not existing_lines:
         with open(RESULTS_FILE, "w", newline="") as f:
@@ -93,7 +93,7 @@ def get_next_experiment_id() -> str:
     """Generate next experiment ID based on existing entries."""
     _ensure_results_file()
     count = 0
-    with open(RESULTS_FILE, "r") as f:
+    with open(RESULTS_FILE) as f:
         reader = csv.reader(f, delimiter="\t")
         next(reader, None)  # skip header
         for _ in reader:
@@ -121,7 +121,7 @@ def log_experiment(
 
     row = [
         experiment_id,
-        datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        datetime.now(UTC).isoformat(timespec="seconds"),
         loop,
         change_description,
         f"{score.composite:.4f}",
@@ -156,7 +156,7 @@ def get_recent_experiments(n: int = 5) -> list[dict]:
     _ensure_results_file()
 
     rows = []
-    with open(RESULTS_FILE, "r") as f:
+    with open(RESULTS_FILE) as f:
         reader = csv.DictReader(f, delimiter="\t")
         for row in reader:
             rows.append(dict(row))
@@ -169,11 +169,10 @@ def get_best_score(loop: str | None = None) -> float:
     _ensure_results_file()
 
     best = 0.0
-    with open(RESULTS_FILE, "r") as f:
+    with open(RESULTS_FILE) as f:
         reader = csv.DictReader(f, delimiter="\t")
         for row in reader:
-            if row.get("accepted") == "true":
-                if loop is None or row.get("loop") == loop:
-                    score = float(row.get("composite_score", 0))
-                    best = max(best, score)
+            if row.get("accepted") == "true" and (loop is None or row.get("loop") == loop):
+                score = float(row.get("composite_score", 0))
+                best = max(best, score)
     return best

@@ -7,11 +7,11 @@ context, enabling learning from experience.
 Memory files are human-readable and reviewable — delete any bad ones.
 """
 
-import json
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import ClassVar
 
 import anthropic
 import structlog
@@ -159,8 +159,8 @@ class MemoryChain:
 
     # Hard cap on how many memories to load — prevents the dir bloating
     # gameplay context as games accumulate. negative > positive > neutral.
-    _MAX_MEMORIES = 20
-    _IMPACT_RANK = {"negative": 0, "positive": 1, "neutral": 2}
+    _MAX_MEMORIES: ClassVar[int] = 20
+    _IMPACT_RANK: ClassVar[dict[str, int]] = {"negative": 0, "positive": 1, "neutral": 2}
 
     def load_memories(self, max_tokens: int = 800) -> str:
         """Load memory fragments into a first-person context string.
@@ -357,7 +357,7 @@ class MemoryChain:
         filename = f"{file_num:03d}_{safe_title}.md"
         path = self.memories_dir / filename
 
-        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        now = datetime.now(UTC).isoformat(timespec="seconds")
         file_content = f"""---
 type: {mem_type}
 title: {safe_title}

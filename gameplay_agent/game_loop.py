@@ -1,19 +1,19 @@
 """Main game loop for AoE2 LLM Agent."""
 
 import asyncio
+import contextlib
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import structlog
 
 from .config import config
-from .entity_utils import extract_attrs, build_entity_summary
+from .entity_utils import build_entity_summary
 from .executor import (
+    clear_detected_entities,
     execute_actions,
     set_detected_entities,
-    clear_detected_entities,
     set_rescan_fn,
     set_rescan_full_fn,
 )
@@ -58,7 +58,7 @@ def _extract_applied_memories(
 
 # Optional detection module (graceful fallback if not available)
 try:
-    from detection.inference.detector import EntityDetector, get_detector
+    from detection.inference.detector import get_detector
 
     DETECTION_AVAILABLE = True
 except ImportError:
@@ -185,10 +185,13 @@ def _register_rescan_callbacks(
 
         # Frame changed — run actual detection
         entities = await _invoke_detector(detector, "detect_fast_multi", screenshot)
-        if detector.tracker and detector._previous_entities:  # type: ignore[union-attr]
-            if len(entities) < len(detector._previous_entities) * ENTITY_DROP_RATIO:  # type: ignore[union-attr]
-                detector.tracker.reset()  # type: ignore[union-attr]
-                log.debug("tracker_reset", reason="camera_moved")
+        if (
+            detector.tracker
+            and detector._previous_entities  # type: ignore[union-attr]
+            and len(entities) < len(detector._previous_entities) * ENTITY_DROP_RATIO  # type: ignore[union-attr]
+        ):
+            detector.tracker.reset()
+            log.debug("tracker_reset", reason="camera_moved")
         set_detected_entities(entities)
         if overlay:
             overlay.show(entities, get_game_window_rect())  # type: ignore[union-attr]
@@ -264,6 +267,7 @@ def _classify_entities(
 
     try:
         from detection.inference.ownership import classify_entities as classify_ownership
+
         from .goals import THREAT_CLASSES
 
         ownership_results = classify_ownership(screenshot, detected_entities, THREAT_CLASSES)
@@ -460,7 +464,7 @@ async def _execute_turn_actions(
 
         # Build feedback from failed actions
         verification_lines = []
-        for action, result in zip(actions, results):
+        for action, result in zip(actions, results, strict=False):
             if not result.success:
                 a_intent = action.get("intent", "") if isinstance(action, dict) else ""
                 a_type = action.get("type", "") if isinstance(action, dict) else ""
@@ -641,12 +645,11 @@ async def game_loop(
             memory.game_end_reason = "error"
         raise
     finally:
-        # Await any in-flight strategist task so it can update goals/log cleanly
+        # Await any in-flight strategist task so it can update goals/log cleanly.
+        # Errors are already logged inside _run_strategist_async.
         if strategist_task is not None and not strategist_task.done():
-            try:
+            with contextlib.suppress(Exception):
                 await strategist_task
-            except Exception:
-                pass  # Already logged inside _run_strategist_async
         if overlay:
             overlay.close()
         metrics = memory.get_metrics_snapshot()

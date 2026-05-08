@@ -31,7 +31,7 @@ from datetime import datetime
 from pathlib import Path
 
 try:
-    from PIL import Image, ImageDraw
+    import PIL  # noqa: F401  # availability probe; PIL is used indirectly via other modules
 except ImportError:
     print("ERROR: Pillow is required. Install with: pip install Pillow")
     sys.exit(1)
@@ -141,14 +141,14 @@ def triage(
     triage_path.write_text(json.dumps(scored, indent=2) + "\n")
 
     print(f"\nTriage complete. Results saved to {triage_path}")
-    print(f"\nTop 10 most informative images:")
+    print("\nTop 10 most informative images:")
     for item in scored[:10]:
         print(
             f"  Score {item['score']:3d} | {item['n_detections']:3d} det "
             f"({item['n_uncertain']} uncertain, {item['n_low']} low) | {item['name']}"
         )
 
-    print(f"\nBottom 5 (least informative):")
+    print("\nBottom 5 (least informative):")
     for item in scored[-5:]:
         print(
             f"  Score {item['score']:3d} | {item['n_detections']:3d} det "
@@ -211,10 +211,8 @@ def prepare_batch(
     v2_classes = load_classes_yaml()
     if schema == "v2":
         id_mapping = build_v1_to_v2_mapping(v1_classes, v2_classes)
-        output_classes = v2_classes
     else:
         id_mapping = {i: i for i in v1_classes}
-        output_classes = v1_classes
 
     # Write classes.txt
     write_classes_txt(batch_dir / "classes.txt", schema)
@@ -236,8 +234,9 @@ def prepare_batch(
         if results[0].boxes is not None and len(results[0].boxes) > 0:
             img_w, img_h = results[0].orig_shape[1], results[0].orig_shape[0]
 
-            for box, cls_id, conf in zip(
-                results[0].boxes.xyxy, results[0].boxes.cls, results[0].boxes.conf
+            for box, cls_id, _conf in zip(
+                results[0].boxes.xyxy, results[0].boxes.cls, results[0].boxes.conf,
+                strict=False,
             ):
                 v1_id = int(cls_id.item())
                 if v1_id not in id_mapping:
@@ -268,12 +267,12 @@ def prepare_batch(
 
     print(f"\nBatch ready at: {batch_dir}")
     print(f"  {len(batch)} images with pre-labels")
-    print(f"  Import into CVAT:")
+    print("  Import into CVAT:")
     print(f"    1. Create project with labels from {batch_dir}/classes.txt")
     print(f"    2. Upload images from {batch_dir}/images/")
     print(f"    3. Import labels as 'YOLO 1.1' from {batch_dir}/labels/")
-    print(f"    4. Review and correct annotations")
-    print(f"    5. Export as 'YOLO 1.1' for integration")
+    print("    4. Review and correct annotations")
+    print("    5. Export as 'YOLO 1.1' for integration")
 
     return batch_dir
 

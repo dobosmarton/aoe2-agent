@@ -6,9 +6,9 @@ This module provides utilities for loading class definitions,
 converting label files, and generating CVAT-compatible class lists.
 """
 
-import yaml
 from pathlib import Path
 
+import yaml
 
 # Root paths
 _CONFIG_DIR = Path(__file__).parent.parent / "training" / "config"

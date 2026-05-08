@@ -31,7 +31,7 @@ import sys
 from pathlib import Path
 
 try:
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageDraw
 except ImportError:
     print("ERROR: Pillow is required. Install with: pip install Pillow")
     sys.exit(1)
@@ -42,7 +42,6 @@ from .class_mapping import (
     load_dataset_yaml,
     write_classes_txt,
 )
-
 
 # Paths
 _DETECTION_DIR = Path(__file__).parent.parent
@@ -126,7 +125,7 @@ def _run_standard_detection(
     img_w, img_h = results[0].orig_shape[1], results[0].orig_shape[0]
 
     detections = []
-    for box, cls_id, conf in zip(boxes.xyxy, boxes.cls, boxes.conf):
+    for box, cls_id, conf in zip(boxes.xyxy, boxes.cls, boxes.conf, strict=False):
         detections.append({
             "bbox": tuple(box.tolist()),
             "class_id": int(cls_id.item()),
@@ -370,7 +369,7 @@ def prelabel(
     print(f"\nDone! {total_detections} detections across {len(images)} images")
     print(f"Output: {output_dir}")
     print(f"Summary: {summary_path}")
-    print(f"\nTop classes:")
+    print("\nTop classes:")
     for name, count in sorted(summary.items(), key=lambda x: -x[1])[:10]:
         print(f"  {name}: {count}")
 

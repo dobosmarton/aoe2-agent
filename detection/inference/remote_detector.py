@@ -15,9 +15,7 @@ import asyncio
 import io
 import logging
 import time
-from typing import TYPE_CHECKING, Union
-
-import numpy as np
+from typing import TYPE_CHECKING
 
 from .detector import DetectedEntity, EntityDetector, get_detector
 
@@ -76,7 +74,7 @@ class RemoteDetector:
     # Public detection methods (async)
     # ------------------------------------------------------------------
 
-    async def detect(self, screenshot: Union[bytes, "Image.Image"]) -> list[DetectedEntity]:
+    async def detect(self, screenshot: bytes | Image.Image) -> list[DetectedEntity]:
         """Full SAHI detection via remote server."""
         t0 = time.monotonic()
         image_bytes = self._to_jpeg(screenshot)
@@ -96,7 +94,7 @@ class RemoteDetector:
         logger.info("remote_detect elapsed=%.2fs entities=%d", elapsed, len(entities))
         return entities
 
-    async def detect_fast(self, screenshot: Union[bytes, "Image.Image"]) -> list[DetectedEntity]:
+    async def detect_fast(self, screenshot: bytes | Image.Image) -> list[DetectedEntity]:
         """Single-image detection (no SAHI)."""
         t0 = time.monotonic()
         image_bytes = self._to_jpeg(screenshot)
@@ -116,7 +114,7 @@ class RemoteDetector:
         logger.info("remote_detect_fast elapsed=%.2fs entities=%d", elapsed, len(entities))
         return entities
 
-    async def detect_fast_multi(self, screenshot: Union[bytes, "Image.Image"]) -> list[DetectedEntity]:
+    async def detect_fast_multi(self, screenshot: bytes | Image.Image) -> list[DetectedEntity]:
         """Two-pass detection: full image + center 50% crop (parallel requests)."""
         from PIL import Image as PILImage
 
@@ -168,7 +166,7 @@ class RemoteDetector:
         return entities
 
     async def detect_adaptive(
-        self, screenshot: Union[bytes, "Image.Image"], force_full: bool = False,
+        self, screenshot: bytes | Image.Image, force_full: bool = False,
     ) -> list[DetectedEntity]:
         """Adaptive detection. With CoreML's speed, full SAHI is fast enough (~300ms).
 
@@ -230,7 +228,7 @@ class RemoteDetector:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _to_jpeg(screenshot: Union[bytes, "Image.Image"]) -> bytes:
+    def _to_jpeg(screenshot: bytes | Image.Image) -> bytes:
         """Convert screenshot to JPEG bytes."""
         if isinstance(screenshot, bytes):
             return screenshot
@@ -261,7 +259,7 @@ class RemoteDetector:
         return entities
 
     async def _fallback_detect(
-        self, screenshot: Union[bytes, "Image.Image"], method: str,
+        self, screenshot: bytes | Image.Image, method: str,
     ) -> list[DetectedEntity]:
         """Fall back to local ONNX detector."""
         if self._fallback is None:

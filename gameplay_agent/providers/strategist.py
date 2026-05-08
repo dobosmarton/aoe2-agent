@@ -1,7 +1,10 @@
 """Strategist LLM provider for goal generation."""
 
 import base64
+import contextlib
 from pathlib import Path
+from typing import ClassVar
+
 import anthropic
 import structlog
 from pydantic import BaseModel, Field
@@ -83,7 +86,7 @@ class StrategistProvider:
         return self._system_prompt
 
     # Age-dependent refresh intervals for fresher readings in early game
-    _AGE_INTERVALS: dict[str, int] = {
+    _AGE_INTERVALS: ClassVar[dict[str, int]] = {
         "Dark Age": 3,
         "Feudal Age": 5,
     }
@@ -191,10 +194,9 @@ Read the screenshot to get exact current resource values (food, wood, gold, ston
                 try:
                     target = int(strategist_goal.target)
                 except ValueError:
-                    try:
+                    # Try float; if that also fails, keep target as string (e.g., "Feudal Age").
+                    with contextlib.suppress(ValueError):
                         target = float(strategist_goal.target)
-                    except ValueError:
-                        pass  # Keep as string (e.g., "Feudal Age")
                 goals.append(
                     Goal(
                         name=strategist_goal.name,

@@ -11,11 +11,8 @@ while keeping the number of classes manageable for training.
 """
 
 from pathlib import Path
-from typing import Optional, List
-import sys
 
-from .sld_extractor import extract_sprite, extract_multiple_frames, PLAYER_COLORS
-
+from .sld_extractor import extract_multiple_frames, extract_sprite
 
 # Animation frames to extract for movement/action variation
 # [0] = idle, [4,8,12] = walking/action frames (varies by unit)
@@ -452,7 +449,7 @@ def extract_sprites(
     verbose: bool = True,
     extract_multiple_frames_flag: bool = False,
     apply_player_colors: bool = False,
-    frame_indices: Optional[List[int]] = None,
+    frame_indices: list[int] | None = None,
 ) -> dict:
     """Extract sprites for all configured classes.
 
@@ -498,7 +495,7 @@ def extract_sprites(
     }
 
     print(f"{'='*60}")
-    print(f"Extracting AoE2 Sprites for YOLO Training (v2)")
+    print("Extracting AoE2 Sprites for YOLO Training (v2)")
     print(f"{'='*60}")
     print(f"Source: {game_dir}")
     print(f"Output: {out_dir}")
@@ -522,7 +519,7 @@ def extract_sprites(
 
         if not matches:
             if verbose:
-                print(f"  ⚠ No files found")
+                print("  ⚠ No files found")
             stats["by_class"][class_name] = {"found": 0, "extracted": 0}
             continue
 

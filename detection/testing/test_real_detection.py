@@ -21,7 +21,6 @@ Expected v2 improvements:
 
 import argparse
 from pathlib import Path
-import sys
 
 
 def main():
@@ -86,7 +85,7 @@ def main():
         return 1
 
     try:
-        from PIL import Image
+        import PIL  # noqa: F401  # availability probe
     except ImportError:
         print("Error: Pillow not installed. Install with: pip install Pillow")
         return 1
@@ -156,7 +155,7 @@ def main():
                 images_with_detections += 1
 
                 # Count by class
-                for cls_id, conf in zip(boxes.cls.cpu().numpy(), boxes.conf.cpu().numpy()):
+                for cls_id, conf in zip(boxes.cls.cpu().numpy(), boxes.conf.cpu().numpy(), strict=False):
                     class_idx = int(cls_id)
                     class_name = model.names.get(class_idx, f"class_{class_idx}")
                     class_counts[class_name] = class_counts.get(class_name, 0) + 1
@@ -168,7 +167,8 @@ def main():
                     for box, cls_id, conf in zip(
                         boxes.xyxy.cpu().numpy(),
                         boxes.cls.cpu().numpy(),
-                        boxes.conf.cpu().numpy()
+                        boxes.conf.cpu().numpy(),
+                        strict=False,
                     ):
                         class_name = model.names.get(int(cls_id), "unknown")
                         x1, y1, x2, y2 = box
@@ -181,7 +181,6 @@ def main():
 
         # Show image if requested
         if args.show:
-            import matplotlib.pyplot as plt
             results[0].show()
 
     # Summary
@@ -233,14 +232,12 @@ def main():
             if v1_detections > 0:
                 print(f"  Avg confidence: {v1_conf_sum/v1_detections:.2f}")
 
-            # Compare with v2 results
-            v2_5_detections = sum(1 for _ in image_files[:5])  # Simplified
             print(f"\nImprovement: v1={v1_detections}, v2={total_detections} on {len(image_files)} images")
         else:
             print(f"v1 model not found at {v1_path}")
 
     if args.save:
-        print(f"\nAnnotated images saved to: runs/detect/predict*/")
+        print("\nAnnotated images saved to: runs/detect/predict*/")
 
     return 0
 

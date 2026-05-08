@@ -8,12 +8,10 @@ https://github.com/SFTtech/openage/blob/master/doc/media/sld-files.md
 SLD uses DXT1 (BC1) compression for main graphics and DXT4 (BC4) for shadows.
 """
 
+import random
 import struct
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, List, Tuple
-import io
-import random
 
 
 @dataclass
@@ -45,9 +43,9 @@ class ExtractedFrame:
     index: int
     width: int
     height: int
-    hotspot: Tuple[int, int]
+    hotspot: tuple[int, int]
     pixels: bytes  # RGBA pixel data
-    player_color_mask: Optional[bytes] = None  # Optional player color mask data
+    player_color_mask: bytes | None = None  # Optional player color mask data
 
 
 # Player color palette for AoE2:DE
@@ -65,7 +63,7 @@ PLAYER_COLORS = {
 
 
 def apply_player_color(pixels: bytes, width: int, height: int,
-                       player_color: Tuple[int, int, int] = (0, 80, 255)) -> bytes:
+                       player_color: tuple[int, int, int] = (0, 80, 255)) -> bytes:
     """
     Apply team color to player-colorable pixels in the sprite.
 
@@ -107,12 +105,12 @@ def apply_player_color(pixels: bytes, width: int, height: int,
     return bytes(pixel_array)
 
 
-def get_random_player_color() -> Tuple[int, int, int]:
+def get_random_player_color() -> tuple[int, int, int]:
     """Get a random player color for training data variety."""
     return random.choice(list(PLAYER_COLORS.values()))
 
 
-def decode_dxt1_block(block_data: bytes) -> List[Tuple[int, int, int, int]]:
+def decode_dxt1_block(block_data: bytes) -> list[tuple[int, int, int, int]]:
     """
     Decode a single 4x4 DXT1/BC1 compressed block.
 
@@ -185,7 +183,7 @@ def decode_dxt1_block(block_data: bytes) -> List[Tuple[int, int, int, int]]:
     return pixels
 
 
-def decode_bc4_block(block_data: bytes) -> List[int]:
+def decode_bc4_block(block_data: bytes) -> list[int]:
     """
     Decode a single 4x4 BC4 compressed block (single channel).
 
@@ -236,8 +234,8 @@ class SLDExtractor:
         self.file_path = Path(file_path)
         self.data = self.file_path.read_bytes()
         self.offset = 0
-        self.header: Optional[SLDHeader] = None
-        self.frames: List[ExtractedFrame] = []
+        self.header: SLDHeader | None = None
+        self.frames: list[ExtractedFrame] = []
 
     def _read(self, fmt: str) -> tuple:
         """Read and unpack data at current offset."""
@@ -269,12 +267,12 @@ class SLDExtractor:
         )
         return self.header
 
-    def parse_frame(self, frame_idx: int) -> Optional[ExtractedFrame]:
+    def parse_frame(self, frame_idx: int) -> ExtractedFrame | None:
         """Parse a single frame."""
         # Read frame header (12 bytes)
         w, h, hx, hy, ftype, u1, fidx = self._read('< 4H 2B H')
 
-        frame_header = SLDFrameHeader(
+        _frame_header = SLDFrameHeader(
             canvas_width=w,
             canvas_height=h,
             hotspot_x=hx,
@@ -321,20 +319,20 @@ class SLDExtractor:
             pixels=pixels
         )
 
-    def _parse_dxt1_layer(self, width: int, height: int) -> Tuple[bytes, int, int]:
+    def _parse_dxt1_layer(self, width: int, height: int) -> tuple[bytes, int, int]:
         """Parse DXT1 compressed main graphics layer.
 
         Returns:
             Tuple of (pixel_data, layer_width, layer_height)
         """
         # Read content length (4 bytes) - note: we calculate actual end position ourselves
-        content_length = self._read('< I')[0]
+        _content_length = self._read('< I')[0]
         layer_start = self.offset
 
         # Layer header: 10 bytes
         # x1, y1, x2, y2 (4 * uint16) + flag1, unknown (2 * uint8)
         x1, y1, x2, y2 = self._read('< 4H')
-        flag1, unk_byte = self._read('< 2B')
+        _flag1, _unk_byte = self._read('< 2B')
 
         layer_width = x2 - x1
         layer_height = y2 - y1
@@ -432,13 +430,13 @@ class SLDExtractor:
             return
 
         if is_mask_layer:
-            # Mask Layer Header: 2 bytes (flag1, unknown)
-            flag1, unk_byte = self._read('< 2B')
+            # Mask Layer Header: 2 bytes (flag1, unknown) — read for pointer advancement only
+            self._read('< 2B')
             header_size = 2
         else:
-            # Graphics Layer Header: 10 bytes
-            x1, y1, x2, y2 = self._read('< 4H')
-            flag1, unk_byte = self._read('< 2B')
+            # Graphics Layer Header: 10 bytes — read for pointer advancement only
+            self._read('< 4H')  # x1, y1, x2, y2
+            self._read('< 2B')  # flag1, unk_byte
             header_size = 10
 
         num_commands = self._read('< H')[0]
@@ -446,7 +444,7 @@ class SLDExtractor:
         # Count draw blocks
         total_draw_blocks = 0
         for _ in range(num_commands):
-            skip_count, draw_count = self._read('< 2B')
+            _skip_count, draw_count = self._read('< 2B')
             total_draw_blocks += draw_count
 
         # Skip pixel data
@@ -457,7 +455,7 @@ class SLDExtractor:
         aligned_size = (actual_size + 3) & ~3  # Align to 4 bytes
         self.offset = layer_start + aligned_size
 
-    def extract_all(self) -> List[ExtractedFrame]:
+    def extract_all(self) -> list[ExtractedFrame]:
         """Extract all frames from the SLD file."""
         self.offset = 0
         self.parse_header()
@@ -474,7 +472,7 @@ class SLDExtractor:
 
         return self.frames
 
-    def extract_first_frame(self) -> Optional[ExtractedFrame]:
+    def extract_first_frame(self) -> ExtractedFrame | None:
         """Extract just the first frame (useful for idle sprites)."""
         self.offset = 0
         self.parse_header()
@@ -485,7 +483,7 @@ class SLDExtractor:
 
     def save_as_png(self, frame: ExtractedFrame, output_path: str,
                     apply_color: bool = False,
-                    player_color: Optional[Tuple[int, int, int]] = None):
+                    player_color: tuple[int, int, int] | None = None):
         """Save extracted frame as PNG.
 
         Args:
@@ -512,7 +510,7 @@ class SLDExtractor:
 
 def extract_sprite(sld_path: str, output_path: str, frame_index: int = 0,
                    apply_player_color: bool = False,
-                   player_color: Optional[Tuple[int, int, int]] = None) -> bool:
+                   player_color: tuple[int, int, int] | None = None) -> bool:
     """
     Extract a sprite from an SLD file.
 
@@ -547,7 +545,7 @@ def extract_sprite(sld_path: str, output_path: str, frame_index: int = 0,
 
 def extract_multiple_frames(sld_path: str, output_dir: str, class_name: str,
                            variant_idx: int = 0,
-                           frame_indices: Optional[List[int]] = None,
+                           frame_indices: list[int] | None = None,
                            apply_player_color: bool = False) -> int:
     """
     Extract multiple animation frames from an SLD file.
@@ -591,7 +589,7 @@ def extract_multiple_frames(sld_path: str, output_dir: str, class_name: str,
         return 0
 
 
-def batch_extract(input_dir: str, output_dir: str, patterns: List[str] = None):
+def batch_extract(input_dir: str, output_dir: str, patterns: list[str] | None = None):
     """
     Batch extract sprites matching patterns.
 

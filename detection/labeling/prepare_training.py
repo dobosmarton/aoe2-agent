@@ -34,8 +34,9 @@ import json
 import random
 import shutil
 import sys
-import yaml
 from pathlib import Path
+
+import yaml
 
 from .class_mapping import load_classes_yaml
 
@@ -405,7 +406,7 @@ def prepare_training(
         "total_val": total_val,
     }
 
-    print(f"\nMerged dataset will contain:")
+    print("\nMerged dataset will contain:")
     print(f"  Train: {total_train} ({len(real_train)} real + {synth_train_count} synthetic)")
     print(f"  Val:   {total_val} ({len(real_val)} real + {synth_val_count} synthetic)")
 
@@ -470,7 +471,7 @@ def prepare_training(
     summary_path = output_dir / "merge_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2) + "\n")
 
-    print(f"\nNext step: Upload to Lambda Labs and train:")
+    print("\nNext step: Upload to Lambda Labs and train:")
     print(f"  tar -czf {output_dir.name}.tar.gz -C {output_dir.parent} {output_dir.name}")
     print(f"  scp {output_dir.name}.tar.gz ubuntu@<LAMBDA_IP>:/home/ubuntu/")
 

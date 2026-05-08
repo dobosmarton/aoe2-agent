@@ -4,8 +4,6 @@ Uses a cheap model (Haiku) to propose targeted changes to prompts/system.md,
 apply them, and revert on failure.
 """
 
-import json
-import re
 import subprocess
 from pathlib import Path
 

@@ -2,7 +2,7 @@
 
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 # AoE2 Dark Age starting values
 INITIAL_RESOURCES = {"food": 200, "wood": 200, "gold": 100, "stone": 200}
@@ -85,7 +85,7 @@ class AgentMemory:
 
         # Start timer on first turn
         if self.game_start_time is None:
-            self.game_start_time = datetime.now(timezone.utc)
+            self.game_start_time = datetime.now(UTC)
 
         # Track cumulative actions
         self.total_actions += len(turn.actions)
@@ -213,7 +213,7 @@ class AgentMemory:
         lines = [
             f"- Resources: Food={state.resources['food']}, Wood={state.resources['wood']}, Gold={state.resources['gold']}, Stone={state.resources['stone']}",
             f"- Population: {state.population}/{state.population_cap}",
-            f"- HOUSED (cannot create villagers!): {is_housed}" if is_housed else f"- Housed: False",
+            f"- HOUSED (cannot create villagers!): {is_housed}" if is_housed else "- Housed: False",
             f"- Age: {state.current_age}",
             f"- TC Idle: {state.idle_tc}",
             f"- Under Attack: {state.under_attack}",
@@ -249,7 +249,7 @@ class AgentMemory:
         """Get elapsed game time in seconds."""
         if self.game_start_time is None:
             return 0.0
-        return (datetime.now(timezone.utc) - self.game_start_time).total_seconds()
+        return (datetime.now(UTC) - self.game_start_time).total_seconds()
 
     def get_metrics_snapshot(self) -> dict:
         """Return current cumulative metrics for scoring."""

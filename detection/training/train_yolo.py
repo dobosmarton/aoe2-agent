@@ -139,7 +139,7 @@ def main():
         model = YOLO(args.model)
 
     # Train with optimized hyperparameters for AoE2
-    results = model.train(
+    model.train(
         data=str(data_path),
         epochs=args.epochs,
         imgsz=args.imgsz,
@@ -195,7 +195,7 @@ def main():
         shutil.copy(best_model_path, dest_pt)
         shutil.copy(onnx_path, dest_onnx)
 
-        print(f"\nModels copied to:")
+        print("\nModels copied to:")
         print(f"  {dest_pt}")
         print(f"  {dest_onnx}")
 

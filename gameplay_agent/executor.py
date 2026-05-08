@@ -7,9 +7,9 @@ import asyncio
 import math
 import random
 import time
-from collections.abc import Callable, Awaitable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 import pyautogui
 import structlog
@@ -27,8 +27,8 @@ pyautogui.PAUSE = 0.02
 # Module-level state (updated per-action batch)
 _window_offset: tuple[int, int] = (0, 0)
 _detected_entities: list[dict] = []
-_rescan_fn: Optional[Callable[[], Awaitable[None]]] = None
-_rescan_full_fn: Optional[Callable[[], Awaitable[None]]] = None
+_rescan_fn: Callable[[], Awaitable[None]] | None = None
+_rescan_full_fn: Callable[[], Awaitable[None]] | None = None
 
 
 @dataclass
@@ -174,7 +174,7 @@ async def _handle_click(action_dict: dict[str, object], intent: str) -> ActionRe
              target_id=action_dict.get("target_id", ""), intent=intent)
 
     # Building placement retry — if first click was invalid (tree/building/water),
-    # try `BUILD_RETRY_ATTEMPTS` random angular offsets at 250–350 px from the
+    # try `BUILD_RETRY_ATTEMPTS` random angular offsets at 250-350 px from the
     # original. Replaces the previous 4 cardinal 80 px offsets, which often hit
     # the same blocked terrain because tree clusters and building footprints
     # are larger than 80 px.

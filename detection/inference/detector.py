@@ -10,11 +10,12 @@ ONNX is recommended for Windows ARM64 where PyTorch is not available.
 
 from __future__ import annotations
 
+import io
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Union, TYPE_CHECKING
-import io
+from typing import TYPE_CHECKING
+
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -88,8 +89,8 @@ class EntityDetector:
 
     def __init__(
         self,
-        model_path: Optional[str] = None,
-        class_names: Optional[list[str]] = None,
+        model_path: str | None = None,
+        class_names: list[str] | None = None,
         confidence_threshold: float = 0.35,
         use_mock: bool = False,
         imgsz: int = 1280,
@@ -182,6 +183,7 @@ class EntityDetector:
         """Load ONNX model using onnxruntime with optimized session options."""
         try:
             import os
+
             import onnxruntime as ort
             sess_options = ort.SessionOptions()
             sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
@@ -261,7 +263,7 @@ class EntityDetector:
         self._previous_entities = new_entities
         return new_entities
 
-    def detect(self, screenshot: Union[bytes, "Image.Image"]) -> list[DetectedEntity]:
+    def detect(self, screenshot: bytes | Image.Image) -> list[DetectedEntity]:
         """Detect entities in screenshot (full SAHI for accuracy).
 
         Args:
@@ -308,7 +310,7 @@ class EntityDetector:
 
         return entities
 
-    def detect_fast(self, screenshot: Union[bytes, "Image.Image"]) -> list[DetectedEntity]:
+    def detect_fast(self, screenshot: bytes | Image.Image) -> list[DetectedEntity]:
         """Fast detection without SAHI tiling. For mid-turn rescans.
 
         Single-pass inference at imgsz resolution. Much faster (~1-2s vs ~28s)
@@ -347,7 +349,7 @@ class EntityDetector:
 
         return entities
 
-    def detect_fast_multi(self, screenshot: Union[bytes, "Image.Image"]) -> list[DetectedEntity]:
+    def detect_fast_multi(self, screenshot: bytes | Image.Image) -> list[DetectedEntity]:
         """Multi-resolution fast detection for small object recovery.
 
         Two-pass inference without full SAHI tiling:
@@ -358,6 +360,7 @@ class EntityDetector:
         Much faster than full SAHI (~2-3s vs ~28s).
         """
         import time
+
         from PIL import Image as PILImage
         t0 = time.monotonic()
         self._reset_counters()
@@ -431,7 +434,7 @@ class EntityDetector:
         return entities
 
     def detect_adaptive(
-        self, screenshot: Union[bytes, "Image.Image"], force_full: bool = False
+        self, screenshot: bytes | Image.Image, force_full: bool = False
     ) -> list[DetectedEntity]:
         """Adaptive detection: fast scan + targeted SAHI on entity clusters only.
 
@@ -628,7 +631,7 @@ class EntityDetector:
 
     def _generate_tiles(
         self,
-        image: "Image.Image",
+        image: Image.Image,
         rois: list[tuple[float, float, float, float]] | None = None,
     ) -> tuple[list, list[tuple[int, int, int, int]]]:
         """Generate padded tiles and their (x, y, tile_w, tile_h) offsets.
@@ -667,7 +670,7 @@ class EntityDetector:
         return tiles, offsets
 
     def _sahi_detect_rois(
-        self, image: "Image.Image", rois: list[tuple[float, float, float, float]]
+        self, image: Image.Image, rois: list[tuple[float, float, float, float]]
     ) -> list[DetectedEntity]:
         """Run SAHI detection only on specified ROI regions.
 
@@ -713,7 +716,8 @@ class EntityDetector:
                     for box, cls_id, conf in zip(
                         result.boxes.xyxy.cpu().numpy(),
                         result.boxes.cls.cpu().numpy(),
-                        result.boxes.conf.cpu().numpy()
+                        result.boxes.conf.cpu().numpy(),
+                        strict=False,
                     ):
                         x1, y1, x2, y2 = box.tolist()
                         class_idx = int(cls_id)
@@ -766,7 +770,7 @@ class EntityDetector:
 
         return merged
 
-    def _pytorch_detect(self, screenshot: Union[bytes, "Image.Image"]) -> list[DetectedEntity]:
+    def _pytorch_detect(self, screenshot: bytes | Image.Image) -> list[DetectedEntity]:
         """Run detection using PyTorch/ultralytics backend.
 
         Uses SAHI sliced inference by default for large images to detect
@@ -788,7 +792,7 @@ class EntityDetector:
         results = self.model(image, conf=self.confidence_threshold, imgsz=self.input_size, verbose=False)
         return self._parse_yolo_results(results)
 
-    def _sahi_detect(self, image: "Image.Image") -> list[DetectedEntity]:
+    def _sahi_detect(self, image: Image.Image) -> list[DetectedEntity]:
         """SAHI sliced inference: tile the image into overlapping 640x640 chunks.
 
         On Retina displays (3024x1672), standard inference resizes to imgsz=1280,
@@ -819,7 +823,8 @@ class EntityDetector:
                     for box, cls_id, conf in zip(
                         result.boxes.xyxy.cpu().numpy(),
                         result.boxes.cls.cpu().numpy(),
-                        result.boxes.conf.cpu().numpy()
+                        result.boxes.conf.cpu().numpy(),
+                        strict=False,
                     ):
                         x1, y1, x2, y2 = box.tolist()
                         class_idx = int(cls_id)
@@ -846,7 +851,7 @@ class EntityDetector:
         all_entities.sort(key=lambda e: (e.class_name, -e.confidence))
         return all_entities
 
-    def _onnx_sahi_detect(self, image: "Image.Image") -> list[DetectedEntity]:
+    def _onnx_sahi_detect(self, image: Image.Image) -> list[DetectedEntity]:
         """ONNX batched SAHI: tile the image, batch all tiles, run one ONNX call.
 
         Same tiling logic as _sahi_detect() but batches all tiles into a single
@@ -916,7 +921,7 @@ class EntityDetector:
             mask = best_conf >= min_thresh
             boxes, best_cls, best_conf = boxes[mask], best_cls[mask], best_conf[mask]
             predictions = []
-            for box, cls_id, conf in zip(boxes, best_cls, best_conf):
+            for box, cls_id, conf in zip(boxes, best_cls, best_conf, strict=False):
                 xc, yc, w, h = box
                 predictions.append([xc - w/2, yc - h/2, xc + w/2, yc + h/2, conf, cls_id])
             predictions = np.array(predictions) if predictions else np.array([]).reshape(0, 6)
@@ -967,7 +972,8 @@ class EntityDetector:
             for box, cls_id, conf in zip(
                 boxes.xyxy.cpu().numpy(),
                 boxes.cls.cpu().numpy(),
-                boxes.conf.cpu().numpy()
+                boxes.conf.cpu().numpy(),
+                strict=False,
             ):
                 x1, y1, x2, y2 = box.tolist()
                 class_idx = int(cls_id)
@@ -994,7 +1000,7 @@ class EntityDetector:
         entities.sort(key=lambda e: (e.class_name, -e.confidence))
         return entities
 
-    def _onnx_detect(self, screenshot: Union[bytes, "Image.Image"]) -> list[DetectedEntity]:
+    def _onnx_detect(self, screenshot: bytes | Image.Image) -> list[DetectedEntity]:
         """Run detection using ONNX runtime backend."""
         from PIL import Image
 
@@ -1063,7 +1069,7 @@ class EntityDetector:
 
             # Convert from x_center, y_center, w, h to x1, y1, x2, y2
             predictions = []
-            for box, cls_id, conf in zip(boxes, best_class_idx, best_confidence):
+            for box, cls_id, conf in zip(boxes, best_class_idx, best_confidence, strict=False):
                 x_c, y_c, w, h = box
                 x1 = x_c - w / 2
                 y1 = y_c - h / 2
@@ -1167,13 +1173,14 @@ class EntityDetector:
 
         return intersection / union if union > 0 else 0.0
 
-    def _mock_detect(self, screenshot: Union[bytes, "Image.Image"]) -> list[DetectedEntity]:
+    def _mock_detect(self, screenshot: bytes | Image.Image) -> list[DetectedEntity]:
         """Generate mock detections for testing.
 
         Creates plausible detections based on typical Dark Age game state.
         """
-        from PIL import Image
         import random
+
+        from PIL import Image
 
         # Get image dimensions
         if isinstance(screenshot, bytes):
@@ -1202,7 +1209,7 @@ class EntityDetector:
         ))
 
         # Sheep - typically 2-4 near TC at game start
-        for i in range(random.randint(2, 4)):
+        for _ in range(random.randint(2, 4)):
             sheep_x = tc_x + random.uniform(-200, 200)
             sheep_y = tc_y + random.uniform(-150, 150)
             entities.append(DetectedEntity(
@@ -1215,7 +1222,7 @@ class EntityDetector:
             ))
 
         # Villagers - 3 starting villagers
-        for i in range(3):
+        for _ in range(3):
             vill_x = tc_x + random.uniform(-150, 150)
             vill_y = tc_y + random.uniform(-100, 100)
             entities.append(DetectedEntity(
@@ -1244,7 +1251,7 @@ class EntityDetector:
 
         return entities
 
-    def detect_to_dict_list(self, screenshot: Union[bytes, "Image.Image"]) -> list[dict]:
+    def detect_to_dict_list(self, screenshot: bytes | Image.Image) -> list[dict]:
         """Detect and return as list of dictionaries.
 
         Convenience method for LLM context building.
@@ -1255,7 +1262,7 @@ class EntityDetector:
         self,
         entities: list[DetectedEntity],
         target_id: str
-    ) -> Optional[DetectedEntity]:
+    ) -> DetectedEntity | None:
         """Find an entity by its ID.
 
         Args:
@@ -1292,8 +1299,8 @@ class EntityDetector:
         self,
         entities: list[DetectedEntity],
         point: tuple[float, float],
-        class_filter: Optional[str] = None
-    ) -> Optional[DetectedEntity]:
+        class_filter: str | None = None
+    ) -> DetectedEntity | None:
         """Find the nearest entity to a point.
 
         Args:
@@ -1320,10 +1327,10 @@ class EntityDetector:
 
 
 # Singleton instance for easy access
-_instance: Optional[EntityDetector] = None
+_instance: EntityDetector | None = None
 
 def get_detector(
-    model_path: Optional[str] = None,
+    model_path: str | None = None,
     use_mock: bool = False,
     imgsz: int = 1280,
 ) -> EntityDetector:

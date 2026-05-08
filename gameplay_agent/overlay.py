@@ -12,6 +12,7 @@ Usage:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import sys
 from typing import TYPE_CHECKING
@@ -174,7 +175,5 @@ class DetectionOverlay:
 
     def close(self):
         """Destroy the overlay window."""
-        try:
+        with contextlib.suppress(Exception):
             self._root.destroy()
-        except Exception:
-            pass

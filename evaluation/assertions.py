@@ -19,10 +19,7 @@ ACTION_DISPLAY_KEYS = ("key", "building_key", "target_class", "target_id", "x", 
 
 def matches(action: dict, pattern: dict) -> bool:
     """Subset match: every key in pattern must equal the same key in action."""
-    for key, expected in pattern.items():
-        if action.get(key) != expected:
-            return False
-    return True
+    return all(action.get(key) == expected for key, expected in pattern.items())
 
 
 def _format_action(action: dict) -> str:

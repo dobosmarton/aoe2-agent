@@ -6,7 +6,6 @@ that can be compared across experiments (like val_bpb in autoresearch).
 
 from dataclasses import dataclass
 
-
 # Normalization caps — scores saturate at these values
 MAX_SURVIVAL_SECONDS = 1200.0  # 20 minutes
 MAX_POPULATION = 50

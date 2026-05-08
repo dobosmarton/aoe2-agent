@@ -15,13 +15,11 @@ The generated dataset can be used directly with YOLOv8:
 import argparse
 import io
 import random
-import shutil
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 try:
-    from PIL import Image, ImageEnhance, ImageFilter, ImageDraw, ImageOps
+    from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
 except ImportError:
     print("Error: Pillow required. Install with: pip install Pillow")
     exit(1)
@@ -252,10 +250,10 @@ class TrainingDataGenerator:
         self,
         sprites_dir: Path,
         output_dir: Path,
-        backgrounds_dir: Optional[Path] = None,
-        real_screenshots_dir: Optional[Path] = None,
+        backgrounds_dir: Path | None = None,
+        real_screenshots_dir: Path | None = None,
         image_size: tuple[int, int] = (1280, 720),
-        configs: Optional[list[SpriteConfig]] = None,
+        configs: list[SpriteConfig] | None = None,
         real_background_ratio: float = 0.5,  # 50% real backgrounds
         enable_enhanced_augmentations: bool = True,
     ):
@@ -846,12 +844,12 @@ class TrainingDataGenerator:
         yaml_path = self._create_yaml()
 
         print(f"\n{'='*50}")
-        print(f"Dataset generated successfully!")
+        print("Dataset generated successfully!")
         print(f"  Training images: {num_train}")
         print(f"  Validation images: {num_val}")
         print(f"  Output directory: {self.output_dir}")
         print(f"  Dataset config: {yaml_path}")
-        print(f"\nTo train YOLOv8:")
+        print("\nTo train YOLOv8:")
         print(f"  yolo train model=yolov8n.pt data={yaml_path} epochs=100 imgsz=640")
 
         return yaml_path

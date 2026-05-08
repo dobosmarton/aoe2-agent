@@ -71,12 +71,12 @@ class HealthResponse(BaseModel):
 # Per-class confidence thresholds (single source of truth)
 # ---------------------------------------------------------------------------
 
-from detection.inference.thresholds import (
+from detection.inference.thresholds import (  # noqa: E402  # imported after sys.path mutation
     CLASS_THRESHOLDS,
-    DEFAULT_CONFIDENCE,
+)
+from detection.inference.thresholds import (  # noqa: E402
     get_threshold as _get_threshold,
 )
-
 
 # ---------------------------------------------------------------------------
 # Class names loader
@@ -289,7 +289,7 @@ def _parse_raw_output(
         mask = best_conf >= min_thresh
         boxes, best_cls, best_conf = boxes[mask], best_cls[mask], best_conf[mask]
         preds = []
-        for box, cls_id, conf in zip(boxes, best_cls, best_conf):
+        for box, cls_id, conf in zip(boxes, best_cls, best_conf, strict=False):
             xc, yc, w, h = box
             preds.append([xc - w / 2, yc - h / 2, xc + w / 2, yc + h / 2, conf, cls_id])
         predictions = np.array(preds) if preds else np.array([]).reshape(0, 6)
@@ -393,7 +393,7 @@ def _detect_sahi(
 
     if state.backend == "coreml":
         # CoreML: sequential per-tile (no dynamic batch support)
-        for chw, (x_off, y_off, tw, th) in zip(tiles, offsets):
+        for chw, (x_off, y_off, tw, th) in zip(tiles, offsets, strict=False):
             raw = _run_coreml_single(state, chw)
             dets = _parse_raw_output(
                 raw, 0, num_classes, state.class_names,

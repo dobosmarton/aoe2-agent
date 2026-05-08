@@ -5,12 +5,16 @@ Generates training images by compositing extracted sprite images onto
 screenshot backgrounds, with auto-generated bounding box labels.
 """
 
-import json
+from __future__ import annotations
+
 import random
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
-import shutil
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from PIL import Image
 
 
 @dataclass
@@ -77,7 +81,7 @@ class SyntheticDataGenerator:
         sprites_dir: str,
         backgrounds_dir: str,
         output_dir: str,
-        sprite_configs: Optional[list[SpriteConfig]] = None,
+        sprite_configs: list[SpriteConfig] | None = None,
         image_size: tuple[int, int] = (1280, 800)
     ):
         """Initialize the generator.
@@ -110,8 +114,8 @@ class SyntheticDataGenerator:
         """Load sprite and background images."""
         try:
             from PIL import Image
-        except ImportError:
-            raise ImportError("PIL/Pillow required. Install with: pip install Pillow")
+        except ImportError as exc:
+            raise ImportError("PIL/Pillow required. Install with: pip install Pillow") from exc
 
         # Load sprites
         for config in self.sprite_configs:
@@ -136,7 +140,7 @@ class SyntheticDataGenerator:
         print(f"Loaded sprites: {sum(len(v) for v in self._sprites.values())} images")
         print(f"Loaded backgrounds: {len(self._backgrounds)} images")
 
-    def generate_image(self, index: int, seed: Optional[int] = None) -> tuple[Path, Path]:
+    def generate_image(self, index: int, seed: int | None = None) -> tuple[Path, Path]:
         """Generate a single training image with labels.
 
         Args:
@@ -221,7 +225,7 @@ class SyntheticDataGenerator:
 
         return image_path, label_path
 
-    def _augment(self, image: "Image.Image") -> "Image.Image":
+    def _augment(self, image: Image.Image) -> Image.Image:
         """Apply random augmentations to image."""
         from PIL import ImageEnhance
 
@@ -310,7 +314,7 @@ class SyntheticDataGenerator:
             "yaml_path": str(yaml_path)
         }
 
-        print(f"\nDataset generated:")
+        print("\nDataset generated:")
         print(f"  Train: {stats['train_images']} images")
         print(f"  Val: {stats['val_images']} images")
         print(f"  YAML: {yaml_path}")
@@ -338,7 +342,7 @@ class SyntheticDataGenerator:
 def extract_sprites_from_game(
     game_graphics_dir: str,
     output_dir: str,
-    sprite_mapping: Optional[dict] = None
+    sprite_mapping: dict | None = None
 ) -> int:
     """Extract sprite images from AoE2 game files.
 

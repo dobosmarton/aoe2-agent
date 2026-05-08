@@ -1,12 +1,14 @@
 """Goal management for AoE2 LLM Agent."""
 
-from dataclasses import dataclass, field
+from __future__ import annotations
+
+from dataclasses import dataclass
 from typing import Any, Literal
 
 import structlog
 
 from .entity_utils import extract_attrs
-from .memory import GameState, AGE_SCORES
+from .memory import AGE_SCORES, AgentMemory, GameState
 
 log = structlog.get_logger()
 
@@ -196,7 +198,7 @@ class GoalManager:
 
     # --- Resource readings cache ---
 
-    def update_resource_readings(self, readings: dict, memory: "AgentMemory | None" = None) -> None:
+    def update_resource_readings(self, readings: dict, memory: AgentMemory | None = None) -> None:
         """Cache resource readings from strategist and update game state."""
         if not readings:
             return
@@ -264,9 +266,9 @@ class GoalManager:
         threats_found = []
         if screenshot_bytes:
             try:
-                from detection.inference.ownership import classify_entities, Owner
+                from detection.inference.ownership import Owner, classify_entities
                 results = classify_entities(screenshot_bytes, candidates, THREAT_CLASSES)
-                for eid, (owner, ratio) in results.items():
+                for eid, (owner, _ratio) in results.items():
                     if owner == Owner.ENEMY or owner == Owner.UNKNOWN:
                         threats_found.append(eid)
             except Exception as e:

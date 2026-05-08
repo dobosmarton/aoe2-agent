@@ -32,7 +32,6 @@ Tips for good training data:
 import argparse
 import time
 from pathlib import Path
-import sys
 
 
 def main():
@@ -151,7 +150,7 @@ def main():
                         # Fallback to PNG if PIL not available
                         png_path = filepath.with_suffix('.png')
                         mss.tools.to_png(screenshot.rgb, screenshot.size, output=str(png_path))
-                        print(f"Warning: PIL not available, saved as PNG instead")
+                        print("Warning: PIL not available, saved as PNG instead")
 
                 captured += 1
                 elapsed = i * args.interval
@@ -164,7 +163,7 @@ def main():
                     time.sleep(args.interval)
 
         except KeyboardInterrupt:
-            print(f"\n\nCapture interrupted by user.")
+            print("\n\nCapture interrupted by user.")
 
     print("\n" + "=" * 60)
     print("CAPTURE COMPLETE")

@@ -23,7 +23,6 @@ from autoresearch.experiment_log import (
     log_experiment,
 )
 from autoresearch.game_runner import run_game
-from autoresearch.metrics import compute_score
 from autoresearch.prompt_mutator import PromptMutator
 
 log = structlog.get_logger()
@@ -110,7 +109,7 @@ class Orchestrator:
         sha = self.git_commit(f"[autoresearch] {experiment_id}: {description}")
 
         # 4. Run the game
-        print(f"\n  Playing game with modified prompt...")
+        print("\n  Playing game with modified prompt...")
         result = await run_game(time_budget=time_budget)
         score = result["score"]
 
@@ -148,7 +147,7 @@ class Orchestrator:
         """
         experiment_id = get_next_experiment_id()
 
-        print(f"\n  Running baseline game (no prompt changes)...")
+        print("\n  Running baseline game (no prompt changes)...")
         result = await run_game(time_budget=time_budget)
         score = result["score"]
 
@@ -239,7 +238,7 @@ class Orchestrator:
         print(f"\n{'=' * 60}")
         print(f"Done — {count} experiments completed")
         print(f"Best score: {self.best_score:.4f}")
-        print(f"Results saved to experiments/results.tsv")
+        print("Results saved to experiments/results.tsv")
         print(f"{'=' * 60}")
 
     def _extract_failure_modes(self, recent: list[dict]) -> list[str]:

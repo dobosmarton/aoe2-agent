@@ -17,7 +17,7 @@ import numpy as np
 from PIL import Image
 
 if TYPE_CHECKING:
-    from .detector import DetectedEntity
+    pass
 
 import structlog
 

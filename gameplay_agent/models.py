@@ -1,8 +1,15 @@
 """Pydantic models for action validation."""
 
-from typing import Annotated, Literal, Optional, Union
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Discriminator, Field, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    Discriminator,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 
 class PointTargetAction(BaseModel):
@@ -14,10 +21,10 @@ class PointTargetAction(BaseModel):
     - target_class to target the nearest entity of that class
     """
 
-    x: Optional[int] = Field(default=None, ge=0, le=7680)
-    y: Optional[int] = Field(default=None, ge=0, le=4320)
-    target_id: Optional[str] = Field(default=None, description="Entity ID from detection, e.g. 'sheep_0'")
-    target_class: Optional[str] = Field(default=None, description="Entity class to target nearest of, e.g. 'sheep'")
+    x: int | None = Field(default=None, ge=0, le=7680)
+    y: int | None = Field(default=None, ge=0, le=4320)
+    target_id: str | None = Field(default=None, description="Entity ID from detection, e.g. 'sheep_0'")
+    target_class: str | None = Field(default=None, description="Entity class to target nearest of, e.g. 'sheep'")
     intent: str = ""
 
     @model_validator(mode='after')
@@ -142,8 +149,8 @@ class ScrollAction(BaseModel):
 
     type: Literal["scroll"]
     clicks: int = Field(description="Positive = scroll up (zoom in), negative = scroll down (zoom out)")
-    x: Optional[int] = Field(default=None, ge=0, le=7680)
-    y: Optional[int] = Field(default=None, ge=0, le=4320)
+    x: int | None = Field(default=None, ge=0, le=7680)
+    y: int | None = Field(default=None, ge=0, le=4320)
     intent: str = ""
 
 
@@ -158,7 +165,7 @@ class DetectAction(BaseModel):
 # preventing the model from confusing field names across action types
 # (e.g., using DragAction's x1/y1 for ClickAction instead of x/y).
 Action = Annotated[
-    Union[ClickAction, RightClickAction, PressAction, DragAction, WaitAction, ScrollAction, DetectAction],
+    ClickAction | RightClickAction | PressAction | DragAction | WaitAction | ScrollAction | DetectAction,
     Discriminator("type"),
 ]
 

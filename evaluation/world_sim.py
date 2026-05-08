@@ -14,7 +14,7 @@ failures, and age-transition regressions, not simulating AoE2 exactly.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -132,7 +132,7 @@ def _apply_queue_villager(state: WorldState) -> WorldState:
         return state
     return replace(state,
                    food=state.food - VILLAGER_COST_FOOD,
-                   villager_queue=state.villager_queue + [VILLAGER_PRODUCTION_TICKS])
+                   villager_queue=[*state.villager_queue, VILLAGER_PRODUCTION_TICKS])
 
 
 def _apply_build(state: WorldState, building_key: str) -> WorldState:
@@ -144,7 +144,7 @@ def _apply_build(state: WorldState, building_key: str) -> WorldState:
     return replace(state,
                    wood=state.wood - cost,
                    pop_cap=new_pop_cap,
-                   buildings=state.buildings + [name])
+                   buildings=[*state.buildings, name])
 
 
 def _feudal_prereqs_met(state: WorldState) -> bool:

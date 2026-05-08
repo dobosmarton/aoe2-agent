@@ -3,7 +3,7 @@
 import json
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, ClassVar
 
 import anthropic
 import structlog
@@ -197,7 +197,7 @@ class ClaudeProvider(BaseLLMProvider):
         # AgentMemory.memories_loaded for per-turn attribution tracking.
         self.loaded_memory_titles: list[str] = []
         self.use_dynamic_context = use_dynamic_context and GAME_KNOWLEDGE_AVAILABLE
-        self._game_db: Optional["GameKnowledge"] = None
+        self._game_db: GameKnowledge | None = None
         self._total_input_tokens: int = 0
         self._total_output_tokens: int = 0
         self._total_cache_read_tokens: int = 0
@@ -429,7 +429,7 @@ class ClaudeProvider(BaseLLMProvider):
     # -- Composite tool handlers ------------------------------------------------
     # Execute multi-step sequences locally, avoiding intermediate API roundtrips.
 
-    _COMPOSITE_NAMES = {"build", "send_villager", "queue_villager"}
+    _COMPOSITE_NAMES: ClassVar[set[str]] = {"build", "send_villager", "queue_villager"}
 
     async def _execute_build(self, block: object) -> tuple[dict, dict]:
         """Composite: press . → q (econ menu) → building_key → click(x,y).
@@ -493,7 +493,7 @@ class ClaudeProvider(BaseLLMProvider):
 
     # -- Tool dispatch ---------------------------------------------------------
 
-    _COMPOSITE_HANDLERS: dict[str, str] = {
+    _COMPOSITE_HANDLERS: ClassVar[dict[str, str]] = {
         "build": "_execute_build",
         "send_villager": "_execute_send_villager",
         "queue_villager": "_execute_queue_villager",

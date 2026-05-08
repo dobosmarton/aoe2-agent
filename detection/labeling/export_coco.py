@@ -154,10 +154,10 @@ def yolo_to_coco(
     print(f"  {len(coco_images)} images")
     print(f"  {len(coco_annotations)} annotations")
     print(f"  {len(categories)} categories")
-    print(f"\nImport into CVAT:")
-    print(f"  1. Open your CVAT task")
-    print(f"  2. Actions → Upload annotations")
-    print(f"  3. Select format: 'COCO 1.0'")
+    print("\nImport into CVAT:")
+    print("  1. Open your CVAT task")
+    print("  2. Actions → Upload annotations")
+    print("  3. Select format: 'COCO 1.0'")
     print(f"  4. Upload: {output_path.name}")
 
     return output_path

@@ -361,8 +361,9 @@ def test_build_context_applies_strategist_overrides():
 
 
 def test_scenario_display_name_with_and_without_variant():
-    from evaluation.runner import _scenario_display_name
     from pathlib import Path
+
+    from evaluation.runner import _scenario_display_name
     path = Path("evaluation/scenarios/x.yaml")
     assert _scenario_display_name(path, None) == "x"
     assert _scenario_display_name(path, "baseline") == "x [baseline]"
@@ -406,9 +407,8 @@ def test_isolate_memories_dir_raises_on_orphan_backup(tmp_path, monkeypatch):
     (fake_backup / "real_user_memory.md").write_text("important user data")
     monkeypatch.setattr(memory_chain, "MEMORIES_DIR", fake_memories)
 
-    with pytest.raises(RuntimeError, match="orphan eval backup"):
-        with _isolate_memories_dir([]):
-            pass
+    with pytest.raises(RuntimeError, match="orphan eval backup"), _isolate_memories_dir([]):
+        pass
 
     # The orphan backup must remain untouched — that's the whole point.
     assert fake_backup.exists()

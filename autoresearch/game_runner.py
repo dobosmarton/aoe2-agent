@@ -6,7 +6,6 @@ Usage:
 
 import argparse
 import asyncio
-import json
 import sys
 from pathlib import Path
 
@@ -190,7 +189,7 @@ def main():
 
     # Print summary
     score = result["score"]
-    print(f"\n--- Game Complete ---")
+    print("\n--- Game Complete ---")
     print(f"Experiment:     {result['experiment_id']}")
     print(f"Composite:      {score.composite:.4f}")
     print(f"Survival:       {score.survival:.4f}")
