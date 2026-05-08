@@ -8,7 +8,22 @@ import siblings as `from gameplay_agent.X import Y` directly — no sys.path
 manipulation required.
 """
 
+import sys
+from unittest.mock import MagicMock
+
 import pytest
+
+# pyautogui reads $DISPLAY at import time on Linux. On a headless CI runner
+# that raises KeyError during test collection — even for tests that never
+# actually drive the mouse. If the real import fails, install a MagicMock
+# so any `import pyautogui` downstream gets a no-op shim. Tests that need
+# specific pyautogui behavior continue to install their own fakes via
+# monkeypatch.setattr(executor, "pyautogui", ...).
+try:
+    import pyautogui  # noqa: F401
+except (KeyError, ImportError):
+    sys.modules.pop("pyautogui", None)
+    sys.modules["pyautogui"] = MagicMock()
 
 
 def pytest_addoption(parser):
