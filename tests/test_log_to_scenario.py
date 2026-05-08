@@ -6,14 +6,16 @@ and YAML emitter. Tests are offline (no API key, no real game logs).
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
-import pytest
+import yaml
 
-REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO))
-
+from evaluation.log_to_scenario import (
+    TurnSnapshot,
+    emit_fixture,
+    find_age_transitions,
+    parse_log,
+)
 
 SAMPLE_LOG = """\
 2026-04-25 10:37:06 [info     ] iteration_start                iteration=1
@@ -41,7 +43,6 @@ def _write_log(tmp_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 def test_parse_log_extracts_three_turns(tmp_path):
-    from evaluation.log_to_scenario import parse_log
     log = _write_log(tmp_path)
     turns = parse_log(log)
     assert len(turns) == 3
@@ -51,7 +52,6 @@ def test_parse_log_extracts_three_turns(tmp_path):
 
 
 def test_parse_log_extracts_resources_dict(tmp_path):
-    from evaluation.log_to_scenario import parse_log
     turns = parse_log(_write_log(tmp_path))
     assert turns[0].resources == {
         "food": 200, "wood": 200, "gold": 100, "stone": 200,
@@ -60,35 +60,30 @@ def test_parse_log_extracts_resources_dict(tmp_path):
 
 
 def test_parse_log_extracts_age_from_claude_response(tmp_path):
-    from evaluation.log_to_scenario import parse_log
     turns = parse_log(_write_log(tmp_path))
     assert turns[0].age == "Dark Age"
     assert turns[2].age == "Feudal Age"
 
 
 def test_parse_log_captures_reasoning_preview(tmp_path):
-    from evaluation.log_to_scenario import parse_log
     turns = parse_log(_write_log(tmp_path))
     assert "Need a house" in turns[0].reasoning
     assert "Time to advance" in turns[1].reasoning
 
 
 def test_parse_log_captures_entity_count(tmp_path):
-    from evaluation.log_to_scenario import parse_log
     turns = parse_log(_write_log(tmp_path))
     assert turns[0].entity_count == 12
     assert turns[1].entity_count == 20
 
 
 def test_parse_log_captures_timestamp(tmp_path):
-    from evaluation.log_to_scenario import parse_log
     turns = parse_log(_write_log(tmp_path))
     assert turns[0].timestamp == "2026-04-25 10:37:06"
 
 
 def test_parse_log_handles_malformed_lines(tmp_path):
     """Garbage lines and partial lines must not crash the parser."""
-    from evaluation.log_to_scenario import parse_log
     log = tmp_path / "game.txt"
     log.write_text(
         "PS C:\\> python -m foo\n"
@@ -104,7 +99,6 @@ def test_parse_log_handles_malformed_lines(tmp_path):
 
 def test_parse_log_skips_malformed_resources_dict(tmp_path):
     """A resources= dict that fails ast.literal_eval must not crash the run."""
-    from evaluation.log_to_scenario import parse_log
     log = tmp_path / "game.txt"
     log.write_text(
         "2026-04-25 10:37:06 [info     ] iteration_start                iteration=1\n"
@@ -116,25 +110,23 @@ def test_parse_log_skips_malformed_resources_dict(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# find_interesting_turns
+# find_age_transitions
 # ---------------------------------------------------------------------------
 
-def test_find_interesting_turns_flags_age_transition(tmp_path):
-    from evaluation.log_to_scenario import find_interesting_turns, parse_log
+def test_find_age_transitions_flags_transition(tmp_path):
     turns = parse_log(_write_log(tmp_path))
-    interesting = find_interesting_turns(turns)
+    interesting = find_age_transitions(turns)
     assert len(interesting) == 1
     assert interesting[0].iteration == 3       # the Dark Age → Feudal Age transition
     assert interesting[0].age == "Feudal Age"
 
 
-def test_find_interesting_turns_empty_when_no_transitions():
-    from evaluation.log_to_scenario import TurnSnapshot, find_interesting_turns
+def test_find_age_transitions_empty_when_no_transitions():
     turns = [
         TurnSnapshot(iteration=1, timestamp="t1", age="Dark Age"),
         TurnSnapshot(iteration=2, timestamp="t2", age="Dark Age"),
     ]
-    assert find_interesting_turns(turns) == []
+    assert find_age_transitions(turns) == []
 
 
 # ---------------------------------------------------------------------------
@@ -147,7 +139,6 @@ def test_resources_carry_forward_when_no_strategist_response(tmp_path):
     The strategist runs as a background async task every 3-10 turns, so most
     intermediate turns carry the same resource state as the last reading.
     """
-    from evaluation.log_to_scenario import parse_log
     log = tmp_path / "game.txt"
     log.write_text(
         "2026-04-25 10:00:00 [info     ] iteration_start                iteration=1\n"
@@ -167,7 +158,6 @@ def test_resources_carry_forward_when_no_strategist_response(tmp_path):
 
 def test_strategist_age_takes_precedence_over_claude_age(tmp_path):
     """The LLM has been observed to misreport age; strategist OCR is authoritative."""
-    from evaluation.log_to_scenario import parse_log
     log = tmp_path / "game.txt"
     log.write_text(
         "2026-04-25 10:00:00 [info     ] iteration_start                iteration=1\n"
@@ -184,8 +174,6 @@ def test_strategist_age_takes_precedence_over_claude_age(tmp_path):
 
 def test_emit_fixture_produces_valid_yaml(tmp_path):
     """The emitted YAML must parse and pass the same lint as hand-written fixtures."""
-    import yaml
-    from evaluation.log_to_scenario import emit_fixture, parse_log
     turns = parse_log(_write_log(tmp_path))
     yaml_text = emit_fixture(turns[0], name="my_test_turn")
     data = yaml.safe_load(yaml_text)
@@ -204,7 +192,22 @@ def test_emit_fixture_produces_valid_yaml(tmp_path):
 
 
 def test_emit_fixture_default_name_uses_iteration(tmp_path):
-    from evaluation.log_to_scenario import emit_fixture, parse_log
     turns = parse_log(_write_log(tmp_path))
     yaml_text = emit_fixture(turns[2])
     assert "turn_3_snapshot" in yaml_text
+
+
+def test_emit_fixture_handles_special_chars_in_reasoning():
+    """Reasoning containing quotes, colons, and newlines must not corrupt YAML."""
+    turn = TurnSnapshot(
+        iteration=7,
+        timestamp="2026-04-25 10:00:00",
+        age="Feudal Age",
+        resources={"food": 200, "wood": 100, "gold": 0, "stone": 0, "population": "10/15"},
+        reasoning='I should "queue villager": don\'t skip housing — pop_cap: 15.\nNext: build mill.',
+    )
+    yaml_text = emit_fixture(turn, name="quote_colon_test")
+    data = yaml.safe_load(yaml_text)  # would fail loudly under f-string emission
+    assert data["name"] == "quote_colon_test"
+    assert data["inputs"]["resources"]["food"] == 200
+    assert data["inputs"]["resources"]["population"] == "10/15"

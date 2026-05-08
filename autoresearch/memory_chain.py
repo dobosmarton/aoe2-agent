@@ -9,6 +9,7 @@ Memory files are human-readable and reviewable — delete any bad ones.
 
 import json
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,6 +19,31 @@ import structlog
 log = structlog.get_logger()
 
 MEMORIES_DIR = Path(__file__).parent.parent / "memories"
+
+_NUMBERED_FILENAME_RE = re.compile(r"\d+_(.+)\.md$")
+
+
+def _resolve_memory_title(meta: dict, file: Path) -> str:
+    """Resolve the snake_case title used in `[applied: title]` reasoning tags.
+
+    Title field was added to memory frontmatter on 2026-04-25. Older files
+    fall back to the suffix of a `NNNN_<title>.md` filename, then to `f.stem`.
+    """
+    title = meta.get("title")
+    if title:
+        return title
+    match = _NUMBERED_FILENAME_RE.match(file.name)
+    return match.group(1) if match else file.stem
+
+
+@dataclass
+class _MemoryEntry:
+    """One ranked memory fragment loaded for context assembly."""
+    rank: int
+    created: str
+    title: str
+    applies_when: str
+    content: str
 
 EXTRACTION_SYSTEM = """You just finished an Age of Empires II game. Write 1-3 first-person notes to
 your future self — rules you should follow next game, based on what happened in this one.
@@ -154,32 +180,28 @@ class MemoryChain:
         if not files:
             return ""
 
-        entries: list[tuple[int, str, str, str, str]] = []  # (rank, created, title, applies_when, content)
+        entries: list[_MemoryEntry] = []
         for f in files:
             text = f.read_text()
             meta = self._parse_frontmatter(text)
             content = self._strip_frontmatter(text).strip()
             if not content:
                 continue
-            rank = self._IMPACT_RANK.get(meta.get("score_impact", "neutral"), 2)
-            created = meta.get("created", "")
-            applies_when = meta.get("applies_when", "").strip()
-            # Title resolution mirrors list_memories(): frontmatter first, then
-            # filename suffix for older files. The model needs this to emit the
-            # `[applied: title]` reasoning prefix described in prompts/core.md.
-            title = meta.get("title")
-            if not title:
-                match = re.match(r"\d+_(.+)\.md$", f.name)
-                title = match.group(1) if match else f.stem
-            entries.append((rank, created, title, applies_when, content))
+            entries.append(_MemoryEntry(
+                rank=self._IMPACT_RANK.get(meta.get("score_impact", "neutral"), 2),
+                created=meta.get("created", ""),
+                title=_resolve_memory_title(meta, f),
+                applies_when=meta.get("applies_when", "").strip(),
+                content=content,
+            ))
 
         if not entries:
             return ""
 
         # Sort by impact tier ascending (negative first), then created descending
         # (newest first). created is an ISO 8601 string so lexicographic sort works.
-        entries.sort(key=lambda e: e[1], reverse=True)  # newest first
-        entries.sort(key=lambda e: e[0])                # then stable by rank
+        entries.sort(key=lambda e: e.created, reverse=True)
+        entries.sort(key=lambda e: e.rank)
         ordered = entries[: self._MAX_MEMORIES]
 
         header = (
@@ -200,13 +222,17 @@ class MemoryChain:
         lines: list[str] = []
         total_chars = len(header)
 
-        for _rank, _created, title, applies_when, content in ordered:
+        for entry in ordered:
             # First line of content keeps the bullet compact; multi-sentence
             # content is preserved verbatim after the trigger prefix.
-            when_prefix = f"(when: {applies_when}) " if applies_when and applies_when != "any" else ""
+            when_prefix = (
+                f"(when: {entry.applies_when}) "
+                if entry.applies_when and entry.applies_when != "any"
+                else ""
+            )
             # `[title]` makes the snake_case identifier visible to the model so it
             # can emit the `[applied: title]` reasoning prefix per prompts/core.md.
-            line = f"- [{title}] {when_prefix}{content}"
+            line = f"- [{entry.title}] {when_prefix}{entry.content}"
             if total_chars + len(line) + 1 > char_budget:
                 break
             lines.append(line)
@@ -224,12 +250,7 @@ class MemoryChain:
             text = f.read_text()
             meta = self._parse_frontmatter(text)
             content = self._strip_frontmatter(text).strip()
-            # Title comes from frontmatter (added 2026-04-25). Fall back to the
-            # filename suffix for older files that predate the title field.
-            title = meta.get("title")
-            if not title:
-                match = re.match(r"\d+_(.+)\.md$", f.name)
-                title = match.group(1) if match else f.stem
+            title = _resolve_memory_title(meta, f)
             result.append({
                 "file": f.name,
                 "title": title,

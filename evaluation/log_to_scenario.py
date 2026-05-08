@@ -23,8 +23,11 @@ from __future__ import annotations
 import argparse
 import ast
 import re
-from dataclasses import dataclass, field
+import sys
+from dataclasses import dataclass
 from pathlib import Path
+
+import yaml
 
 LOG_LINE_RE = re.compile(
     r"^(?P<ts>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+"
@@ -147,12 +150,11 @@ def parse_log(log_path: Path) -> list[TurnSnapshot]:
 # Auto-detect interesting turns
 # ---------------------------------------------------------------------------
 
-def find_interesting_turns(turns: list[TurnSnapshot]) -> list[TurnSnapshot]:
-    """Heuristic: flag turns where the age changed from the previous turn.
+def find_age_transitions(turns: list[TurnSnapshot]) -> list[TurnSnapshot]:
+    """Flag turns where the age changed from the previous turn.
 
     Age transitions are the biggest behavioral discontinuity in AoE2 and
-    the best regression-test fodder. Future versions could also flag stuck
-    loops, food emergencies, and alarm events.
+    the most valuable regression points to capture.
     """
     interesting: list[TurnSnapshot] = []
     last_age: str | None = None
@@ -168,59 +170,57 @@ def find_interesting_turns(turns: list[TurnSnapshot]) -> list[TurnSnapshot]:
 # YAML emission
 # ---------------------------------------------------------------------------
 
+_EXPECTED_TEMPLATE = """
+# expected:
+#   must_include:
+#     type: <action_type>
+"""
+
+
 def emit_fixture(turn: TurnSnapshot, *, name: str | None = None) -> str:
     """Render a TurnSnapshot as a single-turn fixture YAML stub.
 
     The user MUST fill in `detected_entities:` (logs only carry counts,
     not coordinates) and add an `expected:` block before the fixture is
-    runnable. The reasoning preview is preserved as a comment for context.
+    runnable. The reasoning preview is preserved in the description for
+    context. YAML is serialized via `yaml.safe_dump` so reasoning containing
+    quotes, colons, or newlines doesn't corrupt the output.
     """
     fixture_name = name or f"turn_{turn.iteration}_snapshot"
     resources = turn.resources or {}
     age = turn.age or resources.get("age", "Dark Age")
-
-    food = resources.get("food", 0)
-    wood = resources.get("wood", 0)
-    gold = resources.get("gold", 0)
-    stone = resources.get("stone", 0)
-    population = resources.get("population", "0/0")
-
     reasoning_preview = (turn.reasoning or "").replace("\\n", " ")[:200]
 
-    entities_yaml = "\n".join(
-        f"    - {{class: {e['class']}, x: {e['x']}, y: {e['y']}}}"
-        for e in DEFAULT_PLACEHOLDER_ENTITIES
+    entity_note = (
+        f"Real game had {turn.entity_count} entities at this turn."
+        if turn.entity_count
+        else "Entity coordinates are not in logs — fill these in by hand."
     )
 
-    entity_count_note = (
-        f"  # Real game had {turn.entity_count} entities at this turn."
-        if turn.entity_count else
-        "  # Entity coordinates are not in logs — fill these in by hand."
-    )
+    fixture_data = {
+        "name": fixture_name,
+        "description": (
+            f"Auto-generated from log iteration {turn.iteration} ({turn.timestamp}). "
+            f'Reasoning preview: "{reasoning_preview}...". '
+            f"TODO: fill in detected_entities (logs carry only counts, not coords) "
+            f"and add an `expected:` assertion block. "
+            f"{entity_note}"
+        ),
+        "inputs": {
+            "age": age,
+            "resources": {
+                "food": int(resources.get("food", 0)),
+                "wood": int(resources.get("wood", 0)),
+                "gold": int(resources.get("gold", 0)),
+                "stone": int(resources.get("stone", 0)),
+                "population": str(resources.get("population", "0/0")),
+            },
+            "detected_entities": [dict(e) for e in DEFAULT_PLACEHOLDER_ENTITIES],
+        },
+    }
 
-    return f"""name: {fixture_name}
-description: >
-  Auto-generated from log iteration {turn.iteration} ({turn.timestamp}).
-  Reasoning preview: "{reasoning_preview}..."
-  TODO: fill in detected_entities (logs carry only counts, not coords)
-  and add an `expected:` assertion block.
-
-inputs:
-  age: "{age}"
-  resources:
-    food: {food}
-    wood: {wood}
-    gold: {gold}
-    stone: {stone}
-    population: "{population}"
-  detected_entities:
-{entity_count_note}
-{entities_yaml}
-
-# expected:
-#   must_include:
-#     type: <action_type>
-"""
+    body = yaml.safe_dump(fixture_data, sort_keys=False, default_flow_style=False)
+    return body + _EXPECTED_TEMPLATE
 
 
 # ---------------------------------------------------------------------------
@@ -241,7 +241,7 @@ def _cmd_list(turns: list[TurnSnapshot]) -> None:
 def _cmd_one_turn(turns: list[TurnSnapshot], turn_num: int, out: Path | None) -> int:
     snapshot = next((t for t in turns if t.iteration == turn_num), None)
     if snapshot is None:
-        print(f"No turn {turn_num} in log.")
+        print(f"No turn {turn_num} in log.", file=sys.stderr)
         return 1
     yaml_text = emit_fixture(snapshot)
     if out:
@@ -254,9 +254,9 @@ def _cmd_one_turn(turns: list[TurnSnapshot], turn_num: int, out: Path | None) ->
 
 
 def _cmd_auto(turns: list[TurnSnapshot], out_dir: Path) -> int:
-    interesting = find_interesting_turns(turns)
+    interesting = find_age_transitions(turns)
     if not interesting:
-        print("No interesting turns found (no age transitions detected).")
+        print("No age transitions detected.")
         return 0
     out_dir.mkdir(parents=True, exist_ok=True)
     for turn in interesting:
@@ -285,12 +285,12 @@ def _parse_args() -> argparse.Namespace:
 def main() -> int:
     args = _parse_args()
     if not args.log.exists():
-        print(f"Log not found: {args.log}")
+        print(f"Log not found: {args.log}", file=sys.stderr)
         return 1
 
     turns = parse_log(args.log)
     if not turns:
-        print("No turns parsed from log.")
+        print("No turns parsed from log.", file=sys.stderr)
         return 1
 
     if args.list:
@@ -300,14 +300,13 @@ def main() -> int:
         return _cmd_one_turn(turns, args.turn, args.out)
     if args.auto:
         if not args.out_dir:
-            print("--auto requires --out-dir")
+            print("--auto requires --out-dir", file=sys.stderr)
             return 1
         return _cmd_auto(turns, args.out_dir)
 
-    print("Specify one of: --list, --turn N, --auto")
+    print("Specify one of: --list, --turn N, --auto", file=sys.stderr)
     return 1
 
 
 if __name__ == "__main__":
-    import sys
     sys.exit(main())

@@ -25,6 +25,17 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
+# Sibling modules — must be imported AFTER the sys.path mutation above so a
+# direct `python evaluation/runner.py` invocation can resolve the package.
+from evaluation.assertions import evaluate, matches  # noqa: E402
+from evaluation.world_sim import (  # noqa: E402
+    WorldState,
+    apply_actions,
+    evaluate_end_state,
+    init_from_fixture,
+    state_to_fixture_inputs,
+    tick,
+)
 
 # ---------------------------------------------------------------------------
 # Constants — named so a future reader doesn't have to guess
@@ -37,6 +48,7 @@ DEFAULT_ENTITY_CONFIDENCE = 0.9
 PRIORITY_HIGH_THRESHOLD = 8
 PRIORITY_MED_THRESHOLD = 5
 RECENT_TURN_REASONING_PREVIEW = 100
+RECENT_TURNS_CONTEXT_WINDOW = 3
 COST_DECIMAL_PLACES = 4
 SUMMARY_SEPARATOR_WIDTH = 60
 
@@ -426,8 +438,6 @@ async def _run_one_variant_async(
     through to `evaluate()` so `differs_from_baseline_by` assertions can
     compare against it. None for the baseline variant itself.
     """
-    from evaluation.assertions import evaluate
-
     name = _scenario_display_name(fixture_path, fixture.get("_variant_name"))
 
     if _is_real_screenshot_scenario(fixture):
@@ -466,6 +476,74 @@ async def _run_one_variant_async(
     )
 
 
+@dataclass
+class _MultiTurnConfig:
+    """Parsed `multi_turn:` section of a scenario fixture."""
+    max_turns: int
+    per_turn_expected: dict
+    end_state_spec: dict
+    eventually_pattern: dict | None
+
+    @classmethod
+    def from_fixture(cls, fixture: dict) -> _MultiTurnConfig:
+        cfg = fixture["multi_turn"]
+        return cls(
+            max_turns=int(cfg.get("max_turns", 10)),
+            per_turn_expected=cfg.get("expected", {}),
+            end_state_spec=cfg.get("end_state", {}),
+            eventually_pattern=cfg.get("eventually_includes"),
+        )
+
+
+async def _run_multi_turn_step(
+    fixture: dict,
+    base_inputs: dict,
+    world_state: WorldState,
+    recent_turns: list[dict],
+    turn_num: int,
+    per_turn_expected: dict,
+    model: str | None,
+) -> tuple[WorldState, list[dict], str, float, list[str]]:
+    """Build context → invoke executor → assert → apply → tick. Returns (new_state, actions, reasoning, cost, per_turn_failures)."""
+    current_inputs = state_to_fixture_inputs(world_state, base_inputs)
+    current_inputs = {
+        **current_inputs,
+        "recent_turns": recent_turns[-RECENT_TURNS_CONTEXT_WINDOW:],
+    }
+    current_fixture = {**fixture, "inputs": current_inputs}
+
+    actions, reasoning, cost = await _invoke_executor(current_fixture, model)
+
+    failures: list[str] = []
+    if per_turn_expected:
+        failures.extend(
+            f"turn {turn_num}: {f}"
+            for f in evaluate(per_turn_expected, actions=actions, reasoning=reasoning)
+        )
+
+    new_state = tick(apply_actions(world_state, actions))
+    return new_state, actions, reasoning, cost, failures
+
+
+def _evaluate_multi_turn_end(
+    cfg: _MultiTurnConfig,
+    world_state: WorldState,
+    all_actions: list[dict],
+) -> list[str]:
+    """Aggregate end-of-run assertions: end_state and eventually_includes."""
+    failures: list[str] = []
+    if cfg.end_state_spec:
+        failures.extend(evaluate_end_state(cfg.end_state_spec, world_state))
+    if cfg.eventually_pattern is not None and not any(
+        matches(a, cfg.eventually_pattern) for a in all_actions
+    ):
+        failures.append(
+            f"eventually_includes FAILED — no turn produced an action matching "
+            f"{cfg.eventually_pattern!r} across {cfg.max_turns} turns"
+        )
+    return failures
+
+
 async def _run_multi_turn_scenario_async(
     fixture: dict,
     fixture_path: Path,
@@ -489,38 +567,32 @@ async def _run_multi_turn_scenario_async(
       expected:               — assertion block applied to EACH turn's actions
         must_not_include: {type: press, key: b}
     """
-    from evaluation.assertions import evaluate, _matches
-    from evaluation.world_sim import (
-        apply_actions, evaluate_end_state,
-        init_from_fixture, state_to_fixture_inputs, tick,
-    )
-
     name = fixture_path.stem
-    multi_cfg = fixture["multi_turn"]
-    max_turns = int(multi_cfg.get("max_turns", 10))
-    per_turn_expected = multi_cfg.get("expected", {})
-    end_state_spec = multi_cfg.get("end_state", {})
-    eventually_pattern = multi_cfg.get("eventually_includes")
-
+    cfg = _MultiTurnConfig.from_fixture(fixture)
     base_inputs = fixture.get("inputs", {})
     world_state = init_from_fixture(base_inputs)
     fixture_memories = base_inputs.get("memories", [])
 
     all_actions: list[dict] = []
     all_failures: list[str] = []
+    recent_turns: list[dict] = []
     total_cost = 0.0
     started = time.monotonic()
-    recent_turns: list[dict] = []
 
     with _isolate_memories_dir(fixture_memories), _mock_executor():
-        for turn_num in range(1, max_turns + 1):
-            current_inputs = state_to_fixture_inputs(world_state, base_inputs)
-            current_inputs = {**current_inputs, "recent_turns": recent_turns[-3:]}
-            current_fixture = {**fixture, "inputs": current_inputs}
-
+        for turn_num in range(1, cfg.max_turns + 1):
             try:
-                actions, reasoning, cost = await _invoke_executor(current_fixture, model)
+                world_state, actions, reasoning, cost, step_failures = (
+                    await _run_multi_turn_step(
+                        fixture, base_inputs, world_state, recent_turns,
+                        turn_num, cfg.per_turn_expected, model,
+                    )
+                )
             except Exception as exc:
+                # Executor crashed mid-run: stop the loop but still evaluate the
+                # end-state spec against the partial world below — the assertion
+                # is "what did the agent build before it crashed", not just
+                # "did the agent crash".
                 all_failures.append(
                     f"turn {turn_num}: runner exception: {type(exc).__name__}: {exc}"
                 )
@@ -528,24 +600,10 @@ async def _run_multi_turn_scenario_async(
 
             total_cost += cost
             all_actions.extend(actions)
-
-            if per_turn_expected:
-                for failure in evaluate(per_turn_expected, actions=actions, reasoning=reasoning):
-                    all_failures.append(f"turn {turn_num}: {failure}")
-
-            world_state = apply_actions(world_state, actions)
-            world_state = tick(world_state)
+            all_failures.extend(step_failures)
             recent_turns.append({"iteration": turn_num, "reasoning": reasoning})
 
-    if end_state_spec:
-        all_failures.extend(evaluate_end_state(end_state_spec, world_state))
-
-    if eventually_pattern is not None:
-        if not any(_matches(a, eventually_pattern) for a in all_actions):
-            all_failures.append(
-                f"eventually_includes FAILED — no turn produced an action matching "
-                f"{eventually_pattern!r} across {max_turns} turns"
-            )
+    all_failures.extend(_evaluate_multi_turn_end(cfg, world_state, all_actions))
 
     return [ScenarioResult(
         name=name,

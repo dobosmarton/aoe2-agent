@@ -30,8 +30,11 @@ Usage (offline DSL tests, no API):
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from dataclasses import dataclass, field
 from pathlib import Path
+
+import yaml
 
 VISION_FIXTURES_DIR = Path(__file__).resolve().parent / "vision_fixtures"
 
@@ -70,6 +73,15 @@ def evaluate_resource_readings(expected: dict, actual: dict) -> list[str]:
         actual_value = actual[field_name]
 
         if isinstance(spec, dict):
+            if not isinstance(actual_value, (int, float)) or isinstance(actual_value, bool):
+                # Range specs only make sense for numeric readings. Catch type
+                # drift (e.g. strategist returns "200" instead of 200) with a
+                # clear message rather than a TypeError from the comparison.
+                failures.append(
+                    f"{field_name}={actual_value!r} is non-numeric; expected numeric "
+                    f"value for range spec {spec!r}"
+                )
+                continue
             if "min" in spec and actual_value < spec["min"]:
                 failures.append(
                     f"{field_name}={actual_value} below min={spec['min']}"
@@ -92,7 +104,6 @@ def evaluate_resource_readings(expected: dict, actual: dict) -> list[str]:
 
 def load_vision_fixture(fixture_path: Path) -> dict:
     """Load and validate a vision fixture YAML."""
-    import yaml
     data = yaml.safe_load(fixture_path.read_text()) or {}
     if "name" not in data:
         raise ValueError(f"{fixture_path}: missing 'name'")
@@ -145,7 +156,6 @@ async def _invoke_strategist_async(screenshot_bytes: bytes,
         )
         return readings or {}
     finally:
-        import contextlib
         with contextlib.suppress(Exception):
             await provider.client.close()
 

@@ -17,7 +17,7 @@ REASONING_PREVIEW_CHARS = 300
 ACTION_DISPLAY_KEYS = ("key", "building_key", "target_class", "target_id", "x", "y")
 
 
-def _matches(action: dict, pattern: dict) -> bool:
+def matches(action: dict, pattern: dict) -> bool:
     """Subset match: every key in pattern must equal the same key in action."""
     for key, expected in pattern.items():
         if action.get(key) != expected:
@@ -54,7 +54,7 @@ def must_include(actions: list[dict], pattern: dict, **_) -> list[str]:
     """Action list contains at least one action matching the pattern (anywhere)."""
     if not isinstance(pattern, dict):
         return [f"must_include expected a dict, got {type(pattern).__name__}"]
-    if any(_matches(action, pattern) for action in actions):
+    if any(matches(action, pattern) for action in actions):
         return []
     return [
         f"must_include FAILED — no action matched {pattern!r}.\n"
@@ -72,7 +72,7 @@ def must_include_first(actions: list[dict], patterns: list[dict], **_) -> list[s
                 f"must_include_first FAILED — expected {len(patterns)} prefix actions, "
                 f"got only {len(actions)}.\n  Actual:{_format_action_list(actions)}"
             ]
-        if not _matches(actions[index], pattern):
+        if not matches(actions[index], pattern):
             return [
                 f"must_include_first FAILED at index {index} — expected {pattern!r}, "
                 f"got {_format_action(actions[index])}.\n"
@@ -86,7 +86,7 @@ def must_not_include(actions: list[dict], pattern: dict, **_) -> list[str]:
     if not isinstance(pattern, dict):
         return [f"must_not_include expected a dict, got {type(pattern).__name__}"]
     for action in actions:
-        if _matches(action, pattern):
+        if matches(action, pattern):
             return [
                 f"must_not_include FAILED — found forbidden action {_format_action(action)} "
                 f"matching {pattern!r}.\n  Full actions:{_format_action_list(actions)}"
@@ -98,7 +98,7 @@ def _count_matches(actions: list[dict], spec: dict, default_n: int) -> tuple[int
     """Return (expected_n, actual_count, pattern) extracted from a count spec."""
     expected_n = int(spec.get("n", default_n))
     pattern = {key: value for key, value in spec.items() if key != "n"}
-    actual_count = sum(1 for action in actions if _matches(action, pattern))
+    actual_count = sum(1 for action in actions if matches(action, pattern))
     return expected_n, actual_count, pattern
 
 
@@ -153,8 +153,8 @@ def differs_from_baseline_by(
 
     if "must_include" in spec:
         pattern = spec["must_include"]
-        in_variant = any(_matches(action, pattern) for action in actions)
-        in_baseline = any(_matches(action, pattern) for action in baseline_actions)
+        in_variant = any(matches(action, pattern) for action in actions)
+        in_baseline = any(matches(action, pattern) for action in baseline_actions)
         if not in_variant or in_baseline:
             failures.append(
                 f"differs_from_baseline_by.must_include FAILED — pattern {pattern!r} "
@@ -164,8 +164,8 @@ def differs_from_baseline_by(
 
     if "must_not_include" in spec:
         pattern = spec["must_not_include"]
-        in_variant = any(_matches(action, pattern) for action in actions)
-        in_baseline = any(_matches(action, pattern) for action in baseline_actions)
+        in_variant = any(matches(action, pattern) for action in actions)
+        in_baseline = any(matches(action, pattern) for action in baseline_actions)
         if in_variant or not in_baseline:
             failures.append(
                 f"differs_from_baseline_by.must_not_include FAILED — pattern {pattern!r} "
@@ -195,9 +195,8 @@ def _extract_applied_titles(reasoning: str) -> list[str]:
     titles: list[str] = []
     for match in _APPLIED_RE.finditer(reasoning or ""):
         titles.extend(t.strip() for t in match.group(1).split(",") if t.strip())
-    # Preserve first-seen order while deduping (deterministic for assertions).
-    seen: set[str] = set()
-    return [t for t in titles if not (t in seen or seen.add(t))]
+    # dict.fromkeys preserves first-seen insertion order (Py 3.7+) and dedupes.
+    return list(dict.fromkeys(titles))
 
 
 def applied_memories(reasoning: str, expected: list[str], **_) -> list[str]:
