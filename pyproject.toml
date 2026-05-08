@@ -186,6 +186,34 @@ pythonVersion = "3.11"
 reportMissingTypeStubs = false
 reportMissingImports = "warning"
 
+# Per-directory strict mode via executionEnvironments. Each scoped dir
+# runs its own files under strict rules but treats dependencies as
+# `basic` (avoids strict-checking transitively-imported third-party
+# code). After the ANN pass, all four AI-agent dirs pass strict
+# cleanly with 0 errors.
+[[tool.pyright.executionEnvironments]]
+root = "evaluation"
+typeCheckingMode = "strict"
+# Sibling packages live at the project root; without extraPaths the
+# strict env scopes its resolver to `evaluation/` only and can't find
+# `gameplay_agent`, `autoresearch`, etc.
+extraPaths = ["."]
+
+[[tool.pyright.executionEnvironments]]
+root = "autoresearch"
+typeCheckingMode = "strict"
+extraPaths = ["."]
+
+[[tool.pyright.executionEnvironments]]
+root = "gameplay_agent"
+typeCheckingMode = "strict"
+extraPaths = ["."]
+
+[[tool.pyright.executionEnvironments]]
+root = "server"
+typeCheckingMode = "strict"
+extraPaths = ["."]
+
 
 # ---------------------------------------------------------------------------
 # Coverage (pytest-cov)
