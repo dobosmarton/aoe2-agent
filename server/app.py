@@ -14,7 +14,6 @@ import argparse
 import io
 import logging
 import time
-from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,6 +31,8 @@ from detection.inference.thresholds import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from PIL import Image
 
 logger = logging.getLogger(__name__)

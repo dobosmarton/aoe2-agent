@@ -702,9 +702,7 @@ class TrainingDataGenerator:
             draw.ellipse([x, y, x + w, y + h], fill=color)
 
         # Apply slight blur for smoother terrain
-        bg = bg.filter(ImageFilter.GaussianBlur(radius=3))
-
-        return bg
+        return bg.filter(ImageFilter.GaussianBlur(radius=3))
 
     def _check_overlap(
         self,

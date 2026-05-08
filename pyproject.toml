@@ -106,6 +106,8 @@ select = [
     "RUF", # ruff-specific
     "PTH", # flake8-use-pathlib (prefer Path over os.path/builtin open)
     "DTZ", # flake8-datetimez (require explicit tz on datetime calls)
+    "RET", # flake8-return (drop superfluous else-after-return / build-then-return)
+    "TCH", # flake8-type-checking (push type-only imports under TYPE_CHECKING)
 ]
 ignore = [
     "E501",   # line-too-long: ruff format handles formatting; long literals are fine

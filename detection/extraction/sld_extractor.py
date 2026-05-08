@@ -539,9 +539,8 @@ def extract_sprite(
                 apply_color=apply_player_color,
                 player_color=player_color,
             )
-        else:
-            print(f"Frame {frame_index} not found (file has {len(frames)} frames)")
-            return False
+        print(f"Frame {frame_index} not found (file has {len(frames)} frames)")
+        return False
     except Exception as e:
         print(f"Error extracting {sld_path}: {e}")
         return False

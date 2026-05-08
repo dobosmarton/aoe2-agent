@@ -131,7 +131,7 @@ class StrategistProvider:
         # both the attribute access and the strict TypedDict argument types
         # become opaque to the checker (anthropic SDK versions disagree on
         # the exact MessageParam union shape, which would break CI otherwise).
-        client_any = cast(Any, self.client)
+        client_any = cast("Any", self.client)
         response = await client_any.messages.parse(
             model=self.model,
             max_tokens=768,
@@ -146,7 +146,7 @@ class StrategistProvider:
         log.info(
             "strategist_usage", input_tokens=usage.input_tokens, output_tokens=usage.output_tokens
         )
-        return cast(StrategistResponse, response.parsed_output)
+        return cast("StrategistResponse", response.parsed_output)
 
     async def generate_goals(
         self,

@@ -374,8 +374,7 @@ class ClaudeProvider(BaseLLMProvider):
             early_game_tips = self._game_db.get_early_game_priorities()
 
             # Combine: dynamic context first, then original context
-            enhanced_context = f"{dynamic_context}\n{early_game_tips}\n{context}"
-            return enhanced_context
+            return f"{dynamic_context}\n{early_game_tips}\n{context}"
 
         except Exception as e:
             log.warning("dynamic_context_error", error=str(e))
@@ -398,14 +397,12 @@ class ClaudeProvider(BaseLLMProvider):
 
         text = f"{dimensions_info}\n\n{enhanced_context}\n\nBased on the detected entities, goals, and resource status above, decide what to do next."
 
-        content = [
+        return [
             {
                 "type": "text",
                 "text": text,
             },
         ]
-
-        return content
 
     # -- Shared helpers --------------------------------------------------------
 
@@ -590,9 +587,9 @@ class ClaudeProvider(BaseLLMProvider):
             response = await self.client.messages.create(
                 model=self.model,
                 max_tokens=config.max_tokens,
-                system=cast(Any, system_prompt),
-                messages=cast(Any, messages),
-                tools=cast(Any, _ACTION_TOOLS),
+                system=cast("Any", system_prompt),
+                messages=cast("Any", messages),
+                tools=cast("Any", _ACTION_TOOLS),
             )
 
             # Accumulate token usage (cache fields may be None when caching is off)

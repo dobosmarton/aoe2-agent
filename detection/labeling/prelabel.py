@@ -88,14 +88,13 @@ def _get_color(class_name: str) -> tuple[int, int, int]:
     """Get visualization color for a class name."""
     if class_name in _RESOURCE_CLASSES:
         return _CATEGORY_COLORS["resource"]
-    elif class_name in _ANIMAL_CLASSES:
+    if class_name in _ANIMAL_CLASSES:
         return _CATEGORY_COLORS["animal"]
-    elif class_name in _BUILDING_CLASSES:
+    if class_name in _BUILDING_CLASSES:
         return _CATEGORY_COLORS["building"]
-    elif class_name in _DEFENSE_CLASSES:
+    if class_name in _DEFENSE_CLASSES:
         return _CATEGORY_COLORS["defense"]
-    else:
-        return _CATEGORY_COLORS["unit"]
+    return _CATEGORY_COLORS["unit"]
 
 
 def _find_labeled_stems(training_dir: Path | None = None) -> set[str]:

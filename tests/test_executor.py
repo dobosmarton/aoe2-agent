@@ -16,13 +16,16 @@ from __future__ import annotations
 
 import asyncio
 import random
-from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from gameplay_agent import executor as ex
-from gameplay_agent.executor import ActionResult
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
+    from gameplay_agent.executor import ActionResult
 
 # ---------------------------------------------------------------------------
 # Test infra

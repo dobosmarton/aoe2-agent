@@ -11,7 +11,10 @@ equal values, regardless of extra fields on the action.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 REASONING_PREVIEW_CHARS = 300
 ACTION_DISPLAY_KEYS = ("key", "building_key", "target_class", "target_id", "x", "y")

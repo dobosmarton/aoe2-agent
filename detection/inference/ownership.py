@@ -11,15 +11,10 @@ from __future__ import annotations
 
 import io
 from enum import Enum
-from typing import TYPE_CHECKING
 
 import numpy as np
-from PIL import Image
-
-if TYPE_CHECKING:
-    pass
-
 import structlog
+from PIL import Image
 
 log = structlog.get_logger()
 
@@ -106,11 +101,10 @@ def classify_entity(
 
     if best_ratio >= _OWN_THRESHOLD:
         return Owner.OWN, best_ratio
-    elif best_ratio < 0.01 and (x2 - x1) < 10:
+    if best_ratio < 0.01 and (x2 - x1) < 10:
         # Too small to tell
         return Owner.UNKNOWN, best_ratio
-    else:
-        return Owner.ENEMY, best_ratio
+    return Owner.ENEMY, best_ratio
 
 
 def classify_entities(

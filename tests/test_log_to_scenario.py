@@ -6,7 +6,7 @@ and YAML emitter. Tests are offline (no API key, no real game logs).
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 
@@ -16,6 +16,9 @@ from evaluation.log_to_scenario import (
     find_age_transitions,
     parse_log,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 SAMPLE_LOG = """\
 2026-04-25 10:37:06 [info     ] iteration_start                iteration=1

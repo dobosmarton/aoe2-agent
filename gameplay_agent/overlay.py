@@ -50,14 +50,13 @@ def _get_color(class_name: str) -> str:
     """Get tkinter-compatible hex color for a class name."""
     if class_name in _RESOURCE_CLASSES:
         return "#228B22"  # green
-    elif class_name in _ANIMAL_CLASSES:
+    if class_name in _ANIMAL_CLASSES:
         return "#FFA500"  # orange
-    elif class_name in _BUILDING_CLASSES:
+    if class_name in _BUILDING_CLASSES:
         return "#4169E1"  # blue
-    elif class_name in _DEFENSE_CLASSES:
+    if class_name in _DEFENSE_CLASSES:
         return "#9400D3"  # purple
-    else:
-        return "#DC143C"  # red (units, military)
+    return "#DC143C"  # red (units, military)
 
 
 class DetectionOverlay:

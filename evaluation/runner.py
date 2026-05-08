@@ -19,9 +19,9 @@ import os
 import shutil
 import sys
 import time
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from evaluation.assertions import evaluate, matches
 from evaluation.world_sim import (
@@ -32,6 +32,9 @@ from evaluation.world_sim import (
     state_to_fixture_inputs,
     tick,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 REPO = Path(__file__).resolve().parent.parent
 
