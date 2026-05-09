@@ -16,7 +16,6 @@ import argparse
 import asyncio
 import contextlib
 import os
-import shutil
 import sys
 import time
 from dataclasses import dataclass, field
@@ -24,6 +23,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from evaluation.assertions import evaluate, matches
+from evaluation.context_builder import _build_context
+from evaluation.test_isolation import (
+    _isolate_memories_dir,
+    _mock_executor,
+    _seed_detected_entities,
+)
 from evaluation.world_sim import (
     WorldState,
     apply_actions,
@@ -34,9 +39,7 @@ from evaluation.world_sim import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
-
-    from gameplay_agent.executor import ActionResult
+    from collections.abc import Callable
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -46,11 +49,6 @@ REPO = Path(__file__).resolve().parent.parent
 
 DEFAULT_GAME_WIDTH = 1920
 DEFAULT_GAME_HEIGHT = 1080
-ENTITY_BBOX_HALF_SIZE = 20
-DEFAULT_ENTITY_CONFIDENCE = 0.9
-PRIORITY_HIGH_THRESHOLD = 8
-PRIORITY_MED_THRESHOLD = 5
-RECENT_TURN_REASONING_PREVIEW = 100
 RECENT_TURNS_CONTEXT_WINDOW = 3
 COST_DECIMAL_PLACES = 4
 SUMMARY_SEPARATOR_WIDTH = 60
@@ -58,8 +56,6 @@ SUMMARY_SEPARATOR_WIDTH = 60
 ANSI_GREEN = "\033[32m"
 ANSI_RED = "\033[31m"
 ANSI_RESET = "\033[0m"
-
-DEFAULT_AGE = "Dark Age"
 
 
 # ---------------------------------------------------------------------------
@@ -95,271 +91,6 @@ class ScenarioResult:
     reasoning: str = ""
     skipped: bool = False
     skip_reason: str = ""
-
-
-# ---------------------------------------------------------------------------
-# Memory directory backup/restore + fixture planting
-# ---------------------------------------------------------------------------
-
-
-@contextlib.contextmanager
-def _isolate_memories_dir(fixture_memories: list[dict]) -> Iterator[None]:
-    """Back up existing memories/, plant fixture memories, restore on exit.
-
-    Refuses to run if an orphan `<memories>_eval_backup` directory exists
-    from a crashed prior run — its contents are the user's real memories
-    and we cannot tell which of the two dirs is canonical without asking.
-    """
-    from autoresearch.memory_chain import MEMORIES_DIR
-
-    backup_dir = MEMORIES_DIR.with_name(MEMORIES_DIR.name + "_eval_backup")
-    if backup_dir.exists():
-        raise RuntimeError(
-            f"Found orphan eval backup at {backup_dir}. A prior evaluation "
-            f"run crashed before restoring your real memories. Inspect both "
-            f"{backup_dir} and {MEMORIES_DIR}, move the canonical contents "
-            f"back to {MEMORIES_DIR}, then delete the other. Refusing to "
-            f"proceed to avoid silent data loss."
-        )
-
-    had_existing = MEMORIES_DIR.exists()
-    if had_existing:
-        shutil.move(str(MEMORIES_DIR), str(backup_dir))
-    MEMORIES_DIR.mkdir(parents=True, exist_ok=True)
-
-    for index, memory in enumerate(fixture_memories, start=1):
-        _write_fixture_memory(MEMORIES_DIR, memory, index)
-
-    try:
-        yield
-    finally:
-        shutil.rmtree(MEMORIES_DIR, ignore_errors=True)
-        if had_existing and backup_dir.exists():
-            shutil.move(str(backup_dir), str(MEMORIES_DIR))
-        else:
-            MEMORIES_DIR.mkdir(parents=True, exist_ok=True)
-
-
-def _write_fixture_memory(memories_dir: Path, memory: dict, index: int) -> None:
-    """Write a single fixture memory file with frontmatter."""
-    title = memory.get("title", f"fixture_memory_{index}")
-    applies_when = memory.get("applies_when", "any")
-    score_impact = memory.get("score_impact", "negative")
-    mem_type = memory.get("type", "economy")
-    content = memory.get("content", "I should follow this rule.")
-    path = memories_dir / f"{index:03d}_{title}.md"
-    path.write_text(
-        f"---\n"
-        f"type: {mem_type}\n"
-        f"title: {title}\n"
-        f"game_id: fixture\n"
-        f"applies_when: {applies_when}\n"
-        f"score_impact: {score_impact}\n"
-        f"created: 2026-04-25T00:00:00+00:00\n"
-        f"---\n\n{content}\n"
-    )
-
-
-# ---------------------------------------------------------------------------
-# Executor mocking — patch execute_action so the agentic loop doesn't click
-# ---------------------------------------------------------------------------
-
-
-@contextlib.contextmanager
-def _mock_executor() -> Iterator[None]:
-    """Patch execute_action in both the canonical module and the import in claude.py.
-
-    The executor's tool loop calls execute_action for every action; without
-    mocking it would invoke pyautogui (real clicks). We replace it with a
-    success-returning no-op so the LLM's behavior loop is preserved.
-    """
-    import gameplay_agent.executor as ex
-    import gameplay_agent.providers.claude as claude_mod
-
-    real_canonical = ex.execute_action
-    real_in_claude = claude_mod.execute_action
-
-    async def fake_execute_action(action_dict: dict) -> ActionResult:
-        return ex.ActionResult(success=True, detail="ok (eval)")
-
-    ex.execute_action = fake_execute_action
-    claude_mod.execute_action = fake_execute_action
-
-    try:
-        yield
-    finally:
-        ex.execute_action = real_canonical
-        claude_mod.execute_action = real_in_claude
-
-
-# ---------------------------------------------------------------------------
-# Build inputs from a fixture (synthetic detection list + context string)
-# ---------------------------------------------------------------------------
-
-
-def _seed_detected_entities(entities: list[dict]) -> None:
-    """Push fixture entities into executor module state so target_class resolution works."""
-    import gameplay_agent.executor as ex
-
-    ex._detected_entities = [_entity_dict(entity, index) for index, entity in enumerate(entities)]
-
-
-def _entity_dict(entity: dict, index: int) -> dict:
-    """Convert a fixture entity into the executor's internal dict shape."""
-    class_name = entity.get("class", "unknown")
-    x = entity.get("x", 0)
-    y = entity.get("y", 0)
-    return {
-        "id": entity.get("id", f"{class_name}_{index}"),
-        "class": class_name,
-        "center": (x, y),
-        "bbox": (
-            x - ENTITY_BBOX_HALF_SIZE,
-            y - ENTITY_BBOX_HALF_SIZE,
-            x + ENTITY_BBOX_HALF_SIZE,
-            y + ENTITY_BBOX_HALF_SIZE,
-        ),
-        "confidence": entity.get("confidence", DEFAULT_ENTITY_CONFIDENCE),
-    }
-
-
-def _format_entity_line(entity: dict, index: int) -> str:
-    class_name = entity.get("class", "unknown")
-    x = int(entity.get("x", 0))
-    y = int(entity.get("y", 0))
-    confidence = float(entity.get("confidence", DEFAULT_ENTITY_CONFIDENCE))
-    entity_id = entity.get("id", f"{class_name}_{index}")
-    return f"  {entity_id}: {class_name} at ({x},{y}) [{confidence:.0%}]"
-
-
-def _build_entity_summary(entities: list[dict]) -> str:
-    """Mirror gameplay_agent.entity_utils.build_entity_summary's output shape."""
-    if not entities:
-        return ""
-    return "\n".join(_format_entity_line(entity, index) for index, entity in enumerate(entities))
-
-
-def _priority_tier(priority: int) -> str:
-    if priority >= PRIORITY_HIGH_THRESHOLD:
-        return "HIGH"
-    if priority >= PRIORITY_MED_THRESHOLD:
-        return "MED"
-    return "LOW"
-
-
-def _build_resource_block(resources: dict, age: str) -> str:
-    return "\n".join(
-        [
-            "## Resource Status (from strategist)",
-            f"- Food: {resources.get('food', '?')}",
-            f"- Wood: {resources.get('wood', '?')}",
-            f"- Gold: {resources.get('gold', '?')}",
-            f"- Stone: {resources.get('stone', '?')}",
-            f"- Population: {resources.get('population', '0/0')}",
-            f"- Age: {age}",
-        ]
-    )
-
-
-def _build_goal_block(goals: list[dict]) -> str:
-    if not goals:
-        return ""
-    lines = ["## Active Goals"]
-    for goal in goals:
-        priority = goal.get("priority", PRIORITY_MED_THRESHOLD)
-        tier = _priority_tier(priority)
-        lines.append(
-            f"  {tier} (P{priority}): {goal.get('name', '?')} → "
-            f"{goal.get('metric')} target {goal.get('target')}"
-        )
-    return "\n".join(lines)
-
-
-def _build_state_block(resources: dict, age: str, under_attack: bool) -> str:
-    population = resources.get("population", "0/0")
-    pop_now, _, pop_cap = population.partition("/")
-    non_pop_resources = " ".join(
-        f"{key}={value}" for key, value in resources.items() if key != "population"
-    )
-    lines = [
-        "## Current Game State",
-        f"- Resources: {non_pop_resources}",
-        f"- Population: {pop_now or 0}/{pop_cap or 0}",
-        f"- Age: {age}",
-    ]
-    if under_attack:
-        lines.append("- under_attack: true")
-    return "\n".join(lines)
-
-
-def _build_entity_block(entities: list[dict]) -> str:
-    summary = _build_entity_summary(entities)
-    if not summary:
-        return ""
-    return (
-        "\n## Detected Entities (from YOLO)\n"
-        "Use target_class or target_id to interact with these:\n"
-        f"{summary}\n"
-    )
-
-
-def _build_recent_turns_block(recent_turns: list[dict]) -> str:
-    if not recent_turns:
-        return ""
-    lines = ["## Recent Turns (last 3)"]
-    for turn in recent_turns:
-        iteration = turn.get("iteration", "?")
-        reasoning_preview = turn.get("reasoning", "")[:RECENT_TURN_REASONING_PREVIEW]
-        lines.append(f"Turn {iteration}: {reasoning_preview}")
-    return "\n".join(lines)
-
-
-def _apply_strategist_overrides(inputs: dict) -> dict:
-    """Merge `strategist_overrides:` on top of base inputs.
-
-    The strategist normally provides resource readings and goals to the
-    executor. This helper lets a fixture express "what if the strategist
-    output something different?" without running the real strategist.
-
-    Merge semantics:
-      resources  — shallow merge (override individual fields, preserve others)
-      goals      — replace entirely (lists have no canonical partial-merge)
-
-    Returns a new dict; the original is never mutated.
-    """
-    overrides = inputs.get("strategist_overrides") or {}
-    if not overrides:
-        return inputs
-
-    merged = {**inputs}
-    if "resources" in overrides:
-        merged["resources"] = {
-            **inputs.get("resources", {}),
-            **overrides["resources"],
-        }
-    if "goals" in overrides:
-        merged["goals"] = overrides["goals"]
-    return merged
-
-
-def _build_context(fixture: dict) -> str:
-    """Assemble the context string the same way game_loop._build_llm_context does.
-
-    Order matches the production assembly: entities → goals → resources → state → recent.
-    """
-    inputs = fixture.get("inputs", {})
-    inputs = _apply_strategist_overrides(inputs)
-    resources = inputs.get("resources", {})
-    age = inputs.get("age", DEFAULT_AGE)
-
-    blocks = [
-        _build_entity_block(inputs.get("detected_entities", [])),
-        _build_goal_block(inputs.get("goals", [])),
-        _build_resource_block(resources, age),
-        _build_state_block(resources, age, bool(inputs.get("under_attack"))),
-        _build_recent_turns_block(inputs.get("recent_turns", [])),
-    ]
-    return "\n\n".join(block for block in blocks if block)
 
 
 # ---------------------------------------------------------------------------

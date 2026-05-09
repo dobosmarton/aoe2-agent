@@ -323,7 +323,7 @@ def test_expand_variants_overrides_strategist_overrides_per_variant():
 
 def test_apply_strategist_overrides_resources_shallow_merge():
     """Override only specified resource fields; preserve the rest."""
-    from evaluation.runner import _apply_strategist_overrides
+    from evaluation.context_builder import _apply_strategist_overrides
 
     inputs = {
         "resources": {"food": 200, "wood": 150, "gold": 50},
@@ -337,7 +337,7 @@ def test_apply_strategist_overrides_resources_shallow_merge():
 
 def test_apply_strategist_overrides_goals_replace_entirely():
     """Goals are a list; partial-merge is ambiguous, so we replace wholesale."""
-    from evaluation.runner import _apply_strategist_overrides
+    from evaluation.context_builder import _apply_strategist_overrides
 
     inputs = {
         "goals": [{"name": "old", "priority": 9}],
@@ -348,7 +348,7 @@ def test_apply_strategist_overrides_goals_replace_entirely():
 
 
 def test_apply_strategist_overrides_no_overrides_passes_through():
-    from evaluation.runner import _apply_strategist_overrides
+    from evaluation.context_builder import _apply_strategist_overrides
 
     inputs = {"resources": {"food": 200}, "goals": [{"name": "x"}]}
     result = _apply_strategist_overrides(inputs)
@@ -359,7 +359,7 @@ def test_apply_strategist_overrides_no_overrides_passes_through():
 def test_apply_strategist_overrides_does_not_mutate_input():
     """Critical: Phase 1 multi-turn calls _build_context per turn — mutation
     would corrupt the fixture across turns."""
-    from evaluation.runner import _apply_strategist_overrides
+    from evaluation.context_builder import _apply_strategist_overrides
 
     inputs = {
         "resources": {"food": 200, "wood": 150},
@@ -372,7 +372,7 @@ def test_apply_strategist_overrides_does_not_mutate_input():
 
 def test_apply_strategist_overrides_empty_dict_is_noop():
     """A `strategist_overrides: {}` key means "no overrides" — just like absent."""
-    from evaluation.runner import _apply_strategist_overrides
+    from evaluation.context_builder import _apply_strategist_overrides
 
     inputs = {"resources": {"food": 200}, "strategist_overrides": {}}
     result = _apply_strategist_overrides(inputs)
@@ -381,7 +381,7 @@ def test_apply_strategist_overrides_empty_dict_is_noop():
 
 def test_build_context_applies_strategist_overrides():
     """End-to-end: _build_context emits strategist-overridden values in the LLM prompt."""
-    from evaluation.runner import _build_context
+    from evaluation.context_builder import _build_context
 
     fixture = {
         "inputs": {
@@ -420,7 +420,7 @@ def test_scenario_display_name_with_and_without_variant():
 def test_isolate_memories_dir_normal_flow_backs_up_and_restores(tmp_path, monkeypatch):
     """Real memories are moved aside, fixtures planted, then restored on exit."""
     from autoresearch import memory_chain
-    from evaluation.runner import _isolate_memories_dir
+    from evaluation.test_isolation import _isolate_memories_dir
 
     fake_memories = tmp_path / "memories"
     fake_memories.mkdir()
@@ -441,7 +441,7 @@ def test_isolate_memories_dir_normal_flow_backs_up_and_restores(tmp_path, monkey
 def test_isolate_memories_dir_raises_on_orphan_backup(tmp_path, monkeypatch):
     """An orphan backup from a crashed prior run blocks new runs (no silent data loss)."""
     from autoresearch import memory_chain
-    from evaluation.runner import _isolate_memories_dir
+    from evaluation.test_isolation import _isolate_memories_dir
 
     fake_memories = tmp_path / "memories"
     fake_backup = tmp_path / "memories_eval_backup"
@@ -461,7 +461,7 @@ def test_isolate_memories_dir_raises_on_orphan_backup(tmp_path, monkeypatch):
 def test_isolate_memories_dir_no_existing_memories(tmp_path, monkeypatch):
     """Fresh state (no memories dir) works without errors."""
     from autoresearch import memory_chain
-    from evaluation.runner import _isolate_memories_dir
+    from evaluation.test_isolation import _isolate_memories_dir
 
     fake_memories = tmp_path / "memories"  # does NOT exist yet
     monkeypatch.setattr(memory_chain, "MEMORIES_DIR", fake_memories)
