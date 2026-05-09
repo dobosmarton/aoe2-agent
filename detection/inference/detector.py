@@ -18,6 +18,16 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from .mock import mock_detect
+from .postprocess import iou, nms
+from .sahi import (
+    compute_sahi_rois,
+    merge_detections,
+    onnx_sahi_detect,
+    sahi_detect,
+    sahi_detect_rois,
+)
+
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
@@ -301,9 +311,9 @@ class EntityDetector:
             for i, prev in enumerate(self._previous_entities):
                 if i in used_prev_indices or prev.class_name != entity.class_name:
                     continue
-                iou = self._iou(entity.bbox, prev.bbox)
-                if iou > best_iou:
-                    best_iou = iou
+                cur_iou = iou(entity.bbox, prev.bbox)
+                if cur_iou > best_iou:
+                    best_iou = cur_iou
                     best_idx = i
 
             if best_idx >= 0 and best_iou > 0.4:
@@ -333,7 +343,7 @@ class EntityDetector:
         self._reset_counters()
 
         if self.use_mock:
-            entities = self._mock_detect(screenshot)
+            entities = mock_detect(screenshot, self._generate_id)
         elif self.backend == "onnx" and self.use_sahi:
             # ONNX + SAHI: batch all tiles in one inference call
             from PIL import Image as PILImage
@@ -343,7 +353,7 @@ class EntityDetector:
             else:
                 image = screenshot
             if image.size[0] > 640:
-                entities = self._onnx_sahi_detect(image)
+                entities = onnx_sahi_detect(self, image)
             else:
                 entities = self._onnx_detect(screenshot)
         elif self.backend == "onnx":
@@ -352,7 +362,7 @@ class EntityDetector:
             entities = self._pytorch_detect(screenshot)
 
         # Apply NMS to remove duplicate overlapping detections
-        entities = self._nms(entities, iou_threshold=0.5)
+        entities = nms(entities, iou_threshold=0.5)
 
         # Assign persistent IDs: Kalman tracker or greedy IoU fallback
         if self.tracker:
@@ -383,7 +393,7 @@ class EntityDetector:
         self._reset_counters()
 
         if self.use_mock:
-            entities = self._mock_detect(screenshot)
+            entities = mock_detect(screenshot, self._generate_id)
         elif self.backend == "onnx":
             entities = self._onnx_detect(screenshot)
         else:
@@ -399,7 +409,7 @@ class EntityDetector:
             )
             entities = self._parse_yolo_results(results)
 
-        entities = self._nms(entities, iou_threshold=0.5)
+        entities = nms(entities, iou_threshold=0.5)
 
         # Assign persistent IDs: Kalman tracker or greedy IoU fallback
         if self.tracker:
@@ -435,7 +445,7 @@ class EntityDetector:
             image = screenshot
 
         if self.use_mock:
-            entities = self._mock_detect(screenshot)
+            entities = mock_detect(screenshot, self._generate_id)
         elif self.backend == "onnx":
             # Pass 1: full image at input_size (1280)
             full_entities = self._onnx_detect(screenshot)
@@ -492,7 +502,7 @@ class EntityDetector:
             entities = full_entities + crop_entities
 
         # NMS merges duplicates from both passes
-        entities = self._nms(entities, iou_threshold=0.5)
+        entities = nms(entities, iou_threshold=0.5)
 
         if self.tracker:
             entities = self.tracker.update(entities)
@@ -535,7 +545,7 @@ class EntityDetector:
 
         # 1. Fast single-pass scan (raw detections, no NMS/IDs yet)
         if self.use_mock:
-            fast_entities = self._mock_detect(screenshot)
+            fast_entities = mock_detect(screenshot, self._generate_id)
         elif self.backend == "onnx":
             fast_entities = self._onnx_detect(screenshot)
         else:
@@ -545,11 +555,11 @@ class EntityDetector:
             fast_entities = self._parse_yolo_results(results)
 
         # 2. Compute ROI regions around entity clusters
-        rois = self._compute_sahi_rois(fast_entities, self._previous_entities, image.size)
+        rois = compute_sahi_rois(fast_entities, self._previous_entities, image.size)
 
         if not rois:
             # No ROIs needed — fast scan is sufficient
-            entities = self._nms(fast_entities, iou_threshold=0.5)
+            entities = nms(fast_entities, iou_threshold=0.5)
             if self.tracker:
                 entities = self.tracker.update(entities)
             else:
@@ -581,13 +591,13 @@ class EntityDetector:
             return self.detect(screenshot)
 
         # Run SAHI only on ROI tiles
-        sahi_entities = self._sahi_detect_rois(image, rois)
+        sahi_entities = sahi_detect_rois(self, image, rois)
 
         # 4. Merge: keep fast entities outside ROIs, use SAHI inside ROIs
-        merged = self._merge_detections(fast_entities, sahi_entities, rois)
+        merged = merge_detections(fast_entities, sahi_entities, rois)
 
         # 5. Final NMS + persistent IDs
-        merged = self._nms(merged, iou_threshold=0.5)
+        merged = nms(merged, iou_threshold=0.5)
         if self.tracker:
             merged = self.tracker.update(merged)
         else:
@@ -600,267 +610,6 @@ class EntityDetector:
             len(merged),
             len(rois),
         )
-        return merged
-
-    def _compute_sahi_rois(
-        self,
-        fast_entities: list[DetectedEntity],
-        previous_entities: list[DetectedEntity],
-        image_size: tuple[int, int],
-    ) -> list[tuple[float, float, float, float]]:
-        """Compute ROI regions for targeted SAHI based on entity clusters.
-
-        Groups entities within 200px into clusters, adds 128px padding,
-        and merges overlapping ROIs. Also includes regions where previous
-        entities disappeared (may have moved just beyond fast-pass range).
-        """
-        # Collect bboxes from current detections + disappeared previous entities
-        all_bboxes = [e.bbox for e in fast_entities]
-
-        for prev in previous_entities:
-            # Include previous entities not found in fast scan
-            if not any(self._iou(prev.bbox, f.bbox) > 0.3 for f in fast_entities):
-                all_bboxes.append(prev.bbox)
-
-        if not all_bboxes:
-            return []
-
-        # Union-Find clustering: group entities within 200px of each other
-        n = len(all_bboxes)
-        parent = list(range(n))
-
-        def find(x: int) -> int:
-            while parent[x] != x:
-                parent[x] = parent[parent[x]]
-                x = parent[x]
-            return x
-
-        def union(a: int, b: int):
-            a, b = find(a), find(b)
-            if a != b:
-                parent[a] = b
-
-        for i in range(n):
-            ci = (
-                (all_bboxes[i][0] + all_bboxes[i][2]) / 2,
-                (all_bboxes[i][1] + all_bboxes[i][3]) / 2,
-            )
-            for j in range(i + 1, n):
-                cj = (
-                    (all_bboxes[j][0] + all_bboxes[j][2]) / 2,
-                    (all_bboxes[j][1] + all_bboxes[j][3]) / 2,
-                )
-                dist = ((ci[0] - cj[0]) ** 2 + (ci[1] - cj[1]) ** 2) ** 0.5
-                if dist < 200:
-                    union(i, j)
-
-        # Build cluster bounding boxes
-        clusters: dict[int, list[tuple]] = {}
-        for i in range(n):
-            root = find(i)
-            clusters.setdefault(root, []).append(all_bboxes[i])
-
-        # Convert clusters to padded ROIs
-        padding = 128
-        img_w, img_h = image_size
-        rois = []
-        for bboxes in clusters.values():
-            x1 = max(0, min(b[0] for b in bboxes) - padding)
-            y1 = max(0, min(b[1] for b in bboxes) - padding)
-            x2 = min(img_w, max(b[2] for b in bboxes) + padding)
-            y2 = min(img_h, max(b[3] for b in bboxes) + padding)
-            rois.append((x1, y1, x2, y2))
-
-        # Merge overlapping ROIs
-        return self._merge_overlapping_rois(rois)
-
-    def _merge_overlapping_rois(
-        self, rois: list[tuple[float, float, float, float]]
-    ) -> list[tuple[float, float, float, float]]:
-        """Merge ROIs that overlap with each other."""
-        if len(rois) <= 1:
-            return rois
-
-        merged = True
-        while merged:
-            merged = False
-            new_rois = []
-            used = set()
-            for i in range(len(rois)):
-                if i in used:
-                    continue
-                rx1, ry1, rx2, ry2 = rois[i]
-                for j in range(i + 1, len(rois)):
-                    if j in used:
-                        continue
-                    ox1, oy1, ox2, oy2 = rois[j]
-                    # Check overlap
-                    if rx1 <= ox2 and rx2 >= ox1 and ry1 <= oy2 and ry2 >= oy1:
-                        rx1 = min(rx1, ox1)
-                        ry1 = min(ry1, oy1)
-                        rx2 = max(rx2, ox2)
-                        ry2 = max(ry2, oy2)
-                        used.add(j)
-                        merged = True
-                new_rois.append((rx1, ry1, rx2, ry2))
-                used.add(i)
-            rois = new_rois
-
-        return rois
-
-    # ------------------------------------------------------------------
-    # Shared SAHI helpers
-    # ------------------------------------------------------------------
-
-    SAHI_TILE_SIZE = 640
-    SAHI_OVERLAP = 32
-
-    def _generate_tiles(
-        self,
-        image: Image.Image,
-        rois: list[tuple[float, float, float, float]] | None = None,
-    ) -> tuple[list, list[tuple[int, int, int, int]]]:
-        """Generate padded tiles and their (x, y, tile_w, tile_h) offsets.
-
-        If *rois* is given, only tiles within those regions are produced.
-        Otherwise the whole image is tiled.
-        """
-        from PIL import Image as PILImage
-
-        tile_size = self.SAHI_TILE_SIZE
-        stride = tile_size - self.SAHI_OVERLAP
-
-        if rois:
-            regions = [(int(r[0]), int(r[1]), int(r[2]), int(r[3])) for r in rois]
-        else:
-            width, height = image.size
-            regions = [(0, 0, width, height)]
-
-        tiles: list = []
-        offsets: list[tuple[int, int, int, int]] = []
-
-        for rx1, ry1, rx2, ry2 in regions:
-            for y in range(ry1, ry2, stride):
-                for x in range(rx1, rx2, stride):
-                    x_end = min(x + tile_size, rx2)
-                    y_end = min(y + tile_size, ry2)
-                    tile = image.crop((x, y, x_end, y_end))
-                    tile_w, tile_h = tile.size
-                    if tile.size != (tile_size, tile_size):
-                        padded = PILImage.new("RGB", (tile_size, tile_size), (0, 0, 0))
-                        padded.paste(tile, (0, 0))
-                        tile = padded
-                    tiles.append(tile)
-                    offsets.append((x, y, tile_w, tile_h))
-
-        return tiles, offsets
-
-    def _sahi_detect_rois(
-        self, image: Image.Image, rois: list[tuple[float, float, float, float]]
-    ) -> list[DetectedEntity]:
-        """Run SAHI detection only on specified ROI regions.
-
-        Tiles each ROI into 640x640 chunks and batches all tiles for
-        one ONNX call (or sequential PyTorch calls).
-        """
-        tile_size = self.SAHI_TILE_SIZE
-        tiles, offsets = self._generate_tiles(image, rois=rois)
-
-        if not tiles:
-            return []
-
-        all_entities: list[DetectedEntity] = []
-
-        if self.backend == "onnx" and self.onnx_session:
-            # Batch ONNX inference (same approach as _onnx_sahi_detect)
-            batch = np.stack(
-                [np.transpose(np.array(t).astype(np.float32) / 255.0, (2, 0, 1)) for t in tiles],
-                axis=0,
-            )
-            input_name = self.onnx_session.get_inputs()[0].name
-            outputs = self.onnx_session.run(None, {input_name: batch})
-            raw_output = outputs[0]
-            num_classes = len(self.class_names)
-            for tile_idx in range(len(tiles)):
-                x_off, y_off, tw, th = offsets[tile_idx]
-                tile_entities = self._parse_onnx_tile(
-                    raw_output,
-                    tile_idx,
-                    num_classes,
-                    scale_x=1.0,
-                    scale_y=1.0,
-                    x_offset=x_off,
-                    y_offset=y_off,
-                    clip_w=tw,
-                    clip_h=th,
-                )
-                all_entities.extend(tile_entities)
-        else:
-            # Sequential PyTorch
-            for tile_idx, tile in enumerate(tiles):
-                results = self.model(
-                    tile, conf=self.confidence_threshold, imgsz=tile_size, verbose=False
-                )
-                x_off, y_off, tw, th = offsets[tile_idx]
-                for result in results:
-                    if result.boxes is None:
-                        continue
-                    for box, cls_id, conf in zip(
-                        result.boxes.xyxy.cpu().numpy(),
-                        result.boxes.cls.cpu().numpy(),
-                        result.boxes.conf.cpu().numpy(),
-                        strict=True,
-                    ):
-                        x1, y1, x2, y2 = box.tolist()
-                        class_idx = int(cls_id)
-                        class_name = (
-                            self.class_names[class_idx]
-                            if class_idx < len(self.class_names)
-                            else f"unknown_{class_idx}"
-                        )
-                        abs_x1 = x1 + x_off
-                        abs_y1 = y1 + y_off
-                        abs_x2 = min(x2 + x_off, x_off + tw)
-                        abs_y2 = min(y2 + y_off, y_off + th)
-                        if abs_x2 <= abs_x1 or abs_y2 <= abs_y1:
-                            continue
-                        all_entities.append(
-                            DetectedEntity(
-                                id=self._generate_id(class_name),
-                                class_name=class_name,
-                                bbox=(abs_x1, abs_y1, abs_x2, abs_y2),
-                                center=((abs_x1 + abs_x2) / 2, (abs_y1 + abs_y2) / 2),
-                                confidence=float(conf),
-                                area=(abs_x2 - abs_x1) * (abs_y2 - abs_y1),
-                            )
-                        )
-
-        logger.debug("SAHI ROI tiles=%d entities=%d", len(tiles), len(all_entities))
-        return all_entities
-
-    def _merge_detections(
-        self,
-        fast_entities: list[DetectedEntity],
-        sahi_entities: list[DetectedEntity],
-        rois: list[tuple[float, float, float, float]],
-    ) -> list[DetectedEntity]:
-        """Merge fast scan + SAHI detections.
-
-        Keep fast entities outside ROIs (reliable at full resolution),
-        use SAHI entities inside ROIs (more accurate for small objects).
-        """
-        merged = []
-
-        # Keep fast entities whose centers are outside all ROI regions
-        for e in fast_entities:
-            cx, cy = e.center
-            in_roi = any(rx1 <= cx <= rx2 and ry1 <= cy <= ry2 for rx1, ry1, rx2, ry2 in rois)
-            if not in_roi:
-                merged.append(e)
-
-        # Add all SAHI entities from ROI regions
-        merged.extend(sahi_entities)
-
         return merged
 
     def _pytorch_detect(self, screenshot: bytes | Image.Image) -> list[DetectedEntity]:
@@ -879,205 +628,13 @@ class EntityDetector:
 
         # Use SAHI for large images (wider than tile size)
         if self.use_sahi and image.size[0] > 640:
-            return self._sahi_detect(image)
+            return sahi_detect(self, image)
 
         # Standard inference for small images
         results = self.model(
             image, conf=self.confidence_threshold, imgsz=self.input_size, verbose=False
         )
         return self._parse_yolo_results(results)
-
-    def _sahi_detect(self, image: Image.Image) -> list[DetectedEntity]:
-        """SAHI sliced inference: tile the image into overlapping 640x640 chunks.
-
-        On Retina displays (3024x1672), standard inference resizes to imgsz=1280,
-        shrinking sheep to ~21px — below reliable detection. SAHI runs each tile
-        at native 640x640 (the model's training resolution), then offsets coordinates
-        back to the original image space. Existing NMS in detect() deduplicates.
-
-        ~24 tiles * ~40ms/tile ≈ 960ms total — acceptable vs 1-3s LLM API call.
-        """
-        width, height = image.size
-        tile_size = 640
-        overlap = 32  # 5% overlap — NMS handles boundary duplicates
-        stride = tile_size - overlap
-        all_entities = []
-
-        for y_start in range(0, height, stride):
-            for x_start in range(0, width, stride):
-                x_end = min(x_start + tile_size, width)
-                y_end = min(y_start + tile_size, height)
-
-                tile = image.crop((x_start, y_start, x_end, y_end))
-                results = self.model(
-                    tile, conf=self.confidence_threshold, imgsz=tile_size, verbose=False
-                )
-
-                for result in results:
-                    if result.boxes is None:
-                        continue
-                    for box, cls_id, conf in zip(
-                        result.boxes.xyxy.cpu().numpy(),
-                        result.boxes.cls.cpu().numpy(),
-                        result.boxes.conf.cpu().numpy(),
-                        strict=True,
-                    ):
-                        x1, y1, x2, y2 = box.tolist()
-                        class_idx = int(cls_id)
-                        class_name = (
-                            self.class_names[class_idx]
-                            if class_idx < len(self.class_names)
-                            else f"unknown_{class_idx}"
-                        )
-
-                        # Offset coordinates to original image space
-                        abs_x1 = x1 + x_start
-                        abs_y1 = y1 + y_start
-                        abs_x2 = x2 + x_start
-                        abs_y2 = y2 + y_start
-
-                        all_entities.append(
-                            DetectedEntity(
-                                id=self._generate_id(class_name),
-                                class_name=class_name,
-                                bbox=(abs_x1, abs_y1, abs_x2, abs_y2),
-                                center=((abs_x1 + abs_x2) / 2, (abs_y1 + abs_y2) / 2),
-                                confidence=float(conf),
-                                area=(abs_x2 - abs_x1) * (abs_y2 - abs_y1),
-                            )
-                        )
-
-        # Sort by class name, then by confidence (highest first)
-        all_entities.sort(key=lambda e: (e.class_name, -e.confidence))
-        return all_entities
-
-    def _onnx_sahi_detect(self, image: Image.Image) -> list[DetectedEntity]:
-        """ONNX batched SAHI: tile the image, batch all tiles, run one ONNX call.
-
-        Same tiling logic as _sahi_detect() but batches all tiles into a single
-        ONNX Runtime inference call for ~3-5x speedup over sequential PyTorch.
-        """
-        tiles, offsets = self._generate_tiles(image)
-
-        if not tiles:
-            return []
-
-        # 2. Pre-process all tiles into a single batch
-        batch = np.stack(
-            [np.transpose(np.array(t).astype(np.float32) / 255.0, (2, 0, 1)) for t in tiles], axis=0
-        )  # (N, 3, 640, 640)
-
-        # 3. Single ONNX inference call
-        input_name = self.onnx_session.get_inputs()[0].name
-        outputs = self.onnx_session.run(None, {input_name: batch})
-        raw_output = outputs[0]
-
-        logger.debug("ONNX SAHI batch shape: %s, tiles: %d", raw_output.shape, len(tiles))
-
-        # 4. Parse results per tile and offset coordinates
-        all_entities = []
-        num_classes = len(self.class_names)
-
-        for tile_idx in range(len(tiles)):
-            x_start, y_start, tile_w, tile_h = offsets[tile_idx]
-            tile_entities = self._parse_onnx_tile(
-                raw_output,
-                tile_idx,
-                num_classes,
-                scale_x=1.0,
-                scale_y=1.0,  # Tiles are already at native 640x640
-                x_offset=x_start,
-                y_offset=y_start,
-                clip_w=tile_w,
-                clip_h=tile_h,
-            )
-            all_entities.extend(tile_entities)
-
-        all_entities.sort(key=lambda e: (e.class_name, -e.confidence))
-        return all_entities
-
-    def _parse_onnx_tile(
-        self,
-        raw_output: np.ndarray,
-        tile_idx: int,
-        num_classes: int,
-        scale_x: float,
-        scale_y: float,
-        x_offset: float = 0,
-        y_offset: float = 0,
-        clip_w: float = 640,
-        clip_h: float = 640,
-    ) -> list[DetectedEntity]:
-        """Parse ONNX output for a single tile from a batched result.
-
-        Handles both output formats:
-        - Post-NMS: (batch, num_detections, 6) → [x1, y1, x2, y2, conf, cls]
-        - Raw: (batch, 4+num_classes, num_boxes) → needs argmax + threshold
-        """
-        entities = []
-
-        if len(raw_output.shape) == 3 and raw_output.shape[2] == 6:
-            # Post-NMS format: (batch, num_detections, 6)
-            predictions = raw_output[tile_idx]
-        elif len(raw_output.shape) == 3 and raw_output.shape[1] == (4 + num_classes):
-            # Raw format: (batch, 4+num_classes, num_boxes)
-            preds_raw = raw_output[tile_idx].T  # (num_boxes, 4+num_classes)
-            boxes = preds_raw[:, :4]
-            class_scores = preds_raw[:, 4:]
-            best_cls = np.argmax(class_scores, axis=1)
-            best_conf = np.max(class_scores, axis=1)
-            # Use lowest per-class threshold for initial bulk filter
-            min_thresh = (
-                min(self.class_thresholds.values())
-                if self.class_thresholds
-                else self.confidence_threshold
-            )
-            mask = best_conf >= min_thresh
-            boxes, best_cls, best_conf = boxes[mask], best_cls[mask], best_conf[mask]
-            predictions = []
-            for box, cls_id, conf in zip(boxes, best_cls, best_conf, strict=True):
-                xc, yc, w, h = box
-                predictions.append([xc - w / 2, yc - h / 2, xc + w / 2, yc + h / 2, conf, cls_id])
-            predictions = np.array(predictions) if predictions else np.array([]).reshape(0, 6)
-        else:
-            return []
-
-        for pred in predictions:
-            x1, y1, x2, y2, confidence, class_id = pred
-            class_idx = int(class_id)
-            class_name = (
-                self.class_names[class_idx]
-                if class_idx < len(self.class_names)
-                else f"unknown_{class_idx}"
-            )
-            if confidence < self._get_threshold(class_name):
-                continue
-
-            # Scale and offset to original image space
-            abs_x1 = x1 * scale_x + x_offset
-            abs_y1 = y1 * scale_y + y_offset
-            abs_x2 = x2 * scale_x + x_offset
-            abs_y2 = y2 * scale_y + y_offset
-
-            # Clip to tile's actual region (handles edge padding)
-            abs_x2 = min(abs_x2, x_offset + clip_w)
-            abs_y2 = min(abs_y2, y_offset + clip_h)
-
-            if abs_x2 <= abs_x1 or abs_y2 <= abs_y1:
-                continue
-
-            entities.append(
-                DetectedEntity(
-                    id=self._generate_id(class_name),
-                    class_name=class_name,
-                    bbox=(float(abs_x1), float(abs_y1), float(abs_x2), float(abs_y2)),
-                    center=((abs_x1 + abs_x2) / 2, (abs_y1 + abs_y2) / 2),
-                    confidence=float(confidence),
-                    area=float((abs_x2 - abs_x1) * (abs_y2 - abs_y1)),
-                )
-            )
-
-        return entities
 
     def _parse_yolo_results(self, results) -> list[DetectedEntity]:
         """Parse ultralytics YOLO results into DetectedEntity list."""
@@ -1256,133 +813,6 @@ class EntityDetector:
         entities.sort(key=lambda e: (e.class_name, -e.confidence))
 
         logger.debug("Final entity count: %d", len(entities))
-
-        return entities
-
-    def _nms(
-        self, entities: list[DetectedEntity], iou_threshold: float = 0.5
-    ) -> list[DetectedEntity]:
-        """Simple non-maximum suppression."""
-        if not entities:
-            return []
-
-        # Sort by confidence (highest first)
-        entities = sorted(entities, key=lambda e: -e.confidence)
-
-        keep = []
-        while entities:
-            best = entities.pop(0)
-            keep.append(best)
-
-            # Filter out overlapping boxes of the same class
-            entities = [
-                e
-                for e in entities
-                if e.class_name != best.class_name or self._iou(best.bbox, e.bbox) < iou_threshold
-            ]
-
-        return keep
-
-    def _iou(self, box1: tuple, box2: tuple) -> float:
-        """Calculate intersection over union of two boxes."""
-        x1 = max(box1[0], box2[0])
-        y1 = max(box1[1], box2[1])
-        x2 = min(box1[2], box2[2])
-        y2 = min(box1[3], box2[3])
-
-        if x2 <= x1 or y2 <= y1:
-            return 0.0
-
-        intersection = (x2 - x1) * (y2 - y1)
-        area1 = (box1[2] - box1[0]) * (box1[3] - box1[1])
-        area2 = (box2[2] - box2[0]) * (box2[3] - box2[1])
-        union = area1 + area2 - intersection
-
-        return intersection / union if union > 0 else 0.0
-
-    def _mock_detect(self, screenshot: bytes | Image.Image) -> list[DetectedEntity]:
-        """Generate mock detections for testing.
-
-        Creates plausible detections based on typical Dark Age game state.
-        """
-        import random
-
-        from PIL import Image
-
-        # Get image dimensions
-        if isinstance(screenshot, bytes):
-            image = Image.open(io.BytesIO(screenshot))
-            width, height = image.size
-        elif hasattr(screenshot, "size"):
-            width, height = screenshot.size
-        else:
-            width, height = 1920, 1080  # Default fallback
-
-        # Set random seed for reproducibility within same session
-        random.seed(42)
-
-        entities = []
-
-        # Town Center - usually center of screen
-        tc_x = width * 0.5 + random.uniform(-100, 100)
-        tc_y = height * 0.5 + random.uniform(-50, 50)
-        entities.append(
-            DetectedEntity(
-                id=self._generate_id("town_center"),
-                class_name="town_center",
-                bbox=(tc_x - 80, tc_y - 60, tc_x + 80, tc_y + 60),
-                center=(tc_x, tc_y),
-                confidence=0.95,
-                area=160 * 120,
-            )
-        )
-
-        # Sheep - typically 2-4 near TC at game start
-        for _ in range(random.randint(2, 4)):
-            sheep_x = tc_x + random.uniform(-200, 200)
-            sheep_y = tc_y + random.uniform(-150, 150)
-            entities.append(
-                DetectedEntity(
-                    id=self._generate_id("sheep"),
-                    class_name="sheep",
-                    bbox=(sheep_x - 15, sheep_y - 10, sheep_x + 15, sheep_y + 10),
-                    center=(sheep_x, sheep_y),
-                    confidence=random.uniform(0.7, 0.95),
-                    area=30 * 20,
-                )
-            )
-
-        # Villagers - 3 starting villagers
-        for _ in range(3):
-            vill_x = tc_x + random.uniform(-150, 150)
-            vill_y = tc_y + random.uniform(-100, 100)
-            entities.append(
-                DetectedEntity(
-                    id=self._generate_id("villager"),
-                    class_name="villager",
-                    bbox=(vill_x - 12, vill_y - 20, vill_x + 12, vill_y + 5),
-                    center=(vill_x, vill_y),
-                    confidence=random.uniform(0.75, 0.92),
-                    area=24 * 25,
-                )
-            )
-
-        # Scout - usually exploring
-        scout_x = random.uniform(100, width - 100)
-        scout_y = random.uniform(100, height - 100)
-        entities.append(
-            DetectedEntity(
-                id=self._generate_id("scout"),
-                class_name="scout",
-                bbox=(scout_x - 15, scout_y - 18, scout_x + 15, scout_y + 8),
-                center=(scout_x, scout_y),
-                confidence=0.88,
-                area=30 * 26,
-            )
-        )
-
-        # Sort by class name, then by confidence
-        entities.sort(key=lambda e: (e.class_name, -e.confidence))
 
         return entities
 
