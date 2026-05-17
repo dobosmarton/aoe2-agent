@@ -11,6 +11,8 @@ All tests are offline (no LLM, no API key). Tests cover:
 
 from __future__ import annotations
 
+import pytest
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -373,3 +375,114 @@ def test_evaluate_end_state_unknown_field_is_failure():
     state = _state(turn=5)
     failures = evaluate_end_state({"nonexistent_field": 42}, state)
     assert any("unknown WorldState field" in f for f in failures)
+
+
+# ---------------------------------------------------------------------------
+# render() — WorldState → list[DetectedEntity] projection (Phase 1)
+# ---------------------------------------------------------------------------
+
+
+def test_render_emits_exactly_one_town_center():
+    from evaluation.world_sim import render
+
+    entities = render(_state(population=0, buildings=[]))
+    town_centers = [e for e in entities if e.class_name == "town_center"]
+    assert len(town_centers) == 1
+
+
+def test_render_villager_count_equals_population():
+    from evaluation.world_sim import render
+
+    entities = render(_state(population=5, buildings=[]))
+    villager_count = sum(1 for e in entities if e.class_name == "villager")
+    assert villager_count == 5
+
+
+def test_render_ignores_villager_queue():
+    from evaluation.world_sim import render
+
+    entities = render(_state(population=5, villager_queue=[3, 3, 3], buildings=[]))
+    villager_count = sum(1 for e in entities if e.class_name == "villager")
+    assert villager_count == 5
+
+
+def test_render_emits_one_entity_per_building():
+    from evaluation.world_sim import render
+
+    entities = render(_state(population=0, buildings=["mill", "lumber_camp", "house"]))
+    building_class_names = {"mill", "lumber_camp", "house"}
+    matched = [e for e in entities if e.class_name in building_class_names]
+    assert len(matched) == 3
+
+
+def test_render_preserves_building_class_names():
+    from evaluation.world_sim import render
+
+    entities = render(_state(population=0, buildings=["mill", "lumber_camp", "house"]))
+    rendered_classes = {e.class_name for e in entities if e.class_name != "town_center"}
+    assert rendered_classes == {"mill", "lumber_camp", "house"}
+
+
+def test_render_empty_state_emits_only_town_center():
+    from evaluation.world_sim import render
+
+    entities = render(_state(population=0, buildings=[]))
+    assert len(entities) == 1
+
+
+def test_render_is_deterministic():
+    from evaluation.world_sim import render
+
+    state = _state(population=4, buildings=["mill"])
+    assert render(state, 1920, 1080) == render(state, 1920, 1080)
+
+
+def test_render_seed_overrides_turn():
+    from evaluation.world_sim import render
+
+    state = _state(population=4, buildings=[], turn=7)
+    tc_a = next(e for e in render(state, seed=1) if e.class_name == "town_center")
+    tc_b = next(e for e in render(state, seed=2) if e.class_name == "town_center")
+    assert tc_a.center != tc_b.center
+
+
+@pytest.mark.parametrize("width,height", [(1280, 720), (1920, 1080)])
+def test_render_bboxes_are_within_image_dims(width, height):
+    # Projection assumes realistic screenshot dims (≥ 720p). Smaller canvases
+    # are out of contract because the building-grid offset would overflow.
+    from evaluation.world_sim import render
+
+    entities = render(_state(population=3, buildings=["mill"]), width, height)
+    out_of_bounds = [
+        e
+        for e in entities
+        if not (0 <= e.bbox[0] <= width and 0 <= e.bbox[2] <= width)
+        or not (0 <= e.bbox[1] <= height and 0 <= e.bbox[3] <= height)
+    ]
+    assert out_of_bounds == []
+
+
+def test_render_building_positions_stable_across_appends():
+    from evaluation.world_sim import render
+
+    state_two = _state(population=0, buildings=["mill", "lumber_camp"])
+    state_three = _state(population=0, buildings=["mill", "lumber_camp", "house"])
+    mill_two = next(e for e in render(state_two) if e.class_name == "mill")
+    mill_three = next(e for e in render(state_three) if e.class_name == "mill")
+    assert mill_two.center == mill_three.center
+
+
+def test_render_confidence_is_ground_truth():
+    from evaluation.world_sim import render
+
+    entities = render(_state(population=3, buildings=["mill", "house"]))
+    confidences = {e.confidence for e in entities}
+    assert confidences == {1.0}
+
+
+def test_render_all_ids_are_unique():
+    from evaluation.world_sim import render
+
+    entities = render(_state(population=5, buildings=["mill", "lumber_camp", "house"]))
+    ids = [e.id for e in entities]
+    assert len(set(ids)) == len(ids)

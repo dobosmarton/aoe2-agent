@@ -14,7 +14,14 @@ failures, and age-transition regressions, not simulating AoE2 exactly.
 
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from detection.inference.detector import DetectedEntity
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -60,6 +67,34 @@ FEUDAL_AGE_MIN_POP = 22
 FEUDAL_AGE_MIN_FOOD = 500
 
 HOUSE_POP_SLOTS = 5
+
+# Perception-projection constants (used by render() at the bottom of this file).
+_DEFAULT_RENDER_WIDTH = 1920
+_DEFAULT_RENDER_HEIGHT = 1080
+_TC_JITTER_X_PX = 100
+_TC_JITTER_Y_PX = 50
+_VILLAGER_SCATTER_RADIUS_X_PX = 150
+_VILLAGER_SCATTER_RADIUS_Y_PX = 100
+_BUILDING_GRID_COLS = 4
+_BUILDING_GRID_SPACING_PX = 120
+_BUILDING_GRID_OFFSET_PX = 220
+_GROUND_TRUTH_CONFIDENCE = 1.0
+
+# Per-class bbox dimensions (width, height) in pixels. Used by _make_entity()
+# to size the projected DetectedEntity. Unit/animal values match the existing
+# `detection/inference/mock.py` mock fixture; building values are sized for
+# Dark/Feudal-Age footprints.
+_CLASS_BBOX_DIMS_PX: dict[str, tuple[int, int]] = {
+    "town_center": (160, 120),
+    "villager": (24, 25),
+    "house": (60, 60),
+    "mill": (80, 80),
+    "mining_camp": (80, 80),
+    "lumber_camp": (80, 80),
+    "farm": (100, 100),
+    "blacksmith": (80, 80),
+    "dock": (100, 80),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -259,3 +294,118 @@ def evaluate_end_state(end_state_spec: dict, state: WorldState) -> list[str]:
                 f"(after {state.turn} turns)"
             )
     return failures
+
+
+# ---------------------------------------------------------------------------
+# Rendering: project WorldState to DetectedEntity[] for synthetic perception.
+#
+# Phase 1 of the synthetic-arena buildout — see
+# docs/design/synthetic-arena-analysis.md lines 336 (deliverable) and 380
+# (Risk 4: schema contract).
+# ---------------------------------------------------------------------------
+
+
+def _make_entity(
+    class_name: str,
+    center: tuple[float, float],
+    id_factory: Callable[[str], str],
+) -> DetectedEntity:
+    from detection.inference.detector import DetectedEntity
+
+    bbox_width, bbox_height = _CLASS_BBOX_DIMS_PX[class_name]
+    center_x, center_y = center
+    half_width = bbox_width / 2
+    half_height = bbox_height / 2
+    return DetectedEntity(
+        id=id_factory(class_name),
+        class_name=class_name,
+        bbox=(
+            center_x - half_width,
+            center_y - half_height,
+            center_x + half_width,
+            center_y + half_height,
+        ),
+        center=center,
+        confidence=_GROUND_TRUTH_CONFIDENCE,
+        area=float(bbox_width * bbox_height),
+    )
+
+
+def _render_town_center(
+    rng: random.Random,
+    width: int,
+    height: int,
+    id_factory: Callable[[str], str],
+) -> DetectedEntity:
+    center_x = width * 0.5 + rng.uniform(-_TC_JITTER_X_PX, _TC_JITTER_X_PX)
+    center_y = height * 0.5 + rng.uniform(-_TC_JITTER_Y_PX, _TC_JITTER_Y_PX)
+    return _make_entity("town_center", (center_x, center_y), id_factory)
+
+
+def _render_villagers(
+    state: WorldState,
+    rng: random.Random,
+    tc_center: tuple[float, float],
+    id_factory: Callable[[str], str],
+) -> list[DetectedEntity]:
+    # villager_queue entries are deliberately excluded: they are queued for
+    # production at the TC and not yet on the map for the agent to perceive.
+    tc_x, tc_y = tc_center
+    villagers: list[DetectedEntity] = []
+    for _ in range(state.population):
+        vill_x = tc_x + rng.uniform(-_VILLAGER_SCATTER_RADIUS_X_PX, _VILLAGER_SCATTER_RADIUS_X_PX)
+        vill_y = tc_y + rng.uniform(-_VILLAGER_SCATTER_RADIUS_Y_PX, _VILLAGER_SCATTER_RADIUS_Y_PX)
+        villagers.append(_make_entity("villager", (vill_x, vill_y), id_factory))
+    return villagers
+
+
+def _render_buildings(
+    state: WorldState,
+    tc_center: tuple[float, float],
+    id_factory: Callable[[str], str],
+) -> list[DetectedEntity]:
+    # Index-based grid keeps positions stable when buildings are appended.
+    tc_x, tc_y = tc_center
+    entities: list[DetectedEntity] = []
+    for index, name in enumerate(state.buildings):
+        col = index % _BUILDING_GRID_COLS
+        row = index // _BUILDING_GRID_COLS
+        building_x = tc_x + _BUILDING_GRID_OFFSET_PX + col * _BUILDING_GRID_SPACING_PX
+        building_y = tc_y + row * _BUILDING_GRID_SPACING_PX
+        entities.append(_make_entity(name, (building_x, building_y), id_factory))
+    return entities
+
+
+def _default_id_factory() -> Callable[[str], str]:
+    counters: dict[str, int] = {}
+
+    def make_id(class_name: str) -> str:
+        index = counters.get(class_name, 0)
+        counters[class_name] = index + 1
+        return f"{class_name}_{index}"
+
+    return make_id
+
+
+def render(
+    state: WorldState,
+    width: int = _DEFAULT_RENDER_WIDTH,
+    height: int = _DEFAULT_RENDER_HEIGHT,
+    id_factory: Callable[[str], str] | None = None,
+    seed: int | None = None,
+) -> list[DetectedEntity]:
+    """Project a WorldState to a list of DetectedEntity at the given dimensions.
+
+    Same state + same dims (+ same seed) ⇒ identical output. Uses a local
+    random.Random instance — never mutates global random state.
+    """
+    factory = id_factory if id_factory is not None else _default_id_factory()
+    rng = random.Random(seed if seed is not None else state.turn)
+
+    town_center = _render_town_center(rng, width, height, factory)
+    villagers = _render_villagers(state, rng, town_center.center, factory)
+    buildings = _render_buildings(state, town_center.center, factory)
+
+    entities = [town_center, *villagers, *buildings]
+    entities.sort(key=lambda e: (e.class_name, -e.confidence))
+    return entities
