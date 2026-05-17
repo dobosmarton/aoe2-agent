@@ -15,7 +15,7 @@ WorldState and returns the parsed executor output.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from evaluation.world_sim import WorldState, apply_action, tick
@@ -27,27 +27,34 @@ if TYPE_CHECKING:
 _COST_DECIMAL_PLACES = 4
 
 
-@dataclass
+# Action dict values are typed `object` rather than `Any` so any consumer that
+# reads a specific field (e.g. `action["building_key"]`) must narrow with
+# isinstance — keys vary by action type, so the dict shape is genuinely
+# polymorphic. PEP 695 `type` aliases would tighten this further but require
+# Python 3.12; this project targets 3.11.
+
+
+@dataclass(frozen=True, slots=True)
 class SynthTurn:
-    """Frozen audit record for one iteration of the synth loop."""
+    """Audit record for one iteration of the synth loop."""
 
     turn_num: int
     state_before: WorldState
-    actions: list[dict]
+    actions: list[dict[str, object]]
     reasoning: str
     cost_usd: float
     state_after: WorldState
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class SynthLoopResult:
     final_state: WorldState
-    turns: list[SynthTurn] = field(default_factory=list)
-    total_cost_usd: float = 0.0
+    turns: tuple[SynthTurn, ...]
+    total_cost_usd: float
 
 
 async def synth_game_loop(
-    invoke: Callable[[WorldState], Awaitable[tuple[list[dict], str, float]]],
+    invoke: Callable[[WorldState], Awaitable[tuple[list[dict[str, object]], str, float]]],
     initial_state: WorldState,
     max_iterations: int,
 ) -> SynthLoopResult:
@@ -81,6 +88,6 @@ async def synth_game_loop(
 
     return SynthLoopResult(
         final_state=state,
-        turns=turns,
+        turns=tuple(turns),
         total_cost_usd=round(total_cost, _COST_DECIMAL_PLACES),
     )
