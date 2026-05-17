@@ -201,6 +201,9 @@ agent/
 │   └── docs/                      # Detection documentation
 ├── data/                          # Game knowledge database
 ├── prompts/                       # System prompts (executor + strategist)
+├── evaluation/                    # Synthetic-arena evaluation harness
+│   ├── world_sim.py               # WorldState model + render() (Phase 1 perception projection)
+│   └── runner.py                  # Multi-turn scenario harness with assertion DSL
 ├── autoresearch/                  # Automated experiment framework
 ├── justfile                       # Monorepo commands
 └── logs/                          # Screenshots and goal logs
@@ -237,6 +240,32 @@ Action success/failure is tracked via `ActionResult` objects returned by the exe
 ### Autoresearch (`autoresearch/`)
 
 Automated experiment framework. Runs timed games, collects metrics (peak population, food gathered, survival time, action success rate), and scores performance for prompt optimization.
+
+### Synthetic Perception (`evaluation/world_sim.py`)
+
+Projects an in-memory `WorldState` to the same `DetectedEntity` schema the real YOLO detector emits, so the agent's perception layer can be exercised against a fully deterministic, in-process world — no game, no screenshots, no model weights. This is the first step of the synthetic-arena buildout (Langfuse + the perception projection live in the same tier).
+
+Two API surfaces:
+
+- `evaluation.world_sim.render(state, width, height, seed=None) -> list[DetectedEntity]` — pure projection. One `town_center` always, `state.population` villagers, one entity per `state.buildings` entry placed on a stable index-based grid. Villagers in `villager_queue` are deliberately excluded (queued for production, not yet on the map). Confidence is `1.0` (ground truth). Same `state` + same dims + same seed ⇒ identical output.
+- `detection.inference.mock.mock_detect_from_world(screenshot, id_factory, world_state) -> list[DetectedEntity]` — sibling of `mock_detect()` that delegates to `render()`. Use this where the real-game tier would call `mock_detect()`.
+
+Example:
+
+```python
+from evaluation.world_sim import WorldState, render
+
+state = WorldState(
+    food=200.0, wood=200.0, gold=0.0, stone=0.0,
+    population=5, pop_cap=25, age="Dark Age",
+    buildings=["mill"], villager_queue=[], age_up_ticks_remaining=0, turn=0,
+)
+entities = render(state, 1920, 1080)  # list[DetectedEntity], confidence=1.0
+```
+
+**Schema lock.** `tests/test_detector.py::TestSyntheticRenderSchemaContract` is parametrized over both `mock_detect` (legacy) and `mock_detect_from_world` (new), asserting 10 invariants on each (id non-empty, class_name in canonical YOLO list, bbox well-ordered and within dims, center inside bbox, confidence ∈ [0,1], area > 0, `to_dict()` keys, sort order, id uniqueness) plus a state-sensitivity test (`population=15` yields 7 more villager entities than `population=8`). Any future drift between the two perception surfaces fails CI.
+
+**Real-game tier impact: zero.** Nothing in `gameplay_agent/` was modified; the existing `mock_detect()` keeps its frozen Dark-Age fixture behavior. Synthetic-arena callers (Phase 2 and beyond) reach for the new function explicitly.
 
 ## Documentation
 
