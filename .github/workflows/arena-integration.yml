@@ -1,0 +1,89 @@
+name: Arena Integration
+
+# Opt-in / scheduled integration tests for the Synthetic Arena stack.
+#
+# Triggers:
+#   * PRs labeled `arena-ci` — for verifying compose / lockfile / infra changes.
+#   * Nightly cron — catches upstream image drift Renovate hasn't yet bumped.
+#   * Manual dispatch — for ad-hoc smoke testing.
+#
+# Phase 0 scope: just "stack comes up healthy within ~90s on tmpfs volumes".
+# Later phases extend this file with synthetic smoke runs + DuckDB + Langfuse
+# trace assertions (per docs/design/synthetic-arena-analysis.md §"Verification").
+#
+# Kept OUT of the fast PR CI (`ci.yml`) so day-to-day PR feedback stays under
+# ~3 min and doesn't pull multi-hundred-MB images on every push.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  schedule:
+    # 03:17 UTC nightly — staggered off the hour to dodge GitHub-runner contention.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  arena-stack-smoke:
+    # Skip on PRs that don't carry the `arena-ci` label. Scheduled + manual
+    # runs always execute (github.event_name != 'pull_request').
+    if: |
+      github.event_name != 'pull_request' ||
+      contains(github.event.pull_request.labels.*.name, 'arena-ci')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write throwaway secrets for compose
+        # Healthchecks need non-empty env vars but no actual auth is exercised
+        # here — Phase 0 only asserts "containers go Healthy". Real secret
+        # rotation happens out-of-band in production.
+        run: |
+          {
+            echo "ANTHROPIC_API_KEY=ci-not-used"
+            echo "LANGFUSE_SALT=$(openssl rand -base64 24)"
+            echo "LANGFUSE_NEXTAUTH_SECRET=$(openssl rand -base64 24)"
+            echo "LANGFUSE_ENCRYPTION_KEY=$(openssl rand -hex 32)"
+            echo "LANGFUSE_DB_PASSWORD=$(openssl rand -base64 24 | tr -d '=+/' )"
+            echo "CLICKHOUSE_PASSWORD=$(openssl rand -base64 24 | tr -d '=+/' )"
+            echo "REDIS_PASSWORD=$(openssl rand -base64 24 | tr -d '=+/' )"
+            echo "MINIO_ROOT_USER=arena"
+            echo "MINIO_ROOT_PASSWORD=$(openssl rand -base64 24 | tr -d '=+/' )"
+            echo "OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318"
+          } > .env
+
+      - name: Bring up arena stack on tmpfs (CI override)
+        # --wait blocks until every service reports Healthy or fails.
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --wait --wait-timeout 240
+
+      - name: Show container status
+        if: always()
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml ps
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml ps --format json \
+            | jq -r '.[] | "\(.Service): \(.Health // "n/a")"'
+
+      - name: Assert every service is Healthy
+        run: |
+          set -o pipefail
+          unhealthy=$(docker compose -f docker-compose.yml -f docker-compose.ci.yml ps --format json \
+            | jq -r '.[] | select(.Health != "healthy") | .Service')
+          if [ -n "$unhealthy" ]; then
+            echo "::error::Unhealthy services: $unhealthy"
+            exit 1
+          fi
+          echo "All services healthy."
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --no-color
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml down -v

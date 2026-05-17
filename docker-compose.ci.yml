@@ -1,0 +1,58 @@
+# CI override for the Synthetic Arena stack.
+#
+# Layered on top of docker-compose.yml via
+#   docker compose -f docker-compose.yml -f docker-compose.ci.yml ...
+#
+# Differences vs. the production-ish compose file:
+#   * Every named volume becomes tmpfs-backed — no state leaks between runs,
+#     no host disk used, faster bring-up.
+#   * Host port bindings dropped — CI doesn't need host access.
+#   * Healthcheck retries/intervals tightened — fail-fast on broken images.
+#
+# Compose merges lists by appending; we override named-volume DEFINITIONS
+# (not per-service mounts) to swap the storage backend without touching the
+# service spec. Per-service host port lists ARE replaced (lists at this key
+# follow override semantics for simple replacements).
+
+volumes:
+  langfuse-pg-data:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "size=512m"
+  clickhouse-data:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "size=1g"
+  minio-data:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "size=512m"
+  redis-data:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "size=128m"
+
+services:
+  langfuse-web:
+    ports: !reset []
+    healthcheck:
+      interval: 5s
+      retries: 18
+      start_period: 20s
+
+  langfuse-worker:
+    healthcheck:
+      interval: 5s
+      retries: 18
+      start_period: 20s
+
+  minio:
+    ports: !reset []

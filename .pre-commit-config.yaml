@@ -10,6 +10,8 @@ repos:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
+        # --unsafe so compose-spec custom tags (!reset, !override) parse cleanly.
+        args: ["--unsafe"]
       - id: check-toml
       - id: check-merge-conflict
       - id: check-added-large-files

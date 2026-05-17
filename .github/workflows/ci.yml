@@ -24,31 +24,48 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Verify all docker-compose images are digest-pinned
+        # Fails if any `image:` line in any docker-compose*.yml lacks `@sha256:`.
+        # Renovate keeps digests fresh; this guard prevents accidental floating-tag
+        # commits. See docs/design/synthetic-arena-analysis.md §H "Image pinning".
+        run: |
+          if grep -rE '^\s*image:' docker-compose*.yml | grep -v '@sha256:'; then
+            echo "::error::Found docker-compose image lines without @sha256: digests"
+            exit 1
+          fi
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: pip
-          cache-dependency-path: pyproject.toml
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Verify uv.lock is up to date
+        # Fails if pyproject.toml was edited without re-running `uv lock`.
+        # Catches "I bumped a >= but forgot to refresh the lockfile" mistakes.
+        run: uv lock --locked
 
       - name: Install project + dev + server extras
         # Single source of truth: pyproject.toml [project.dependencies] +
         # [project.optional-dependencies]. coremltools is a macOS-only extra
         # that we deliberately skip on Linux CI.
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev,server]"
+        run: uv sync --extra dev --extra server
 
       - name: Ruff lint
-        run: ruff check .
+        run: uv run ruff check .
 
       - name: Ruff format check
-        run: ruff format --check .
+        run: uv run ruff format --check .
 
       - name: Pyright type-check
         # Scope-explicit because the bundled pyproject `include` only kicks in
         # when pyright is invoked with no path args.
-        run: pyright gameplay_agent autoresearch evaluation server
+        run: uv run pyright gameplay_agent autoresearch evaluation server
 
       - name: Pytest
-        run: pytest -q
+        run: uv run pytest -q

@@ -1,0 +1,37 @@
+# Synthetic Arena Phase 0 doesn't build any application images — every
+# `image:` in docker-compose.yml is a pinned public image. This .dockerignore
+# is here to keep build context tiny if/when arena components do get
+# containerized later (phase 7+ web UI is a candidate).
+
+**/__pycache__/
+**/.pytest_cache/
+**/.ruff_cache/
+**/.coverage*
+**/venv/
+**/.venv/
+.env
+.env.*
+*.egg-info/
+
+# Large data / models / logs — never needed in a build context.
+data/
+detection/**/training_data*/
+detection/real_screenshots/
+detection/labeling/output/
+training_data*.tar.gz
+logs/
+logs*.txt
+tmp/
+experiments/
+memories/
+game_graphics/
+
+# Compose state should never enter a build context.
+volumes/
+*.sqlite
+*.duckdb
+
+# Editor / OS noise
+.DS_Store
+.idea/
+.vscode/
