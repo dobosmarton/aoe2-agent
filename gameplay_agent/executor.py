@@ -89,6 +89,16 @@ def clear_detected_entities() -> None:
     _detected_entities = []
 
 
+def _build_executor_rng() -> random.Random:
+    """Fresh local RNG seeded from config.seed.
+
+    Read at call time so tests that mutate config.seed pick up the change
+    without re-importing. Never seeds the global `random` module — keeps the
+    determinism contract local to the build-retry helper.
+    """
+    return random.Random(config.seed)
+
+
 # ---------------------------------------------------------------------------
 # Coordinate resolution
 # ---------------------------------------------------------------------------
@@ -217,9 +227,10 @@ async def _handle_click(action_dict: dict[str, object], intent: str) -> ActionRe
         retry_start = time.monotonic()
         await asyncio.sleep(BUILD_SETTLE_DELAY)
         offsets: list[tuple[int, int]] = []
+        rng = _build_executor_rng()
         for _ in range(BUILD_RETRY_ATTEMPTS):
-            angle = random.uniform(0.0, 2.0 * math.pi)
-            radius = random.uniform(BUILD_RETRY_RADIUS_MIN, BUILD_RETRY_RADIUS_MAX)
+            angle = rng.uniform(0.0, 2.0 * math.pi)
+            radius = rng.uniform(BUILD_RETRY_RADIUS_MIN, BUILD_RETRY_RADIUS_MAX)
             dx = int(radius * math.cos(angle))
             dy = int(radius * math.sin(angle))
             offsets.append((dx, dy))

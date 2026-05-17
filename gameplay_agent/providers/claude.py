@@ -430,6 +430,7 @@ class ClaudeProvider(BaseLLMProvider):
             response = await self.client.messages.create(
                 model=self.model,
                 max_tokens=config.max_tokens,
+                temperature=config.temperature,
                 system=system_prompt,  # pyright: ignore[reportArgumentType]
                 messages=messages,  # pyright: ignore[reportArgumentType]
                 tools=_ACTION_TOOLS,  # pyright: ignore[reportArgumentType]

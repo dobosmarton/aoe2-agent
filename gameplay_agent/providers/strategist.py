@@ -133,6 +133,7 @@ class StrategistProvider:
         response = await self.client.messages.parse(  # pyright: ignore[reportAttributeAccessIssue]
             model=self.model,
             max_tokens=768,
+            temperature=config.temperature,
             system=self.get_system_prompt(),
             messages=[{"role": "user", "content": content}],  # pyright: ignore[reportArgumentType]
             output_format=StrategistResponse,

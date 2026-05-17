@@ -88,6 +88,18 @@ export ANTHROPIC_API_KEY=your-key-here
 | `AOE2_LOOP_DELAY` | `1.0` | Seconds between iterations |
 | `AOE2_SAVE_SCREENSHOTS` | `true` | Save screenshots to logs/ |
 | `AOE2_DETECTION_HOST` | — | Remote detection server URL (e.g., `http://192.168.64.1:8420`) |
+| `AOE2_TEMPERATURE` | `0.0` | Anthropic Messages API temperature (lowest variance) |
+| `AOE2_SEED` | — | Local-RNG seed (build-retry jitter); unset = OS entropy |
+
+### Reproducibility (Phase 3)
+
+Determinism is asymptotic — per [arxiv 2408.04667](https://arxiv.org/html/2408.04667v5), expect ~5–12% per-decision variance even with `temperature=0`. Promise *statistical* replay over N trials, not byte-identical traces.
+
+Three knobs to make runs as reproducible as Anthropic and the Python stack allow:
+
+- **`AOE2_TEMPERATURE=0.0`** (default) is Anthropic's lowest-variance temperature. Raise it (e.g. `0.7`) for output diversity at the cost of reproducibility.
+- **`AOE2_SEED=<int>`** seeds the local RNG used in `executor.py`'s build-retry jitter and Phase 1's `world_sim.render()` default fallback. Two runs with the same seed produce the same RNG sequence. Leave unset to get today's stochastic behavior (OS entropy). **Not passed to the Anthropic API** — `messages.create()` doesn't accept `seed=` as of late 2025; this is purely for the local code paths.
+- **Pin model snapshots.** Set `AOE2_MODEL` and `AOE2_STRATEGIST_MODEL` to a dated snapshot (e.g. `claude-sonnet-4-6-2026-XX-XX`) rather than the floating family alias. Floating tags can move under you between runs.
 
 ### Synthetic Arena infrastructure (optional)
 
