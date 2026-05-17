@@ -326,3 +326,147 @@ def test_get_detector_returns_singleton():
     a = get_detector(use_mock=True)
     b = get_detector(use_mock=True)
     assert a is b
+
+
+# ---------------------------------------------------------------------------
+# Schema contract: synthetic render must match real DetectedEntity schema.
+#
+# Risk 4 mitigation per docs/design/synthetic-arena-analysis.md line 380.
+# Parametrized over both `mock_detect` (existing) and `mock_detect_from_world`
+# (Phase 1, new) so any schema drift between the two surfaces fails loudly.
+# ---------------------------------------------------------------------------
+
+
+_CONTRACT_SCREENSHOT_WIDTH = 1920
+_CONTRACT_SCREENSHOT_HEIGHT = 1080
+
+
+def _build_id_factory():
+    counters: dict[str, int] = {}
+
+    def make_id(class_name: str) -> str:
+        index = counters.get(class_name, 0)
+        counters[class_name] = index + 1
+        return f"{class_name}_{index}"
+
+    return make_id
+
+
+def _dark_age_world_state():
+    from evaluation.world_sim import WorldState
+
+    return WorldState(
+        food=200.0,
+        wood=200.0,
+        gold=0.0,
+        stone=0.0,
+        population=5,
+        pop_cap=25,
+        age="Dark Age",
+        buildings=["mill"],
+        villager_queue=[],
+        age_up_ticks_remaining=0,
+        turn=0,
+    )
+
+
+@pytest.fixture
+def contract_screenshot() -> bytes:
+    return _make_screenshot(_CONTRACT_SCREENSHOT_WIDTH, _CONTRACT_SCREENSHOT_HEIGHT)
+
+
+@pytest.fixture(params=["mock_detect", "mock_detect_from_world"])
+def contract_entities(request, contract_screenshot) -> list[DetectedEntity]:
+    from detection.inference.mock import mock_detect, mock_detect_from_world
+
+    if request.param == "mock_detect":
+        return mock_detect(contract_screenshot, _build_id_factory())
+    return mock_detect_from_world(contract_screenshot, _build_id_factory(), _dark_age_world_state())
+
+
+def test_every_id_is_non_empty_string(contract_entities):
+    bad = [e for e in contract_entities if not (isinstance(e.id, str) and e.id)]
+    assert bad == []
+
+
+def test_every_class_name_is_in_canonical_classlist(contract_entities):
+    from detection.inference.detector import _load_default_classes
+
+    canonical = set(_load_default_classes())
+    unknown = [e.class_name for e in contract_entities if e.class_name not in canonical]
+    assert unknown == []
+
+
+def test_every_bbox_is_well_ordered(contract_entities):
+    malformed = [
+        e for e in contract_entities if not (e.bbox[0] < e.bbox[2] and e.bbox[1] < e.bbox[3])
+    ]
+    assert malformed == []
+
+
+def test_every_bbox_is_within_image_dims(contract_entities):
+    out_of_bounds = [
+        e
+        for e in contract_entities
+        if not (
+            0 <= e.bbox[0] <= _CONTRACT_SCREENSHOT_WIDTH
+            and 0 <= e.bbox[2] <= _CONTRACT_SCREENSHOT_WIDTH
+        )
+        or not (
+            0 <= e.bbox[1] <= _CONTRACT_SCREENSHOT_HEIGHT
+            and 0 <= e.bbox[3] <= _CONTRACT_SCREENSHOT_HEIGHT
+        )
+    ]
+    assert out_of_bounds == []
+
+
+def test_every_center_is_inside_its_bbox(contract_entities):
+    bad = [
+        e
+        for e in contract_entities
+        if not (e.bbox[0] <= e.center[0] <= e.bbox[2] and e.bbox[1] <= e.center[1] <= e.bbox[3])
+    ]
+    assert bad == []
+
+
+def test_every_confidence_is_in_unit_interval(contract_entities):
+    bad = [e for e in contract_entities if not (0.0 <= e.confidence <= 1.0)]
+    assert bad == []
+
+
+def test_every_area_is_positive(contract_entities):
+    bad = [e for e in contract_entities if not e.area > 0]
+    assert bad == []
+
+
+def test_every_to_dict_has_canonical_keys(contract_entities):
+    canonical = {"id", "class", "bbox", "center", "confidence"}
+    mismatched = [e for e in contract_entities if set(e.to_dict()) != canonical]
+    assert mismatched == []
+
+
+def test_output_is_sorted_by_class_then_confidence(contract_entities):
+    sort_keys = [(e.class_name, -e.confidence) for e in contract_entities]
+    assert sort_keys == sorted(sort_keys)
+
+
+def test_all_ids_are_unique(contract_entities):
+    ids = [e.id for e in contract_entities]
+    assert len(set(ids)) == len(ids)
+
+
+def test_population_15_yields_seven_more_villagers_than_population_8(contract_screenshot):
+    from dataclasses import replace
+
+    from detection.inference.mock import mock_detect_from_world
+
+    base = _dark_age_world_state()
+    state_8 = replace(base, population=8)
+    state_15 = replace(base, population=15)
+
+    entities_8 = mock_detect_from_world(contract_screenshot, _build_id_factory(), state_8)
+    entities_15 = mock_detect_from_world(contract_screenshot, _build_id_factory(), state_15)
+
+    villagers_8 = sum(1 for e in entities_8 if e.class_name == "villager")
+    villagers_15 = sum(1 for e in entities_15 if e.class_name == "villager")
+    assert villagers_15 - villagers_8 == 7

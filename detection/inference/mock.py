@@ -114,8 +114,8 @@ def mock_detect(
     scout_y = random.uniform(100, height - 100)
     entities.append(
         DetectedEntity(
-            id=id_factory("scout"),
-            class_name="scout",
+            id=id_factory("scout_line"),
+            class_name="scout_line",
             bbox=(scout_x - 15, scout_y - 18, scout_x + 15, scout_y + 8),
             center=(scout_x, scout_y),
             confidence=0.88,
