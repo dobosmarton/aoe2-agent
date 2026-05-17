@@ -1,13 +1,25 @@
 """Synthetic detection generator for tests / dev without YOLO weights.
 
-`mock_detect(screenshot, id_factory)` produces a Dark-Age-shaped fixture
-(town center, 2-4 sheep, 3 villagers, 1 scout) sized to the screenshot
-dimensions. The IDs assigned here are placeholders — they're reassigned
-downstream by `_assign_persistent_ids` or the Kalman tracker — but we still
-need a callable that mints them, so the caller passes one in.
+Two entry points, each doing one thing:
 
-`random.seed(42)` makes the same screenshot dimensions produce the same
-detections; tests rely on this determinism.
+- `mock_detect(screenshot, id_factory)` — frozen Dark-Age fixture
+  (town center, 2-4 sheep, 3 villagers, 1 scout) sized to the screenshot.
+  Used by the real-game tier's mock fallback and existing tests.
+- `mock_detect_from_world(screenshot, id_factory, world_state)` — projects a
+  `WorldState` (from the synthetic-arena tier) to detections at the
+  screenshot's dimensions. Phase 1 of the synthetic-arena buildout.
+
+The IDs assigned here are placeholders — they're reassigned downstream by
+`_assign_persistent_ids` or the Kalman tracker — but we still need a callable
+that mints them, so the caller passes one in.
+
+`random.seed(42)` in `mock_detect` makes the same screenshot dimensions
+produce the same detections; existing tests rely on this determinism.
+
+NOTE (follow-up): the global `random.seed(42)` mutates process-wide RNG state
+— a side effect. `mock_detect_from_world` uses a local RNG inside
+`evaluation.world_sim.render` instead. The legacy path should migrate when
+its test surface allows.
 """
 
 from __future__ import annotations
@@ -18,6 +30,8 @@ from typing import TYPE_CHECKING
 
 from PIL import Image
 
+from evaluation.world_sim import WorldState, render
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -26,6 +40,15 @@ if TYPE_CHECKING:
 
 _DEFAULT_FALLBACK_WIDTH = 1920
 _DEFAULT_FALLBACK_HEIGHT = 1080
+
+
+def _extract_screenshot_dims(screenshot: bytes | Image.Image) -> tuple[int, int]:
+    if isinstance(screenshot, bytes):
+        image = Image.open(io.BytesIO(screenshot))
+        return image.size
+    if hasattr(screenshot, "size"):
+        return screenshot.size
+    return _DEFAULT_FALLBACK_WIDTH, _DEFAULT_FALLBACK_HEIGHT
 
 
 def mock_detect(
@@ -41,14 +64,7 @@ def mock_detect(
     # `from .detector import DetectedEntity` would create a cycle.
     from .detector import DetectedEntity
 
-    if isinstance(screenshot, bytes):
-        image = Image.open(io.BytesIO(screenshot))
-        width, height = image.size
-    elif hasattr(screenshot, "size"):
-        width, height = screenshot.size
-    else:
-        width, height = _DEFAULT_FALLBACK_WIDTH, _DEFAULT_FALLBACK_HEIGHT
-
+    width, height = _extract_screenshot_dims(screenshot)
     random.seed(42)
 
     entities: list[DetectedEntity] = []
@@ -110,3 +126,18 @@ def mock_detect(
     entities.sort(key=lambda e: (e.class_name, -e.confidence))
 
     return entities
+
+
+def mock_detect_from_world(
+    screenshot: bytes | Image.Image,
+    id_factory: Callable[[str], str],
+    world_state: WorldState,
+) -> list[DetectedEntity]:
+    """Project a `WorldState` to detections at the screenshot's dimensions.
+
+    Synthetic-arena tier entry point. Unlike `mock_detect`, output depends on
+    `world_state` and is fully deterministic per (state, dims, seed) — no
+    global RNG mutation.
+    """
+    width, height = _extract_screenshot_dims(screenshot)
+    return render(world_state, width, height, id_factory)
