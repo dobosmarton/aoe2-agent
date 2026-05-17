@@ -384,7 +384,9 @@ async def execute_action(action: dict[str, object] | Action) -> ActionResult:
     # Normalize to dict — isinstance(BaseModel) narrows the type for pyright,
     # which `hasattr` does not.
     if isinstance(action, BaseModel):
-        action_dict = action.model_dump()
+        # pyright 1.1.409 fails to narrow `dict[str, object] | Action` to the
+        # BaseModel branch here when Action is an Annotated discriminated union.
+        action_dict = action.model_dump()  # pyright: ignore[reportAttributeAccessIssue]
     else:
         validated = validate_action(action)
         if not validated:

@@ -6,6 +6,13 @@ from pathlib import Path
 from pydantic import BaseModel
 
 
+def _parse_optional_int(value: str | None) -> int | None:
+    """Parse an optional integer env var. Treats missing or empty as None."""
+    if value is None or value == "":
+        return None
+    return int(value)
+
+
 class Config(BaseModel):
     """Agent configuration."""
 
@@ -19,6 +26,12 @@ class Config(BaseModel):
     max_tool_iterations: int = 7  # Max tool calls per game turn in agentic loop
     strategist_model: str = "claude-sonnet-4-6"  # Strategist: deeper reasoning
     strategist_interval: int = 10  # Run strategist every N turns
+
+    # Determinism knobs (Phase 3). Pin model snapshots via AOE2_MODEL /
+    # AOE2_STRATEGIST_MODEL to a dated form (e.g. claude-sonnet-4-6-2026-XX-XX)
+    # rather than the floating family alias for reproducible runs.
+    temperature: float = 0.0  # Anthropic Messages API temperature (0.0 = lowest variance)
+    seed: int | None = None  # Local RNG seed; None = OS entropy (today's behavior)
 
     # Detection settings
     detection_imgsz: int = 1280  # YOLO inference resolution (higher = more detections, slower)
@@ -47,6 +60,8 @@ class Config(BaseModel):
             loop_delay=float(os.environ.get("AOE2_LOOP_DELAY", "0.3")),
             save_screenshots=os.environ.get("AOE2_SAVE_SCREENSHOTS", "true").lower() == "true",
             detection_host=os.environ.get("AOE2_DETECTION_HOST", ""),
+            temperature=float(os.environ.get("AOE2_TEMPERATURE", "0.0")),
+            seed=_parse_optional_int(os.environ.get("AOE2_SEED")),
         )
 
 

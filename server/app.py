@@ -316,7 +316,9 @@ def _run_coreml_single(state: ModelState, chw: np.ndarray) -> np.ndarray:
 
     if not isinstance(result, np.ndarray):
         result = np.array(result)
-    if result.ndim == 2:
+    # numpy 2.x type stubs make np.array() return `object` in some overload
+    # paths; the runtime is always ndarray here per the isinstance branch above.
+    if result.ndim == 2:  # pyright: ignore[reportAttributeAccessIssue]
         result = np.expand_dims(result, axis=0)
 
     return result
