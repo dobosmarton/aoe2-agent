@@ -486,3 +486,67 @@ def test_render_all_ids_are_unique():
     entities = render(_state(population=5, buildings=["mill", "lumber_camp", "house"]))
     ids = [e.id for e in entities]
     assert len(set(ids)) == len(ids)
+
+
+# ---------------------------------------------------------------------------
+# apply_action — single-action dispatch covering all 7 emitted types (Phase 2)
+# ---------------------------------------------------------------------------
+
+
+def test_apply_action_queue_villager_deducts_food():
+    from evaluation.world_sim import apply_action
+
+    new_state = apply_action(_state(food=200.0), {"type": "queue_villager"})
+    assert new_state.food == 150.0
+
+
+def test_apply_action_build_adds_house():
+    from evaluation.world_sim import apply_action
+
+    new_state = apply_action(
+        _state(wood=150.0, buildings=[]), {"type": "build", "building_key": "q"}
+    )
+    assert "house" in new_state.buildings
+
+
+def test_apply_action_press_z_starts_age_up():
+    from evaluation.world_sim import apply_action
+
+    state = _state(food=600.0, population=22, age="Dark Age", buildings=["mill", "lumber_camp"])
+    new_state = apply_action(state, {"type": "press", "key": "z"})
+    assert new_state.age_up_ticks_remaining == 6
+
+
+def test_apply_action_press_non_z_is_noop():
+    from evaluation.world_sim import apply_action
+
+    state = _state(food=200.0)
+    new_state = apply_action(state, {"type": "press", "key": "b"})
+    assert new_state == state
+
+
+@pytest.mark.parametrize(
+    "action_type", ["click", "right_click", "drag", "wait", "scroll", "detect"]
+)
+def test_apply_action_mouse_keyboard_primitives_are_noop(action_type):
+    from evaluation.world_sim import apply_action
+
+    state = _state(food=200.0, wood=150.0, buildings=["mill"])
+    new_state = apply_action(state, {"type": action_type})
+    assert new_state == state
+
+
+def test_apply_action_unknown_type_is_noop():
+    from evaluation.world_sim import apply_action
+
+    state = _state(food=200.0)
+    new_state = apply_action(state, {"type": "this_action_does_not_exist"})
+    assert new_state == state
+
+
+def test_apply_action_missing_type_is_noop():
+    from evaluation.world_sim import apply_action
+
+    state = _state(food=200.0)
+    new_state = apply_action(state, {})
+    assert new_state == state

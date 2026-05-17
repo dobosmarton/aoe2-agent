@@ -203,16 +203,56 @@ def _apply_age_up(state: WorldState) -> WorldState:
     return replace(state, food=state.food - AGE_UP_COST_FOOD, age_up_ticks_remaining=AGE_UP_TICKS)
 
 
+def _handle_queue_villager_action(state: WorldState, action: dict) -> WorldState:
+    return _apply_queue_villager(state)
+
+
+def _handle_build_action(state: WorldState, action: dict) -> WorldState:
+    return _apply_build(state, action.get("building_key", ""))
+
+
+def _handle_press_action(state: WorldState, action: dict) -> WorldState:
+    # Only "z" advances the age; other key presses are noise in synth mode.
+    if action.get("key") == "z":
+        return _apply_age_up(state)
+    return state
+
+
+def _handle_noop_action(state: WorldState, action: dict) -> WorldState:
+    # click / right_click / drag / wait / scroll / detect have no WorldState
+    # effect in the synth tier — they're mouse/keyboard primitives the LLM
+    # emits without affecting our economic model. Accepting them keeps the
+    # loop faithful to the real executor's emission surface.
+    return state
+
+
+_ACTION_HANDLERS: dict[str, Callable[[WorldState, dict], WorldState]] = {
+    "queue_villager": _handle_queue_villager_action,
+    "build": _handle_build_action,
+    "press": _handle_press_action,
+    "click": _handle_noop_action,
+    "right_click": _handle_noop_action,
+    "drag": _handle_noop_action,
+    "wait": _handle_noop_action,
+    "scroll": _handle_noop_action,
+    "detect": _handle_noop_action,
+}
+
+
+def apply_action(state: WorldState, action: dict) -> WorldState:
+    """Apply a single LLM action to the world state.
+
+    Unknown action types silently no-op so the loop accepts anything the
+    executor emits without crashing.
+    """
+    handler = _ACTION_HANDLERS.get(action.get("type", ""), _handle_noop_action)
+    return handler(state, action)
+
+
 def apply_actions(state: WorldState, actions: list[dict]) -> WorldState:
     """Apply a list of LLM actions to the world state. Returns a new state."""
     for action in actions:
-        action_type = action.get("type")
-        if action_type == "queue_villager":
-            state = _apply_queue_villager(state)
-        elif action_type == "build":
-            state = _apply_build(state, action.get("building_key", ""))
-        elif action_type == "press" and action.get("key") == "z":
-            state = _apply_age_up(state)
+        state = apply_action(state, action)
     return state
 
 
