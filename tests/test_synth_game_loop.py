@@ -165,3 +165,117 @@ def test_synth_game_loop_accepts_mouse_keyboard_primitives_without_crashing(acti
     invoke = _RecordingStub([([{"type": action_type}], "", 0.0)])
     result = _run(synth_game_loop(invoke, _state(), max_iterations=1))
     assert len(result.turns) == 1
+
+
+# ---------------------------------------------------------------------------
+# Event emission (Phase 4)
+# ---------------------------------------------------------------------------
+
+
+class _RecordingSink:
+    """EventSink implementation that captures every emit in order."""
+
+    def __init__(self):
+        self.events = []
+
+    def emit(self, event):
+        self.events.append(event)
+
+
+def test_synth_game_loop_result_includes_run_id():
+    from gameplay_agent.synth_game_loop import synth_game_loop
+
+    invoke = _RecordingStub([_empty_turn()])
+    result = _run(synth_game_loop(invoke, _state(), max_iterations=1))
+    assert len(result.run_id) == 32  # uuid4().hex is 32 hex chars
+
+
+def test_synth_game_loop_result_run_id_differs_across_runs():
+    from gameplay_agent.synth_game_loop import synth_game_loop
+
+    invoke_a = _RecordingStub([_empty_turn()])
+    invoke_b = _RecordingStub([_empty_turn()])
+    a = _run(synth_game_loop(invoke_a, _state(), max_iterations=1))
+    b = _run(synth_game_loop(invoke_b, _state(), max_iterations=1))
+    assert a.run_id != b.run_id
+
+
+def test_synth_game_loop_emits_turn_start_per_turn():
+    from gameplay_agent.synth_game_loop import synth_game_loop
+
+    sink = _RecordingSink()
+    invoke = _RecordingStub([_empty_turn() for _ in range(3)])
+    _run(synth_game_loop(invoke, _state(), max_iterations=3, sink=sink))
+    turn_starts = [e for e in sink.events if e.payload.kind == "turn_start"]
+    assert len(turn_starts) == 3
+
+
+def test_synth_game_loop_emits_llm_prompt_and_response_per_turn():
+    from gameplay_agent.synth_game_loop import synth_game_loop
+
+    sink = _RecordingSink()
+    invoke = _RecordingStub([_empty_turn(cost=0.01)])
+    _run(synth_game_loop(invoke, _state(), max_iterations=1, sink=sink))
+    kinds = [e.payload.kind for e in sink.events]
+    assert "llm_prompt" in kinds and "llm_response" in kinds
+
+
+def test_synth_game_loop_emits_one_action_event_per_action():
+    from gameplay_agent.synth_game_loop import synth_game_loop
+
+    sink = _RecordingSink()
+    actions = [{"type": "queue_villager"}, {"type": "build", "building_key": "q"}]
+    invoke = _RecordingStub([(actions, "do stuff", 0.0)])
+    _run(synth_game_loop(invoke, _state(food=200.0, wood=150.0), max_iterations=1, sink=sink))
+    action_events = [e for e in sink.events if e.payload.kind == "action"]
+    assert len(action_events) == 2
+
+
+def test_synth_game_loop_emits_action_result_with_state_changed_flag():
+    from gameplay_agent.synth_game_loop import synth_game_loop
+
+    sink = _RecordingSink()
+    invoke = _RecordingStub([([{"type": "queue_villager"}], "", 0.0)])
+    _run(synth_game_loop(invoke, _state(food=200.0), max_iterations=1, sink=sink))
+    result_events = [e for e in sink.events if e.payload.kind == "action_result"]
+    assert result_events[0].payload.state_changed is True
+
+
+def test_synth_game_loop_emits_action_result_state_unchanged_for_noop():
+    from gameplay_agent.synth_game_loop import synth_game_loop
+
+    sink = _RecordingSink()
+    invoke = _RecordingStub([([{"type": "wait"}], "", 0.0)])
+    _run(synth_game_loop(invoke, _state(), max_iterations=1, sink=sink))
+    result_events = [e for e in sink.events if e.payload.kind == "action_result"]
+    assert result_events[0].payload.state_changed is False
+
+
+def test_synth_game_loop_emits_metric_per_turn():
+    from gameplay_agent.synth_game_loop import synth_game_loop
+
+    sink = _RecordingSink()
+    invoke = _RecordingStub([_empty_turn(cost=0.01), _empty_turn(cost=0.02)])
+    _run(synth_game_loop(invoke, _state(), max_iterations=2, sink=sink))
+    metric_events = [e for e in sink.events if e.payload.kind == "metric"]
+    assert len(metric_events) == 2
+
+
+def test_synth_game_loop_tags_all_events_with_same_run_id():
+    from gameplay_agent.synth_game_loop import synth_game_loop
+
+    sink = _RecordingSink()
+    invoke = _RecordingStub([_empty_turn() for _ in range(2)])
+    result = _run(synth_game_loop(invoke, _state(), max_iterations=2, sink=sink))
+    run_ids = {e.run_id for e in sink.events}
+    assert run_ids == {result.run_id}
+
+
+def test_synth_game_loop_default_sink_emits_nothing():
+    """No sink argument = NullEventSink default; should not raise."""
+    from gameplay_agent.synth_game_loop import synth_game_loop
+
+    invoke = _RecordingStub([_empty_turn()])
+    # No sink argument; should run with the NullEventSink default.
+    result = _run(synth_game_loop(invoke, _state(), max_iterations=1))
+    assert result.turns[0].turn_num == 1
