@@ -39,3 +39,13 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
+
+      # Mirrors the CI `uv lock --locked` check: fails if pyproject.toml and
+      # uv.lock are out of sync. Triggered only when one of those files is
+      # staged — no overhead on commits that don't touch dependencies.
+      - id: uv-lock-locked
+        name: uv lock --locked (pyproject/uv.lock consistency)
+        entry: uv lock --locked
+        language: system
+        files: ^(pyproject\.toml|uv\.lock)$
+        pass_filenames: false
