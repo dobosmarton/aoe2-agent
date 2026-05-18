@@ -32,6 +32,8 @@ distro==1.9.0
     # via anthropic
 docstring-parser==0.18.0
     # via anthropic
+duckdb==1.5.2
+    # via aoe2-agent
 fastapi==0.136.1
     # via aoe2-agent
 filelock==3.29.0
