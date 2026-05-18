@@ -58,27 +58,56 @@ jobs:
           } > .env
 
       - name: Bring up arena stack on tmpfs (CI override)
-        # --wait blocks until every service reports Healthy or fails.
+        # We deliberately do NOT use `compose up --wait`. The otel-collector
+        # contrib image is distroless (FROM scratch) so it can't run an
+        # in-container healthcheck probe — its healthcheck is intentionally
+        # disabled in the base compose. `--wait` errors out the moment any
+        # awaited service has no healthcheck, even when every health-checked
+        # service is Healthy. We poll from the host in the next step instead.
         run: |
-          docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --wait --wait-timeout 240
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d
+
+      - name: Wait for healthchecks
+        # Poll up to ~240s for every container that *has* a healthcheck to
+        # reach `healthy`. Services with no healthcheck (otel-collector) are
+        # treated as ready once they're running — the previous `up -d` only
+        # returns after compose has started them.
+        run: |
+          set -o pipefail
+          deadline=$((SECONDS + 240))
+          while [ $SECONDS -lt $deadline ]; do
+            pending=$(docker compose -f docker-compose.yml -f docker-compose.ci.yml ps --format json \
+              | jq -r 'select((.Health // "") != "" and .Health != "healthy") | .Service')
+            if [ -z "$pending" ]; then
+              echo "All health-checked services Healthy."
+              exit 0
+            fi
+            echo "Still waiting on: $(echo "$pending" | tr '\n' ' ')"
+            sleep 5
+          done
+          echo "::error::Timed out after 240s waiting for healthchecks"
+          exit 1
 
       - name: Show container status
         if: always()
         run: |
+          set -o pipefail
           docker compose -f docker-compose.yml -f docker-compose.ci.yml ps
+          # `compose ps --format json` emits NDJSON (one object per line) on
+          # current Compose — no outer `.[]` needed; jq streams each line.
           docker compose -f docker-compose.yml -f docker-compose.ci.yml ps --format json \
-            | jq -r '.[] | "\(.Service): \(.Health // "n/a")"'
+            | jq -r '"\(.Service): \(if (.Health // "") == "" then "n/a" else .Health end)"'
 
-      - name: Assert every service is Healthy
+      - name: Assert every health-checked service is Healthy
         run: |
           set -o pipefail
           unhealthy=$(docker compose -f docker-compose.yml -f docker-compose.ci.yml ps --format json \
-            | jq -r '.[] | select(.Health != "healthy") | .Service')
+            | jq -r 'select((.Health // "") != "" and .Health != "healthy") | .Service')
           if [ -n "$unhealthy" ]; then
             echo "::error::Unhealthy services: $unhealthy"
             exit 1
           fi
-          echo "All services healthy."
+          echo "All health-checked services healthy."
 
       - name: Dump logs on failure
         if: failure()
