@@ -117,3 +117,11 @@ arena-infra-status:
 
 # Stack + (later: native arena controller + web UI). Phase 0: just the stack.
 arena-up: arena-infra-up
+
+# Race N profiles against each other (real Claude API, requires ANTHROPIC_API_KEY)
+arena-race profile="arena/profiles/v1.yaml":
+    venv/bin/python -m arena race {{profile}}
+
+# Offline smoke test: mock invoke, no API key, 10 turns per variant
+arena-smoke:
+    venv/bin/python -m arena smoke
