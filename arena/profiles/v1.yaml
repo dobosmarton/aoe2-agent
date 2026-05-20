@@ -1,0 +1,11 @@
+turns: 50
+profiles:
+  - name: haiku-deterministic
+    model: claude-haiku-4-5-20251001
+    temperature: 0.0
+    seed: 42
+
+  - name: haiku-explorative
+    model: claude-haiku-4-5-20251001
+    temperature: 0.7
+    seed: 42

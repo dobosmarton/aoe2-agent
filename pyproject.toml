@@ -71,6 +71,7 @@ include = [
     "server*",
     "detection*",
     "data*",
+    "arena*",
 ]
 exclude = ["tests*", "experiments*", "venv*", "memories*", "logs*", "tmp*"]
 
@@ -223,6 +224,11 @@ root = "server"
 typeCheckingMode = "strict"
 extraPaths = ["."]
 
+[[tool.pyright.executionEnvironments]]
+root = "arena"
+typeCheckingMode = "strict"
+extraPaths = ["."]
+
 
 # ---------------------------------------------------------------------------
 # Coverage (pytest-cov)
@@ -237,6 +243,7 @@ source = [
     "evaluation",
     "server",
     "detection",
+    "arena",
 ]
 omit = [
     "*/tests/*",
