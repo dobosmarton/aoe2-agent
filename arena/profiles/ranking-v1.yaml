@@ -1,0 +1,17 @@
+turns: 60
+rounds: 5
+
+# Bradley-Terry ranking config: K rounds x M scenarios x N profiles.
+# Temperature=0.5 introduces LLM sampling variance so rounds are
+# non-degenerate. Scenarios are sourced from arena.scenarios.DEFAULT_SCENARIOS
+# when the `scenarios` list is empty.
+profiles:
+  - name: bare
+    model: claude-haiku-4-5-20251001
+    temperature: 0.5
+    prompt_variant: bare
+
+  - name: strategy
+    model: claude-haiku-4-5-20251001
+    temperature: 0.5
+    prompt_variant: strategy
