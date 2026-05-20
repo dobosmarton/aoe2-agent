@@ -36,6 +36,7 @@ from evaluation.event_log import (
     MetricPayload,
     NullEventSink,
     TurnStartPayload,
+    WorldStateSnapshot,
 )
 from evaluation.world_sim import WorldState, apply_action, tick
 
@@ -102,6 +103,7 @@ async def synth_game_loop(
     initial_state: WorldState,
     max_iterations: int,
     sink: EventSink = _NULL_SINK,
+    run_id: str | None = None,
 ) -> SynthLoopResult:
     """Run `max_iterations` synthetic turns and return the audit trail.
 
@@ -111,8 +113,11 @@ async def synth_game_loop(
 
     Events are emitted to `sink` (default: NullEventSink — no persistence).
     Provide a DuckDBEventSink to persist; both share the EventSink protocol.
+
+    Pass `run_id` to continue an existing run (e.g. after fork()); if None,
+    a fresh UUID is generated.
     """
-    run_id = uuid.uuid4().hex
+    actual_run_id = run_id if run_id is not None else uuid.uuid4().hex
     agent_id = uuid.uuid4().hex
     state = initial_state
     turns: list[SynthTurn] = []
@@ -120,10 +125,19 @@ async def synth_game_loop(
 
     for turn_num in range(1, max_iterations + 1):
         state_before = state
-        _emit(sink, run_id, agent_id, turn_num, TurnStartPayload(turn_num=turn_num))
         _emit(
             sink,
-            run_id,
+            actual_run_id,
+            agent_id,
+            turn_num,
+            TurnStartPayload(
+                turn_num=turn_num,
+                state=WorldStateSnapshot.from_world_state(state_before),
+            ),
+        )
+        _emit(
+            sink,
+            actual_run_id,
             agent_id,
             turn_num,
             LlmPromptPayload(state_summary=_summarize_state(state_before)),
@@ -133,7 +147,7 @@ async def synth_game_loop(
         total_cost += cost
         _emit(
             sink,
-            run_id,
+            actual_run_id,
             agent_id,
             turn_num,
             LlmResponsePayload(actions=actions, reasoning=reasoning, cost_usd=cost),
@@ -141,14 +155,18 @@ async def synth_game_loop(
 
         for index, action in enumerate(actions):
             _emit(
-                sink, run_id, agent_id, turn_num, ActionPayload(index_in_turn=index, action=action)
+                sink,
+                actual_run_id,
+                agent_id,
+                turn_num,
+                ActionPayload(index_in_turn=index, action=action),
             )
             state_before_action = state
             state = apply_action(state, action)
             action_type = action.get("type", "")
             _emit(
                 sink,
-                run_id,
+                actual_run_id,
                 agent_id,
                 turn_num,
                 ActionResultPayload(
@@ -161,7 +179,7 @@ async def synth_game_loop(
         state = tick(state)
         _emit(
             sink,
-            run_id,
+            actual_run_id,
             agent_id,
             turn_num,
             MetricPayload(name="cost_usd", value=cost),
@@ -182,6 +200,6 @@ async def synth_game_loop(
         final_state=state,
         turns=tuple(turns),
         total_cost_usd=round(total_cost, _COST_DECIMAL_PLACES),
-        run_id=run_id,
+        run_id=actual_run_id,
         agent_id=agent_id,
     )

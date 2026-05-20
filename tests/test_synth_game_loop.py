@@ -279,3 +279,37 @@ def test_synth_game_loop_default_sink_emits_nothing():
     # No sink argument; should run with the NullEventSink default.
     result = _run(synth_game_loop(invoke, _state(), max_iterations=1))
     assert result.turns[0].turn_num == 1
+
+
+# ---------------------------------------------------------------------------
+# Snapshot + custom run_id (Phase 5)
+# ---------------------------------------------------------------------------
+
+
+def test_synth_game_loop_turn_start_carries_world_state_snapshot():
+    from gameplay_agent.synth_game_loop import synth_game_loop
+
+    sink = _RecordingSink()
+    invoke = _RecordingStub([_empty_turn()])
+    _run(synth_game_loop(invoke, _state(food=300.0), max_iterations=1, sink=sink))
+    turn_start = next(e for e in sink.events if e.payload.kind == "turn_start")
+    assert turn_start.payload.state is not None
+    assert turn_start.payload.state.food == 300.0
+
+
+def test_synth_game_loop_accepts_custom_run_id():
+    from gameplay_agent.synth_game_loop import synth_game_loop
+
+    invoke = _RecordingStub([_empty_turn()])
+    result = _run(synth_game_loop(invoke, _state(), max_iterations=1, run_id="custom-run-xyz"))
+    assert result.run_id == "custom-run-xyz"
+
+
+def test_synth_game_loop_custom_run_id_is_used_in_emitted_events():
+    from gameplay_agent.synth_game_loop import synth_game_loop
+
+    sink = _RecordingSink()
+    invoke = _RecordingStub([_empty_turn()])
+    _run(synth_game_loop(invoke, _state(), max_iterations=1, sink=sink, run_id="my-run"))
+    run_ids = {e.run_id for e in sink.events}
+    assert run_ids == {"my-run"}
