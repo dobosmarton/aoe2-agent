@@ -39,8 +39,65 @@ if TYPE_CHECKING:
 
     import duckdb
 
+    from evaluation.world_sim import WorldState
+
 
 SCHEMA_VERSION = 1
+
+
+# ---------------------------------------------------------------------------
+# WorldStateSnapshot — Pydantic mirror of WorldState for event persistence.
+# Embedded in TurnStartPayload so fork() can restore state in O(1).
+# ---------------------------------------------------------------------------
+
+
+class WorldStateSnapshot(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    food: float
+    wood: float
+    gold: float
+    stone: float
+    population: int
+    pop_cap: int
+    age: str
+    buildings: list[str]
+    villager_queue: list[int]
+    age_up_ticks_remaining: int
+    turn: int
+
+    @classmethod
+    def from_world_state(cls, state: WorldState) -> WorldStateSnapshot:
+        return cls(
+            food=state.food,
+            wood=state.wood,
+            gold=state.gold,
+            stone=state.stone,
+            population=state.population,
+            pop_cap=state.pop_cap,
+            age=state.age,
+            buildings=list(state.buildings),
+            villager_queue=list(state.villager_queue),
+            age_up_ticks_remaining=state.age_up_ticks_remaining,
+            turn=state.turn,
+        )
+
+    def to_world_state(self) -> WorldState:
+        from evaluation.world_sim import WorldState as _WorldState
+
+        return _WorldState(
+            food=self.food,
+            wood=self.wood,
+            gold=self.gold,
+            stone=self.stone,
+            population=self.population,
+            pop_cap=self.pop_cap,
+            age=self.age,
+            buildings=list(self.buildings),
+            villager_queue=list(self.villager_queue),
+            age_up_ticks_remaining=self.age_up_ticks_remaining,
+            turn=self.turn,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -55,6 +112,7 @@ class _PayloadBase(BaseModel):
 class TurnStartPayload(_PayloadBase):
     kind: Literal["turn_start"] = "turn_start"
     turn_num: int
+    state: WorldStateSnapshot | None = None  # Phase 5: snapshot for fork()
 
 
 class ObservationPayload(_PayloadBase):

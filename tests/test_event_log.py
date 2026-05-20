@@ -26,6 +26,7 @@ from evaluation.event_log import (
     Payload,
     TurnStartPayload,
     WorldMutationPayload,
+    WorldStateSnapshot,
 )
 
 # ---------------------------------------------------------------------------
@@ -230,3 +231,95 @@ def test_duckdb_sink_separates_runs_by_run_id(
     sink.emit(_event(TurnStartPayload(turn_num=0), run_id="run_b"))
     run_a_count = conn.execute("SELECT COUNT(*) FROM events WHERE run_id = 'run_a'").fetchone()[0]
     assert run_a_count == 1
+
+
+# ---------------------------------------------------------------------------
+# WorldStateSnapshot (Phase 5)
+# ---------------------------------------------------------------------------
+
+
+def _snapshot(**kwargs) -> WorldStateSnapshot:
+    defaults = {
+        "food": 200.0,
+        "wood": 150.0,
+        "gold": 0.0,
+        "stone": 0.0,
+        "population": 8,
+        "pop_cap": 25,
+        "age": "Dark Age",
+        "buildings": [],
+        "villager_queue": [],
+        "age_up_ticks_remaining": 0,
+        "turn": 0,
+    }
+    defaults.update(kwargs)
+    return WorldStateSnapshot(**defaults)
+
+
+def _world_state(**kwargs):
+    from evaluation.world_sim import WorldState
+
+    defaults = {
+        "food": 200.0,
+        "wood": 150.0,
+        "gold": 0.0,
+        "stone": 0.0,
+        "population": 8,
+        "pop_cap": 25,
+        "age": "Dark Age",
+        "buildings": [],
+        "villager_queue": [],
+        "age_up_ticks_remaining": 0,
+        "turn": 0,
+    }
+    defaults.update(kwargs)
+    return WorldState(**defaults)
+
+
+def test_world_state_snapshot_from_world_state_preserves_all_fields() -> None:
+    ws = _world_state(food=300.0, wood=200.0, turn=5, buildings=["house"], villager_queue=[2])
+    snap = WorldStateSnapshot.from_world_state(ws)
+    assert snap.food == 300.0
+    assert snap.wood == 200.0
+    assert snap.turn == 5
+    assert snap.buildings == ["house"]
+    assert snap.villager_queue == [2]
+
+
+def test_world_state_snapshot_to_world_state_inverts_from_world_state() -> None:
+    from evaluation.world_sim import WorldState
+
+    ws = _world_state(food=123.5, population=12, age="Feudal Age", buildings=["mill", "house"])
+    snap = WorldStateSnapshot.from_world_state(ws)
+    restored = snap.to_world_state()
+    assert isinstance(restored, WorldState)
+    assert restored == ws
+
+
+def test_world_state_snapshot_roundtrips_via_discriminator() -> None:
+    snap = _snapshot(food=400.0, turn=3)
+    payload = TurnStartPayload(turn_num=3, state=snap)
+    assert _adapter.validate_json(payload.model_dump_json()) == payload
+
+
+def test_world_state_snapshot_field_parity_with_dataclass() -> None:
+    import dataclasses
+
+    from evaluation.world_sim import WorldState
+
+    snapshot_fields = set(WorldStateSnapshot.model_fields.keys())
+    dataclass_fields = {f.name for f in dataclasses.fields(WorldState)}
+    assert snapshot_fields == dataclass_fields
+
+
+def test_turn_start_payload_state_defaults_to_none() -> None:
+    payload = TurnStartPayload(turn_num=1)
+    assert payload.state is None
+
+
+def test_turn_start_payload_with_state_serializes_and_parses() -> None:
+    snap = _snapshot(food=250.0, population=10)
+    payload = TurnStartPayload(turn_num=2, state=snap)
+    restored = _adapter.validate_json(payload.model_dump_json())
+    assert isinstance(restored, TurnStartPayload)
+    assert restored.state == snap
