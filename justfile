@@ -132,3 +132,8 @@ arena-smoke:
 # Requires ANTHROPIC_API_KEY. Default config costs ~$1.20 (Haiku, 60 turns x 5 rounds x 4 scenarios x 2 profiles).
 arena-rank profile="arena/profiles/ranking-v1.yaml":
     venv/bin/python -m arena rank {{profile}}
+
+# Start the arena replay/inspect web server (FastAPI + SSE).
+# Browse to http://localhost:8000/runs to list available event logs.
+arena-web-dev port="8000":
+    venv/bin/python -m arena.web --port {{port}}
