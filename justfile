@@ -137,3 +137,16 @@ arena-rank profile="arena/profiles/ranking-v1.yaml":
 # Browse to http://localhost:8000/runs to list available event logs.
 arena-web-dev port="8000":
     venv/bin/python -m arena.web --port {{port}}
+
+# Install UI dependencies via Bun.
+arena-ui-install:
+    cd arena/web/ui && bun install
+
+# Run Vite dev server on :5173, proxying /runs, /events, /health to FastAPI on :8000.
+# Start `just arena-web-dev` in another shell first.
+arena-ui-dev: arena-ui-install
+    cd arena/web/ui && bun run dev
+
+# Build the production SPA bundle to arena/web/ui/dist/.
+arena-web-build: arena-ui-install
+    cd arena/web/ui && bun run build

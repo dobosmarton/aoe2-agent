@@ -34,6 +34,12 @@ experiments/
 eval_virtual_box_ideas.md
 overlay-update.zip
 
+# Frontend build artefacts (arena/web/ui — Vite + Bun)
+arena/web/ui/node_modules/
+arena/web/ui/dist/
+arena/web/ui/.vite/
+arena/web/ui/*.tsbuildinfo
+
 # Detection data (large files)
 detection/**/training_data*/
 detection/real_screenshots/

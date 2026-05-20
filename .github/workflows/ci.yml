@@ -69,3 +69,24 @@ jobs:
 
       - name: Pytest
         run: uv run pytest -q
+
+  ui-build:
+    # Runs in parallel with lint-typecheck-test. The arena/web/ui/ frontend
+    # has its own toolchain (Bun + Vite + TypeScript + Tailwind + shadcn)
+    # disjoint from the Python side, so a separate job keeps signal clean.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: arena/web/ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install (frozen lockfile)
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        run: bun run typecheck
+      - name: Build
+        run: bun run build
