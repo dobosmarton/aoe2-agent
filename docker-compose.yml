@@ -60,6 +60,18 @@ services:
       LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
       LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
       LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+      # Auto-bootstrap a dev org/project/user on first boot. Re-applied after
+      # `arena-infra-nuke` resets the DB, so credentials remain stable across
+      # nuke-and-up cycles. See https://langfuse.com/self-hosting/configuration.
+      LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID}
+      LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME}
+      LANGFUSE_INIT_PROJECT_ID: ${LANGFUSE_INIT_PROJECT_ID}
+      LANGFUSE_INIT_PROJECT_NAME: ${LANGFUSE_INIT_PROJECT_NAME}
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_INIT_PROJECT_PUBLIC_KEY}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_INIT_PROJECT_SECRET_KEY}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL}
+      LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME}
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD}
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://$$(hostname):3000/api/public/health"]
       interval: 10s

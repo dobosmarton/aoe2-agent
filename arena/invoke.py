@@ -17,8 +17,10 @@ import re
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, TypeAlias
 
-from anthropic import NOT_GIVEN, AsyncAnthropic
+from anthropic import AsyncAnthropic
 from pydantic import TypeAdapter, ValidationError
+
+from arena.prompts import get_prompt
 
 if TYPE_CHECKING:
     from arena.config_profile import ConfigProfile
@@ -35,29 +37,8 @@ InvokeFn: TypeAlias = Callable[
 ]
 
 # ---------------------------------------------------------------------------
-# Prompt
+# Prompt — variants live in arena/prompts.py and are looked up per profile.
 # ---------------------------------------------------------------------------
-
-_SYSTEM_PROMPT = """\
-You are an Age of Empires 2 economy strategist.
-
-Each turn you receive the current game state. Respond with ONLY a valid JSON \
-array of actions (e.g. [{"type": "queue_villager"}]) or [] to do nothing.
-No markdown, no explanation — just the JSON array.
-
-Available actions:
-  {"type": "queue_villager"}               — train villager (50 food; pop < pop_cap)
-  {"type": "build", "building_key": "q"}   — house      (25 wood; +5 pop_cap)
-  {"type": "build", "building_key": "w"}   — mill       (100 wood)
-  {"type": "build", "building_key": "r"}   — lumber camp (100 wood)
-  {"type": "build", "building_key": "e"}   — mining camp (100 wood)
-  {"type": "build", "building_key": "a"}   — farm        (60 wood)
-  {"type": "build", "building_key": "s"}   — blacksmith  (150 wood)
-  {"type": "press", "key": "z"}            — start age-up (500 food; needs mill + lumber_camp + pop≥22)
-
-Resources tick automatically each turn: +20 food, +15 wood.
-Goal: grow economy and reach Feudal Age efficiently.\
-"""
 
 
 def _state_to_prompt(state: WorldState) -> str:
@@ -126,7 +107,7 @@ async def _call_claude(
     client: AsyncAnthropic,
     model: str,
     temperature: float,
-    seed: int | None,
+    system_prompt: str,
     prompt: str,
 ) -> tuple[list[dict[str, object]], str, float]:
     from anthropic.types import TextBlock
@@ -135,8 +116,7 @@ async def _call_claude(
         model=model,
         max_tokens=256,
         temperature=temperature,
-        seed=seed if seed is not None else NOT_GIVEN,
-        system=_SYSTEM_PROMPT,
+        system=system_prompt,
         messages=[{"role": "user", "content": prompt}],  # pyright: ignore[reportArgumentType]
     )
 
@@ -159,12 +139,14 @@ def build_synth_invoke(profile: ConfigProfile, api_key: str) -> InvokeFn:
     client = AsyncAnthropic(api_key=api_key)
     model = profile.model
     temperature = profile.temperature
-    seed = profile.seed
+    system_prompt = get_prompt(profile.prompt_variant)
 
     async def invoke(
         state: WorldState,
     ) -> tuple[list[dict[str, object]], str, float]:
-        return await _call_claude(client, model, temperature, seed, _state_to_prompt(state))
+        return await _call_claude(
+            client, model, temperature, system_prompt, _state_to_prompt(state)
+        )
 
     return invoke
 

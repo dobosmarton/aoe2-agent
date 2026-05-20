@@ -68,3 +68,19 @@ def test_summarise_ranks_by_population_descending() -> None:
     table = summarise(results)
     positions = [table.index(m.name) for m in all_metrics]
     assert positions == sorted(positions)
+
+
+def test_extract_metrics_exposes_wood_and_buildings() -> None:
+    results = _run_results()
+    metrics = extract_metrics(results[0])
+    final_state = results[0].loop_result.turns[-1].state_after
+    assert metrics.final_wood == final_state.wood
+    assert metrics.buildings == tuple(final_state.buildings)
+
+
+def test_extract_metrics_counts_actions_from_default_mock() -> None:
+    # The default mock invoke returns `[]` every turn, so no actions are issued.
+    results = _run_results()
+    metrics = extract_metrics(results[0])
+    assert metrics.total_actions == 0
+    assert metrics.action_counts == ()

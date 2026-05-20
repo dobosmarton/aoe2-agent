@@ -1,11 +1,24 @@
-turns: 50
+turns: 60
+
+# Two-way prompt comparison. Model and temperature are held constant
+# (Haiku temp=0) so the only variable is `prompt_variant`.
+#
+# `terse` and `few-shot` were dropped after the 2026-05-20 race showed
+# they cost more without changing the final outcome. See arena/prompts.py
+# for the registry.
 profiles:
-  - name: haiku-deterministic
+  # `bare`: minimum prompt, no strategy notes.
+  # Surprise result: outperforms `strategy` on pop and infrastructure —
+  # the absence of a target prereq list lets the agent keep building
+  # past Feudal Age instead of stopping the moment the threshold is hit.
+  - name: bare
     model: claude-haiku-4-5-20251001
     temperature: 0.0
-    seed: 42
+    prompt_variant: bare
 
-  - name: haiku-explorative
+  # `strategy`: explicit prereq enumeration + "stop spamming villagers"
+  # rule. Reaches Feudal at the minimum bar; over-constrains late game.
+  - name: strategy
     model: claude-haiku-4-5-20251001
-    temperature: 0.7
-    seed: 42
+    temperature: 0.0
+    prompt_variant: strategy
