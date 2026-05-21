@@ -97,8 +97,12 @@ export function App(): React.ReactElement {
           <TabsContent value="trace" className="min-h-0 flex-1">
             <TracePanel events={events} selectedTurn={selectedTurn} />
           </TabsContent>
-          <TabsContent value="diff" className="min-h-0 flex-1">
-            <DiffPanel />
+          <TabsContent value="diff" className="min-h-0 flex-1 overflow-auto">
+            <DiffPanel
+              events={events}
+              currentRunId={selectedRunId}
+              onOpenRun={setSelectedRunId}
+            />
           </TabsContent>
         </Tabs>
 
