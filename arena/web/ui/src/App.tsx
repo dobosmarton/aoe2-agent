@@ -8,6 +8,7 @@ import { useEvents } from "@/hooks/use-events";
 import { useRuns } from "@/hooks/use-runs";
 import { lastTurn, statesByTurn } from "@/lib/event-utils";
 import { DiffPanel } from "@/panels/diff";
+import { OperatorPanel } from "@/panels/operator";
 import { TracePanel } from "@/panels/trace";
 import { WorldPanel } from "@/panels/world";
 import type { SseStatus } from "@/hooks/use-events";
@@ -89,6 +90,7 @@ export function App(): React.ReactElement {
             <TabsTrigger value="world">World</TabsTrigger>
             <TabsTrigger value="trace">Trace</TabsTrigger>
             <TabsTrigger value="diff">Diff</TabsTrigger>
+            <TabsTrigger value="operator">Operator</TabsTrigger>
           </TabsList>
 
           <TabsContent value="world" className="min-h-0 flex-1 overflow-auto">
@@ -101,6 +103,13 @@ export function App(): React.ReactElement {
             <DiffPanel
               events={events}
               currentRunId={selectedRunId}
+              onOpenRun={setSelectedRunId}
+            />
+          </TabsContent>
+          <TabsContent value="operator" className="min-h-0 flex-1 overflow-auto">
+            <OperatorPanel
+              currentRunId={selectedRunId}
+              initialParentT={selectedTurn}
               onOpenRun={setSelectedRunId}
             />
           </TabsContent>

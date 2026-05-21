@@ -1,9 +1,12 @@
-"""FastAPI + SSE backend for replaying arena event logs (Phase 7.1).
+"""FastAPI + SSE backend for replaying arena event logs.
 
 URL contract (frozen for future-frontend compatibility):
-  GET /health            -> {"status": "ok"}
-  GET /runs              -> list[RunSummary], newest first
-  GET /events?run_id=X   -> text/event-stream, one event per line
+  GET  /health            -> {"status": "ok"}
+  GET  /runs              -> list[RunSummary], newest first
+  GET  /events?run_id=X   -> text/event-stream, one event per line.
+                             Switches to live-tail mode for in-flight runs.
+  POST /forks             -> create a child run with mutation patch + N-turn
+                             async replay (Phase 9)
 
 Each SSE line is `data: <payload_json>\\n\\n`, where `<payload_json>` is the
 raw column value from the events table (Pydantic-serialised by the writer
@@ -18,19 +21,28 @@ Logs root resolution:
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
+from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import duckdb
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
+from arena.web.forks import ForkRequest, ForkResponse, create_fork
+from arena.web.live import LiveRunRegistry
+from evaluation.fork import ForkError
+
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import AsyncIterator, Iterator
+
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_LOGS_ROOT = Path("logs") / "arena"
 _DEFAULT_CORS_ORIGINS = ("http://localhost:5173", "http://localhost:8000")
@@ -152,13 +164,41 @@ def _stream_events_sync(db_path: Path, run_id: str) -> Iterator[str]:
 # ---------------------------------------------------------------------------
 
 
-app = FastAPI(title="AoE2 Arena Web (event-log replay)")
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    app.state.registry = LiveRunRegistry()
+    fork_tasks: set[asyncio.Task[None]] = set()
+    app.state.fork_tasks = fork_tasks
+    try:
+        yield
+    finally:
+        # Best-effort cancel of in-flight forks on shutdown.
+        tasks: set[asyncio.Task[None]] = app.state.fork_tasks
+        for task in list(tasks):
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+
+app = FastAPI(title="AoE2 Arena Web (event-log replay)", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
+
+def get_registry(request: Request) -> LiveRunRegistry:
+    registry = request.app.state.registry
+    assert isinstance(registry, LiveRunRegistry)
+    return registry
+
+
+def get_fork_tasks(request: Request) -> set[asyncio.Task[None]]:
+    tasks = request.app.state.fork_tasks
+    assert isinstance(tasks, set)
+    return tasks
 
 
 @app.get("/health")
@@ -172,10 +212,96 @@ async def runs() -> list[dict[str, object]]:
     return [asdict(s) for s in summaries]
 
 
+async def _live_event_stream(
+    registry: LiveRunRegistry,
+    run_id: str,
+) -> AsyncIterator[str]:
+    """Replay any already-written events for the live run, then tail new ones.
+
+    The race window: while we're reading DuckDB rows, the writer may add
+    more. Subscribing AFTER the read means we'd miss those rows. The fix
+    is to subscribe BEFORE the read and skip any queue event whose t we
+    already saw in the DB.
+    """
+    sub = registry.subscribe(run_id)
+    try:
+        db_path = await asyncio.to_thread(_resolve_run_optional, run_id, _logs_root())
+        max_t_seen = -1
+        if db_path is not None:
+            for line, last_t in _stream_existing_rows(db_path, run_id):
+                yield line
+                if last_t > max_t_seen:
+                    max_t_seen = last_t
+        while True:
+            event = await sub.queue.get()
+            if event is None:
+                break
+            if event.t <= max_t_seen:
+                continue
+            yield f"data: {event.payload.model_dump_json()}\n\n"
+    finally:
+        registry.unsubscribe(run_id, sub)
+
+
+def _stream_existing_rows(db_path: Path, run_id: str) -> Iterator[tuple[str, int]]:
+    """Yield (sse_line, t) pairs for already-persisted events of `run_id`."""
+    with duckdb.connect(str(db_path), read_only=True) as conn:
+        cursor = conn.execute(
+            "SELECT t, payload_json FROM events WHERE run_id=? ORDER BY t",
+            [run_id],
+        )
+        while True:
+            row = cursor.fetchone()
+            if row is None:
+                break
+            yield f"data: {row[1]}\n\n", int(row[0])
+
+
+def _resolve_run_optional(run_id: str, root: Path) -> Path | None:
+    """Like _resolve_run but returns None instead of raising 404."""
+    for db_path in _all_duckdb_files(root):
+        with duckdb.connect(str(db_path), read_only=True) as conn:
+            row = conn.execute("SELECT 1 FROM events WHERE run_id=? LIMIT 1", [run_id]).fetchone()
+        if row is not None:
+            return db_path
+    return None
+
+
 @app.get("/events")
-async def events(run_id: str = Query(..., min_length=1)) -> StreamingResponse:
+async def events(
+    run_id: str = Query(..., min_length=1),
+    registry: LiveRunRegistry = Depends(get_registry),
+) -> StreamingResponse:
+    if registry.is_live(run_id):
+        return StreamingResponse(
+            _live_event_stream(registry, run_id),
+            media_type="text/event-stream",
+        )
     db_path = await asyncio.to_thread(_resolve_run, run_id, _logs_root())
     return StreamingResponse(
         _stream_events_sync(db_path, run_id),
         media_type="text/event-stream",
     )
+
+
+@app.post("/forks", response_model=ForkResponse)
+async def post_forks(
+    request: ForkRequest,
+    registry: LiveRunRegistry = Depends(get_registry),
+    fork_tasks: set[asyncio.Task[None]] = Depends(get_fork_tasks),
+) -> ForkResponse:
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY is not set on the server")
+    try:
+        return await create_fork(
+            request=request,
+            api_key=api_key,
+            registry=registry,
+            logs_root=_logs_root(),
+            fork_tasks=fork_tasks,
+        )
+    except FileNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except ForkError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
