@@ -14,7 +14,7 @@ server *ARGS:
 install:
     uv sync
 
-# Editable install with dev tooling (ruff, pytest, pyright, pre-commit).
+# Editable install with dev tooling (ruff, pytest, basedpyright, pre-commit).
 install-dev:
     uv sync --extra dev
 

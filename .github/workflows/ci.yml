@@ -62,10 +62,11 @@ jobs:
       - name: Ruff format check
         run: uv run ruff format --check .
 
-      - name: Pyright type-check
+      - name: basedpyright type-check
         # Scope-explicit because the bundled pyproject `include` only kicks in
-        # when pyright is invoked with no path args.
-        run: uv run pyright gameplay_agent autoresearch evaluation server
+        # when basedpyright is invoked with no path args. basedpyright reads
+        # the same [tool.pyright] config section as pyright.
+        run: uv run basedpyright gameplay_agent autoresearch evaluation server
 
       - name: Pytest
         run: uv run pytest -q
