@@ -30,9 +30,9 @@ schema is lock-in-stable from day one (Risk 5).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, Literal, Protocol
+from typing import TYPE_CHECKING, Annotated, Final, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Discriminator
+from pydantic import BaseModel, ConfigDict, Discriminator, TypeAdapter
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -186,6 +186,17 @@ Payload = Annotated[
 ]
 
 
+# TypeAdapter construction walks the discriminated union once; cache it.
+_PAYLOAD_ADAPTER: Final[TypeAdapter[Payload]] = TypeAdapter(Payload)
+
+
+# Shape of one DuckDB `events` row: matches _CREATE_TABLE_SQL column order
+# (run_id, agent_id, t, kind, payload_json, ts, schema_version). Exported
+# so callers reading rows back from the DB can type their helpers
+# consistently with Event.from_row.
+EventRow = tuple[str, str, int, str, str, "datetime", int]
+
+
 # ---------------------------------------------------------------------------
 # Event wrapper — what gets persisted.
 # ---------------------------------------------------------------------------
@@ -199,6 +210,24 @@ class Event:
     payload: Payload
     ts: datetime
     schema_version: int = SCHEMA_VERSION
+
+    @classmethod
+    def from_row(cls, row: EventRow) -> Event:
+        """Reconstruct an Event from a DuckDB `SELECT * FROM events` row.
+
+        Inverse of DuckDBEventSink.emit. The `kind` column is redundant
+        with the embedded discriminator in payload_json and is ignored
+        here — TypeAdapter validates the discriminator on the payload.
+        """
+        run_id, agent_id, t, _kind, payload_json, ts, schema_version = row
+        return cls(
+            run_id=run_id,
+            agent_id=agent_id,
+            t=t,
+            payload=_PAYLOAD_ADAPTER.validate_json(payload_json),
+            ts=ts,
+            schema_version=schema_version,
+        )
 
 
 # ---------------------------------------------------------------------------

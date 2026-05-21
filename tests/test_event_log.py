@@ -6,10 +6,14 @@ Uses an in-memory DuckDB connection per test — fast, isolated, no file I/O.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING, cast
 
 import duckdb
 import pytest
 from pydantic import TypeAdapter
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 from evaluation.event_log import (
     SCHEMA_VERSION,
@@ -17,6 +21,7 @@ from evaluation.event_log import (
     ActionResultPayload,
     DuckDBEventSink,
     Event,
+    EventRow,
     ForkPayload,
     LlmPromptPayload,
     LlmResponsePayload,
@@ -35,7 +40,7 @@ from evaluation.event_log import (
 
 
 @pytest.fixture
-def conn() -> duckdb.DuckDBPyConnection:
+def conn() -> Iterator[duckdb.DuckDBPyConnection]:
     """Fresh in-memory DuckDB connection. Auto-closed via teardown."""
     connection = duckdb.connect(":memory:")
     try:
@@ -59,6 +64,21 @@ def _event(
         payload=payload,
         ts=datetime(2026, 5, 18, 12, 0, 0, tzinfo=UTC),
     )
+
+
+def _scalar(conn: duckdb.DuckDBPyConnection, sql: str) -> object:
+    """Execute `sql` and return the first column of the first row.
+
+    Returns `object` (not `Any`) so callers must compare-or-cast — the
+    `Any` shortcut would silently green-light bogus operations.
+    Assumes the query returns at least one row — asserts otherwise.
+    """
+    row = conn.execute(sql).fetchone()
+    assert row is not None
+    # Explicit narrowing — `row[0]` is Any (duckdb returns tuple[Any, ...]);
+    # cast to `object` at the boundary so callers can't accidentally rely
+    # on Any's silent operation-permissiveness.
+    return cast("object", row[0])
 
 
 _adapter: TypeAdapter[Payload] = TypeAdapter(Payload)
@@ -165,34 +185,29 @@ def test_duckdb_sink_emit_inserts_one_row(
     sink: DuckDBEventSink, conn: duckdb.DuckDBPyConnection
 ) -> None:
     sink.emit(_event(TurnStartPayload(turn_num=1)))
-    count = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
-    assert count == 1
+    assert _scalar(conn, "SELECT COUNT(*) FROM events") == 1
 
 
 def test_duckdb_sink_stores_kind(sink: DuckDBEventSink, conn: duckdb.DuckDBPyConnection) -> None:
     sink.emit(_event(MetricPayload(name="cost_usd", value=0.01)))
-    kind = conn.execute("SELECT kind FROM events").fetchone()[0]
-    assert kind == "metric"
+    assert _scalar(conn, "SELECT kind FROM events") == "metric"
 
 
 def test_duckdb_sink_stores_run_id(sink: DuckDBEventSink, conn: duckdb.DuckDBPyConnection) -> None:
     sink.emit(_event(TurnStartPayload(turn_num=0), run_id="run_xyz"))
-    run_id = conn.execute("SELECT run_id FROM events").fetchone()[0]
-    assert run_id == "run_xyz"
+    assert _scalar(conn, "SELECT run_id FROM events") == "run_xyz"
 
 
 def test_duckdb_sink_stores_turn(sink: DuckDBEventSink, conn: duckdb.DuckDBPyConnection) -> None:
     sink.emit(_event(TurnStartPayload(turn_num=4), t=4))
-    t = conn.execute("SELECT t FROM events").fetchone()[0]
-    assert t == 4
+    assert _scalar(conn, "SELECT t FROM events") == 4
 
 
 def test_duckdb_sink_stores_schema_version(
     sink: DuckDBEventSink, conn: duckdb.DuckDBPyConnection
 ) -> None:
     sink.emit(_event(TurnStartPayload(turn_num=0)))
-    version = conn.execute("SELECT schema_version FROM events").fetchone()[0]
-    assert version == SCHEMA_VERSION
+    assert _scalar(conn, "SELECT schema_version FROM events") == SCHEMA_VERSION
 
 
 def test_duckdb_sink_payload_json_roundtrips_to_typed_payload(
@@ -200,7 +215,7 @@ def test_duckdb_sink_payload_json_roundtrips_to_typed_payload(
 ) -> None:
     original = MetricPayload(name="cost_usd", value=0.04)
     sink.emit(_event(original))
-    raw = conn.execute("SELECT payload_json FROM events").fetchone()[0]
+    raw = cast("str", _scalar(conn, "SELECT payload_json FROM events"))
     parsed = _adapter.validate_json(raw)
     assert parsed == original
 
@@ -220,8 +235,7 @@ def test_duckdb_sink_query_by_kind_filters_correctly(
     sink.emit(_event(TurnStartPayload(turn_num=0), t=0))
     sink.emit(_event(MetricPayload(name="cost", value=0.01), t=0))
     sink.emit(_event(MetricPayload(name="cost", value=0.02), t=1))
-    metric_count = conn.execute("SELECT COUNT(*) FROM events WHERE kind = 'metric'").fetchone()[0]
-    assert metric_count == 2
+    assert _scalar(conn, "SELECT COUNT(*) FROM events WHERE kind = 'metric'") == 2
 
 
 def test_duckdb_sink_separates_runs_by_run_id(
@@ -229,8 +243,87 @@ def test_duckdb_sink_separates_runs_by_run_id(
 ) -> None:
     sink.emit(_event(TurnStartPayload(turn_num=0), run_id="run_a"))
     sink.emit(_event(TurnStartPayload(turn_num=0), run_id="run_b"))
-    run_a_count = conn.execute("SELECT COUNT(*) FROM events WHERE run_id = 'run_a'").fetchone()[0]
-    assert run_a_count == 1
+    assert _scalar(conn, "SELECT COUNT(*) FROM events WHERE run_id = 'run_a'") == 1
+
+
+# ---------------------------------------------------------------------------
+# Event.from_row — reconstruct an Event from a DuckDB row (inverse of emit)
+# ---------------------------------------------------------------------------
+
+
+# Naive datetime — DuckDB's `ts TIMESTAMP` column drops tzinfo on read-back,
+# so equality round-trips cleanly only when the original is also naive.
+_TS_NAIVE = datetime(2026, 5, 18, 12, 0, 0)  # noqa: DTZ001 (see comment above)
+
+_ALL_PAYLOAD_KINDS: list[Payload] = [
+    TurnStartPayload(turn_num=5),
+    ObservationPayload(entity_count=12, classes=["mill", "town_center"]),
+    LlmPromptPayload(state_summary="food=200 wood=150"),
+    LlmResponsePayload(
+        actions=[{"type": "queue_villager"}], reasoning="economy boost", cost_usd=0.0123
+    ),
+    ActionPayload(index_in_turn=0, action={"type": "build", "building_key": "q"}),
+    ActionResultPayload(index_in_turn=0, action_type="queue_villager", state_changed=True),
+    WorldMutationPayload(before_summary="pop=5", after_summary="pop=0", reason="chaos"),
+    ForkPayload(parent_run_id="parent", parent_t=3, mutation_summary="set food=0"),
+    MetricPayload(name="cost_usd", value=0.045),
+]
+
+
+def _emit_and_select(
+    sink: DuckDBEventSink, conn: duckdb.DuckDBPyConnection, event: Event
+) -> EventRow:
+    sink.emit(event)
+    row = conn.execute(
+        "SELECT run_id, agent_id, t, kind, payload_json, ts, schema_version FROM events"
+    ).fetchone()
+    assert row is not None
+    return cast("EventRow", row)
+
+
+def test_event_from_row_roundtrips_via_duckdb(
+    sink: DuckDBEventSink, conn: duckdb.DuckDBPyConnection
+) -> None:
+    original = Event(
+        run_id="r1",
+        agent_id="agent_x",
+        t=4,
+        payload=MetricPayload(name="cost", value=0.01),
+        ts=_TS_NAIVE,
+    )
+    row = _emit_and_select(sink, conn, original)
+    assert Event.from_row(row) == original
+
+
+def _payload_id(payload: Payload) -> str:
+    """Typed parametrize-id callback — keeps the lambda out of `Any` territory."""
+    return type(payload).__name__
+
+
+@pytest.mark.parametrize("payload", _ALL_PAYLOAD_KINDS, ids=_payload_id)
+def test_event_from_row_roundtrips_all_payload_kinds(
+    sink: DuckDBEventSink,
+    conn: duckdb.DuckDBPyConnection,
+    payload: Payload,
+) -> None:
+    original = Event(run_id="r1", agent_id="a", t=0, payload=payload, ts=_TS_NAIVE)
+    row = _emit_and_select(sink, conn, original)
+    assert Event.from_row(row) == original
+
+
+def test_event_from_row_preserves_non_default_schema_version(
+    sink: DuckDBEventSink, conn: duckdb.DuckDBPyConnection
+) -> None:
+    original = Event(
+        run_id="r1",
+        agent_id="a",
+        t=0,
+        payload=TurnStartPayload(turn_num=0),
+        ts=_TS_NAIVE,
+        schema_version=99,
+    )
+    row = _emit_and_select(sink, conn, original)
+    assert Event.from_row(row).schema_version == 99
 
 
 # ---------------------------------------------------------------------------
