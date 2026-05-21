@@ -201,37 +201,36 @@ reportMissingImports = "warning"
 reportExplicitAny = "error"
 reportAny = "error"
 
-# Per-directory strict mode via executionEnvironments. Each scoped dir
-# runs its own files under strict rules but treats dependencies as
-# `basic` (avoids strict-checking transitively-imported third-party
-# code). After the ANN pass, all four AI-agent dirs pass strict
-# cleanly with 0 errors.
+# Per-directory extraPaths via executionEnvironments. Each scoped dir
+# needs `.` in its path so basedpyright's resolver can find sibling
+# packages (gameplay_agent, autoresearch, evaluation, etc.) without
+# strict-checking transitively-imported third-party code.
+#
+# NOTE: the original intent of these blocks was to enable
+# `typeCheckingMode = "strict"` per dir, but that key is unsupported
+# inside executionEnvironments by both pyright AND basedpyright —
+# the setting was silently inert. The whole repo runs at the base
+# `typeCheckingMode = "basic"`. Re-enabling per-dir strict requires
+# either explicit `reportXxx` overrides per env, or separate
+# pyrightconfig.json files in each dir. Tracked as a follow-up.
 [[tool.pyright.executionEnvironments]]
 root = "evaluation"
-typeCheckingMode = "strict"
-# Sibling packages live at the project root; without extraPaths the
-# strict env scopes its resolver to `evaluation/` only and can't find
-# `gameplay_agent`, `autoresearch`, etc.
 extraPaths = ["."]
 
 [[tool.pyright.executionEnvironments]]
 root = "autoresearch"
-typeCheckingMode = "strict"
 extraPaths = ["."]
 
 [[tool.pyright.executionEnvironments]]
 root = "gameplay_agent"
-typeCheckingMode = "strict"
 extraPaths = ["."]
 
 [[tool.pyright.executionEnvironments]]
 root = "server"
-typeCheckingMode = "strict"
 extraPaths = ["."]
 
 [[tool.pyright.executionEnvironments]]
 root = "arena"
-typeCheckingMode = "strict"
 extraPaths = ["."]
 
 
