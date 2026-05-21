@@ -127,8 +127,10 @@ pyperclip==1.11.0
     # via mouseinfo
 pyrect==0.2.0
     # via pygetwindow
-pyright==1.1.409
+basedpyright==1.39.5
     # via aoe2-agent
+nodejs-wheel-binaries==24.15.0
+    # via basedpyright
 pyscreeze==1.0.1
     # via pyautogui
 pytest==9.0.3

@@ -51,7 +51,7 @@ format:
 
 # Static type-check with pyright (AI agent code only — see [tool.pyright])
 typecheck:
-    pyright
+    basedpyright
 
 # Run tests
 test *ARGS:

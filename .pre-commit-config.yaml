@@ -25,17 +25,17 @@ repos:
         args: ["--fix"]
       - id: ruff-format
 
-  # Pyright: static type checker. Runs via the project's venv so third-party
-  # imports (anthropic, structlog, mss, ...) resolve. The mirrors-pyright
-  # hook installs into an isolated env and would flood the report with bogus
-  # "Import could not be resolved" errors.
+  # basedpyright: stricter pyright fork. Required for the project's
+  # `reportAny` / `reportExplicitAny` enforcement (vanilla pyright silently
+  # ignores those settings). Runs via the project's venv so third-party
+  # imports (anthropic, structlog, mss, ...) resolve.
   - repo: local
     hooks:
-      - id: pyright
-        name: pyright
+      - id: basedpyright
+        name: basedpyright
         # Explicit scope: the hook ignores pyproject's `include` when given
         # filenames, so pass the AI-agent dirs ourselves.
-        entry: venv/bin/pyright gameplay_agent autoresearch evaluation server
+        entry: venv/bin/basedpyright gameplay_agent autoresearch evaluation server
         language: system
         types: [python]
         pass_filenames: false

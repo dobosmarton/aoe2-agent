@@ -6,6 +6,11 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+
+# basedpyright: track the baseline (grandfathered errors), ignore caches.
+.basedpyright/*
+!.basedpyright/baseline.json
+
 .coverage
 .coverage.*
 htmlcov/

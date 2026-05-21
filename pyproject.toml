@@ -51,7 +51,10 @@ dev = [
     "ruff>=0.15.0",
     "pytest>=9.0.0",
     "pytest-cov>=5.0.0",
-    "pyright>=1.1.400",
+    # basedpyright = stricter pyright fork; recognizes reportAny /
+    # reportExplicitAny (Microsoft's pyright deliberately omits them).
+    # Configured under [tool.pyright] — basedpyright reads the same section.
+    "basedpyright>=1.39.0",
     "pre-commit>=4.0.0",
 ]
 # macOS-only — install separately when running CoreML inference.
