@@ -1,8 +1,17 @@
 import type { RunSummary } from "@/lib/events";
 
+// Backend origin. Empty string = same-origin (prod build served by FastAPI,
+// or dev with Vite proxy). Set VITE_API_BASE_URL=http://host:port to point
+// the dev SPA at a remote/non-proxied backend.
+const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
+
+function apiUrl(path: string): string {
+  return `${API_BASE}${path}`;
+}
+
 export async function fetchRuns(signal?: AbortSignal): Promise<readonly RunSummary[]> {
   const init = signal === undefined ? {} : { signal };
-  const response = await fetch("/runs", init);
+  const response = await fetch(apiUrl("/runs"), init);
   if (!response.ok) {
     throw new Error(`GET /runs failed: ${response.status} ${response.statusText}`);
   }
@@ -10,7 +19,7 @@ export async function fetchRuns(signal?: AbortSignal): Promise<readonly RunSumma
 }
 
 export function eventsUrl(runId: string): string {
-  return `/events?run_id=${encodeURIComponent(runId)}`;
+  return apiUrl(`/events?run_id=${encodeURIComponent(runId)}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -44,7 +53,7 @@ export interface ForkResult {
 }
 
 export async function createFork(spec: ForkSpec): Promise<ForkResult> {
-  const response = await fetch("/forks", {
+  const response = await fetch(apiUrl("/forks"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(spec),

@@ -4,9 +4,13 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-// Dev-server proxy forwards backend calls to FastAPI (Phase 7.1) on :8000.
-// In production the SPA is built to dist/ and served from the same origin as
-// the API, so the same relative URLs (/runs, /events, /health) just work.
+// Backend routing:
+//   - Default (no env var): the dev proxy below forwards /runs, /events,
+//     /forks, /health to FastAPI on :8000. Same relative URLs work in the
+//     prod build, where the SPA is served from the API's origin.
+//   - Cross-origin: set VITE_API_BASE_URL=http://host:port to bypass the
+//     proxy entirely (e.g. backend on a VM, frontend dev locally). The
+//     backend must allow the SPA origin via ARENA_WEB_CORS_ORIGINS.
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
@@ -17,6 +21,7 @@ export default defineConfig({
     proxy: {
       "/runs": "http://localhost:8000",
       "/events": "http://localhost:8000",
+      "/forks": "http://localhost:8000",
       "/health": "http://localhost:8000",
     },
   },
