@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import cast
 
 import numpy as np
 
@@ -82,7 +83,7 @@ class EntityTracker:
         confidence = tracker.get_confidence()
     """
 
-    def __init__(self, iou_threshold: float = 0.3, max_misses: int = 3):
+    def __init__(self, iou_threshold: float = 0.3, max_misses: int = 3) -> None:
         self.tracks: list[TrackedEntity] = []
         self.iou_threshold = iou_threshold
         self.max_misses = max_misses
@@ -93,7 +94,7 @@ class EntityTracker:
         self._next_id += 1
         return tid
 
-    def _create_track(self, detection: DetectedEntity):
+    def _create_track(self, detection: DetectedEntity) -> None:
         meas = _bbox_to_measurement(detection.bbox)
         state = np.array([meas[0], meas[1], 0.0, 0.0, meas[2], meas[3]])
         track = TrackedEntity(
@@ -188,7 +189,7 @@ class EntityTracker:
         active = sum(1 for t in self.tracks if t.misses == 0)
         return active / len(self.tracks)
 
-    def reset(self):
+    def reset(self) -> None:
         """Clear all tracks (e.g., on camera movement)."""
         self.tracks.clear()
 
@@ -204,9 +205,15 @@ class EntityTracker:
                     id=track.id,
                     class_name=track.class_name,
                     bbox=(float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])),
-                    center=(float(track.state[0]), float(track.state[1])),
+                    center=(
+                        float(cast("float", track.state[0])),
+                        float(cast("float", track.state[1])),
+                    ),
                     confidence=track.confidence,
-                    area=float(max(1, track.state[4]) * max(1, track.state[5])),
+                    area=float(
+                        max(1.0, float(cast("float", track.state[4])))
+                        * max(1.0, float(cast("float", track.state[5])))
+                    ),
                 )
             )
         entities.sort(key=lambda e: (e.class_name, -e.confidence))
@@ -216,13 +223,13 @@ class EntityTracker:
 # --- Module-level helper functions ---
 
 
-def _kalman_predict(track: TrackedEntity):
+def _kalman_predict(track: TrackedEntity) -> None:
     """Kalman predict step: advance state using constant velocity model."""
     track.state = _F @ track.state
     track.covariance = _F @ track.covariance @ _F.T + _Q
 
 
-def _kalman_update(track: TrackedEntity, measurement: np.ndarray):
+def _kalman_update(track: TrackedEntity, measurement: np.ndarray) -> None:
     """Kalman update step: correct prediction with measurement."""
     y = measurement - _H @ track.state
     S = _H @ track.covariance @ _H.T + _R
@@ -239,8 +246,10 @@ def _bbox_to_measurement(bbox: tuple) -> np.ndarray:
 
 def _state_to_bbox(state: np.ndarray) -> tuple[float, float, float, float]:
     """Convert state [x_c, y_c, vx, vy, w, h] to (x1, y1, x2, y2)."""
-    x_c, y_c = state[0], state[1]
-    w, h = max(1.0, state[4]), max(1.0, state[5])
+    x_c = float(cast("float", state[0]))
+    y_c = float(cast("float", state[1]))
+    w = max(1.0, float(cast("float", state[4])))
+    h = max(1.0, float(cast("float", state[5])))
     return (x_c - w / 2, y_c - h / 2, x_c + w / 2, y_c + h / 2)
 
 
@@ -272,17 +281,18 @@ def _solve_assignment(cost_matrix: np.ndarray) -> tuple[list[int], list[int]]:
 
 def _greedy_match(cost_matrix: np.ndarray) -> tuple[list[int], list[int]]:
     """Greedy matching fallback when scipy is not installed."""
-    n_rows, n_cols = cost_matrix.shape
+    n_rows = int(cast("int", cost_matrix.shape[0]))
+    n_cols = int(cast("int", cost_matrix.shape[1]))
     row_indices: list[int] = []
     col_indices: list[int] = []
     used_rows: set[int] = set()
     used_cols: set[int] = set()
 
     # Flatten and sort by cost
-    costs = []
+    costs: list[tuple[float, int, int]] = []
     for i in range(n_rows):
         for j in range(n_cols):
-            costs.append((cost_matrix[i, j], i, j))
+            costs.append((float(cast("float", cost_matrix[i, j])), i, j))
     costs.sort()
 
     for _, r, c in costs:

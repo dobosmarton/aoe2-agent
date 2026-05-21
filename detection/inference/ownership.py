@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import io
 from enum import Enum
+from typing import cast
 
 import numpy as np
 import structlog
 from PIL import Image
 
-log = structlog.get_logger()
+log = structlog.stdlib.get_logger()
 
 
 class Owner(Enum):
@@ -74,7 +75,8 @@ def classify_entity(
     Returns:
         (Owner, blue_ratio) tuple.
     """
-    h, w = img_array.shape[:2]
+    h = int(cast("int", img_array.shape[0]))
+    w = int(cast("int", img_array.shape[1]))
     x1, y1, x2, y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
 
     # Clamp to image bounds

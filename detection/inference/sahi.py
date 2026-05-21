@@ -20,10 +20,12 @@ cutting tile counts from ~18 to ~3-8 when the detection set is sparse.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+import math
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
+from ._ultralytics_results import yolo_boxes_to_lists
 from .postprocess import iou
 
 if TYPE_CHECKING:
@@ -83,7 +85,9 @@ def compute_sahi_rois(
                 (all_bboxes[j][0] + all_bboxes[j][2]) / 2,
                 (all_bboxes[j][1] + all_bboxes[j][3]) / 2,
             )
-            dist = ((ci[0] - cj[0]) ** 2 + (ci[1] - cj[1]) ** 2) ** 0.5
+            dx = float(ci[0] - cj[0])
+            dy = float(ci[1] - cj[1])
+            dist = math.sqrt(dx * dx + dy * dy)
             if dist < 200:
                 union(i, j)
 
@@ -204,8 +208,8 @@ def sahi_detect_rois(
             [np.transpose(np.array(t).astype(np.float32) / 255.0, (2, 0, 1)) for t in tiles],
             axis=0,
         )
-        input_name = det.onnx_session.get_inputs()[0].name
-        outputs = det.onnx_session.run(None, {input_name: batch})
+        input_name = cast("str", det.onnx_session.get_inputs()[0].name)
+        outputs = cast("list[np.ndarray]", det.onnx_session.run(None, {input_name: batch}))
         raw_output = outputs[0]
         num_classes = len(det.class_names)
         for tile_idx in range(len(tiles)):
@@ -224,19 +228,23 @@ def sahi_detect_rois(
             )
             all_entities.extend(tile_entities)
     else:
+        if det.model is None:
+            raise RuntimeError("det.model not loaded")
         for tile_idx, tile in enumerate(tiles):
-            results = det.model(tile, conf=det.confidence_threshold, imgsz=tile_size, verbose=False)
+            results = cast(
+                "list[object]",
+                det.model(  # pyright: ignore[reportAny]
+                    tile, conf=det.confidence_threshold, imgsz=tile_size, verbose=False
+                ),
+            )
             x_off, y_off, tw, th = offsets[tile_idx]
             for result in results:
-                if result.boxes is None:
+                boxes_attr: object | None = getattr(result, "boxes", None)
+                if boxes_attr is None:
                     continue
-                for box, cls_id, conf in zip(
-                    result.boxes.xyxy.cpu().numpy(),
-                    result.boxes.cls.cpu().numpy(),
-                    result.boxes.conf.cpu().numpy(),
-                    strict=True,
-                ):
-                    x1, y1, x2, y2 = box.tolist()
+                bboxes, classes, confidences = yolo_boxes_to_lists(boxes_attr)
+                for box, cls_id, conf in zip(bboxes, classes, confidences, strict=True):
+                    x1, y1, x2, y2 = box[0], box[1], box[2], box[3]
                     class_idx = int(cls_id)
                     class_name = (
                         det.class_names[class_idx]
@@ -255,7 +263,7 @@ def sahi_detect_rois(
                             class_name=class_name,
                             bbox=(abs_x1, abs_y1, abs_x2, abs_y2),
                             center=((abs_x1 + abs_x2) / 2, (abs_y1 + abs_y2) / 2),
-                            confidence=float(conf),
+                            confidence=conf,
                             area=(abs_x2 - abs_x1) * (abs_y2 - abs_y1),
                         )
                     )
@@ -304,6 +312,8 @@ def sahi_detect(det: EntityDetector, image: Image.Image) -> list[DetectedEntity]
     overlap = 32
     stride = tile_size - overlap
     all_entities = []
+    if det.model is None:
+        raise RuntimeError("det.model not loaded")
 
     for y_start in range(0, height, stride):
         for x_start in range(0, width, stride):
@@ -311,18 +321,20 @@ def sahi_detect(det: EntityDetector, image: Image.Image) -> list[DetectedEntity]
             y_end = min(y_start + tile_size, height)
 
             tile = image.crop((x_start, y_start, x_end, y_end))
-            results = det.model(tile, conf=det.confidence_threshold, imgsz=tile_size, verbose=False)
+            results = cast(
+                "list[object]",
+                det.model(  # pyright: ignore[reportAny]
+                    tile, conf=det.confidence_threshold, imgsz=tile_size, verbose=False
+                ),
+            )
 
             for result in results:
-                if result.boxes is None:
+                boxes_attr: object | None = getattr(result, "boxes", None)
+                if boxes_attr is None:
                     continue
-                for box, cls_id, conf in zip(
-                    result.boxes.xyxy.cpu().numpy(),
-                    result.boxes.cls.cpu().numpy(),
-                    result.boxes.conf.cpu().numpy(),
-                    strict=True,
-                ):
-                    x1, y1, x2, y2 = box.tolist()
+                bboxes, classes, confidences = yolo_boxes_to_lists(boxes_attr)
+                for box, cls_id, conf in zip(bboxes, classes, confidences, strict=True):
+                    x1, y1, x2, y2 = box[0], box[1], box[2], box[3]
                     class_idx = int(cls_id)
                     class_name = (
                         det.class_names[class_idx]
@@ -341,7 +353,7 @@ def sahi_detect(det: EntityDetector, image: Image.Image) -> list[DetectedEntity]
                             class_name=class_name,
                             bbox=(abs_x1, abs_y1, abs_x2, abs_y2),
                             center=((abs_x1 + abs_x2) / 2, (abs_y1 + abs_y2) / 2),
-                            confidence=float(conf),
+                            confidence=conf,
                             area=(abs_x2 - abs_x1) * (abs_y2 - abs_y1),
                         )
                     )
@@ -365,8 +377,10 @@ def onnx_sahi_detect(det: EntityDetector, image: Image.Image) -> list[DetectedEn
         [np.transpose(np.array(t).astype(np.float32) / 255.0, (2, 0, 1)) for t in tiles], axis=0
     )
 
-    input_name = det.onnx_session.get_inputs()[0].name
-    outputs = det.onnx_session.run(None, {input_name: batch})
+    if det.onnx_session is None:
+        raise RuntimeError("det.onnx_session not initialised")
+    input_name = cast("str", det.onnx_session.get_inputs()[0].name)
+    outputs = cast("list[np.ndarray]", det.onnx_session.run(None, {input_name: batch}))
     raw_output = outputs[0]
 
     logger.debug("ONNX SAHI batch shape: %s, tiles: %d", raw_output.shape, len(tiles))
@@ -416,29 +430,43 @@ def parse_onnx_tile(
 
     entities = []
 
+    # numpy stubs return Any from indexing/slicing/ufuncs; cast at the
+    # boundary then .tolist() before iteration so the loop body is typed.
     if len(raw_output.shape) == 3 and raw_output.shape[2] == 6:
-        predictions = raw_output[tile_idx]
+        predictions = cast("np.ndarray", raw_output[tile_idx])
     elif len(raw_output.shape) == 3 and raw_output.shape[1] == (4 + num_classes):
-        preds_raw = raw_output[tile_idx].T
-        boxes = preds_raw[:, :4]
-        class_scores = preds_raw[:, 4:]
-        best_cls = np.argmax(class_scores, axis=1)
-        best_conf = np.max(class_scores, axis=1)
+        preds_raw = cast("np.ndarray", cast("np.ndarray", raw_output[tile_idx]).T)
+        boxes = cast("np.ndarray", preds_raw[:, :4])
+        class_scores = cast("np.ndarray", preds_raw[:, 4:])
+        best_cls = cast("np.ndarray", np.argmax(class_scores, axis=1))
+        best_conf = cast("np.ndarray", np.max(class_scores, axis=1))
         min_thresh = (
             min(det.class_thresholds.values()) if det.class_thresholds else det.confidence_threshold
         )
-        mask = best_conf >= min_thresh
-        boxes, best_cls, best_conf = boxes[mask], best_cls[mask], best_conf[mask]
-        predictions = []
-        for box, cls_id, conf in zip(boxes, best_cls, best_conf, strict=True):
-            xc, yc, w, h = box
-            predictions.append([xc - w / 2, yc - h / 2, xc + w / 2, yc + h / 2, conf, cls_id])
-        predictions = np.array(predictions) if predictions else np.array([]).reshape(0, 6)
+        mask = cast("np.ndarray", best_conf >= min_thresh)
+        boxes = cast("np.ndarray", boxes[mask])
+        best_cls = cast("np.ndarray", best_cls[mask])
+        best_conf = cast("np.ndarray", best_conf[mask])
+        box_list = cast("list[list[float]]", boxes.tolist())
+        cls_list = cast("list[float]", best_cls.tolist())
+        conf_list = cast("list[float]", best_conf.tolist())
+        pred_list: list[list[float]] = []
+        for box, cls_id, conf in zip(box_list, cls_list, conf_list, strict=True):
+            xc, yc, w, h = box[0], box[1], box[2], box[3]
+            pred_list.append([xc - w / 2, yc - h / 2, xc + w / 2, yc + h / 2, conf, cls_id])
+        predictions = np.array(pred_list) if pred_list else np.array([]).reshape(0, 6)
     else:
         return []
 
-    for pred in predictions:
-        x1, y1, x2, y2, confidence, class_id = pred
+    for pred in cast("list[list[float]]", predictions.tolist()):
+        x1, y1, x2, y2, confidence, class_id = (
+            pred[0],
+            pred[1],
+            pred[2],
+            pred[3],
+            pred[4],
+            pred[5],
+        )
         class_idx = int(class_id)
         class_name = (
             det.class_names[class_idx]
@@ -463,10 +491,10 @@ def parse_onnx_tile(
             DetectedEntity(
                 id=det._generate_id(class_name),
                 class_name=class_name,
-                bbox=(float(abs_x1), float(abs_y1), float(abs_x2), float(abs_y2)),
+                bbox=(abs_x1, abs_y1, abs_x2, abs_y2),
                 center=((abs_x1 + abs_x2) / 2, (abs_y1 + abs_y2) / 2),
-                confidence=float(confidence),
-                area=float((abs_x2 - abs_x1) * (abs_y2 - abs_y1)),
+                confidence=confidence,
+                area=(abs_x2 - abs_x1) * (abs_y2 - abs_y1),
             )
         )
 

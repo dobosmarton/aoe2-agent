@@ -10,7 +10,7 @@ import structlog
 from .entity_utils import extract_attrs
 from .memory import AGE_SCORES, AgentMemory, GameState
 
-log = structlog.get_logger()
+log = structlog.stdlib.get_logger()
 
 # Enemy military classes from YOLO detection that trigger alarm
 ALARM_CONFIDENCE_GATE = 0.45

@@ -5,7 +5,7 @@ from typing import Protocol
 
 import structlog
 
-log = structlog.get_logger()
+log = structlog.stdlib.get_logger()
 
 # Try to import pygetwindow, fall back gracefully if not available
 try:

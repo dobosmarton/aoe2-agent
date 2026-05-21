@@ -9,11 +9,12 @@ Usage:
 """
 
 import sys
+from pathlib import Path
 
 from data.game_knowledge import GameKnowledge
 
 
-def main():
+def main() -> int:
     print("=" * 60)
     print("AoE2 Game Knowledge Database Population")
     print("=" * 60)
@@ -44,7 +45,7 @@ def main():
     print("Sample Units:")
     print("-" * 40)
 
-    sample_resources = {"food": 100, "wood": 100, "gold": 100, "stone": 100}
+    sample_resources: dict[str, object] = {"food": 100, "wood": 100, "gold": 100, "stone": 100}
     units = db.get_affordable_units(sample_resources, "dark", limit=5)
     for unit in units:
         name = unit.get("localized_name", "Unknown")

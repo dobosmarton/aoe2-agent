@@ -479,21 +479,27 @@ def _print_summary(results: list[ScenarioResult]) -> None:
     print(separator)
 
 
-def _resolve_fixtures(args: argparse.Namespace) -> list[Path]:
+class _RunnerArgs(argparse.Namespace):
+    fixtures: list[str]
+    all: bool
+    model: str | None
+
+
+def _resolve_fixtures(args: _RunnerArgs) -> list[Path]:
     if args.all:
         scenarios_dir = REPO / "evaluation" / "scenarios"
         return sorted(scenarios_dir.rglob("*.yaml"))
     return [Path(p) for p in args.fixtures]
 
 
-def _parse_args() -> argparse.Namespace:
+def _parse_args() -> _RunnerArgs:
     parser = argparse.ArgumentParser(description="Run scenario evaluations against ClaudeProvider")
     parser.add_argument("fixtures", nargs="*", help="YAML fixture paths (or use --all)")
     parser.add_argument(
         "--all", action="store_true", help="Run every fixture in evaluation/scenarios/"
     )
     parser.add_argument("--model", help="Override the model (default: config.model)")
-    return parser.parse_args()
+    return parser.parse_args(namespace=_RunnerArgs())
 
 
 def main() -> int:

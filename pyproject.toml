@@ -87,11 +87,13 @@ exclude = ["tests*", "experiments*", "venv*", "memories*", "logs*", "tmp*", "are
 target-version = "py311"
 line-length = 100
 
-# Skip vendored / data / non-source dirs. Ruff's defaults already exclude
-# venv, build, dist, etc., but spell out the project-specific ones.
+# Skip vendored / scratch / non-source dirs. Ruff's defaults already exclude
+# venv, build, dist, etc., but spell out the project-specific ones. Every
+# first-party package (gameplay_agent, autoresearch, evaluation, server,
+# detection, arena, data) is linted — only scratch dirs and bundled assets
+# are skipped.
 extend-exclude = [
     "experiments",
-    "data",
     "logs",
     "tmp",
     "memories",
@@ -155,10 +157,6 @@ ignore = [
 # Tests don't need annotations — pytest doesn't care about test return types,
 # and `dataclass` test fixtures get annotation-free defaults.
 "tests/**" = ["ANN"]
-# detection/ is computer-vision / ML code with heavy numpy.ndarray and
-# ultralytics types. Annotating thoroughly requires understanding the
-# third-party shape contracts; deferred until that work is scoped.
-"detection/**" = ["ANN"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -168,14 +166,19 @@ indent-style = "space"
 # ---------------------------------------------------------------------------
 # Pyright — static type checker
 # ---------------------------------------------------------------------------
-# Scoped to the AI agent code. detection/ is computer-vision/ML and uses
-# numpy/PIL shapes that grumble loudly under static checking; revisit later.
+# Covers every first-party python package in the repo. Exclusions are scratch
+# / vendored / non-source dirs only — no first-party package is allowed to
+# skip type checking. numpy / PIL / ultralytics boundaries are crossed via
+# explicit `cast(...)` at the call site, not by excluding the file.
 [tool.pyright]
 include = [
     "gameplay_agent",
     "autoresearch",
     "evaluation",
     "server",
+    "detection",
+    "arena",
+    "data",
 ]
 exclude = [
     "venv",
@@ -184,7 +187,6 @@ exclude = [
     "tmp",
     "logs",
     "memories",
-    "data",
     "arena/web/ui",
 ]
 # No venv= config: pre-commit runs `venv/bin/pyright` directly via the
@@ -231,6 +233,14 @@ extraPaths = ["."]
 
 [[tool.pyright.executionEnvironments]]
 root = "arena"
+extraPaths = ["."]
+
+[[tool.pyright.executionEnvironments]]
+root = "detection"
+extraPaths = ["."]
+
+[[tool.pyright.executionEnvironments]]
+root = "data"
 extraPaths = ["."]
 
 

@@ -10,6 +10,7 @@ This gives the agent enough information to make tactical decisions
 while keeping the number of classes manageable for training.
 """
 
+import argparse
 from pathlib import Path
 
 from .sld_extractor import extract_multiple_frames, extract_sprite
@@ -830,7 +831,7 @@ def extract_sprites(
     return stats
 
 
-def print_config():
+def print_config() -> None:
     """Print the extraction configuration."""
     print(f"\n{'=' * 60}")
     print("SPRITE EXTRACTION CONFIGURATION")
@@ -892,9 +893,17 @@ def print_config():
                 print(f"  • {name} (max {max_var}): {desc}")
 
 
-def main():
-    import argparse
+class _ExtractSpritesArgs(argparse.Namespace):
+    game_dir: str
+    output: str
+    show_config: bool
+    quiet: bool
+    multi_frame: bool
+    player_colors: bool
+    frames: list[int]
 
+
+def main() -> int:
     parser = argparse.ArgumentParser(
         description="Extract comprehensive sprite set for YOLO training (v2 with animation frames and player colors)"
     )
@@ -926,7 +935,7 @@ def main():
         help="Frame indices to extract when using --multi-frame (default: 0 4 8 12)",
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(namespace=_ExtractSpritesArgs())
 
     if args.show_config:
         print_config()

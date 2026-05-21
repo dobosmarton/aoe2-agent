@@ -19,12 +19,12 @@ def export_to_onnx(model_path: str, imgsz: int = 640) -> str:
     Returns:
         Path to the exported .onnx file
     """
-    from ultralytics import YOLO
+    from detection._ultralytics_compat import YOLO
 
     model = YOLO(model_path)
     print(f"Exporting {model_path} to ONNX (imgsz={imgsz}, dynamic batch)...")
 
-    export_path = model.export(
+    export_path = model.export(  # pyright: ignore[reportAny]
         format="onnx",
         imgsz=imgsz,
         simplify=True,
@@ -35,7 +35,12 @@ def export_to_onnx(model_path: str, imgsz: int = 640) -> str:
     return str(export_path)
 
 
-def main():
+class _ExportOnnxArgs(argparse.Namespace):
+    model: str
+    imgsz: int
+
+
+def main() -> None:
     parser = argparse.ArgumentParser(description="Export YOLO model to ONNX")
     parser.add_argument(
         "--model",
@@ -43,7 +48,7 @@ def main():
         help="Path to .pt model file",
     )
     parser.add_argument("--imgsz", type=int, default=640, help="Input image size")
-    args = parser.parse_args()
+    args = parser.parse_args(namespace=_ExportOnnxArgs())
 
     export_to_onnx(args.model, args.imgsz)
 

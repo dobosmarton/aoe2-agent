@@ -34,7 +34,18 @@ import time
 from pathlib import Path
 
 
-def main():
+class _CaptureReplayArgs(argparse.Namespace):
+    output: str
+    count: int
+    interval: float
+    prefix: str
+    monitor: int
+    quality: int
+    format: str
+    delay: float
+
+
+def main() -> int:
     parser = argparse.ArgumentParser(description="Capture screenshots from AoE2 for training data")
     parser.add_argument(
         "--output",
@@ -69,7 +80,7 @@ def main():
         help="Initial delay before starting capture (default: 5.0)",
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(namespace=_CaptureReplayArgs())
 
     # Try to import mss for screen capture
     try:

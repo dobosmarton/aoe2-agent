@@ -5,12 +5,16 @@ Provides dynamic context injection to reduce prompt bloat while giving
 the LLM access to relevant game data based on current game state.
 """
 
+import contextlib
 import sqlite3
-import json
 import urllib.request
 from pathlib import Path
-from typing import Optional
+from typing import cast
 
+from ._halfon_schema import HalfonEntity, HalfonResponse
+from ._narrow import as_dict as _as_dict
+from ._narrow import as_int as _as_int
+from ._narrow import as_str as _as_str
 
 # Age progression mapping
 AGE_ORDER = ["dark", "feudal", "castle", "imperial"]
@@ -20,33 +24,33 @@ AGE_ORDER = ["dark", "feudal", "castle", "imperial"]
 UNIT_CLASSES = {
     0: "archer",
     1: "artifact",
-    4: "civilian",       # Villager
+    4: "civilian",  # Villager
     6: "infantry",
     8: "cavalry",
-    12: "cavalry",       # Mounted soldier
+    12: "cavalry",  # Mounted soldier
     13: "siege",
-    14: "predator",      # Wolf, lion
-    18: "monk",          # Priest
-    19: "trade_unit",    # Trade cart
-    22: "infantry",      # Phalanx
-    23: "domestic",      # Sheep, turkey
-    36: "ship",          # Fire ship
-    52: "resource",      # Deep sea fish
-    53: "resource",      # Gold mine
-    54: "resource",      # Shore fish
-    56: "resource",      # Forage/berries
-    57: "boar",          # Wild boar
-    58: "sheep",         # Sheep specifically
+    14: "predator",  # Wolf, lion
+    18: "monk",  # Priest
+    19: "trade_unit",  # Trade cart
+    22: "infantry",  # Phalanx
+    23: "domestic",  # Sheep, turkey
+    36: "ship",  # Fire ship
+    52: "resource",  # Deep sea fish
+    53: "resource",  # Gold mine
+    54: "resource",  # Shore fish
+    56: "resource",  # Forage/berries
+    57: "boar",  # Wild boar
+    58: "sheep",  # Sheep specifically
 }
 
 # Building classes
 BUILDING_CLASSES = {
-    3: "building",       # Generic building class
-    11: "building",      # All buildings
-    20: "trade_building", # Market
-    21: "wall",          # Walls
-    30: "tower",         # Towers
-    51: "flag",          # Flags
+    3: "building",  # Generic building class
+    11: "building",  # All buildings
+    20: "trade_building",  # Market
+    21: "wall",  # Walls
+    30: "tower",  # Towers
+    51: "flag",  # Flags
 }
 
 # Known building IDs (hardcoded for reliability)
@@ -102,7 +106,7 @@ KNOWN_UNIT_IDS = {
 class GameKnowledge:
     """SQLite database wrapper for AoE2 game data."""
 
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: str | None = None) -> None:
         """Initialize database connection.
 
         Args:
@@ -116,7 +120,7 @@ class GameKnowledge:
         self.conn.row_factory = sqlite3.Row  # Enable column access by name
         self._init_tables()
 
-    def _init_tables(self):
+    def _init_tables(self) -> None:
         """Create database tables if they don't exist."""
         self.conn.executescript("""
             CREATE TABLE IF NOT EXISTS units (
@@ -182,41 +186,50 @@ class GameKnowledge:
         """)
         self.conn.commit()
 
-    def _is_building(self, entity_id: int, entity: dict) -> bool:
+    def _is_building(self, entity_id: int, entity: HalfonEntity) -> bool:
         """Determine if an entity is a building based on multiple heuristics."""
         # Check known building IDs first
         if entity_id in KNOWN_BUILDING_IDS:
             return True
 
-        entity_class = entity.get("class", -1)
-
         # Check building classes
-        if entity_class in BUILDING_CLASSES:
+        if entity.class_ in BUILDING_CLASSES:
             return True
 
         # Buildings typically have high HP, no attack, and garrison capacity
-        hp = entity.get("hit_points", 0)
-        attack = entity.get("attack", 0)
-        garrison = entity.get("garrison_capacity", 0)
-
-        # High HP with low/no attack is likely a building
-        if hp > 500 and attack == 0:
+        if entity.hit_points > 500 and entity.attack == 0:
             return True
 
         # Has garrison capacity
-        if garrison > 0 and hp > 200:
+        if entity.garrison_capacity > 0 and entity.hit_points > 200:
             return True
 
         # Name-based heuristics
-        name = str(entity.get("name", "")).lower()
-        building_keywords = ["tower", "castle", "wall", "gate", "house", "mill",
-                           "camp", "dock", "range", "stable", "barracks", "center",
-                           "monastery", "market", "university", "blacksmith", "wonder",
-                           "outpost", "workshop", "trap", "farm"]
-        if any(kw in name for kw in building_keywords):
-            return True
-
-        return False
+        name = entity.name.lower()
+        building_keywords = [
+            "tower",
+            "castle",
+            "wall",
+            "gate",
+            "house",
+            "mill",
+            "camp",
+            "dock",
+            "range",
+            "stable",
+            "barracks",
+            "center",
+            "monastery",
+            "market",
+            "university",
+            "blacksmith",
+            "wonder",
+            "outpost",
+            "workshop",
+            "trap",
+            "farm",
+        ]
+        return any(kw in name for kw in building_keywords)
 
     def populate_from_halfon(self) -> int:
         """Download and populate database from halfon.aoe2.se.
@@ -227,75 +240,29 @@ class GameKnowledge:
         url = "https://halfon.aoe2.se/data/units_buildings_techs.de.json"
 
         try:
-            with urllib.request.urlopen(url, timeout=30) as response:
-                data = json.loads(response.read().decode('utf-8'))
+            with urllib.request.urlopen(url, timeout=30) as response:  # pyright: ignore[reportAny]
+                raw_bytes = cast("bytes", response.read())  # pyright: ignore[reportAny]
+            payload = HalfonResponse.model_validate_json(raw_bytes)
         except Exception as e:
-            raise RuntimeError(f"Failed to fetch data from {url}: {e}")
+            raise RuntimeError(f"Failed to fetch data from {url}: {e}") from e
 
         count = 0
         unit_count = 0
         building_count = 0
 
-        # Process units and buildings from the main data
-        units_buildings = data.get("units_buildings", {})
-        for id_str, entity in units_buildings.items():
+        for id_str, entity in payload.units_buildings.items():
             try:
                 entity_id = int(id_str)
-                cost = entity.get("cost", {})
-                entity_class = entity.get("class", 0)
+            except ValueError:
+                continue  # Skip non-numeric IDs
 
-                # Determine if building or unit
-                if self._is_building(entity_id, entity):
-                    # It's a building
-                    self.conn.execute("""
-                        INSERT OR REPLACE INTO buildings
-                        (id, name, localized_name, hit_points, cost_wood, cost_stone,
-                         build_time, age, type, garrison_capacity)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        entity_id,
-                        entity.get("name"),
-                        entity.get("localised_name") or entity.get("localized_name"),
-                        entity.get("hit_points", 0),
-                        cost.get("wood", 0),
-                        cost.get("stone", 0),
-                        entity.get("build_time", 0),
-                        self._infer_age(entity, entity_id),
-                        entity.get("type", 0),
-                        entity.get("garrison_capacity", 0)
-                    ))
-                    building_count += 1
-                else:
-                    # It's a unit
-                    self.conn.execute("""
-                        INSERT OR REPLACE INTO units
-                        (id, name, localized_name, hit_points, attack, melee_armor,
-                         pierce_armor, range, cost_food, cost_wood, cost_gold, cost_stone,
-                         train_time, age, type, class, line_of_sight)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        entity_id,
-                        entity.get("name"),
-                        entity.get("localised_name") or entity.get("localized_name"),
-                        entity.get("hit_points", 0),
-                        entity.get("attack", 0),
-                        entity.get("melee_armor", 0),
-                        entity.get("pierce_armor", 0),
-                        entity.get("range", 0),
-                        cost.get("food", 0),
-                        cost.get("wood", 0),
-                        cost.get("gold", 0),
-                        cost.get("stone", 0),
-                        entity.get("train_time", 0),
-                        self._infer_age(entity, entity_id),
-                        entity.get("type", 0),
-                        entity_class,
-                        entity.get("line_of_sight", 4)
-                    ))
-                    unit_count += 1
-                count += 1
-            except (ValueError, TypeError) as e:
-                continue  # Skip malformed entries
+            if self._is_building(entity_id, entity):
+                self._insert_building(entity_id, entity)
+                building_count += 1
+            else:
+                self._insert_unit(entity_id, entity)
+                unit_count += 1
+            count += 1
 
         # Also populate from hardcoded essential data for reliability
         self._populate_essential_units()
@@ -305,7 +272,61 @@ class GameKnowledge:
         print(f"Loaded {unit_count} units and {building_count} buildings")
         return count
 
-    def _populate_essential_units(self):
+    def _insert_building(self, entity_id: int, entity: HalfonEntity) -> None:
+        """Write one halfon building entity into the buildings table."""
+        self.conn.execute(
+            """
+            INSERT OR REPLACE INTO buildings
+            (id, name, localized_name, hit_points, cost_wood, cost_stone,
+             build_time, age, type, garrison_capacity)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                entity_id,
+                entity.name,
+                entity.display_name,
+                entity.hit_points,
+                entity.cost.wood,
+                entity.cost.stone,
+                entity.build_time,
+                self._infer_age(entity, entity_id),
+                entity.type,
+                entity.garrison_capacity,
+            ),
+        )
+
+    def _insert_unit(self, entity_id: int, entity: HalfonEntity) -> None:
+        """Write one halfon unit entity into the units table."""
+        self.conn.execute(
+            """
+            INSERT OR REPLACE INTO units
+            (id, name, localized_name, hit_points, attack, melee_armor,
+             pierce_armor, range, cost_food, cost_wood, cost_gold, cost_stone,
+             train_time, age, type, class, line_of_sight)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                entity_id,
+                entity.name,
+                entity.display_name,
+                entity.hit_points,
+                entity.attack,
+                entity.melee_armor,
+                entity.pierce_armor,
+                entity.range,
+                entity.cost.food,
+                entity.cost.wood,
+                entity.cost.gold,
+                entity.cost.stone,
+                entity.train_time,
+                self._infer_age(entity, entity_id),
+                entity.type,
+                entity.class_,
+                entity.line_of_sight,
+            ),
+        )
+
+    def _populate_essential_units(self) -> None:
         """Populate essential units that must always be present."""
         essential_units = [
             # id, name, localized_name, hp, attack, melee_armor, pierce_armor,
@@ -316,18 +337,19 @@ class GameKnowledge:
         ]
 
         for unit in essential_units:
-            try:
-                self.conn.execute("""
+            with contextlib.suppress(sqlite3.IntegrityError, sqlite3.OperationalError):
+                self.conn.execute(
+                    """
                     INSERT OR IGNORE INTO units
                     (id, name, localized_name, hit_points, attack, melee_armor,
                      pierce_armor, range, cost_food, cost_wood, cost_gold, cost_stone,
                      train_time, age, type, class, line_of_sight)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, unit)
-            except Exception:
-                pass
+                """,
+                    unit,
+                )
 
-    def _populate_essential_buildings(self):
+    def _populate_essential_buildings(self) -> None:
         """Populate essential buildings that must always be present."""
         essential_buildings = [
             # id, name, localized_name, hp, wood, stone, build_time, age, type, garrison
@@ -340,67 +362,93 @@ class GameKnowledge:
         ]
 
         for building in essential_buildings:
-            try:
-                self.conn.execute("""
+            with contextlib.suppress(sqlite3.IntegrityError, sqlite3.OperationalError):
+                self.conn.execute(
+                    """
                     INSERT OR IGNORE INTO buildings
                     (id, name, localized_name, hit_points, cost_wood, cost_stone,
                      build_time, age, type, garrison_capacity)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, building)
-            except Exception:
-                pass
+                """,
+                    building,
+                )
 
-    def _infer_age(self, entity: dict, entity_id: int = 0) -> str:
+    def _infer_age(self, entity: HalfonEntity, entity_id: int = 0) -> str:
         """Infer the age requirement for an entity.
 
         Args:
-            entity: Entity dict from JSON data
-            entity_id: Optional entity ID for known unit lookups
+            entity: Validated halfon entity record.
+            entity_id: Optional entity ID for known unit lookups.
         """
         # Check known unit IDs first
         if entity_id in KNOWN_UNIT_IDS:
             return KNOWN_UNIT_IDS[entity_id][2]
 
         # Check if explicitly specified in data
-        if "age" in entity:
-            age_val = entity["age"]
-            if isinstance(age_val, str):
-                return age_val.lower()
-            elif isinstance(age_val, int):
-                return AGE_ORDER[min(age_val, 3)]
+        if isinstance(entity.age, str):
+            return entity.age.lower()
+        if isinstance(entity.age, int):
+            return AGE_ORDER[min(entity.age, 3)]
 
         # Infer from cost patterns or name
-        name = str(entity.get("name", "")).lower()
-        localized = str(entity.get("localised_name", "")).lower()
-        cost = entity.get("cost", {})
+        name = entity.name.lower()
+        localized = entity.localised_name.lower()
 
         # Imperial age indicators
-        imperial_keywords = ["elite", "heavy", "siege ram", "bombard", "champion",
-                           "paladin", "arbalest", "hand cannon", "hussar"]
+        imperial_keywords = [
+            "elite",
+            "heavy",
+            "siege ram",
+            "bombard",
+            "champion",
+            "paladin",
+            "arbalest",
+            "hand cannon",
+            "hussar",
+        ]
         if any(x in name or x in localized for x in imperial_keywords):
             return "imperial"
 
         # Castle age indicators
-        castle_keywords = ["knight", "crossbow", "mangonel", "monk", "pikeman",
-                         "long sword", "camel", "scorpion", "cavalier"]
+        castle_keywords = [
+            "knight",
+            "crossbow",
+            "mangonel",
+            "monk",
+            "pikeman",
+            "long sword",
+            "camel",
+            "scorpion",
+            "cavalier",
+        ]
         if any(x in name or x in localized for x in castle_keywords):
             return "castle"
 
         # Feudal age indicators
-        feudal_keywords = ["archer", "scout", "spear", "skirmish", "man-at-arms",
-                          "galley", "fire ship"]
+        feudal_keywords = [
+            "archer",
+            "scout",
+            "spear",
+            "skirmish",
+            "man-at-arms",
+            "galley",
+            "fire ship",
+        ]
         if any(x in name or x in localized for x in feudal_keywords):
             return "feudal"
 
         # High gold cost usually means later age
-        if cost.get("gold", 0) > 50:
+        gold_cost = entity.cost.gold
+        if gold_cost > 50:
             return "castle"
-        if cost.get("gold", 0) > 30:
+        if gold_cost > 30:
             return "feudal"
 
         return "dark"
 
-    def get_affordable_units(self, resources: dict, age: str = "dark", limit: int = 10) -> list[dict]:
+    def get_affordable_units(
+        self, resources: dict, age: str = "dark", limit: int = 10
+    ) -> list[dict]:
         """Get units that can be afforded with current resources.
 
         Args:
@@ -412,10 +460,11 @@ class GameKnowledge:
             List of affordable unit dicts
         """
         age_index = AGE_ORDER.index(age.lower()) if age.lower() in AGE_ORDER else 0
-        available_ages = AGE_ORDER[:age_index + 1]
+        available_ages = AGE_ORDER[: age_index + 1]
 
         placeholders = ",".join("?" * len(available_ages))
-        cursor = self.conn.execute(f"""
+        cursor = self.conn.execute(
+            f"""
             SELECT localized_name, cost_food, cost_wood, cost_gold, attack, hit_points,
                    melee_armor, pierce_armor, range, train_time
             FROM units
@@ -424,24 +473,29 @@ class GameKnowledge:
             AND localized_name IS NOT NULL
             ORDER BY attack DESC
             LIMIT ?
-        """, (
-            resources.get("food", 0),
-            resources.get("wood", 0),
-            resources.get("gold", 0),
-            resources.get("stone", 0),
-            *available_ages,
-            limit
-        ))
+        """,
+            (
+                resources.get("food", 0),
+                resources.get("wood", 0),
+                resources.get("gold", 0),
+                resources.get("stone", 0),
+                *available_ages,
+                limit,
+            ),
+        )
 
-        return [dict(row) for row in cursor.fetchall()]
+        return [dict(row) for row in cast("list[sqlite3.Row]", cursor.fetchall())]
 
-    def get_affordable_buildings(self, resources: dict, age: str = "dark", limit: int = 10) -> list[dict]:
+    def get_affordable_buildings(
+        self, resources: dict, age: str = "dark", limit: int = 10
+    ) -> list[dict]:
         """Get buildings that can be afforded with current resources."""
         age_index = AGE_ORDER.index(age.lower()) if age.lower() in AGE_ORDER else 0
-        available_ages = AGE_ORDER[:age_index + 1]
+        available_ages = AGE_ORDER[: age_index + 1]
 
         placeholders = ",".join("?" * len(available_ages))
-        cursor = self.conn.execute(f"""
+        cursor = self.conn.execute(
+            f"""
             SELECT localized_name, cost_wood, cost_stone, hit_points, build_time
             FROM buildings
             WHERE cost_wood <= ? AND cost_stone <= ?
@@ -449,25 +503,25 @@ class GameKnowledge:
             AND localized_name IS NOT NULL
             ORDER BY hit_points DESC
             LIMIT ?
-        """, (
-            resources.get("wood", 0),
-            resources.get("stone", 0),
-            *available_ages,
-            limit
-        ))
+        """,
+            (resources.get("wood", 0), resources.get("stone", 0), *available_ages, limit),
+        )
 
-        return [dict(row) for row in cursor.fetchall()]
+        return [dict(row) for row in cast("list[sqlite3.Row]", cursor.fetchall())]
 
-    def get_unit_by_name(self, name: str) -> Optional[dict]:
+    def get_unit_by_name(self, name: str) -> dict[str, object] | None:
         """Look up a unit by name (partial match)."""
-        cursor = self.conn.execute("""
+        cursor = self.conn.execute(
+            """
             SELECT * FROM units
             WHERE localized_name LIKE ? OR name LIKE ?
             LIMIT 1
-        """, (f"%{name}%", f"%{name}%"))
+        """,
+            (f"%{name}%", f"%{name}%"),
+        )
 
-        row = cursor.fetchone()
-        return dict(row) if row else None
+        row = cast("sqlite3.Row | None", cursor.fetchone())
+        return dict(row) if row is not None else None
 
     def get_counter_info(self, unit_name: str) -> str:
         """Get counter information for a unit type."""
@@ -488,8 +542,9 @@ class GameKnowledge:
                 return value
         return "Unknown"
 
-    def get_context_for_state(self, age: str, resources: dict,
-                               detected_entities: Optional[list] = None) -> str:
+    def get_context_for_state(
+        self, age: str, resources: dict[str, object], detected_entities: list[object] | None = None
+    ) -> str:
         """Generate minimal context string for LLM injection.
 
         Args:
@@ -505,12 +560,16 @@ class GameKnowledge:
         # Section 1: Detected entities (if provided)
         if detected_entities:
             lines.append("## Detected Entities")
-            for entity in detected_entities[:15]:  # Limit to 15 entities
-                eid = entity.get("id", "unknown")
-                cls = entity.get("class", "unknown")
-                center = entity.get("center", (0, 0))
-                conf = entity.get("confidence", 0)
-                lines.append(f"  {eid}: {cls} at ({int(center[0])},{int(center[1])}) [{conf:.0%}]")
+            for raw_entity in detected_entities[:15]:  # Limit to 15 entities
+                entity = _as_dict(raw_entity)
+                eid = _as_str(entity.get("id"), "unknown")
+                cls = _as_str(entity.get("class"), "unknown")
+                center_raw = entity.get("center", (0, 0))
+                center = center_raw if isinstance(center_raw, (tuple, list)) else (0, 0)
+                conf = float(_as_int(entity.get("confidence")))
+                cx = _as_int(center[0]) if len(center) > 0 else 0
+                cy = _as_int(center[1]) if len(center) > 1 else 0
+                lines.append(f"  {eid}: {cls} at ({cx},{cy}) [{conf:.0%}]")
             lines.append("")
 
         # Section 2: Affordable units
@@ -526,9 +585,12 @@ class GameKnowledge:
                 hp = unit.get("hit_points", 0)
 
                 cost_parts = []
-                if food: cost_parts.append(f"{food}F")
-                if wood: cost_parts.append(f"{wood}W")
-                if gold: cost_parts.append(f"{gold}G")
+                if food:
+                    cost_parts.append(f"{food}F")
+                if wood:
+                    cost_parts.append(f"{wood}W")
+                if gold:
+                    cost_parts.append(f"{gold}G")
 
                 lines.append(f"  {name}: {'/'.join(cost_parts)} (ATK:{atk}, HP:{hp})")
             lines.append("")
@@ -544,8 +606,10 @@ class GameKnowledge:
                 hp = bldg.get("hit_points", 0)
 
                 cost_parts = []
-                if wood: cost_parts.append(f"{wood}W")
-                if stone: cost_parts.append(f"{stone}S")
+                if wood:
+                    cost_parts.append(f"{wood}W")
+                if stone:
+                    cost_parts.append(f"{stone}S")
 
                 lines.append(f"  {name}: {'/'.join(cost_parts)} (HP:{hp})")
             lines.append("")
@@ -562,19 +626,25 @@ class GameKnowledge:
 5. House cost: 25 wood, provides +5 population
 """
 
-    def close(self):
+    def close(self) -> None:
         """Close database connection."""
         self.conn.close()
 
-    def __enter__(self):
+    def __enter__(self) -> "GameKnowledge":
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object,
+    ) -> None:
         self.close()
 
 
 # Singleton instance for easy access
-_instance: Optional[GameKnowledge] = None
+_instance: GameKnowledge | None = None
+
 
 def get_db() -> GameKnowledge:
     """Get or create the singleton database instance."""

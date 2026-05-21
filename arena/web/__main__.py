@@ -6,13 +6,18 @@ import argparse
 import logging
 
 
+class _ArenaWebArgs(argparse.Namespace):
+    host: str
+    port: int
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     parser = argparse.ArgumentParser(description="AoE2 Arena Web (event-log replay)")
     parser.add_argument("--host", default="127.0.0.1", help="Bind host")
     parser.add_argument("--port", type=int, default=8000, help="Bind port")
-    args = parser.parse_args()
+    args = parser.parse_args(namespace=_ArenaWebArgs())
 
     import uvicorn
 

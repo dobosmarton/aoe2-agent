@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import io
 import logging
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
+from ._ultralytics_results import yolo_boxes_to_lists
 from .mock import mock_detect
 from .postprocess import iou, nms
 from .sahi import (
@@ -32,6 +34,8 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from PIL import Image
+
+    from .._classes_schema import ClassesYaml
 
 
 @dataclass
@@ -68,7 +72,7 @@ def _load_default_classes() -> list[str]:
         import yaml
 
         with yaml_path.open() as f:
-            data = yaml.safe_load(f)
+            data = cast("ClassesYaml", yaml.safe_load(f))
         classes = sorted(data["classes"], key=lambda c: c["id"])
         return [c["name"] for c in classes]
     except Exception:
@@ -155,7 +159,7 @@ class EntityDetector:
         use_mock: bool = False,
         imgsz: int = 1280,
         use_sahi: bool = True,
-    ):
+    ) -> None:
         """Initialize the detector.
 
         Args:
@@ -195,7 +199,7 @@ class EntityDetector:
         if model_path and not use_mock:
             self._load_model(model_path)
 
-    def _load_model(self, model_path: str):
+    def _load_model(self, model_path: str) -> None:
         """Load YOLO model from weights file (supports .pt and .onnx)."""
         path = Path(model_path)
 
@@ -217,10 +221,10 @@ class EntityDetector:
         else:
             self._load_pytorch(model_path)
 
-    def _load_pytorch(self, model_path: str):
+    def _load_pytorch(self, model_path: str) -> None:
         """Load PyTorch YOLO model."""
         try:
-            from ultralytics import YOLO
+            from detection._ultralytics_compat import YOLO
 
             self.model = YOLO(model_path)
             self.backend = "pytorch"
@@ -244,7 +248,7 @@ class EntityDetector:
             print(f"WARNING: Failed to load PyTorch model: {e}. Using mock detection.")
             self.use_mock = True
 
-    def _load_onnx(self, model_path: str):
+    def _load_onnx(self, model_path: str) -> None:
         """Load ONNX model using onnxruntime with optimized session options."""
         try:
             import os
@@ -272,7 +276,7 @@ class EntityDetector:
             print(f"WARNING: Failed to load ONNX model: {e}. Using mock detection.")
             self.use_mock = True
 
-    def _reset_counters(self):
+    def _reset_counters(self) -> None:
         """Reset entity ID counters for new detection."""
         self._class_counters = dict.fromkeys(self.class_names, 0)
 
@@ -404,6 +408,8 @@ class EntityDetector:
             else:
                 image = screenshot
             # Single-pass inference — skip SAHI
+            if self.model is None:
+                raise RuntimeError("Model not loaded; call _load_model() first")
             results = self.model(
                 image, conf=self.confidence_threshold, imgsz=self.input_size, verbose=False
             )
@@ -477,6 +483,8 @@ class EntityDetector:
         else:
             # PyTorch: same two-pass approach
             w, h = image.size
+            if self.model is None:
+                raise RuntimeError("Model not loaded; call _load_model() first")
             results = self.model(
                 image,
                 conf=min(self.class_thresholds.values()),
@@ -490,6 +498,8 @@ class EntityDetector:
             crop_x2 = w - crop_x1
             crop_y2 = h - crop_y1
             center_crop = image.crop((crop_x1, crop_y1, crop_x2, crop_y2))
+            if self.model is None:
+                raise RuntimeError("Model not loaded; call _load_model() first")
             results = self.model(
                 center_crop, conf=min(self.class_thresholds.values()), imgsz=640, verbose=False
             )
@@ -549,6 +559,8 @@ class EntityDetector:
         elif self.backend == "onnx":
             fast_entities = self._onnx_detect(screenshot)
         else:
+            if self.model is None:
+                raise RuntimeError("Model not loaded; call _load_model() first")
             results = self.model(
                 image, conf=self.confidence_threshold, imgsz=self.input_size, verbose=False
             )
@@ -631,26 +643,24 @@ class EntityDetector:
             return sahi_detect(self, image)
 
         # Standard inference for small images
+        if self.model is None:
+            raise RuntimeError("Model not loaded; call _load_model() first")
         results = self.model(
             image, conf=self.confidence_threshold, imgsz=self.input_size, verbose=False
         )
         return self._parse_yolo_results(results)
 
-    def _parse_yolo_results(self, results) -> list[DetectedEntity]:
+    def _parse_yolo_results(self, results: object) -> list[DetectedEntity]:
         """Parse ultralytics YOLO results into DetectedEntity list."""
         entities = []
-        for result in results:
-            boxes = result.boxes
-            if boxes is None:
+        for result in cast("list[object]", results):
+            boxes_attr: object | None = getattr(result, "boxes", None)
+            if boxes_attr is None:
                 continue
 
-            for box, cls_id, conf in zip(
-                boxes.xyxy.cpu().numpy(),
-                boxes.cls.cpu().numpy(),
-                boxes.conf.cpu().numpy(),
-                strict=True,
-            ):
-                x1, y1, x2, y2 = box.tolist()
+            boxes, classes, confidences = yolo_boxes_to_lists(boxes_attr)
+            for box, cls_id, conf in zip(boxes, classes, confidences, strict=True):
+                x1, y1, x2, y2 = box[0], box[1], box[2], box[3]
                 class_idx = int(cls_id)
 
                 if class_idx < len(self.class_names):
@@ -697,8 +707,10 @@ class EntityDetector:
         img_array = np.expand_dims(img_array, axis=0)
 
         # Run inference
-        input_name = self.onnx_session.get_inputs()[0].name
-        outputs = self.onnx_session.run(None, {input_name: img_array})
+        if self.onnx_session is None:
+            raise RuntimeError("ONNX session not initialised; call _load_onnx() first")
+        input_name = cast("str", self.onnx_session.get_inputs()[0].name)
+        outputs = cast("list[np.ndarray]", self.onnx_session.run(None, {input_name: img_array}))
 
         # Debug: print output shape to understand format
         raw_output = outputs[0]
@@ -708,65 +720,75 @@ class EntityDetector:
         # Format 1: Post-NMS (1, num_detections, 6) = x1, y1, x2, y2, conf, class_id
         # Format 2: Raw predictions (1, 4+num_classes, num_boxes) = needs transposing and NMS
 
+        # numpy stubs return Any from indexing/slicing/ufuncs; cast at the
+        # boundary then .tolist() to a typed list[list[float]] before iteration.
         if len(raw_output.shape) == 3 and raw_output.shape[2] == 6:
             # Post-NMS format: (1, num_detections, 6)
-            predictions = raw_output[0]
+            predictions = cast("np.ndarray", raw_output[0])
             logger.debug("Post-NMS format, %d detection slots", len(predictions))
 
             if logger.isEnabledFor(logging.DEBUG):
-                confidences = predictions[:, 4]
-                non_zero = confidences[confidences > 0.01]
+                confidences = cast("np.ndarray", predictions[:, 4])
+                non_zero = cast("np.ndarray", confidences[confidences > 0.01])
                 logger.debug("Confidences > 0.01: %d", len(non_zero))
                 if len(non_zero) > 0:
-                    logger.debug("Max conf: %.4f, Min conf: %.4f", non_zero.max(), non_zero.min())
+                    logger.debug(
+                        "Max conf: %.4f, Min conf: %.4f",
+                        float(cast("float", non_zero.max())),
+                        float(cast("float", non_zero.min())),
+                    )
         elif len(raw_output.shape) == 3 and raw_output.shape[1] == (4 + len(self.class_names)):
             # Raw format: (1, 4+num_classes, num_boxes) - needs transposing
-            # Shape is (1, 50, 8400) for 46 classes -> transpose to (8400, 50)
-            predictions_raw = raw_output[0].T  # Now (num_boxes, 4+num_classes)
+            predictions_raw = cast("np.ndarray", cast("np.ndarray", raw_output[0]).T)
             logger.debug("Raw format, %d boxes, processing...", len(predictions_raw))
 
-            # Extract boxes, scores, and class predictions
-            boxes = predictions_raw[:, :4]  # x_center, y_center, width, height
-            class_scores = predictions_raw[:, 4:]  # (num_boxes, num_classes)
+            boxes = cast("np.ndarray", predictions_raw[:, :4])
+            class_scores = cast("np.ndarray", predictions_raw[:, 4:])
 
-            # Get best class and confidence for each box
-            best_class_idx = np.argmax(class_scores, axis=1)
-            best_confidence = np.max(class_scores, axis=1)
+            best_class_idx = cast("np.ndarray", np.argmax(class_scores, axis=1))
+            best_confidence = cast("np.ndarray", np.max(class_scores, axis=1))
 
-            # Filter by confidence (use lowest per-class threshold for bulk filter)
             min_thresh = (
                 min(self.class_thresholds.values())
                 if self.class_thresholds
                 else self.confidence_threshold
             )
-            mask = best_confidence >= min_thresh
-            boxes = boxes[mask]
-            best_class_idx = best_class_idx[mask]
-            best_confidence = best_confidence[mask]
+            mask = cast("np.ndarray", best_confidence >= min_thresh)
+            boxes = cast("np.ndarray", boxes[mask])
+            best_class_idx = cast("np.ndarray", best_class_idx[mask])
+            best_confidence = cast("np.ndarray", best_confidence[mask])
 
             logger.debug("%d boxes after confidence filter (%.2f)", len(boxes), min_thresh)
 
-            # Convert from x_center, y_center, w, h to x1, y1, x2, y2
-            predictions = []
-            for box, cls_id, conf in zip(boxes, best_class_idx, best_confidence, strict=True):
-                x_c, y_c, w, h = box
-                x1 = x_c - w / 2
-                y1 = y_c - h / 2
-                x2 = x_c + w / 2
-                y2 = y_c + h / 2
-                predictions.append([x1, y1, x2, y2, conf, cls_id])
-            predictions = np.array(predictions) if predictions else np.array([]).reshape(0, 6)
+            # Build typed python lists once at the numpy boundary
+            box_list = cast("list[list[float]]", boxes.tolist())
+            cls_list = cast("list[float]", best_class_idx.tolist())
+            conf_list = cast("list[float]", best_confidence.tolist())
+            pred_list: list[list[float]] = []
+            for box, cls_id, conf in zip(box_list, cls_list, conf_list, strict=True):
+                x_c, y_c, w, h = box[0], box[1], box[2], box[3]
+                pred_list.append([x_c - w / 2, y_c - h / 2, x_c + w / 2, y_c + h / 2, conf, cls_id])
+            predictions = np.array(pred_list) if pred_list else np.array([]).reshape(0, 6)
         else:
             logger.debug("Unknown format shape %s, trying as post-NMS", raw_output.shape)
-            predictions = raw_output[0] if len(raw_output.shape) == 3 else raw_output
+            predictions = cast(
+                "np.ndarray", raw_output[0] if len(raw_output.shape) == 3 else raw_output
+            )
 
         # Scale factors for converting from 640x640 to original size
         scale_x = orig_width / self.input_size
         scale_y = orig_height / self.input_size
 
         entities = []
-        for pred in predictions:
-            x1, y1, x2, y2, confidence, class_id = pred
+        for pred in cast("list[list[float]]", predictions.tolist()):
+            x1, y1, x2, y2, confidence, class_id = (
+                pred[0],
+                pred[1],
+                pred[2],
+                pred[3],
+                pred[4],
+                pred[5],
+            )
 
             # Per-class confidence threshold
             class_idx = int(class_id)
@@ -880,9 +902,9 @@ class EntityDetector:
             return None
 
         def distance(e: DetectedEntity) -> float:
-            dx = e.center[0] - point[0]
-            dy = e.center[1] - point[1]
-            return (dx * dx + dy * dy) ** 0.5
+            dx = float(e.center[0] - point[0])
+            dy = float(e.center[1] - point[1])
+            return math.sqrt(dx * dx + dy * dy)
 
         return min(candidates, key=distance)
 

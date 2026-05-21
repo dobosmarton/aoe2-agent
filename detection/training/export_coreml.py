@@ -22,12 +22,12 @@ def export_to_coreml(model_path: str, imgsz: int = 640) -> str:
     Returns:
         Path to the exported .mlpackage directory
     """
-    from ultralytics import YOLO
+    from detection._ultralytics_compat import YOLO
 
     model = YOLO(model_path)
     print(f"Exporting {model_path} to CoreML (imgsz={imgsz}, nms=False)...")
 
-    export_path = model.export(
+    export_path = model.export(  # pyright: ignore[reportAny]
         format="coreml",
         imgsz=imgsz,
         nms=False,  # NMS runs client-side for flexibility
@@ -35,6 +35,11 @@ def export_to_coreml(model_path: str, imgsz: int = 640) -> str:
 
     print(f"Exported to: {export_path}")
     return str(export_path)
+
+
+class _ExportCoreMLArgs(argparse.Namespace):
+    model: str
+    imgsz: int
 
 
 def main() -> None:
@@ -45,7 +50,7 @@ def main() -> None:
         help="Path to .pt model file",
     )
     parser.add_argument("--imgsz", type=int, default=640, help="Input image size")
-    args = parser.parse_args()
+    args = parser.parse_args(namespace=_ExportCoreMLArgs())
 
     export_to_coreml(args.model, args.imgsz)
 

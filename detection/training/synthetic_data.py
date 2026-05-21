@@ -84,7 +84,7 @@ class SyntheticDataGenerator:
         output_dir: str,
         sprite_configs: list[SpriteConfig] | None = None,
         image_size: tuple[int, int] = (1280, 800),
-    ):
+    ) -> None:
         """Initialize the generator.
 
         Args:
@@ -111,7 +111,7 @@ class SyntheticDataGenerator:
         self._backgrounds: list = []
         self._load_assets()
 
-    def _load_assets(self):
+    def _load_assets(self) -> None:
         """Load sprite and background images."""
         try:
             from PIL import Image

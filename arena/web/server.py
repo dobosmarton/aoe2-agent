@@ -27,7 +27,7 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import duckdb
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
@@ -99,10 +99,13 @@ def _label_from_filename(db_path: Path) -> str:
 def _runs_in_file(db_path: Path) -> list[RunSummary]:
     conn = duckdb.connect(str(db_path), read_only=True)
     try:
-        rows = conn.execute(
-            "SELECT run_id, COUNT(*) AS n, MIN(ts) AS first_ts, MAX(ts) AS last_ts "
-            "FROM events GROUP BY run_id ORDER BY MIN(ts)"
-        ).fetchall()
+        rows = cast(
+            "list[tuple[object, ...]]",
+            conn.execute(
+                "SELECT run_id, COUNT(*) AS n, MIN(ts) AS first_ts, MAX(ts) AS last_ts "
+                "FROM events GROUP BY run_id ORDER BY MIN(ts)"
+            ).fetchall(),
+        )
     finally:
         conn.close()
     label = _label_from_filename(db_path)
@@ -111,7 +114,7 @@ def _runs_in_file(db_path: Path) -> list[RunSummary]:
             run_id=str(row[0]),
             db_path=str(db_path),
             label=label,
-            n_events=int(row[1]),
+            n_events=int(cast("int", row[1])),
             first_ts=_ts_to_str(row[2]),
             last_ts=_ts_to_str(row[3]),
         )
@@ -190,15 +193,17 @@ app.add_middleware(
 
 
 def get_registry(request: Request) -> LiveRunRegistry:
-    registry = request.app.state.registry
+    app_state = cast("FastAPI", request.app).state
+    registry = cast("object", app_state.registry)
     assert isinstance(registry, LiveRunRegistry)
     return registry
 
 
 def get_fork_tasks(request: Request) -> set[asyncio.Task[None]]:
-    tasks = request.app.state.fork_tasks
+    app_state = cast("FastAPI", request.app).state
+    tasks = cast("object", app_state.fork_tasks)
     assert isinstance(tasks, set)
-    return tasks
+    return cast("set[asyncio.Task[None]]", tasks)
 
 
 @app.get("/health")
@@ -251,10 +256,10 @@ def _stream_existing_rows(db_path: Path, run_id: str) -> Iterator[tuple[str, int
             [run_id],
         )
         while True:
-            row = cursor.fetchone()
+            row = cast("tuple[object, ...] | None", cursor.fetchone())
             if row is None:
                 break
-            yield f"data: {row[1]}\n\n", int(row[0])
+            yield f"data: {row[1]}\n\n", int(cast("int", row[0]))
 
 
 def _resolve_run_optional(run_id: str, root: Path) -> Path | None:

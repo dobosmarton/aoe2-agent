@@ -26,8 +26,12 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import yaml
+
+from data._narrow import as_int as _as_int
+from data._narrow import as_str as _as_str
 
 LOG_LINE_RE = re.compile(
     r"^(?P<ts>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+"
@@ -60,7 +64,7 @@ class TurnSnapshot:
     iteration: int
     timestamp: str
     age: str | None = None
-    resources: dict | None = None
+    resources: dict[str, object] | None = None
     reasoning: str | None = None
     goal_count: int | None = None
     entity_count: int | None = None
@@ -84,7 +88,7 @@ def parse_log(log_path: Path) -> list[TurnSnapshot]:
     """
     turns: list[TurnSnapshot] = []
     current: TurnSnapshot | None = None
-    last_resources: dict | None = None
+    last_resources: dict[str, object] | None = None
     last_strategist_age: str | None = None
 
     for raw_line in log_path.read_text().splitlines():
@@ -115,14 +119,17 @@ def parse_log(log_path: Path) -> list[TurnSnapshot]:
             res_match = RESOURCES_RE.search(rest)
             if res_match:
                 try:
-                    parsed = ast.literal_eval(res_match.group(1))
+                    parsed_value = cast("object", ast.literal_eval(res_match.group(1)))
+                except (ValueError, SyntaxError):
+                    parsed_value = None
+                if isinstance(parsed_value, dict):
+                    parsed: dict[str, object] = parsed_value
                     current.resources = parsed
                     last_resources = parsed
-                    if "age" in parsed:
-                        current.age = parsed["age"]
-                        last_strategist_age = parsed["age"]
-                except (ValueError, SyntaxError):
-                    pass
+                    age_val = parsed.get("age")
+                    if age_val is not None:
+                        current.age = age_val if isinstance(age_val, str) else None
+                        last_strategist_age = current.age
             goal_match = GOAL_COUNT_RE.search(rest)
             if goal_match:
                 current.goal_count = int(goal_match.group(1))
@@ -190,8 +197,8 @@ def emit_fixture(turn: TurnSnapshot, *, name: str | None = None) -> str:
     quotes, colons, or newlines doesn't corrupt the output.
     """
     fixture_name = name or f"turn_{turn.iteration}_snapshot"
-    resources = turn.resources or {}
-    age = turn.age or resources.get("age", "Dark Age")
+    resources: dict[str, object] = turn.resources or {}
+    age = turn.age or _as_str(resources.get("age", "Dark Age"), "Dark Age")
     reasoning_preview = (turn.reasoning or "").replace("\\n", " ")[:200]
 
     entity_note = (
@@ -212,11 +219,11 @@ def emit_fixture(turn: TurnSnapshot, *, name: str | None = None) -> str:
         "inputs": {
             "age": age,
             "resources": {
-                "food": int(resources.get("food", 0)),
-                "wood": int(resources.get("wood", 0)),
-                "gold": int(resources.get("gold", 0)),
-                "stone": int(resources.get("stone", 0)),
-                "population": str(resources.get("population", "0/0")),
+                "food": _as_int(resources.get("food")),
+                "wood": _as_int(resources.get("wood")),
+                "gold": _as_int(resources.get("gold")),
+                "stone": _as_int(resources.get("stone")),
+                "population": _as_str(resources.get("population", "0/0"), "0/0"),
             },
             "detected_entities": [dict(e) for e in DEFAULT_PLACEHOLDER_ENTITIES],
         },
@@ -273,7 +280,16 @@ def _cmd_auto(turns: list[TurnSnapshot], out_dir: Path) -> int:
     return 0
 
 
-def _parse_args() -> argparse.Namespace:
+class _LogToScenarioArgs(argparse.Namespace):
+    log: Path
+    list: bool
+    turn: int | None
+    auto: bool
+    out: Path | None
+    out_dir: Path | None
+
+
+def _parse_args() -> _LogToScenarioArgs:
     parser = argparse.ArgumentParser(
         description="Convert a real-game structlog stream into scenario YAML stubs."
     )
@@ -289,7 +305,7 @@ def _parse_args() -> argparse.Namespace:
         "--out", type=Path, help="Output path (single-turn mode); print to stdout if omitted"
     )
     parser.add_argument("--out-dir", type=Path, help="Output directory (auto mode)")
-    return parser.parse_args()
+    return parser.parse_args(namespace=_LogToScenarioArgs())
 
 
 def main() -> int:

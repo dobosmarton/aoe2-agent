@@ -19,11 +19,12 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import structlog
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from detection.inference.detector import DetectedEntity, EntityDetector
@@ -45,7 +46,7 @@ from .executor import (
 from .screen import capture_screenshot, save_screenshot
 from .window import get_game_window_rect
 
-log = structlog.get_logger()
+log = structlog.stdlib.get_logger()
 
 
 try:
@@ -73,10 +74,10 @@ async def _invoke_detector(
     `list[DetectedEntity]` — pyright can't see that through `getattr`,
     so the return type is asserted here.
     """
-    fn = getattr(det, method)
+    fn = cast("Callable[..., object]", getattr(det, method))
     if asyncio.iscoroutinefunction(fn):
-        return await fn(*args, **kwargs)
-    return await asyncio.to_thread(fn, *args, **kwargs)
+        return cast("list[DetectedEntity]", await fn(*args, **kwargs))
+    return cast("list[DetectedEntity]", await asyncio.to_thread(fn, *args, **kwargs))
 
 
 def _init_detector() -> Detector | None:

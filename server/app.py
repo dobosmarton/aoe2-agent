@@ -35,6 +35,8 @@ if TYPE_CHECKING:
 
     from PIL import Image
 
+    from detection._classes_schema import ClassesYaml
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -88,7 +90,7 @@ def _load_class_names() -> tuple[str, ...]:
         import yaml
 
         with yaml_path.open() as f:
-            data = yaml.safe_load(f)
+            data = cast("ClassesYaml", yaml.safe_load(f))
         classes = sorted(data["classes"], key=lambda c: c["id"])
         return tuple(c["name"] for c in classes)
     except (FileNotFoundError, KeyError, ValueError):
@@ -342,29 +344,47 @@ def _parse_raw_output(
     - Post-NMS: (batch, num_detections, 6)
     - Raw: (batch, 4+num_classes, num_boxes)
     """
+    # numpy stubs type ndarray indexing/slicing as Any (the shape-typed
+    # variants aren't in the public stubs). Cast at the boundary so the
+    # downstream loop body is typed, instead of sprinkling ignores.
     min_thresh = min(CLASS_THRESHOLDS.values())
 
     if len(raw.shape) == 3 and raw.shape[2] == 6:
-        predictions = raw[batch_idx]
+        predictions = cast("np.ndarray", raw[batch_idx])
     elif len(raw.shape) == 3 and raw.shape[1] == (4 + num_classes):
-        preds_raw = raw[batch_idx].T  # (num_boxes, 4+num_classes)
-        boxes = preds_raw[:, :4]
-        class_scores = preds_raw[:, 4:]
-        best_cls = np.argmax(class_scores, axis=1)
-        best_conf = np.max(class_scores, axis=1)
-        mask = best_conf >= min_thresh
-        boxes, best_cls, best_conf = boxes[mask], best_cls[mask], best_conf[mask]
-        preds = []
-        for box, cls_id, conf in zip(boxes, best_cls, best_conf, strict=True):
-            xc, yc, w, h = box
-            preds.append([xc - w / 2, yc - h / 2, xc + w / 2, yc + h / 2, conf, cls_id])
+        preds_raw = cast("np.ndarray", raw[batch_idx].T)  # (num_boxes, 4+num_classes)
+        boxes = cast("np.ndarray", preds_raw[:, :4])
+        class_scores = cast("np.ndarray", preds_raw[:, 4:])
+        best_cls = cast("np.ndarray", np.argmax(class_scores, axis=1))
+        best_conf = cast("np.ndarray", np.max(class_scores, axis=1))
+        mask = cast("np.ndarray", best_conf >= min_thresh)
+        boxes = cast("np.ndarray", boxes[mask])
+        best_cls = cast("np.ndarray", best_cls[mask])
+        best_conf = cast("np.ndarray", best_conf[mask])
+        # numpy ndarray iteration / indexing yields Any per the public
+        # stubs; .tolist() converts arrays to plain python floats once at
+        # the boundary so the inner loop is typed.
+        boxes_list = cast("list[list[float]]", boxes.tolist())
+        cls_list = cast("list[float]", best_cls.tolist())
+        conf_list = cast("list[float]", best_conf.tolist())
+        preds: list[list[float]] = []
+        for box_arr, cls_val, conf_val in zip(boxes_list, cls_list, conf_list, strict=True):
+            xc, yc, w, h = box_arr[0], box_arr[1], box_arr[2], box_arr[3]
+            preds.append([xc - w / 2, yc - h / 2, xc + w / 2, yc + h / 2, conf_val, cls_val])
         predictions = np.array(preds) if preds else np.array([]).reshape(0, 6)
     else:
         return []
 
     results: list[DetectionResult] = []
-    for pred in predictions:
-        x1, y1, x2, y2, confidence, class_id = pred
+    for pred in cast("list[list[float]]", predictions.tolist()):
+        x1, y1, x2, y2, confidence, class_id = (
+            pred[0],
+            pred[1],
+            pred[2],
+            pred[3],
+            pred[4],
+            pred[5],
+        )
         class_idx = int(class_id)
         class_name = (
             class_names[class_idx] if class_idx < len(class_names) else f"unknown_{class_idx}"
@@ -389,10 +409,10 @@ def _parse_raw_output(
         results.append(
             DetectionResult(
                 class_name=class_name,
-                bbox=(float(abs_x1), float(abs_y1), float(abs_x2), float(abs_y2)),
+                bbox=(abs_x1, abs_y1, abs_x2, abs_y2),
                 center=((abs_x1 + abs_x2) / 2, (abs_y1 + abs_y2) / 2),
-                confidence=float(confidence),
-                area=float((abs_x2 - abs_x1) * (abs_y2 - abs_y1)),
+                confidence=confidence,
+                area=(abs_x2 - abs_x1) * (abs_y2 - abs_y1),
             )
         )
 
@@ -603,6 +623,12 @@ def create_app(model_path: str) -> FastAPI:
 # ---------------------------------------------------------------------------
 
 
+class _ServerArgs(argparse.Namespace):
+    model: str
+    host: str
+    port: int
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -610,7 +636,7 @@ def main() -> None:
     parser.add_argument("--model", required=True, help="Path to .mlpackage or .onnx model")
     parser.add_argument("--host", default="0.0.0.0", help="Bind host")
     parser.add_argument("--port", type=int, default=8420, help="Bind port")
-    args = parser.parse_args()
+    args = parser.parse_args(namespace=_ServerArgs())
 
     import uvicorn
 

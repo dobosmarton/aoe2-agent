@@ -29,6 +29,7 @@ import shutil
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 try:
     import PIL  # noqa: F401  # availability probe; PIL is used indirectly via other modules
@@ -57,7 +58,7 @@ def triage(
     output_dir: Path = _DEFAULT_OUTPUT_DIR,
     conf_low: float = 0.15,
     conf_high: float = 0.7,
-) -> list[dict]:
+) -> list[dict[str, str | int]]:
     """Score all images by informativeness for active learning.
 
     Images with many uncertain or missing detections are most valuable
@@ -73,7 +74,7 @@ def triage(
         Sorted list of {path, score, n_detections, n_uncertain, n_low} dicts.
     """
     try:
-        from ultralytics import YOLO
+        from detection._ultralytics_compat import YOLO
     except ImportError:
         print("ERROR: ultralytics is required.")
         sys.exit(1)
@@ -176,7 +177,7 @@ def prepare_batch(
         Path to the batch directory.
     """
     try:
-        from ultralytics import YOLO
+        from detection._ultralytics_compat import YOLO
     except ImportError:
         print("ERROR: ultralytics is required.")
         sys.exit(1)
@@ -187,7 +188,7 @@ def prepare_batch(
     triage_path = output_dir / "triage_results.json"
     if triage_path.exists():
         print("Loading existing triage results...")
-        scored = json.loads(triage_path.read_text())
+        scored = cast("list[dict[str, str | int]]", json.loads(triage_path.read_text()))
     else:
         print("No triage results found, running triage...")
         scored = triage(model_path, raw_dir, output_dir)
@@ -220,7 +221,7 @@ def prepare_batch(
 
     # Process each image
     for item in batch:
-        img_path = Path(item["path"])
+        img_path = Path(str(item["path"]))
         if not img_path.exists():
             continue
 
@@ -351,7 +352,19 @@ def integrate(
     return count
 
 
-def main():
+class _ActiveLearningArgs(argparse.Namespace):
+    command: str
+    model: str
+    input: str
+    output: str
+    batch_size: int
+    conf: float
+    schema: str
+    cvat_export: str
+    training_data: str
+
+
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Active learning pipeline for AoE2 detection",
     )
@@ -379,7 +392,7 @@ def main():
     )
     integrate_parser.add_argument("--training-data", type=str, default=str(_TRAINING_DATA_DIR))
 
-    args = parser.parse_args()
+    args = parser.parse_args(namespace=_ActiveLearningArgs())
 
     if args.command == "triage":
         triage(Path(args.model), Path(args.input), Path(args.output))

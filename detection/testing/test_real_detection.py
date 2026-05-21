@@ -21,9 +21,24 @@ Expected v2 improvements:
 
 import argparse
 from pathlib import Path
+from typing import cast
+
+from detection.inference._ultralytics_results import yolo_boxes_to_lists
 
 
-def main():
+class _TestRealDetectionArgs(argparse.Namespace):
+    model: str
+    images: str
+    conf: float
+    save: bool
+    show: bool
+    limit: int | None
+    compare: bool
+    v1_model: str
+    verbose: bool
+
+
+def main() -> int:
     parser = argparse.ArgumentParser(description="Test YOLO detection on real game screenshots")
     parser.add_argument(
         "--model",
@@ -55,11 +70,11 @@ def main():
         "--verbose", "-v", action="store_true", help="Show detailed detection results"
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(namespace=_TestRealDetectionArgs())
 
     # Import dependencies
     try:
-        from ultralytics import YOLO
+        from detection._ultralytics_compat import YOLO
     except ImportError:
         print("Error: ultralytics not installed. Install with: pip install ultralytics")
         return 1
@@ -117,53 +132,49 @@ def main():
 
     # Track statistics
     total_detections = 0
-    class_counts = {}
-    confidence_sum = 0
+    class_counts: dict[str, int] = {}
+    confidence_sum = 0.0
     images_with_detections = 0
 
     # Test each image
     for i, img_path in enumerate(image_files):
         print(f"\n[{i + 1}/{len(image_files)}] {img_path.name}")
 
-        results = model(str(img_path), conf=args.conf, save=args.save, verbose=False)
+        results = cast(
+            "list[object]",
+            model(str(img_path), conf=args.conf, save=args.save, verbose=False),  # pyright: ignore[reportAny]
+        )
 
-        if results and len(results) > 0:
-            boxes = results[0].boxes
-            if boxes is not None and len(boxes) > 0:
-                num_detections = len(boxes)
-                total_detections += num_detections
-                images_with_detections += 1
-
-                # Count by class
-                for cls_id, conf in zip(
-                    boxes.cls.cpu().numpy(), boxes.conf.cpu().numpy(), strict=True
-                ):
-                    class_idx = int(cls_id)
-                    class_name = model.names.get(class_idx, f"class_{class_idx}")
-                    class_counts[class_name] = class_counts.get(class_name, 0) + 1
-                    confidence_sum += conf
-
-                print(f"  Detections: {num_detections}")
-
-                if args.verbose:
-                    for box, cls_id, conf in zip(
-                        boxes.xyxy.cpu().numpy(),
-                        boxes.cls.cpu().numpy(),
-                        boxes.conf.cpu().numpy(),
-                        strict=True,
-                    ):
-                        class_name = model.names.get(int(cls_id), "unknown")
-                        x1, y1, x2, y2 = box
-                        cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
-                        print(f"    {class_name}: ({cx:.0f}, {cy:.0f}) conf={conf:.2f}")
-            else:
-                print("  Detections: 0")
-        else:
+        boxes_attr: object | None = (
+            getattr(results[0], "boxes", None) if results and len(results) > 0 else None
+        )
+        if boxes_attr is None or len(cast("list[object]", boxes_attr)) == 0:
             print("  Detections: 0")
+        else:
+            bboxes, classes, confidences = yolo_boxes_to_lists(boxes_attr)
+            num_detections = len(bboxes)
+            total_detections += num_detections
+            images_with_detections += 1
+
+            names_dict = cast("dict[int, str]", getattr(model, "names", {}))
+            for cls_id, conf in zip(classes, confidences, strict=True):
+                class_idx = int(cls_id)
+                class_name = names_dict.get(class_idx, f"class_{class_idx}")
+                class_counts[class_name] = class_counts.get(class_name, 0) + 1
+                confidence_sum += conf
+
+            print(f"  Detections: {num_detections}")
+
+            if args.verbose:
+                for box, cls_id, conf in zip(bboxes, classes, confidences, strict=True):
+                    class_name = names_dict.get(int(cls_id), "unknown")
+                    x1, y1, x2, y2 = box[0], box[1], box[2], box[3]
+                    cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+                    print(f"    {class_name}: ({cx:.0f}, {cy:.0f}) conf={conf:.2f}")
 
         # Show image if requested
-        if args.show:
-            results[0].show()
+        if args.show and results:
+            getattr(results[0], "show", lambda: None)()  # pyright: ignore[reportAny]
 
     # Summary
     print("\n" + "=" * 60)

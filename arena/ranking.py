@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, TypeAlias
+from typing import TYPE_CHECKING, TypeAlias, cast
 
 import numpy as np
 
@@ -44,6 +44,7 @@ if TYPE_CHECKING:
 ScoreTuple: TypeAlias = tuple[int, int, float]
 ScoreFn: TypeAlias = "Callable[[WorldState], ScoreTuple]"
 RaceFn: TypeAlias = "Callable[[RaceConfig, WorldState, EventSink], Awaitable[list[VariantResult]]]"
+_F64Array: TypeAlias = "NDArray[np.float64]"
 
 
 class RankingError(Exception):
@@ -105,35 +106,41 @@ def _solve_bt(wins: NDArray[np.int64]) -> NDArray[np.float64]:
 
     `wins[i, j]` is the number of times profile i beat profile j.
     Output sums to 0 (mean-centered) and is the log of MM-fitted strengths.
+
+    Numpy stubs return Any from `.shape[i]`, arithmetic between arrays, and
+    most ufunc calls. Operations that flow into typed downstream code are
+    cast to `NDArray[float64]` / `int` at the boundary so the rest of the
+    function is statically typed.
     """
-    n = wins.shape[0]
+    n = int(cast("int", wins.shape[0]))
     if wins.shape != (n, n):
         raise ValueError(f"wins must be square, got {wins.shape}")
 
-    smoothed = wins.astype(np.float64) + _BT_PRIOR * (1 - np.eye(n))
-    total_wins = smoothed.sum(axis=1)
-    games = smoothed + smoothed.T
-    pi = np.ones(n, dtype=np.float64)
+    smoothed_f = cast("_F64Array", wins.astype(np.float64))
+    smoothed = cast("_F64Array", smoothed_f + _BT_PRIOR * (1 - np.eye(n)))
+    total_wins = cast("_F64Array", smoothed.sum(axis=1))
+    games = cast("_F64Array", smoothed + smoothed.T)
+    pi: NDArray[np.float64] = np.ones(n, dtype=np.float64)
 
     for _ in range(_MM_MAX_ITERS):
-        denom = np.zeros(n, dtype=np.float64)
+        denom: NDArray[np.float64] = np.zeros(n, dtype=np.float64)
         for i in range(n):
             for j in range(n):
                 if i == j:
                     continue
-                denom[i] += games[i, j] / (pi[i] + pi[j])
-        new_pi = total_wins / denom
-        new_pi = new_pi / new_pi.sum() * n
+                denom[i] += cast("float", games[i, j] / (pi[i] + pi[j]))
+        new_pi = cast("_F64Array", total_wins / denom)
+        new_pi = cast("_F64Array", new_pi / cast("float", new_pi.sum()) * n)
 
-        if np.max(np.abs(new_pi - pi)) < _MM_TOLERANCE:
+        if cast("float", np.max(np.abs(new_pi - pi))) < _MM_TOLERANCE:
             pi = new_pi
             break
         pi = new_pi
     else:
         raise RankingError(f"BT solver did not converge in {_MM_MAX_ITERS} iterations")
 
-    log_ratings = np.log(pi)
-    return log_ratings - log_ratings.mean()
+    log_ratings = cast("_F64Array", np.log(pi))
+    return cast("_F64Array", log_ratings - cast("float", log_ratings.mean()))
 
 
 # ---------------------------------------------------------------------------
@@ -173,22 +180,22 @@ def _bootstrap_ci(
     """Percentile-bootstrap 95% CIs for BT log-ratings."""
     n_outcomes = len(outcomes)
     sampled_ratings: list[NDArray[np.float64]] = []
-    indices = np.arange(n_outcomes)
+    indices: NDArray[np.int64] = np.arange(n_outcomes)
 
     for _ in range(n_samples):
-        sample_idx = rng.choice(indices, size=n_outcomes, replace=True)
-        sample = [outcomes[i] for i in sample_idx]
+        sample_idx = cast("NDArray[np.int64]", rng.choice(indices, size=n_outcomes, replace=True))
+        sample = [outcomes[i] for i in cast("list[int]", sample_idx.tolist())]
         try:
             wins = _wins_from_outcomes(sample, profile_names)
             sampled_ratings.append(_solve_bt(wins))
         except RankingError:
             continue  # degenerate bootstrap sample (one profile dominates)
 
-    stacked = np.stack(sampled_ratings, axis=0)
-    lo = np.percentile(stacked, 2.5, axis=0)
-    hi = np.percentile(stacked, 97.5, axis=0)
-    ci_low = {name: float(lo[i]) for i, name in enumerate(profile_names)}
-    ci_high = {name: float(hi[i]) for i, name in enumerate(profile_names)}
+    stacked = cast("_F64Array", np.stack(sampled_ratings, axis=0))
+    lo = cast("_F64Array", np.percentile(stacked, 2.5, axis=0))
+    hi = cast("_F64Array", np.percentile(stacked, 97.5, axis=0))
+    ci_low = {name: float(cast("np.float64", lo[i])) for i, name in enumerate(profile_names)}
+    ci_high = {name: float(cast("np.float64", hi[i])) for i, name in enumerate(profile_names)}
     return ci_low, ci_high
 
 
@@ -205,10 +212,13 @@ def _build_result(
 ) -> RankingResult:
     wins = _wins_from_outcomes(outcomes, profile_names)
     point_log_ratings = _solve_bt(wins)
-    ratings = {name: float(point_log_ratings[i]) for i, name in enumerate(profile_names)}
+    ratings = {
+        name: float(cast("np.float64", point_log_ratings[i]))
+        for i, name in enumerate(profile_names)
+    }
     ci_low, ci_high = _bootstrap_ci(outcomes, profile_names, n_samples, rng)
     pairwise_wins = {
-        (a, b): int(wins[i, j])
+        (a, b): int(cast("np.int64", wins[i, j]))
         for i, a in enumerate(profile_names)
         for j, b in enumerate(profile_names)
         if i != j

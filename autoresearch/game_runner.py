@@ -17,7 +17,7 @@ from gameplay_agent.game_loop import game_loop
 from gameplay_agent.memory import AgentMemory
 from gameplay_agent.providers.claude import ClaudeProvider
 
-log = structlog.get_logger()
+log = structlog.stdlib.get_logger()
 
 
 async def run_game(
@@ -142,6 +142,14 @@ async def run_and_log(
     return result
 
 
+class _GameRunnerArgs(argparse.Namespace):
+    time_budget: float | None
+    max_iterations: int | None
+    experiment_id: str | None
+    description: str
+    overlay: bool
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run AoE2 agent and collect metrics")
     parser.add_argument(
@@ -173,7 +181,7 @@ def main() -> None:
         action="store_true",
         help="Show live YOLO detection overlay on game window",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(namespace=_GameRunnerArgs())
 
     result = asyncio.run(
         run_and_log(

@@ -26,7 +26,22 @@ import argparse
 from pathlib import Path
 
 
-def main():
+class _TrainYoloArgs(argparse.Namespace):
+    data: str
+    model: str
+    epochs: int
+    batch: int
+    imgsz: int
+    device: int
+    workers: int
+    patience: int
+    project: str
+    name: str
+    resume: bool
+    export_onnx: bool
+
+
+def main() -> int:
     parser = argparse.ArgumentParser(description="Train YOLO model for AoE2 detection")
     parser.add_argument(
         "--data",
@@ -71,11 +86,11 @@ def main():
     )
     parser.add_argument("--export-onnx", action="store_true", help="Export to ONNX after training")
 
-    args = parser.parse_args()
+    args = parser.parse_args(namespace=_TrainYoloArgs())
 
     # Import ultralytics (may not be installed on all systems)
     try:
-        from ultralytics import YOLO
+        from detection._ultralytics_compat import YOLO
     except ImportError:
         print("Error: ultralytics not installed. Install with: pip install ultralytics")
         return 1
@@ -153,12 +168,13 @@ def main():
     if args.export_onnx and best_model_path.exists():
         print("\nExporting to ONNX (dynamic batch)...")
         best_model = YOLO(str(best_model_path))
-        onnx_path = best_model.export(
+        onnx_path_raw = best_model.export(  # pyright: ignore[reportAny]
             format="onnx",
             imgsz=args.imgsz,
             simplify=True,
             dynamic=True,
         )
+        onnx_path = str(onnx_path_raw)
         print(f"ONNX model: {onnx_path}")
 
         # Copy to detection/inference/models using the run name

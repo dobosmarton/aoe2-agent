@@ -211,7 +211,14 @@ def _default_output_path(name: str) -> Path:
     return REPO / "evaluation" / "scenarios" / "regression" / f"{name}.yaml"
 
 
-def _parse_args() -> argparse.Namespace:
+class _FixtureBuilderArgs(argparse.Namespace):
+    log: Path
+    turn: int
+    name: str | None
+    out: Path | None
+
+
+def _parse_args() -> _FixtureBuilderArgs:
     parser = argparse.ArgumentParser(
         description="Build a YAML scenario fixture from a real game log."
     )
@@ -224,7 +231,7 @@ def _parse_args() -> argparse.Namespace:
         type=Path,
         help="Output YAML path (default: scenarios/regression/<name>.yaml)",
     )
-    return parser.parse_args()
+    return parser.parse_args(namespace=_FixtureBuilderArgs())
 
 
 def _print_summary(out: Path, fixture: dict) -> None:

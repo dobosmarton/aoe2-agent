@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from .memory import AgentMemory
     from .providers.strategist import StrategistProvider
 
-log = structlog.get_logger()
+log = structlog.stdlib.get_logger()
 
 
 async def _run_strategist_async(

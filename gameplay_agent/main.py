@@ -25,7 +25,7 @@ structlog.configure(
     cache_logger_on_first_use=True,
 )
 
-log = structlog.get_logger()
+log = structlog.stdlib.get_logger()
 
 
 def create_provider(provider_name: str) -> ClaudeProvider:
@@ -44,7 +44,14 @@ def create_provider(provider_name: str) -> ClaudeProvider:
     return providers[provider_name]()
 
 
-async def main_async(args: argparse.Namespace) -> None:
+class _AgentArgs(argparse.Namespace):
+    provider: str
+    test: bool
+    iterations: int | None
+    overlay: bool
+
+
+async def main_async(args: _AgentArgs) -> None:
     """Async main function."""
     # Validate API key
     if not config.anthropic_api_key:
@@ -100,7 +107,7 @@ def main() -> None:
         help="Show live YOLO detection overlay on game window",
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(namespace=_AgentArgs())
 
     try:
         asyncio.run(main_async(args))

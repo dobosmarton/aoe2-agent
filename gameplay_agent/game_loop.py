@@ -46,7 +46,7 @@ from .turn_phases import (
 )
 from .window import ensure_game_focused, get_game_window_rect, is_game_running
 
-log = structlog.get_logger()
+log = structlog.stdlib.get_logger()
 
 
 # ---------------------------------------------------------------------------

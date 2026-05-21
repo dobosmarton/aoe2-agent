@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from .memory import AgentMemory
     from .providers.base import LLMResult
 
-log = structlog.get_logger()
+log = structlog.stdlib.get_logger()
 
 
 # Per-turn cross-game memory attribution. The LLM is instructed (in core.md)

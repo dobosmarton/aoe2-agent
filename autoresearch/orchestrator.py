@@ -22,7 +22,7 @@ from autoresearch.experiment_log import (
 from autoresearch.game_runner import run_game
 from autoresearch.prompt_mutator import PromptMutator
 
-log = structlog.get_logger()
+log = structlog.stdlib.get_logger()
 
 REPO_ROOT = Path(__file__).parent.parent
 EPSILON = 0.02  # Accept if score >= best - epsilon
@@ -282,6 +282,12 @@ class Orchestrator:
         )
 
 
+class _OrchestratorArgs(argparse.Namespace):
+    max_experiments: int | None
+    time_budget: float
+    no_baseline: bool
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run autoresearch prompt optimization loop")
     parser.add_argument(
@@ -301,7 +307,7 @@ def main() -> None:
         action="store_true",
         help="Skip baseline game even if no previous experiments",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(namespace=_OrchestratorArgs())
 
     print("AoE2 Autoresearch — Prompt Optimization Loop")
     print(f"Time budget: {args.time_budget}s per game")

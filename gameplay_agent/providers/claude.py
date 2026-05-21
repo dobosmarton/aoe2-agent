@@ -3,12 +3,15 @@
 import json
 import re
 from pathlib import Path
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar, cast
 
 import anthropic
 import structlog
 from anthropic.types import ToolUseBlock
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
 
 from ..config import config
 from ..executor import execute_action, get_detected_entities
@@ -23,7 +26,7 @@ _PRICE_CACHE_READ = 0.30
 _PRICE_CACHE_WRITE = 3.75
 
 
-log = structlog.get_logger()
+log = structlog.stdlib.get_logger()
 
 # Load system prompt from file
 PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
@@ -179,7 +182,12 @@ class ClaudeProvider(BaseLLMProvider):
             return context
 
         # Parse resources and age from context
-        resources = {"food": 200, "wood": 200, "gold": 100, "stone": 200}  # Defaults
+        resources: dict[str, object] = {
+            "food": 200,
+            "wood": 200,
+            "gold": 100,
+            "stone": 200,
+        }  # Defaults
         age = "dark"
 
         try:
@@ -391,17 +399,23 @@ class ClaudeProvider(BaseLLMProvider):
         tool_name = block.name
         handler_name = self._COMPOSITE_HANDLERS.get(tool_name)
         if handler_name:
-            return await getattr(self, handler_name)(block)
+            handler = cast(
+                "Callable[[ToolUseBlock], Awaitable[tuple[dict, dict]]]",
+                getattr(self, handler_name),
+            )
+            return await handler(block)
 
-        action_dict = {"type": tool_name, **block.input}
+        block_input = cast("dict[str, object]", block.input)
+        action_dict = {"type": tool_name, **block_input}
         result = await execute_action(action_dict)
+        intent = block_input.get("intent", "")
         log.info(
             "tool_executed",
             action=tool_name,
-            intent=block.input.get("intent", ""),
+            intent=intent if isinstance(intent, str) else "",
             success=result.success,
         )
-        include_entities = tool_name == "press" and bool(block.input.get("rescan"))
+        include_entities = tool_name == "press" and bool(block_input.get("rescan"))
         tool_result = self._make_tool_result(
             block, result.success, result.detail, include_entities=include_entities
         )
@@ -461,7 +475,8 @@ class ClaudeProvider(BaseLLMProvider):
                 action_dict, tool_result = await self._execute_tool_call(block)
                 executed_actions.append(action_dict)
                 tool_results.append(tool_result)
-                if json.loads(tool_result["content"]).get("success"):
+                parsed_content = cast("object", json.loads(tool_result["content"]))
+                if isinstance(parsed_content, dict) and parsed_content.get("success"):
                     success_count += 1
 
             messages.append({"role": "user", "content": tool_results})

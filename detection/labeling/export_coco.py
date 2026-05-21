@@ -166,7 +166,12 @@ def yolo_to_coco(
     return output_path
 
 
-def main():
+class _ExportCocoArgs(argparse.Namespace):
+    input: str
+    output: str
+
+
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Convert YOLO pre-labels to COCO JSON for CVAT import",
     )
@@ -182,7 +187,7 @@ def main():
         default=str(_DEFAULT_OUTPUT),
         help="Output COCO JSON path",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(namespace=_ExportCocoArgs())
 
     yolo_to_coco(Path(args.input), Path(args.output))
 

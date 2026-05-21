@@ -36,7 +36,7 @@ class FrameDiffer:
         differ.update(screenshot_bytes)
     """
 
-    def __init__(self, threshold: float = 0.03):
+    def __init__(self, threshold: float = 0.03) -> None:
         """Initialize frame differ.
 
         Args:
@@ -85,7 +85,7 @@ class FrameDiffer:
         else:
             logger.debug("frame_diff changed=False mad=%.4f threshold=%.4f", mad, self.threshold)
 
-        return changed
+        return bool(changed)
 
     def update(self, screenshot: bytes) -> None:
         """Force-update the stored frame (call after successful detection)."""

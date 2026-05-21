@@ -15,11 +15,14 @@ import asyncio
 import io
 import logging
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from .detector import DetectedEntity, EntityDetector, get_detector
+from .postprocess import nms as _apply_nms
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from PIL import Image
 
 logger = logging.getLogger(__name__)
@@ -52,9 +55,6 @@ class RemoteDetector:
         self._server_available = True
         self._last_health_check: float = 0.0
 
-        # Local NMS (reuse from EntityDetector)
-        self._nms_helper = EntityDetector(use_mock=True)
-
         # Local Kalman tracker
         self.tracker = None
         try:
@@ -85,7 +85,7 @@ class RemoteDetector:
             return await self._fallback_detect(screenshot, "detect")
 
         entities = self._to_entities(detections)
-        entities = self._nms_helper._nms(entities, iou_threshold=0.5)
+        entities = _apply_nms(entities, iou_threshold=0.5)
 
         if self.tracker:
             entities = self.tracker.update(entities)
@@ -105,7 +105,7 @@ class RemoteDetector:
             return await self._fallback_detect(screenshot, "detect_fast")
 
         entities = self._to_entities(detections)
-        entities = self._nms_helper._nms(entities, iou_threshold=0.5)
+        entities = _apply_nms(entities, iou_threshold=0.5)
 
         if self.tracker:
             entities = self.tracker.update(entities)
@@ -153,7 +153,7 @@ class RemoteDetector:
             e.center = ((e.bbox[0] + e.bbox[2]) / 2, (e.bbox[1] + e.bbox[3]) / 2)
 
         entities = full_entities + crop_entities
-        entities = self._nms_helper._nms(entities, iou_threshold=0.5)
+        entities = _apply_nms(entities, iou_threshold=0.5)
 
         if self.tracker:
             entities = self.tracker.update(entities)
@@ -214,8 +214,9 @@ class RemoteDetector:
                 timeout=10.0,
             )
             response.raise_for_status()
-            data = response.json()
-            return data.get("detections", [])
+            data = cast("dict[str, object]", response.json())
+            detections = data.get("detections", [])
+            return cast("list[dict]", detections) if isinstance(detections, list) else []
         except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError) as e:
             logger.warning("remote_detection_failed: %s", e)
             self._server_available = False
@@ -280,7 +281,7 @@ class RemoteDetector:
             return []
 
         logger.info("falling_back_to_local_detector method=%s", method)
-        fn = getattr(self._fallback, method)
+        fn = cast("Callable[..., list[DetectedEntity]]", getattr(self._fallback, method))
         return await asyncio.to_thread(fn, screenshot)
 
 

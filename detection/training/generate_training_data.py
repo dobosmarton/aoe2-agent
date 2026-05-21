@@ -14,9 +14,11 @@ The generated dataset can be used directly with YOLOv8:
 
 import argparse
 import io
+import math
 import random
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 try:
     from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
@@ -575,7 +577,7 @@ class TrainingDataGenerator:
         configs: list[SpriteConfig] | None = None,
         real_background_ratio: float = 0.5,  # 50% real backgrounds
         enable_enhanced_augmentations: bool = True,
-    ):
+    ) -> None:
         self.sprites_dir = Path(sprites_dir)
         self.output_dir = Path(output_dir)
         self.backgrounds_dir = Path(backgrounds_dir) if backgrounds_dir else None
@@ -596,7 +598,7 @@ class TrainingDataGenerator:
         self._load_backgrounds()
         self._load_real_backgrounds()
 
-    def _load_sprites(self):
+    def _load_sprites(self) -> None:
         """Load sprite images for each class."""
         for config in self.configs:
             self.sprites[config.class_name] = []
@@ -614,7 +616,7 @@ class TrainingDataGenerator:
             else:
                 print(f"Loaded {count} sprites for {config.class_name}")
 
-    def _load_backgrounds(self):
+    def _load_backgrounds(self) -> None:
         """Load background images."""
         if self.backgrounds_dir and self.backgrounds_dir.exists():
             for ext in ["*.jpg", "*.jpeg", "*.png"]:
@@ -627,7 +629,7 @@ class TrainingDataGenerator:
 
         print(f"Loaded {len(self.backgrounds)} background images")
 
-    def _load_real_backgrounds(self):
+    def _load_real_backgrounds(self) -> None:
         """Load real game screenshots as backgrounds."""
         if self.real_screenshots_dir and self.real_screenshots_dir.exists():
             for ext in ["*.jpg", "*.jpeg", "*.png"]:
@@ -954,12 +956,12 @@ class TrainingDataGenerator:
             r, g, b = image.split()
             if random.random() < 0.5:
                 # Warm shift
-                r = r.point(lambda x: min(255, int(x * 1.1)))
-                b = b.point(lambda x: int(x * 0.9))
+                r = r.point(lambda x: min(255, int(cast("int", x) * 1.1)))
+                b = b.point(lambda x: int(cast("int", x) * 0.9))
             else:
                 # Cool shift
-                r = r.point(lambda x: int(x * 0.9))
-                b = b.point(lambda x: min(255, int(x * 1.1)))
+                r = r.point(lambda x: int(cast("int", x) * 0.9))
+                b = b.point(lambda x: min(255, int(cast("int", x) * 1.1)))
             image = Image.merge("RGB", (r, g, b))
 
         # 6. Vignette effect (darker edges)
@@ -968,7 +970,7 @@ class TrainingDataGenerator:
             vignette_draw = ImageDraw.Draw(vignette)
             # Radial gradient approximation
             center_x, center_y = image.width // 2, image.height // 2
-            max_dist = (center_x**2 + center_y**2) ** 0.5
+            max_dist = math.sqrt(center_x * center_x + center_y * center_y)
             for i in range(0, 255, 5):
                 radius = int(max_dist * (255 - i) / 255)
                 vignette_draw.ellipse(
@@ -1180,7 +1182,20 @@ names:
         return yaml_path
 
 
-def main():
+class _GenerateTrainingDataArgs(argparse.Namespace):
+    sprites: str
+    backgrounds: str | None
+    real_screenshots: str | None
+    output: str
+    num_images: int
+    image_size: list[int]
+    train_split: float
+    seed: int
+    real_bg_ratio: float
+    no_enhanced_aug: bool
+
+
+def main() -> int:
     parser = argparse.ArgumentParser(
         description="Generate synthetic training data for AoE2 YOLO model (v2 with enhanced augmentations)"
     )
@@ -1238,7 +1253,7 @@ def main():
         help="Disable enhanced augmentations (fog of war, UI, compression, etc.)",
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(namespace=_GenerateTrainingDataArgs())
 
     # Resolve paths relative to script location
     script_dir = Path(__file__).parent.parent  # agent/
@@ -1269,7 +1284,7 @@ def main():
         output_dir=output_dir,
         backgrounds_dir=backgrounds_dir,
         real_screenshots_dir=real_screenshots_dir,
-        image_size=tuple(args.image_size),
+        image_size=(args.image_size[0], args.image_size[1]),
         real_background_ratio=args.real_bg_ratio,
         enable_enhanced_augmentations=not args.no_enhanced_aug,
     )

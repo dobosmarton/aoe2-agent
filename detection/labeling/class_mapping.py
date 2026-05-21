@@ -7,8 +7,12 @@ converting label files, and generating CVAT-compatible class lists.
 """
 
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 import yaml
+
+if TYPE_CHECKING:
+    from .._classes_schema import ClassesYaml
 
 # Root paths
 _CONFIG_DIR = Path(__file__).parent.parent / "training" / "config"
@@ -23,7 +27,7 @@ def load_classes_yaml(path: Path | None = None) -> dict[int, str]:
     """
     path = path or (_CONFIG_DIR / "classes.yaml")
     with path.open() as f:
-        data = yaml.safe_load(f)
+        data = cast("ClassesYaml", yaml.safe_load(f))
 
     return {entry["id"]: entry["name"] for entry in data["classes"]}
 
@@ -36,9 +40,9 @@ def load_dataset_yaml(path: Path | None = None) -> dict[int, str]:
     """
     path = path or _DATASET_YAML
     with path.open() as f:
-        data = yaml.safe_load(f)
+        data = cast("dict[str, dict[object, str]]", yaml.safe_load(f))
 
-    return {int(k): v for k, v in data["names"].items()}
+    return {int(cast("int", k)): v for k, v in data["names"].items()}
 
 
 def build_v1_to_v2_mapping(

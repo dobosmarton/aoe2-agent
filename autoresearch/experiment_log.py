@@ -12,7 +12,7 @@ import structlog
 
 from .metrics import GameScore
 
-log = structlog.get_logger()
+log = structlog.stdlib.get_logger()
 
 RESULTS_FILE = Path(__file__).parent.parent / "experiments" / "results.tsv"
 

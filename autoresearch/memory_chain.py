@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from autoresearch.metrics import GameScore
     from gameplay_agent.memory import AgentMemory
 
-log = structlog.get_logger()
+log = structlog.stdlib.get_logger()
 
 MEMORIES_DIR = Path(__file__).parent.parent / "memories"
 
@@ -327,7 +327,8 @@ class MemoryChain:
             log.warning("memory_parse_failed", text=text[:200])
             return []
 
-        raw = data.get("observations") or []
+        raw_value = data.get("observations")
+        raw: list[object] = raw_value if isinstance(raw_value, list) else []
         valid = [obs for obs in raw if isinstance(obs, dict) and (obs.get("content") or "").strip()]
         if len(valid) < len(raw):
             log.warning("memory_parse_dropped_empty", dropped=len(raw) - len(valid))

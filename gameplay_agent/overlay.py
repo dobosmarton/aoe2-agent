@@ -104,7 +104,7 @@ class DetectionOverlay:
             import ctypes
 
             # Get the HWND for the overlay window
-            hwnd = ctypes.windll.user32.FindWindowW(None, self.OVERLAY_TITLE)
+            hwnd: int = ctypes.windll.user32.FindWindowW(None, self.OVERLAY_TITLE)  # pyright: ignore[reportAny]
             if not hwnd:
                 logger.warning("Could not find overlay HWND")
                 return
@@ -115,7 +115,7 @@ class DetectionOverlay:
             LWA_COLORKEY = 0x00000001
 
             # Add layered + transparent extended styles
-            ex_style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            ex_style: int = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)  # pyright: ignore[reportAny]
             ctypes.windll.user32.SetWindowLongW(
                 hwnd, GWL_EXSTYLE, ex_style | WS_EX_LAYERED | WS_EX_TRANSPARENT
             )

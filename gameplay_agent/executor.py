@@ -9,6 +9,7 @@ import random
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
+from typing import cast
 
 import pyautogui
 import structlog
@@ -18,7 +19,7 @@ from .config import config
 from .models import Action, validate_action
 from .window import ensure_game_focused, get_game_window_rect
 
-log = structlog.get_logger()
+log = structlog.stdlib.get_logger()
 
 # Configure pyautogui for better game compatibility
 pyautogui.FAILSAFE = False
@@ -397,16 +398,21 @@ async def execute_action(action: dict[str, object] | Action) -> ActionResult:
     if isinstance(action, BaseModel):
         # pyright 1.1.409 fails to narrow `dict[str, object] | Action` to the
         # BaseModel branch here when Action is an Annotated discriminated union.
-        action_dict = action.model_dump()  # pyright: ignore[reportAttributeAccessIssue]
+        action_dict = cast(
+            "dict[str, object]",
+            action.model_dump(),  # pyright: ignore[reportAttributeAccessIssue]
+        )
     else:
         validated = validate_action(action)
         if not validated:
             log.warning("invalid_action", action=action)
             return ActionResult(False, "invalid action format")
-        action_dict = validated.model_dump()
+        action_dict = cast("dict[str, object]", validated.model_dump())
 
-    action_type = action_dict.get("type", "")
-    intent = action_dict.get("intent", "")
+    action_type_raw = action_dict.get("type", "")
+    intent_raw = action_dict.get("intent", "")
+    action_type = action_type_raw if isinstance(action_type_raw, str) else ""
+    intent = intent_raw if isinstance(intent_raw, str) else ""
 
     handler = _ACTION_HANDLERS.get(action_type)
     if not handler:

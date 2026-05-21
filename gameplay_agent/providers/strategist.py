@@ -13,7 +13,7 @@ from ..config import config
 from ..goals import Goal
 from ..memory import GameState
 
-log = structlog.get_logger()
+log = structlog.stdlib.get_logger()
 
 # Load strategist prompt
 PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"

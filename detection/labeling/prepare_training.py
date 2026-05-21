@@ -34,7 +34,9 @@ import json
 import random
 import shutil
 import sys
+from collections.abc import Sequence
 from pathlib import Path
+from typing import cast
 
 import yaml
 
@@ -63,7 +65,7 @@ def detect_export_format(cvat_dir: Path) -> str:
     # Also check root for a COCO JSON
     for f in cvat_dir.glob("*.json"):
         try:
-            data = json.loads(f.read_text(encoding="utf-8"))
+            data = cast("dict[str, object]", json.loads(f.read_text(encoding="utf-8")))
             if "annotations" in data and "images" in data:
                 return "coco"
         except (json.JSONDecodeError, KeyError):
@@ -103,7 +105,7 @@ def convert_coco_to_yolo_labels(
         # Check root
         for f in cvat_dir.glob("*.json"):
             try:
-                data = json.loads(f.read_text(encoding="utf-8"))
+                data = cast("dict[str, object]", json.loads(f.read_text(encoding="utf-8")))
                 if "annotations" in data and "images" in data:
                     coco_json = f
                     break
@@ -114,67 +116,104 @@ def convert_coco_to_yolo_labels(
         raise FileNotFoundError(f"No COCO JSON found in {cvat_dir}")
 
     print(f"  Reading COCO annotations from: {coco_json.name}")
-    coco_data = json.loads(coco_json.read_text(encoding="utf-8"))
+    coco_data = cast("dict[str, object]", json.loads(coco_json.read_text(encoding="utf-8")))
 
     # Build COCO category_id -> v2 class_id mapping via name matching
     v2_name_to_id = {name: cid for cid, name in v2_classes.items()}
-    coco_cat_to_v2 = {}
-    for cat in coco_data.get("categories", []):
-        cat_name = cat["name"]
+    coco_cat_to_v2: dict[int, int] = {}
+    categories = cast("list[dict[str, object]]", coco_data.get("categories", []))
+    for cat in categories:
+        cat_name = str(cat["name"])
+        cat_id_raw = cat["id"]
+        if not isinstance(cat_id_raw, int):
+            continue
         if cat_name in v2_name_to_id:
-            coco_cat_to_v2[cat["id"]] = v2_name_to_id[cat_name]
+            coco_cat_to_v2[cat_id_raw] = v2_name_to_id[cat_name]
         else:
             print(f"  WARNING: COCO category '{cat_name}' not found in classes.yaml, skipping")
 
-    print(
-        f"  Mapped {len(coco_cat_to_v2)}/{len(coco_data.get('categories', []))} COCO categories to v2 IDs"
-    )
+    print(f"  Mapped {len(coco_cat_to_v2)}/{len(categories)} COCO categories to v2 IDs")
 
     # Build image_id -> image info
-    images_by_id = {}
-    for img in coco_data.get("images", []):
-        images_by_id[img["id"]] = img
+    images_by_id: dict[int, dict[str, object]] = {}
+    images_list = cast("list[dict[str, object]]", coco_data.get("images", []))
+    for img in images_list:
+        img_id_raw = img["id"]
+        if isinstance(img_id_raw, int):
+            images_by_id[img_id_raw] = img
 
     # Group annotations by image_id
-    anns_by_image: dict[int, list] = {}
-    for ann in coco_data.get("annotations", []):
-        img_id = ann["image_id"]
-        if img_id not in anns_by_image:
-            anns_by_image[img_id] = []
-        anns_by_image[img_id].append(ann)
+    anns_by_image: dict[int, list[dict[str, object]]] = {}
+    annotations_list = cast("list[dict[str, object]]", coco_data.get("annotations", []))
+    for ann in annotations_list:
+        ann_img_id = ann["image_id"]
+        if not isinstance(ann_img_id, int):
+            continue
+        if ann_img_id not in anns_by_image:
+            anns_by_image[ann_img_id] = []
+        anns_by_image[ann_img_id].append(ann)
 
     # Convert each image's annotations to YOLO format
     output_labels_dir.mkdir(parents=True, exist_ok=True)
-    results = []
+    results: list[tuple[str, Path, int]] = []
 
     for img_id, img_info in images_by_id.items():
-        img_w = img_info["width"]
-        img_h = img_info["height"]
-        file_name = img_info["file_name"]
+        img_w_raw = img_info["width"]
+        img_h_raw = img_info["height"]
+        if not isinstance(img_w_raw, (int, float)) or not isinstance(img_h_raw, (int, float)):
+            continue
+        img_w = float(img_w_raw)
+        img_h = float(img_h_raw)
+        file_name = str(img_info["file_name"])
         stem = Path(file_name).stem
 
         anns = anns_by_image.get(img_id, [])
         if not anns:
             continue
 
-        yolo_lines = []
+        yolo_lines: list[str] = []
         for ann in anns:
-            cat_id = ann["category_id"]
-            if cat_id not in coco_cat_to_v2:
+            cat_id_raw2 = ann["category_id"]
+            if not isinstance(cat_id_raw2, int) or cat_id_raw2 not in coco_cat_to_v2:
                 continue
-            v2_id = coco_cat_to_v2[cat_id]
+            v2_id = coco_cat_to_v2[cat_id_raw2]
 
             # Get bounding box - prefer bbox field, fall back to polygon
-            bbox = ann.get("bbox")
-            if bbox and bbox[2] > 0 and bbox[3] > 0:
+            bbox_raw = ann.get("bbox")
+            x: float
+            y: float
+            w: float
+            h: float
+            if (
+                isinstance(bbox_raw, list)
+                and len(bbox_raw) >= 4
+                and isinstance(bbox_raw[2], (int, float))
+                and isinstance(bbox_raw[3], (int, float))
+                and bbox_raw[2] > 0
+                and bbox_raw[3] > 0
+            ):
                 # COCO bbox: [x_top_left, y_top_left, width, height]
-                x, y, w, h = bbox
+                bx, by, bw, bh = bbox_raw[0], bbox_raw[1], bbox_raw[2], bbox_raw[3]
+                if not all(isinstance(v, (int, float)) for v in (bx, by, bw, bh)):
+                    continue
+                x, y, w, h = (
+                    float(cast("float", bx)),
+                    float(cast("float", by)),
+                    float(cast("float", bw)),
+                    float(cast("float", bh)),
+                )
             elif ann.get("segmentation"):
                 # Compute bbox from polygon points
                 seg = ann["segmentation"]
                 if isinstance(seg, list) and len(seg) > 0:
                     # Flatten all polygon points
-                    points = seg[0] if isinstance(seg[0], list) else seg
+                    first = seg[0]
+                    points_raw = first if isinstance(first, list) else seg
+                    points: list[float] = [
+                        float(p)
+                        for p in cast("list[object]", points_raw)
+                        if isinstance(p, (int, float))
+                    ]
                     xs = points[0::2]
                     ys = points[1::2]
                     if not xs or not ys:
@@ -313,7 +352,7 @@ def _extract_labels_from_export(
 
 
 def prepare_training(
-    cvat_export_dirs: list[str | Path],
+    cvat_export_dirs: Sequence[str | Path],
     output_dir: str | Path = _DEFAULT_OUTPUT,
     synthetic_dir: str | Path = _SYNTHETIC_DIR,
     images_dir: str | Path | None = None,
@@ -513,7 +552,17 @@ def _copy_pair(
     shutil.copy2(label_path, label_dest)
 
 
-def main():
+class _PrepareTrainingArgs(argparse.Namespace):
+    cvat_export: list[str]
+    output: str
+    images_dir: str | None
+    synthetic: str
+    val_split: float
+    no_synthetic: bool
+    dry_run: bool
+
+
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Prepare hybrid training dataset from CVAT export + synthetic data",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -561,7 +610,7 @@ def main():
         action="store_true",
         help="Show what would happen without copying files",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(namespace=_PrepareTrainingArgs())
 
     prepare_training(
         cvat_export_dirs=args.cvat_export,

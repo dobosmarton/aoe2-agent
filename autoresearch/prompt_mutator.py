@@ -10,7 +10,7 @@ from pathlib import Path
 import anthropic
 import structlog
 
-log = structlog.get_logger()
+log = structlog.stdlib.get_logger()
 
 PROMPT_FILE = Path(__file__).parent.parent / "prompts" / "system.md"
 

@@ -11,13 +11,19 @@ from __future__ import annotations
 
 import json
 import re
+from typing import cast
 
 import structlog
 
-log = structlog.get_logger()
+log = structlog.stdlib.get_logger()
 
 
-def extract_json_object(text: str) -> dict | None:
+def _loads(text: str) -> object:
+    """`json.loads` typed as returning `object` instead of `Any`."""
+    return cast("object", json.loads(text))
+
+
+def extract_json_object(text: str) -> dict[str, object] | None:
     """Extract a JSON object from LLM response text.
 
     Tries three strategies in order:
@@ -29,7 +35,7 @@ def extract_json_object(text: str) -> dict | None:
     """
     # Strategy 1: direct parse
     try:
-        result = json.loads(text)
+        result = _loads(text)
         if isinstance(result, dict):
             return result
     except json.JSONDecodeError:
@@ -39,7 +45,7 @@ def extract_json_object(text: str) -> dict | None:
     code_match = re.search(r"```(?:json)?\s*(\{.+\})\s*```", text, re.DOTALL)
     if code_match:
         try:
-            result = json.loads(code_match.group(1))
+            result = _loads(code_match.group(1))
             if isinstance(result, dict):
                 return result
         except json.JSONDecodeError:
@@ -49,7 +55,7 @@ def extract_json_object(text: str) -> dict | None:
     return _extract_by_bracket_matching(text)
 
 
-def _extract_by_bracket_matching(text: str) -> dict | None:
+def _extract_by_bracket_matching(text: str) -> dict[str, object] | None:
     """Find the first balanced JSON object using bracket counting.
 
     Handles escaped characters and quoted strings so that braces
@@ -81,8 +87,9 @@ def _extract_by_bracket_matching(text: str) -> dict | None:
             depth -= 1
             if depth == 0:
                 try:
-                    return json.loads(text[start : i + 1])
+                    parsed = _loads(text[start : i + 1])
                 except json.JSONDecodeError:
                     return None
+                return parsed if isinstance(parsed, dict) else None
 
     return None

@@ -29,6 +29,12 @@ import json
 import shutil
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
+
+from detection.inference._ultralytics_results import yolo_boxes_to_lists
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 try:
     from PIL import Image, ImageDraw
@@ -125,34 +131,38 @@ def _find_labeled_stems(training_dir: Path | None = None) -> set[str]:
 
 
 def _run_standard_detection(
-    model,
+    model: object,
     img_path: Path,
     conf_threshold: float,
 ) -> list[dict]:
     """Run standard YOLO inference on a single image."""
-    results = model(str(img_path), conf=conf_threshold, verbose=False)
+    results = cast(
+        "list[object]",
+        cast("Callable[..., object]", model)(str(img_path), conf=conf_threshold, verbose=False),
+    )
 
-    if results[0].boxes is None or len(results[0].boxes) == 0:
+    boxes_attr: object | None = getattr(results[0], "boxes", None)
+    if boxes_attr is None or len(cast("list[object]", boxes_attr)) == 0:
         return []
 
-    boxes = results[0].boxes
-    img_w, img_h = results[0].orig_shape[1], results[0].orig_shape[0]
+    orig_shape = getattr(results[0], "orig_shape", (0, 0))
+    img_h = int(cast("int", orig_shape[0]))
+    img_w = int(cast("int", orig_shape[1]))
 
-    detections = []
-    for box, cls_id, conf in zip(boxes.xyxy, boxes.cls, boxes.conf, strict=True):
-        detections.append(
-            {
-                "bbox": tuple(box.tolist()),
-                "class_id": int(cls_id.item()),
-                "confidence": float(conf.item()),
-                "img_size": (img_w, img_h),
-            }
-        )
-    return detections
+    bboxes, classes, confidences = yolo_boxes_to_lists(boxes_attr)
+    return [
+        {
+            "bbox": (box[0], box[1], box[2], box[3]),
+            "class_id": int(cls_id),
+            "confidence": conf,
+            "img_size": (img_w, img_h),
+        }
+        for box, cls_id, conf in zip(bboxes, classes, confidences, strict=True)
+    ]
 
 
 def _run_sahi_detection(
-    sahi_model,
+    sahi_model: object,
     img_path: Path,
     conf_threshold: float,
 ) -> list[dict]:
@@ -215,7 +225,7 @@ def prelabel(
         Summary dict with per-class detection counts.
     """
     try:
-        from ultralytics import YOLO
+        from detection._ultralytics_compat import YOLO
     except ImportError:
         print("ERROR: ultralytics is required. Install with: pip install ultralytics")
         sys.exit(1)
@@ -447,7 +457,18 @@ def _save_preview(
     img.save(preview_path, "JPEG", quality=85)
 
 
-def main():
+class _PrelabelArgs(argparse.Namespace):
+    model: str
+    input: str
+    output: str
+    conf: float
+    schema: str
+    no_preview: bool
+    skip_labeled: bool
+    sahi: bool
+
+
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Pre-label AoE2 screenshots using YOLO model",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -498,7 +519,7 @@ def main():
         action="store_true",
         help="Use SAHI sliced inference (640x640 tiles) for better small object detection",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(namespace=_PrelabelArgs())
 
     prelabel(
         model_path=args.model,
