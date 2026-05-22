@@ -36,6 +36,7 @@ from fastapi.responses import StreamingResponse
 
 from arena.web.forks import ForkRequest, ForkResponse, create_fork
 from arena.web.live import LiveRunRegistry
+from evaluation.event_broker import EventBroker, InProcessEventBroker, RunId, Seq
 from evaluation.fork import ForkError
 
 if TYPE_CHECKING:
@@ -80,6 +81,15 @@ def _cors_origins() -> list[str]:
     if override is None:
         return list(_DEFAULT_CORS_ORIGINS)
     return [origin.strip() for origin in override.split(",") if origin.strip()]
+
+
+def _broker_enabled() -> bool:
+    """Phase 1 feature flag: route /events through the new EventBroker path.
+
+    Off by default. Set ARENA_BROKER_ENABLED=true to opt in. Deleted in
+    Phase 2 when the broker becomes the only path.
+    """
+    return os.environ.get("ARENA_BROKER_ENABLED", "false").lower() in ("1", "true", "yes")
 
 
 def _all_duckdb_files(root: Path) -> list[Path]:
@@ -170,6 +180,7 @@ def _stream_events_sync(db_path: Path, run_id: str) -> Iterator[str]:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.registry = LiveRunRegistry()
+    app.state.broker = InProcessEventBroker()
     fork_tasks: set[asyncio.Task[None]] = set()
     app.state.fork_tasks = fork_tasks
     try:
@@ -206,6 +217,18 @@ def get_fork_tasks(request: Request) -> set[asyncio.Task[None]]:
     return cast("set[asyncio.Task[None]]", tasks)
 
 
+def get_broker(request: Request) -> EventBroker:
+    """FastAPI dependency: yields the process-wide `EventBroker`.
+
+    Phase 1 always returns the `InProcessEventBroker` installed at startup;
+    Phase C swaps to a Redis/NATS broker — same Protocol, zero handler
+    changes."""
+    app_state = cast("FastAPI", request.app).state
+    broker = cast("object", app_state.broker)
+    assert isinstance(broker, InProcessEventBroker)
+    return broker
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -215,6 +238,21 @@ async def health() -> dict[str, str]:
 async def runs() -> list[dict[str, object]]:
     summaries = await asyncio.to_thread(_list_runs, _logs_root())
     return [asdict(s) for s in summaries]
+
+
+async def _broker_sse(
+    broker: EventBroker,
+    run_id: str,
+) -> AsyncIterator[str]:
+    """Phase 1 SSE generator: drain the broker for the given run.
+
+    Caller (`events()`) must check `broker.is_open(run_id)` before reaching
+    this. Same wire format as `_live_event_stream` —
+    `data: <payload_json>\\n\\n` — so the frontend can't tell which
+    generator served it.
+    """
+    async for envelope in broker.stream(RunId(run_id), from_seq=Seq(0)):
+        yield f"data: {envelope.event.payload.model_dump_json()}\n\n"
 
 
 async def _live_event_stream(
@@ -276,7 +314,16 @@ def _resolve_run_optional(run_id: str, root: Path) -> Path | None:
 async def events(
     run_id: str = Query(..., min_length=1),
     registry: LiveRunRegistry = Depends(get_registry),
+    broker: EventBroker = Depends(get_broker),
 ) -> StreamingResponse:
+    # Phase 1: when the flag is on, route live runs through the broker.
+    # Cold runs (no broker entry, not in registry) still hit DuckDB —
+    # that's Phase 2's `stream_cold` work.
+    if _broker_enabled() and broker.is_open(RunId(run_id)):
+        return StreamingResponse(
+            _broker_sse(broker, run_id),
+            media_type="text/event-stream",
+        )
     if registry.is_live(run_id):
         return StreamingResponse(
             _live_event_stream(registry, run_id),
