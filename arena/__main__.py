@@ -16,6 +16,7 @@ import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING, TypeVar
 
 import duckdb
 
@@ -24,8 +25,16 @@ from arena.metrics import summarise
 from arena.race import race, race_with_mock
 from arena.ranking import RankingResult, rank
 from arena.scenarios import DEFAULT_SCENARIOS, get_scenario
+from evaluation.duckdb_persister import MultiRunBrokerSink
+from evaluation.event_broker import InProcessEventBroker
 from evaluation.event_log import DuckDBEventSink
 from evaluation.world_sim import WorldState
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
+
+_T = TypeVar("_T")
 
 _DEFAULT_PROFILE = Path(__file__).parent / "profiles" / "v1.yaml"
 _DEFAULT_RANKING_PROFILE = Path(__file__).parent / "profiles" / "ranking-v1.yaml"
@@ -56,6 +65,27 @@ def _new_db_path(label: str) -> Path:
     return day_dir / f"{label}-{now.strftime('%H%M%S')}.duckdb"
 
 
+async def _run_through_broker(
+    db_path: Path,
+    producer: Callable[[MultiRunBrokerSink], Awaitable[_T]],
+) -> _T:
+    """Phase 2.5 shim: drive a producer through the broker + a shared DuckDB sink.
+
+    Owns the broker, DuckDB connection, and sink lifetimes so each CLI
+    entry point stays a one-liner at the call site. The `close_all`
+    invariant (close every opened run before exiting the `with`) is what
+    guarantees the file is consistent on disk by the time we return.
+    """
+    broker = InProcessEventBroker()
+    with duckdb.connect(str(db_path)) as conn:
+        db_sink = DuckDBEventSink(conn)
+        sink = MultiRunBrokerSink(broker, db_sink, asyncio.get_running_loop())
+        try:
+            return await producer(sink)
+        finally:
+            await sink.close_all()
+
+
 def _cmd_race(profile_path: Path) -> None:
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
@@ -65,12 +95,12 @@ def _cmd_race(profile_path: Path) -> None:
     db_path = _new_db_path("race")
     print(f"Racing {len(config.profiles)} profiles for {config.turns} turns …")
     print(f"Event log: {db_path}")
-    conn = duckdb.connect(str(db_path))
-    try:
-        sink = DuckDBEventSink(conn)
-        results = asyncio.run(race(config, api_key, _STANDARD_START, sink=sink))
-    finally:
-        conn.close()
+    results = asyncio.run(
+        _run_through_broker(
+            db_path,
+            lambda sink: race(config, api_key, _STANDARD_START, sink=sink),
+        )
+    )
     print(summarise(results))
 
 
@@ -85,12 +115,12 @@ def _cmd_smoke() -> None:
     db_path = _new_db_path("smoke")
     print(f"Smoke run: {len(config.profiles)} profiles x {config.turns} turns (mock invoke) ...")
     print(f"Event log: {db_path}")
-    conn = duckdb.connect(str(db_path))
-    try:
-        sink = DuckDBEventSink(conn)
-        results = asyncio.run(race_with_mock(config, _STANDARD_START, sink=sink))
-    finally:
-        conn.close()
+    results = asyncio.run(
+        _run_through_broker(
+            db_path,
+            lambda sink: race_with_mock(config, _STANDARD_START, sink=sink),
+        )
+    )
     print(summarise(results))
 
 
@@ -139,12 +169,12 @@ def _cmd_rank(profile_path: Path) -> None:
 
     db_path = _new_db_path("rank")
     print(f"Event log: {db_path}")
-    conn = duckdb.connect(str(db_path))
-    try:
-        sink = DuckDBEventSink(conn)
-        result = asyncio.run(rank(config, api_key, sink=sink))
-    finally:
-        conn.close()
+    result = asyncio.run(
+        _run_through_broker(
+            db_path,
+            lambda sink: rank(config, api_key, sink=sink),
+        )
+    )
     print(_format_ranking(result))
 
 
