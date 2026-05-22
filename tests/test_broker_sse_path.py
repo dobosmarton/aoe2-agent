@@ -1,11 +1,12 @@
-"""Phase 1 integration test: the broker-on `/events` path never touches DuckDB.
+"""Unit guarantee: the broker-source `/events` generator never touches DuckDB.
 
-This is *not* the Phase 0 collision-regression test. That one stays xfail
-until Phase 2 (it exercises `_live_event_stream` directly, which the broker
-flag doesn't route past). What this test proves is the structural claim
-of Phase 1: when a run is open in the broker, the new `_broker_sse` path
-serves it entirely from the in-memory broker — zero `duckdb.connect()`
-calls. That property is the foundation the Phase 2 cutover stands on.
+The Phase 0 regression test in `tests/test_web_live_sse_collision.py`
+verifies the property end-to-end through the HTTP layer. This test is
+the lower-level unit-scoped equivalent — it proves the structural claim
+in isolation: when a run is open in the broker, `_stream_from_broker`
+serves it entirely from memory, with zero `duckdb.connect()` calls.
+Cheap to maintain, fast to fail loudly if anyone re-introduces a DuckDB
+scan in the live SSE path.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from unittest.mock import patch
 
 import duckdb
 
-from arena.web.server import _broker_sse
+from arena.web.server import _stream_from_broker
 from evaluation.event_broker import InProcessEventBroker, RunId
 from evaluation.event_log import Event, TurnStartPayload
 
@@ -32,9 +33,9 @@ def _event(run_id: str, t: int) -> Event:
 
 
 def test_broker_sse_path_avoids_duckdb() -> None:
-    """`_broker_sse` over an open-then-published run must not call
+    """`_stream_from_broker` over an open-then-published run must not call
     `duckdb.connect` at all — the entire stream comes from memory.
-    This is the structural property that makes Phase 2's cutover safe."""
+    This is the structural property the broker cutover stands on."""
     broker = InProcessEventBroker()
     run = RunId("r1")
 
@@ -43,7 +44,7 @@ def test_broker_sse_path_avoids_duckdb() -> None:
         for i in range(3):
             await broker.publish(run, _event("r1", t=i))
         broker.close_run(run)
-        return [line async for line in _broker_sse(broker, "r1")]
+        return [line async for line in _stream_from_broker(broker, run)]
 
     with patch.object(duckdb, "connect", autospec=True) as connect_spy:
         lines = asyncio.run(scenario())
@@ -68,7 +69,7 @@ def test_broker_sse_yields_live_events_during_publish() -> None:
         broker.open_run(run)
 
         async def consumer() -> list[str]:
-            return [line async for line in _broker_sse(broker, "r1")]
+            return [line async for line in _stream_from_broker(broker, run)]
 
         task = asyncio.create_task(consumer())
         await asyncio.sleep(0)  # let the consumer attach

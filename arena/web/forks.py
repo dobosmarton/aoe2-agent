@@ -1,18 +1,18 @@
-"""Operator-driven fork endpoint + async replay (Phase 9).
+"""Operator-driven fork endpoint + async replay (Phase 9, broker-wired Phase 2).
 
 `create_fork()` is the entry point called by the FastAPI POST /forks
 handler. It snapshot-forks the parent run via evaluation.fork.fork(),
-optionally applies a `MutationPatch`, emits a `world_mutation` event,
+optionally applies a `MutationPatch`, publishes a `world_mutation` event,
 and schedules a background `synth_game_loop` task to play out N more
-turns. The HTTP response returns immediately with the child run_id;
-SSE clients subscribe to the live registry to watch events arrive.
+turns. Every event flows through the EventBroker — SSE clients consume
+the broker; the persister mirrors to DuckDB.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Literal
 
@@ -21,9 +21,9 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from arena.config_profile import ConfigProfile
 from arena.invoke import build_synth_invoke
-from arena.web.live import BroadcastingSink, LiveRunRegistry
+from evaluation.duckdb_persister import persist_to_duckdb
+from evaluation.event_broker import BrokerEventSink, EventBroker, RunId
 from evaluation.event_log import (
-    DuckDBEventSink,
     Event,
     TurnStartPayload,
     WorldMutationPayload,
@@ -171,6 +171,26 @@ def _build_world_mutation_event(
 
 
 # ---------------------------------------------------------------------------
+# Producer helpers
+# ---------------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class _CapturingSink:
+    """In-memory EventSink that just appends emits to a list.
+
+    Used to bridge `evaluation.fork.fork()` (sync `EventSink` API) into
+    the async broker — capture the snapshot event(s), then `await
+    broker.publish(...)` for each in the async caller.
+    """
+
+    events: list[Event] = field(default_factory=list)
+
+    def emit(self, event: Event) -> None:
+        self.events.append(event)
+
+
+# ---------------------------------------------------------------------------
 # Background replay task
 # ---------------------------------------------------------------------------
 
@@ -180,32 +200,52 @@ async def _replay(
     child_run_id: str,
     n_turns: int,
     api_key: str,
-    db_path: Path,
-    registry: LiveRunRegistry,
+    broker: EventBroker,
+    persist_task: asyncio.Task[None],
 ) -> None:
-    """Run synth_game_loop, teeing events to DuckDB + the live registry."""
+    """Run synth_game_loop publishing through the broker; close on exit.
+
+    Lifecycle ordering at the tail is load-bearing:
+        1. drain pending `BrokerEventSink.emit` publishes (they go via
+           `call_soon_threadsafe` so are still queued when the game loop
+           returns from its last `await`).
+        2. `broker.close_run` — signals the persister to drain and exit.
+        3. `await persist_task` — guarantees DuckDB is fully written
+           before any cold-path reader sees the run as finalized.
+    DO NOT REORDER — see the broker-architecture design doc § "Subtle
+    correctness items".
+    """
+    typed_run = RunId(child_run_id)
     try:
-        with duckdb.connect(str(db_path)) as conn:
-            sink = BroadcastingSink(
-                db_sink=DuckDBEventSink(conn),
-                registry=registry,
-                loop=asyncio.get_running_loop(),
-            )
-            invoke = build_synth_invoke(DEFAULT_FORK_PROFILE, api_key)
-            await synth_game_loop(
-                invoke=invoke,
-                initial_state=initial_state,
-                max_iterations=n_turns,
-                sink=sink,
-                run_id=child_run_id,
-            )
+        sink = BrokerEventSink(
+            broker=broker,
+            run_id=typed_run,
+            loop=asyncio.get_running_loop(),
+        )
+        invoke = build_synth_invoke(DEFAULT_FORK_PROFILE, api_key)
+        await synth_game_loop(
+            invoke=invoke,
+            initial_state=initial_state,
+            max_iterations=n_turns,
+            sink=sink,
+            run_id=child_run_id,
+        )
+        # Two-tick drain: BrokerEventSink does
+        # `call_soon_threadsafe(create_task, broker.publish(...))`.
+        # Tick 1 fires the queued callbacks (which schedule the publish
+        # tasks). Tick 2 lets the publish tasks themselves run (their
+        # bodies are sync, so they complete inside one tick).
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
     except Exception:
         logger.exception("fork replay failed for run_id=%s", child_run_id)
         raise
     finally:
-        # Always close the live channel; otherwise SSE subscribers wait
-        # forever on a queue that never receives the None sentinel.
-        registry.finalize(child_run_id)
+        broker.close_run(typed_run)
+        try:
+            await persist_task
+        except Exception:
+            logger.exception("persister failed for run_id=%s", child_run_id)
 
 
 # ---------------------------------------------------------------------------
@@ -216,11 +256,23 @@ async def _replay(
 async def create_fork(
     request: ForkRequest,
     api_key: str,
-    registry: LiveRunRegistry,
+    broker: EventBroker,
     logs_root: Path,
     fork_tasks: set[asyncio.Task[None]],
 ) -> ForkResponse:
     """Snapshot the parent at parent_t, optionally mutate, schedule replay.
+
+    Lifecycle ordering at the head is load-bearing:
+        1. `broker.open_run` — must come before any publish or
+           persister subscription.
+        2. `await broker.publish(snapshot+mutation events)` — synchronous
+           publishes inside the async handler, so they land in the
+           buffer in deterministic order.
+        3. spawn `persist_to_duckdb` task — subscribes from `Seq(0)`,
+           so order doesn't matter for it specifically, but spawning
+           after the head publishes keeps the call sequence linear.
+        4. spawn `_replay` task — the replay's emits race against any
+           late subscriber, which is fine: the broker buffer covers it.
 
     Raises FileNotFoundError if the parent run can't be located, or
     ForkError (from evaluation.fork) if parent_t has no turn_start.
@@ -229,46 +281,52 @@ async def create_fork(
     child_db = _new_child_db_path(logs_root)
 
     mutation_fn = None if request.mutation.is_empty() else request.mutation.apply
+    captured = _CapturingSink()
 
     with duckdb.connect(str(parent_db), read_only=True) as parent_conn:
         parent_state_before = _load_parent_state(
             parent_conn, request.parent_run_id, request.parent_t
         )
-        with duckdb.connect(str(child_db)) as child_conn:
-            db_sink = DuckDBEventSink(child_conn)
-            child_run_id, forked_state = fork(
-                conn=parent_conn,
-                parent_run_id=request.parent_run_id,
-                parent_t=request.parent_t,
-                sink=db_sink,
-                mutation_fn=mutation_fn,
-            )
-            if mutation_fn is not None and parent_state_before is not None:
-                db_sink.emit(
-                    _build_world_mutation_event(
-                        child_run_id=child_run_id,
-                        parent_t=request.parent_t,
-                        before=parent_state_before,
-                        after=forked_state,
-                        reason=request.reason,
-                    )
-                )
+        child_run_id, forked_state = fork(
+            conn=parent_conn,
+            parent_run_id=request.parent_run_id,
+            parent_t=request.parent_t,
+            sink=captured,
+            mutation_fn=mutation_fn,
+        )
 
-    registry.register(child_run_id)
-    task = asyncio.create_task(
+    typed_run = RunId(child_run_id)
+    broker.open_run(typed_run)
+    for event in captured.events:
+        await broker.publish(typed_run, event)
+    if mutation_fn is not None and parent_state_before is not None:
+        await broker.publish(
+            typed_run,
+            _build_world_mutation_event(
+                child_run_id=child_run_id,
+                parent_t=request.parent_t,
+                before=parent_state_before,
+                after=forked_state,
+                reason=request.reason,
+            ),
+        )
+
+    persist_task = asyncio.create_task(persist_to_duckdb(broker, typed_run, child_db))
+    fork_tasks.add(persist_task)
+    persist_task.add_done_callback(fork_tasks.discard)
+
+    replay_task = asyncio.create_task(
         _replay(
             initial_state=forked_state,
             child_run_id=child_run_id,
             n_turns=request.n_turns,
             api_key=api_key,
-            db_path=child_db,
-            registry=registry,
+            broker=broker,
+            persist_task=persist_task,
         )
     )
-    # Retain a strong reference to the task — without this, asyncio's
-    # garbage collector can drop the task mid-execution.
-    fork_tasks.add(task)
-    task.add_done_callback(fork_tasks.discard)
+    fork_tasks.add(replay_task)
+    replay_task.add_done_callback(fork_tasks.discard)
 
     return ForkResponse(
         child_run_id=child_run_id,

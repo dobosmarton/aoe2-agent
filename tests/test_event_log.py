@@ -416,3 +416,63 @@ def test_turn_start_payload_with_state_serializes_and_parses() -> None:
     restored = _adapter.validate_json(payload.model_dump_json())
     assert isinstance(restored, TurnStartPayload)
     assert restored.state == snap
+
+
+# ---------------------------------------------------------------------------
+# Wire-format byte stability — Phase 2 cutover gate.
+# ---------------------------------------------------------------------------
+#
+# The SSE wire bytes for cold reads pass through Pydantic twice:
+#   1. Writer (DuckDBEventSink): payload.model_dump_json() -> stored as VARCHAR.
+#   2. Reader (stream_cold + _stream_from_cold): bytes -> validate_json -> dataclass
+#      -> payload.model_dump_json() -> SSE.
+# The frontend matches against the `kind` discriminator inside the JSON.
+# If Pydantic re-serialization produced different bytes from the original
+# write (e.g. key reordering), live and cold paths would emit divergent
+# wire bytes — caught here.
+
+
+_ROUNDTRIP_PAYLOADS: list[Payload] = [
+    TurnStartPayload(turn_num=7),
+    TurnStartPayload(turn_num=3, state=_snapshot(food=250.0, population=10)),
+    ObservationPayload(entity_count=12, classes=["mill", "town_center"]),
+    LlmPromptPayload(state_summary="age=Dark food=200"),
+    LlmResponsePayload(
+        actions=[{"type": "train_villager"}],
+        reasoning="train villager to expand economy",
+        cost_usd=0.0012,
+    ),
+    ActionPayload(index_in_turn=0, action={"type": "train_villager"}),
+    ActionResultPayload(index_in_turn=0, action_type="train_villager", state_changed=True),
+    WorldMutationPayload(
+        before_summary="food=200",
+        after_summary="food=400",
+        reason="operator boost",
+    ),
+    ForkPayload(parent_run_id="parent_abc", parent_t=5, mutation_summary="food+200"),
+    MetricPayload(name="composite", value=0.87),
+]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    _ROUNDTRIP_PAYLOADS,
+    ids=[p.kind for p in _ROUNDTRIP_PAYLOADS],
+)
+def test_payload_roundtrip_is_byte_stable(payload: Payload) -> None:
+    """Re-serializing a parsed payload must produce identical bytes —
+    if not, SSE bytes from cold reads will differ from live reads."""
+    original_bytes = payload.model_dump_json()
+    restored = _adapter.validate_json(original_bytes)
+    assert restored.model_dump_json() == original_bytes
+
+
+@pytest.mark.parametrize(
+    "payload",
+    _ROUNDTRIP_PAYLOADS,
+    ids=[p.kind for p in _ROUNDTRIP_PAYLOADS],
+)
+def test_payload_roundtrip_preserves_discriminator(payload: Payload) -> None:
+    """The `kind` field is the discriminator the frontend matches on."""
+    restored_bytes = _adapter.validate_json(payload.model_dump_json()).model_dump_json()
+    assert f'"kind":"{payload.kind}"' in restored_bytes

@@ -1,10 +1,15 @@
-"""Tests for arena/web/live.py + arena/web/forks.py (Phase 9). Offline."""
+"""Tests for arena/web/forks.py (Phase 9, broker-wired Phase 2). Offline.
+
+Broker lifecycle invariants live in `tests/test_event_broker.py`; this
+file exercises the fork-specific orchestration (parent resolution,
+mutation events, persister-flush-before-return).
+"""
 
 from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import duckdb
 import pytest
@@ -12,11 +17,10 @@ from pydantic import ValidationError
 
 from arena.web import forks as forks_module
 from arena.web.forks import ForkRequest, MutationPatch, create_fork
-from arena.web.live import LiveRunRegistry
+from evaluation.event_broker import InProcessEventBroker, RunId
 from evaluation.event_log import (
     DuckDBEventSink,
     Event,
-    MetricPayload,
     TurnStartPayload,
     WorldStateSnapshot,
 )
@@ -108,48 +112,6 @@ def test_mutation_patch_rejects_extra_fields() -> None:
 
 
 # ---------------------------------------------------------------------------
-# LiveRunRegistry
-# ---------------------------------------------------------------------------
-
-
-def test_registry_subscriber_receives_published_event() -> None:
-    async def run() -> Event | None:
-        registry = LiveRunRegistry()
-        registry.register("R1")
-        sub = registry.subscribe("R1")
-        event = Event(
-            run_id="R1",
-            agent_id="a",
-            t=1,
-            payload=MetricPayload(name="x", value=1.0),
-            ts=datetime.now(UTC),
-        )
-        registry.publish_nowait(event)
-        return await asyncio.wait_for(sub.queue.get(), timeout=1.0)
-
-    received = asyncio.run(run())
-    assert received is not None and received.run_id == "R1"
-
-
-def test_registry_finalize_sends_none_sentinel() -> None:
-    async def run() -> Event | None:
-        registry = LiveRunRegistry()
-        registry.register("R2")
-        sub = registry.subscribe("R2")
-        registry.finalize("R2")
-        return await asyncio.wait_for(sub.queue.get(), timeout=1.0)
-
-    assert asyncio.run(run()) is None
-
-
-def test_registry_is_live_returns_false_after_finalize() -> None:
-    registry = LiveRunRegistry()
-    registry.register("R3")
-    registry.finalize("R3")
-    assert registry.is_live("R3") is False
-
-
-# ---------------------------------------------------------------------------
 # create_fork
 # ---------------------------------------------------------------------------
 
@@ -157,7 +119,7 @@ def test_registry_is_live_returns_false_after_finalize() -> None:
 def test_create_fork_raises_when_parent_run_missing(logs_root: Path) -> None:
     request = ForkRequest(parent_run_id="ghost", parent_t=1)
     with pytest.raises(FileNotFoundError):
-        asyncio.run(create_fork(request, "stub-key", LiveRunRegistry(), logs_root, set()))
+        asyncio.run(create_fork(request, "stub-key", InProcessEventBroker(), logs_root, set()))
 
 
 def test_create_fork_returns_child_run_id(
@@ -168,7 +130,7 @@ def test_create_fork_returns_child_run_id(
     _make_parent_log(logs_root / "2026-05-21" / "race-100000.duckdb", "P1", _state())
 
     async def go() -> str:
-        registry = LiveRunRegistry()
+        broker = InProcessEventBroker()
         tasks: set[asyncio.Task[None]] = set()
         response = await create_fork(
             ForkRequest(
@@ -179,11 +141,11 @@ def test_create_fork_returns_child_run_id(
                 reason="test",
             ),
             "stub-key",
-            registry,
+            broker,
             logs_root,
             tasks,
         )
-        # Drain the background replay so cleanup is clean.
+        # Drain the background replay + persister so cleanup is clean.
         for task in list(tasks):
             await task
         return response.child_run_id
@@ -199,7 +161,7 @@ def test_create_fork_writes_world_mutation_when_patch_non_empty(
     _make_parent_log(logs_root / "2026-05-21" / "race-100000.duckdb", "P2", _state())
 
     async def go() -> tuple[str, str]:
-        registry = LiveRunRegistry()
+        broker = InProcessEventBroker()
         tasks: set[asyncio.Task[None]] = set()
         response = await create_fork(
             ForkRequest(
@@ -210,7 +172,7 @@ def test_create_fork_writes_world_mutation_when_patch_non_empty(
                 reason="mutate food",
             ),
             "stub-key",
-            registry,
+            broker,
             logs_root,
             tasks,
         )
@@ -225,3 +187,42 @@ def test_create_fork_writes_world_mutation_when_patch_non_empty(
             [child_run_id],
         ).fetchone()
     assert row is not None and row[0] == 1
+
+
+def test_create_fork_closes_broker_run_after_replay(
+    logs_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Broker invariant: after the replay task completes, broker.is_open
+    is False AND the DuckDB file is fully written (persister awaited)."""
+    _patch_invoke(monkeypatch)
+    _make_parent_log(logs_root / "2026-05-21" / "race-100000.duckdb", "P3", _state())
+
+    async def go() -> tuple[bool, int, str]:
+        broker = InProcessEventBroker()
+        tasks: set[asyncio.Task[None]] = set()
+        response = await create_fork(
+            ForkRequest(parent_run_id="P3", parent_t=1, n_turns=1),
+            "stub-key",
+            broker,
+            logs_root,
+            tasks,
+        )
+        for task in list(tasks):
+            await task
+
+        with duckdb.connect(response.db_path, read_only=True) as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM events WHERE run_id=?",
+                [response.child_run_id],
+            ).fetchone()
+        assert row is not None
+        return (
+            broker.is_open(RunId(response.child_run_id)),
+            int(cast("int", row[0])),
+            response.child_run_id,
+        )
+
+    is_open, row_count, child_run_id = asyncio.run(go())
+    assert is_open is False, "broker should close the run after replay"
+    assert row_count >= 1, f"DuckDB should have ≥1 event for {child_run_id} after persister flush"

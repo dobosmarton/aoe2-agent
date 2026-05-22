@@ -35,8 +35,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from arena.web.forks import ForkRequest, ForkResponse, create_fork
-from arena.web.live import LiveRunRegistry
 from evaluation.event_broker import EventBroker, InProcessEventBroker, RunId, Seq
+from evaluation.event_log import stream_cold
 from evaluation.fork import ForkError
 
 if TYPE_CHECKING:
@@ -81,15 +81,6 @@ def _cors_origins() -> list[str]:
     if override is None:
         return list(_DEFAULT_CORS_ORIGINS)
     return [origin.strip() for origin in override.split(",") if origin.strip()]
-
-
-def _broker_enabled() -> bool:
-    """Phase 1 feature flag: route /events through the new EventBroker path.
-
-    Off by default. Set ARENA_BROKER_ENABLED=true to opt in. Deleted in
-    Phase 2 when the broker becomes the only path.
-    """
-    return os.environ.get("ARENA_BROKER_ENABLED", "false").lower() in ("1", "true", "yes")
 
 
 def _all_duckdb_files(root: Path) -> list[Path]:
@@ -157,21 +148,6 @@ def _resolve_run(run_id: str, root: Path) -> Path:
     raise HTTPException(status_code=404, detail=f"run_id {run_id!r} not found")
 
 
-def _stream_events_sync(db_path: Path, run_id: str) -> Iterator[str]:
-    # Generator stays synchronous: Starlette's StreamingResponse drives sync
-    # iterators on its thread pool, so the event loop is never blocked.
-    conn = duckdb.connect(str(db_path), read_only=True)
-    try:
-        cursor = conn.execute("SELECT payload_json FROM events WHERE run_id=? ORDER BY t", [run_id])
-        while True:
-            row = cursor.fetchone()
-            if row is None:
-                break
-            yield f"data: {row[0]}\n\n"
-    finally:
-        conn.close()
-
-
 # ---------------------------------------------------------------------------
 # FastAPI app
 # ---------------------------------------------------------------------------
@@ -179,7 +155,6 @@ def _stream_events_sync(db_path: Path, run_id: str) -> Iterator[str]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    app.state.registry = LiveRunRegistry()
     app.state.broker = InProcessEventBroker()
     fork_tasks: set[asyncio.Task[None]] = set()
     app.state.fork_tasks = fork_tasks
@@ -201,13 +176,6 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
-
-
-def get_registry(request: Request) -> LiveRunRegistry:
-    app_state = cast("FastAPI", request.app).state
-    registry = cast("object", app_state.registry)
-    assert isinstance(registry, LiveRunRegistry)
-    return registry
 
 
 def get_fork_tasks(request: Request) -> set[asyncio.Task[None]]:
@@ -240,98 +208,48 @@ async def runs() -> list[dict[str, object]]:
     return [asdict(s) for s in summaries]
 
 
-async def _broker_sse(
+async def _stream_from_broker(
     broker: EventBroker,
-    run_id: str,
+    run_id: RunId,
 ) -> AsyncIterator[str]:
-    """Phase 1 SSE generator: drain the broker for the given run.
-
-    Caller (`events()`) must check `broker.is_open(run_id)` before reaching
-    this. Same wire format as `_live_event_stream` —
-    `data: <payload_json>\\n\\n` — so the frontend can't tell which
-    generator served it.
-    """
-    async for envelope in broker.stream(RunId(run_id), from_seq=Seq(0)):
+    """Phase 2 SSE generator for live runs: drain the broker."""
+    async for envelope in broker.stream(run_id, from_seq=Seq(0)):
         yield f"data: {envelope.event.payload.model_dump_json()}\n\n"
 
 
-async def _live_event_stream(
-    registry: LiveRunRegistry,
-    run_id: str,
-) -> AsyncIterator[str]:
-    """Replay any already-written events for the live run, then tail new ones.
+def _stream_from_cold(db_path: Path, run_id: RunId) -> Iterator[str]:
+    """Phase 2 SSE generator for finalized runs.
 
-    The race window: while we're reading DuckDB rows, the writer may add
-    more. Subscribing AFTER the read means we'd miss those rows. The fix
-    is to subscribe BEFORE the read and skip any queue event whose t we
-    already saw in the DB.
+    Synchronous so Starlette can drive it on its thread pool — DuckDB
+    iteration is blocking, and pretending otherwise via `to_thread`
+    would just hide the same cost behind more code. Re-serializes via
+    `payload.model_dump_json()` for byte-equivalence with the broker
+    path (guarded by `test_payload_roundtrip_is_byte_stable`).
     """
-    sub = registry.subscribe(run_id)
-    try:
-        db_path = await asyncio.to_thread(_resolve_run_optional, run_id, _logs_root())
-        max_t_seen = -1
-        if db_path is not None:
-            for line, last_t in _stream_existing_rows(db_path, run_id):
-                yield line
-                if last_t > max_t_seen:
-                    max_t_seen = last_t
-        while True:
-            event = await sub.queue.get()
-            if event is None:
-                break
-            if event.t <= max_t_seen:
-                continue
-            yield f"data: {event.payload.model_dump_json()}\n\n"
-    finally:
-        registry.unsubscribe(run_id, sub)
-
-
-def _stream_existing_rows(db_path: Path, run_id: str) -> Iterator[tuple[str, int]]:
-    """Yield (sse_line, t) pairs for already-persisted events of `run_id`."""
-    with duckdb.connect(str(db_path), read_only=True) as conn:
-        cursor = conn.execute(
-            "SELECT t, payload_json FROM events WHERE run_id=? ORDER BY t",
-            [run_id],
-        )
-        while True:
-            row = cast("tuple[object, ...] | None", cursor.fetchone())
-            if row is None:
-                break
-            yield f"data: {row[1]}\n\n", int(cast("int", row[0]))
-
-
-def _resolve_run_optional(run_id: str, root: Path) -> Path | None:
-    """Like _resolve_run but returns None instead of raising 404."""
-    for db_path in _all_duckdb_files(root):
-        with duckdb.connect(str(db_path), read_only=True) as conn:
-            row = conn.execute("SELECT 1 FROM events WHERE run_id=? LIMIT 1", [run_id]).fetchone()
-        if row is not None:
-            return db_path
-    return None
+    for envelope in stream_cold(db_path, run_id):
+        yield f"data: {envelope.event.payload.model_dump_json()}\n\n"
 
 
 @app.get("/events")
 async def events(
     run_id: str = Query(..., min_length=1),
-    registry: LiveRunRegistry = Depends(get_registry),
     broker: EventBroker = Depends(get_broker),
 ) -> StreamingResponse:
-    # Phase 1: when the flag is on, route live runs through the broker.
-    # Cold runs (no broker entry, not in registry) still hit DuckDB —
-    # that's Phase 2's `stream_cold` work.
-    if _broker_enabled() and broker.is_open(RunId(run_id)):
+    """Stream events for `run_id` as Server-Sent Events.
+
+    Live runs (`broker.is_open`) read from the broker — zero DuckDB
+    opens; immune to writer/reader file-mode collisions.
+    Finalized runs fall through to `stream_cold` (read-only DuckDB).
+    """
+    typed_run = RunId(run_id)
+    if broker.is_open(typed_run):
         return StreamingResponse(
-            _broker_sse(broker, run_id),
-            media_type="text/event-stream",
-        )
-    if registry.is_live(run_id):
-        return StreamingResponse(
-            _live_event_stream(registry, run_id),
+            _stream_from_broker(broker, typed_run),
             media_type="text/event-stream",
         )
     db_path = await asyncio.to_thread(_resolve_run, run_id, _logs_root())
     return StreamingResponse(
-        _stream_events_sync(db_path, run_id),
+        _stream_from_cold(db_path, typed_run),
         media_type="text/event-stream",
     )
 
@@ -339,7 +257,7 @@ async def events(
 @app.post("/forks", response_model=ForkResponse)
 async def post_forks(
     request: ForkRequest,
-    registry: LiveRunRegistry = Depends(get_registry),
+    broker: EventBroker = Depends(get_broker),
     fork_tasks: set[asyncio.Task[None]] = Depends(get_fork_tasks),
 ) -> ForkResponse:
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -349,7 +267,7 @@ async def post_forks(
         return await create_fork(
             request=request,
             api_key=api_key,
-            registry=registry,
+            broker=broker,
             logs_root=_logs_root(),
             fork_tasks=fork_tasks,
         )

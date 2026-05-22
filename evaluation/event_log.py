@@ -30,15 +30,18 @@ schema is lock-in-stable from day one (Risk 5).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, Final, Literal, Protocol
+from typing import TYPE_CHECKING, Annotated, Final, Literal, Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, Discriminator, TypeAdapter
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from datetime import datetime
+    from pathlib import Path
 
     import duckdb
 
+    from evaluation.event_broker import EventEnvelope
     from evaluation.world_sim import WorldState
 
 
@@ -292,3 +295,39 @@ class DuckDBEventSink:
                 event.schema_version,
             ),
         )
+
+
+# ---------------------------------------------------------------------------
+# Cold-path reader (post-finalize) — mirrors the broker's EventEnvelope contract.
+# ---------------------------------------------------------------------------
+
+
+def stream_cold(db_path: Path, run_id: str) -> Iterator[EventEnvelope]:
+    """Read finalized events for `run_id` from DuckDB, in canonical order.
+
+    Assigns `Seq` from row order (1-indexed) so cold readers see the same
+    envelope shape the broker delivers live. `ORDER BY t, rowid` is
+    load-bearing: same-turn events share `t`, and `rowid` is DuckDB's
+    stable insert-order tiebreak — without it, replays would silently
+    reorder events that share a turn number.
+
+    Caller must guarantee no in-process writer holds `db_path` RW; this
+    function opens read-only.
+    """
+    # Local import: `evaluation.event_broker` depends on `Event` from this
+    # module, so importing it at module scope creates a cycle.
+    import duckdb
+
+    from evaluation.event_broker import EventEnvelope, RunId, Seq
+
+    with duckdb.connect(str(db_path), read_only=True) as conn:
+        rows = cast(
+            "list[EventRow]",
+            conn.execute(
+                "SELECT * FROM events WHERE run_id=? ORDER BY t, rowid",
+                [run_id],
+            ).fetchall(),
+        )
+    typed_run = RunId(run_id)
+    for i, row in enumerate(rows, start=1):
+        yield EventEnvelope(run_id=typed_run, seq=Seq(i), event=Event.from_row(row))
