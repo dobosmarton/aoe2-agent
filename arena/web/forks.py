@@ -32,9 +32,14 @@ from evaluation.fork import fork
 from gameplay_agent.synth_game_loop import synth_game_loop
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from evaluation.world_sim import WorldState
+
+
+def _null_on_close(_: RunId) -> None:
+    """Default `on_close` callback — no-op for CLI and test paths."""
 
 
 logger = logging.getLogger(__name__)
@@ -202,6 +207,7 @@ async def _replay(
     api_key: str,
     broker: EventBroker,
     persist_task: asyncio.Task[None],
+    on_close: Callable[[RunId], None],
 ) -> None:
     """Run synth_game_loop publishing through the broker; close on exit.
 
@@ -212,6 +218,8 @@ async def _replay(
         2. `broker.close_run` — signals the persister to drain and exit.
         3. `await persist_task` — guarantees DuckDB is fully written
            before any cold-path reader sees the run as finalized.
+        4. `on_close(typed_run)` — notify the server's reaper registry
+           so the buffer can be reaped after the grace period.
     DO NOT REORDER — see the broker-architecture design doc § "Subtle
     correctness items".
     """
@@ -246,6 +254,7 @@ async def _replay(
             await persist_task
         except Exception:
             logger.exception("persister failed for run_id=%s", child_run_id)
+        on_close(typed_run)
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +268,7 @@ async def create_fork(
     broker: EventBroker,
     logs_root: Path,
     fork_tasks: set[asyncio.Task[None]],
+    on_close: Callable[[RunId], None] = _null_on_close,
 ) -> ForkResponse:
     """Snapshot the parent at parent_t, optionally mutate, schedule replay.
 
@@ -323,6 +333,7 @@ async def create_fork(
             api_key=api_key,
             broker=broker,
             persist_task=persist_task,
+            on_close=on_close,
         )
     )
     fork_tasks.add(replay_task)

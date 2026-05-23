@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, TypeAlias
 
 import pytest
@@ -31,30 +30,22 @@ import pytest
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from evaluation.event_log import Event
+
 from evaluation.event_broker import (
     BrokerEventSink,
+    BrokerMetricsSnapshot,
+    BrokerOverflowError,
     EventBroker,
     EventEnvelope,
     InProcessEventBroker,
     RunId,
     Seq,
 )
-from evaluation.event_log import Event, TurnStartPayload
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _event(run_id: str = "r1", t: int = 0) -> Event:
-    """Build a minimal turn_start Event for tests."""
-    return Event(
-        run_id=run_id,
-        agent_id="agent_x",
-        t=t,
-        payload=TurnStartPayload(turn_num=t),
-        ts=datetime(2026, 5, 21, 12, 0, 0, tzinfo=UTC),
-    )
 
 
 _BrokerFactory: TypeAlias = "Callable[[], EventBroker]"
@@ -80,11 +71,13 @@ async def _drain(broker: EventBroker, run_id: RunId, from_seq: Seq = Seq(0)) -> 
 # ---------------------------------------------------------------------------
 
 
-def test_lifecycle_open_publish_stream_close(broker: EventBroker) -> None:
+def test_lifecycle_open_publish_stream_close(
+    broker: EventBroker, build_event: Callable[..., Event]
+) -> None:
     async def scenario() -> tuple[list[Seq], list[EventEnvelope]]:
         run = RunId("r1")
         broker.open_run(run)
-        seqs = [await broker.publish(run, _event(run, t=i)) for i in range(5)]
+        seqs = [await broker.publish(run, build_event(run, t=i)) for i in range(5)]
         broker.close_run(run)
         envs = await _drain(broker, run)
         return seqs, envs
@@ -103,31 +96,35 @@ def test_open_twice_raises_value_error(broker: EventBroker) -> None:
         broker.open_run(run)
 
 
-def test_publish_before_open_raises_runtime_error(broker: EventBroker) -> None:
+def test_publish_before_open_raises_runtime_error(
+    broker: EventBroker, build_event: Callable[..., Event]
+) -> None:
     with pytest.raises(RuntimeError, match="not open"):
-        asyncio.run(broker.publish(RunId("r1"), _event()))
+        asyncio.run(broker.publish(RunId("r1"), build_event()))
 
 
-def test_publish_after_close_raises(broker: EventBroker) -> None:
+def test_publish_after_close_raises(broker: EventBroker, build_event: Callable[..., Event]) -> None:
     async def scenario() -> None:
         run = RunId("r1")
         broker.open_run(run)
-        await broker.publish(run, _event(run))
+        await broker.publish(run, build_event(run))
         broker.close_run(run)
-        await broker.publish(run, _event(run))  # must raise
+        await broker.publish(run, build_event(run))  # must raise
 
     with pytest.raises(RuntimeError, match="not open"):
         asyncio.run(scenario())
 
 
-def test_publish_with_mismatched_run_id_raises(broker: EventBroker) -> None:
+def test_publish_with_mismatched_run_id_raises(
+    broker: EventBroker, build_event: Callable[..., Event]
+) -> None:
     """The broker uses run_id for routing; event.run_id for downstream reads.
     Drifting them silently corrupts the materializations."""
 
     async def scenario() -> None:
         run = RunId("r1")
         broker.open_run(run)
-        await broker.publish(run, _event(run_id="someone_else"))
+        await broker.publish(run, build_event(run_id="someone_else"))
 
     with pytest.raises(ValueError, match="does not match"):
         asyncio.run(scenario())
@@ -138,12 +135,14 @@ def test_publish_with_mismatched_run_id_raises(broker: EventBroker) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_late_subscriber_replays_from_seq_1(broker: EventBroker) -> None:
+def test_late_subscriber_replays_from_seq_1(
+    broker: EventBroker, build_event: Callable[..., Event]
+) -> None:
     async def scenario() -> list[EventEnvelope]:
         run = RunId("r1")
         broker.open_run(run)
         for i in range(3):
-            await broker.publish(run, _event(run, t=i))
+            await broker.publish(run, build_event(run, t=i))
         broker.close_run(run)
         return await _drain(broker, run)  # subscriber attaches after close
 
@@ -151,12 +150,14 @@ def test_late_subscriber_replays_from_seq_1(broker: EventBroker) -> None:
     assert [e.seq for e in envs] == [Seq(1), Seq(2), Seq(3)]
 
 
-def test_from_seq_skips_earlier_envelopes(broker: EventBroker) -> None:
+def test_from_seq_skips_earlier_envelopes(
+    broker: EventBroker, build_event: Callable[..., Event]
+) -> None:
     async def scenario() -> list[EventEnvelope]:
         run = RunId("r1")
         broker.open_run(run)
         for i in range(5):
-            await broker.publish(run, _event(run, t=i))
+            await broker.publish(run, build_event(run, t=i))
         broker.close_run(run)
         return await _drain(broker, run, from_seq=Seq(3))
 
@@ -165,7 +166,7 @@ def test_from_seq_skips_earlier_envelopes(broker: EventBroker) -> None:
 
 
 def test_two_concurrent_subscribers_see_identical_sequences(
-    broker: EventBroker,
+    broker: EventBroker, build_event: Callable[..., Event]
 ) -> None:
     async def scenario() -> tuple[list[EventEnvelope], list[EventEnvelope]]:
         run = RunId("r1")
@@ -179,7 +180,7 @@ def test_two_concurrent_subscribers_see_identical_sequences(
         await asyncio.sleep(0)  # let both subscribers attach before publishing
 
         for i in range(4):
-            await broker.publish(run, _event(run, t=i))
+            await broker.publish(run, build_event(run, t=i))
         broker.close_run(run)
 
         return await asyncio.gather(task_a, task_b)
@@ -244,7 +245,9 @@ def test_consumer_cancellation_removes_waiter() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_broker_event_sink_emit_publishes_via_loop() -> None:
+def test_broker_event_sink_emit_publishes_via_loop(
+    build_event: Callable[..., Event],
+) -> None:
     async def scenario() -> list[EventEnvelope]:
         broker = InProcessEventBroker()
         run = RunId("r1")
@@ -252,7 +255,7 @@ def test_broker_event_sink_emit_publishes_via_loop() -> None:
         sink = BrokerEventSink(broker=broker, run_id=run, loop=asyncio.get_running_loop())
 
         for i in range(3):
-            sink.emit(_event(run, t=i))
+            sink.emit(build_event(run, t=i))
 
         # `call_soon_threadsafe` schedules onto next loop iter — give it room.
         await asyncio.sleep(0)
@@ -273,7 +276,9 @@ def test_broker_event_sink_emit_publishes_via_loop() -> None:
 
 
 @pytest.mark.parametrize("n_events", [0, 1, 5, 50, 200])
-def test_drained_seqs_are_dense_1_to_n_for_any_publish_count(n_events: int) -> None:
+def test_drained_seqs_are_dense_1_to_n_for_any_publish_count(
+    n_events: int, build_event: Callable[..., Event]
+) -> None:
     """For any N, draining after close yields exactly Seq(1)..Seq(N) in order,
     with no gaps and no duplicates. Holds for any broker implementing the
     same Protocol — the contract, not the implementation, is on trial."""
@@ -283,7 +288,7 @@ def test_drained_seqs_are_dense_1_to_n_for_any_publish_count(n_events: int) -> N
         run = RunId("r1")
         broker.open_run(run)
         for i in range(n_events):
-            await broker.publish(run, _event(run, t=i))
+            await broker.publish(run, build_event(run, t=i))
         broker.close_run(run)
         return [env.seq async for env in broker.stream(run, from_seq=Seq(0))]
 
@@ -295,7 +300,9 @@ def test_drained_seqs_are_dense_1_to_n_for_any_publish_count(n_events: int) -> N
     ("n_events", "n_subscribers"),
     [(1, 1), (1, 5), (5, 3), (10, 2), (20, 5), (50, 1)],
 )
-def test_all_subscribers_observe_identical_sequences(n_events: int, n_subscribers: int) -> None:
+def test_all_subscribers_observe_identical_sequences(
+    n_events: int, n_subscribers: int, build_event: Callable[..., Event]
+) -> None:
     """Every subscriber attached before publish sees the same envelope list."""
 
     async def scenario() -> list[list[Seq]]:
@@ -310,7 +317,7 @@ def test_all_subscribers_observe_identical_sequences(n_events: int, n_subscriber
         await asyncio.sleep(0)  # let every subscriber arm its waiter
 
         for i in range(n_events):
-            await broker.publish(run, _event(run, t=i))
+            await broker.publish(run, build_event(run, t=i))
         broker.close_run(run)
 
         return await asyncio.gather(*tasks)
@@ -318,3 +325,181 @@ def test_all_subscribers_observe_identical_sequences(n_events: int, n_subscriber
     results = asyncio.run(scenario())
     expected = [Seq(i) for i in range(1, n_events + 1)]
     assert all(r == expected for r in results)
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — reap (Protocol-level, runs against every broker impl)
+# ---------------------------------------------------------------------------
+
+
+def test_reap_drops_buffer_for_closed_run(
+    broker: EventBroker, build_event: Callable[..., Event]
+) -> None:
+    """After reap, the run's history is irrecoverable — a fresh stream
+    returns empty even though events were published before close."""
+
+    async def scenario() -> list[EventEnvelope]:
+        run = RunId("r1")
+        broker.open_run(run)
+        for i in range(3):
+            await broker.publish(run, build_event(run, t=i))
+        broker.close_run(run)
+        broker.reap(run)
+        return await _drain(broker, run)
+
+    assert asyncio.run(scenario()) == []
+
+
+def test_reap_on_open_run_raises_value_error(broker: EventBroker) -> None:
+    run = RunId("r1")
+    broker.open_run(run)
+    with pytest.raises(ValueError, match="cannot reap open run"):
+        broker.reap(run)
+
+
+def test_reap_after_close_is_idempotent_with_open_again(
+    broker: EventBroker, build_event: Callable[..., Event]
+) -> None:
+    """Reap drops state cleanly enough that the same run_id can be opened
+    fresh — useful for tests and future scenarios that recycle ids."""
+
+    async def scenario() -> list[Seq]:
+        run = RunId("r1")
+        broker.open_run(run)
+        await broker.publish(run, build_event(run, t=0))
+        broker.close_run(run)
+        broker.reap(run)
+        broker.open_run(run)
+        await broker.publish(run, build_event(run, t=0))
+        broker.close_run(run)
+        return [env.seq async for env in broker.stream(run, from_seq=Seq(0))]
+
+    # Fresh open: seq restarts at 1.
+    assert asyncio.run(scenario()) == [Seq(1)]
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — backpressure (InProcessEventBroker-specific, NOT on Protocol)
+# ---------------------------------------------------------------------------
+
+
+def test_backpressure_evicts_head_when_buffer_full(
+    build_event: Callable[..., Event],
+) -> None:
+    """Publishing past `max_buffer_size` auto-evicts the leftmost
+    envelope and bumps `head_seq` by one."""
+
+    async def scenario() -> tuple[int, int, int]:
+        broker = InProcessEventBroker(max_buffer_size=3)
+        run = RunId("r1")
+        broker.open_run(run)
+        for i in range(5):
+            await broker.publish(run, build_event(run, t=i))
+        return (
+            len(broker._buffers[run]),
+            broker._head_seq[run],
+            broker._buffers[run][0].seq,
+        )
+
+    buf_len, head_seq, oldest_seq = asyncio.run(scenario())
+    assert buf_len == 3, "deque maxlen must cap retained envelopes"
+    assert head_seq == 3, "head_seq tracks the seq of the oldest retained envelope"
+    assert oldest_seq == Seq(3), "the leftmost envelope's seq matches head_seq"
+
+
+def test_slow_consumer_raises_overflow_error_on_wake(
+    build_event: Callable[..., Event],
+) -> None:
+    """A consumer arms its waiter while its cursor is valid, then publish
+    evicts past the cursor; on wake, the consumer self-raises.
+
+    Critical timing: between the consumer arming its waiter and the test
+    waking it, all four publishes run synchronously (publish has no
+    `await` inside, so consecutive `await publish(...)` calls never yield
+    control back to the scheduler). That's what guarantees the consumer
+    finds `head_seq > cursor + 1` on its single wake — not multiple
+    intermediate wakes that would each drain a single event."""
+
+    async def scenario() -> BrokerOverflowError:
+        broker = InProcessEventBroker(max_buffer_size=3)
+        run = RunId("r1")
+        broker.open_run(run)
+
+        # Pre-publish so the consumer attaches mid-stream at Seq(1).
+        await broker.publish(run, build_event(run, t=0))
+
+        captured: list[BrokerOverflowError] = []
+
+        async def consumer() -> None:
+            try:
+                async for _ in broker.stream(run, from_seq=Seq(1)):
+                    pass  # consume normally; the eviction is the test
+            except BrokerOverflowError as err:
+                captured.append(err)
+
+        task = asyncio.create_task(consumer())
+        await asyncio.sleep(0)  # let consumer drain Seq(1) + arm waiter
+
+        # Publish 4 more events synchronously (no `await sleep(0)` between).
+        # Buffer holds [Seq(3), Seq(4), Seq(5)] with head_seq=3 afterward.
+        for i in range(1, 5):
+            await broker.publish(run, build_event(run, t=i))
+
+        await asyncio.wait_for(task, timeout=1.0)
+        assert captured, "consumer should have raised BrokerOverflowError"
+        return captured[0]
+
+    err = asyncio.run(scenario())
+    # Consumer drained Seq(1) cleanly; next requested is Seq(2),
+    # which was evicted (head_seq advanced to 3).
+    assert err.requested_seq == Seq(2)
+    assert err.available_from == Seq(3)
+
+
+def test_overflow_increments_streams_dropped_metric(
+    build_event: Callable[..., Event],
+) -> None:
+    """Each overflow-raise bumps `streams_dropped` so /metrics sees it."""
+
+    async def scenario() -> int:
+        broker = InProcessEventBroker(max_buffer_size=2)
+        run = RunId("r1")
+        broker.open_run(run)
+        for i in range(5):
+            await broker.publish(run, build_event(run, t=i))
+        broker.close_run(run)
+        # Now a from_seq=1 request is below head_seq=4 and must raise.
+        with pytest.raises(BrokerOverflowError):
+            await _drain(broker, run, from_seq=Seq(1))
+        return broker.metrics().streams_dropped
+
+    assert asyncio.run(scenario()) == 1
+
+
+def test_metrics_counters_track_publishes_and_yields(
+    build_event: Callable[..., Event],
+) -> None:
+    """`events_published` increments on publish; `events_streamed` on each
+    yielded envelope. `runs_open` reflects the current open-run set."""
+
+    async def scenario() -> BrokerMetricsSnapshot:
+        broker = InProcessEventBroker()
+        run_a = RunId("a")
+        run_b = RunId("b")
+        broker.open_run(run_a)
+        broker.open_run(run_b)
+        for i in range(4):
+            await broker.publish(run_a, build_event(run_a, t=i))
+        for i in range(2):
+            await broker.publish(run_b, build_event(run_b, t=i))
+        broker.close_run(run_a)
+        # Drain run_a only — events_streamed should be 4, not 6.
+        async for _ in broker.stream(run_a, from_seq=Seq(0)):
+            pass
+        return broker.metrics()
+
+    m = asyncio.run(scenario())
+    assert m.events_published == 6
+    assert m.events_streamed == 4
+    assert m.streams_dropped == 0
+    assert m.runs_open == 1  # run_b still open

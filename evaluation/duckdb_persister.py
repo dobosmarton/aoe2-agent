@@ -153,7 +153,8 @@ class MultiRunBrokerSink:
         publish_task.add_done_callback(self._pending_publishes.discard)
 
     async def close_all(self) -> None:
-        """Drain every queued publish, close every opened run, await every persister.
+        """Drain every queued publish, close every opened run, await every
+        persister, then reap.
 
         Two-tick drain mirrors `arena/web/forks.py::_replay`: the producer
         may have just returned from its last `await`, leaving emit's
@@ -162,6 +163,12 @@ class MultiRunBrokerSink:
         tasks themselves start. Then `gather` on any still-pending
         publishes guarantees they finish before `close_run` — otherwise a
         publish-after-close would raise.
+
+        The trailing `reap` is what makes CLI flows leak-free: a single
+        process can run thousands of `synth_game_loop` invocations
+        through this sink and never accumulate per-run state past
+        `close_all`. The server has a grace-period reaper instead;
+        here the process is exiting so no grace is needed.
         """
         await asyncio.sleep(0)
         await asyncio.sleep(0)
@@ -171,6 +178,8 @@ class MultiRunBrokerSink:
             self.broker.close_run(rid)
         if self._persisters:
             await asyncio.gather(*self._persisters.values())
+        for rid in self._persisters:
+            self.broker.reap(rid)
 
 
 __all__ = [

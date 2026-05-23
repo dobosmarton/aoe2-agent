@@ -7,7 +7,6 @@ verify they all land in DuckDB in `Seq` order via `Event.from_row`.
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 
 import duckdb
@@ -21,17 +20,8 @@ from evaluation.event_broker import InProcessEventBroker, RunId
 from evaluation.event_log import DuckDBEventSink, Event, EventRow, TurnStartPayload
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
-
-
-def _event(run_id: str, t: int) -> Event:
-    return Event(
-        run_id=run_id,
-        agent_id="agent_x",
-        t=t,
-        payload=TurnStartPayload(turn_num=t),
-        ts=datetime(2026, 5, 21, 12, 0, 0, tzinfo=UTC),
-    )
 
 
 def _read_all(db_path: Path) -> list[Event]:
@@ -41,7 +31,9 @@ def _read_all(db_path: Path) -> list[Event]:
     return [Event.from_row(row) for row in rows]
 
 
-def test_persister_writes_every_published_event(tmp_path: Path) -> None:
+def test_persister_writes_every_publishedbuild_event(
+    tmp_path: Path, build_event: Callable[..., Event]
+) -> None:
     """Producer + persister run concurrently; persister mirrors every event."""
     db_path = tmp_path / "persisted.duckdb"
 
@@ -55,7 +47,7 @@ def test_persister_writes_every_published_event(tmp_path: Path) -> None:
         await asyncio.sleep(0)
 
         for i in range(5):
-            await broker.publish(run, _event("r1", t=i))
+            await broker.publish(run, build_event("r1", t=i))
 
         broker.close_run(run)
         await asyncio.wait_for(persist_task, timeout=2.0)
@@ -67,7 +59,9 @@ def test_persister_writes_every_published_event(tmp_path: Path) -> None:
     assert all(isinstance(e.payload, TurnStartPayload) for e in persisted)
 
 
-def test_persister_replays_pre_published_events(tmp_path: Path) -> None:
+def test_persister_replays_pre_published_events(
+    tmp_path: Path, build_event: Callable[..., Event]
+) -> None:
     """Late-spawned persister still drains the full history from seq=0."""
     db_path = tmp_path / "replayed.duckdb"
 
@@ -78,7 +72,7 @@ def test_persister_replays_pre_published_events(tmp_path: Path) -> None:
 
         # Publish before the persister exists — broker buffers them.
         for i in range(3):
-            await broker.publish(run, _event("r1", t=i))
+            await broker.publish(run, build_event("r1", t=i))
 
         persist_task = asyncio.create_task(persist_to_duckdb(broker, run, db_path))
         broker.close_run(run)
@@ -125,7 +119,9 @@ def _read_all_for(db_path: Path, run_id: str) -> list[Event]:
     return [Event.from_row(row) for row in rows]
 
 
-def test_persist_via_sink_writes_through_shared_conn(tmp_path: Path) -> None:
+def test_persist_via_sink_writes_through_shared_conn(
+    tmp_path: Path, build_event: Callable[..., Event]
+) -> None:
     """`persist_to_duckdb_via_sink` writes via a caller-owned sink — the
     connection stays open across multiple per-run persisters."""
     db_path = tmp_path / "shared.duckdb"
@@ -140,7 +136,7 @@ def test_persist_via_sink_writes_through_shared_conn(tmp_path: Path) -> None:
             persist_task = asyncio.create_task(persist_to_duckdb_via_sink(broker, run, sink))
             await asyncio.sleep(0)
             for i in range(3):
-                await broker.publish(run, _event("r1", t=i))
+                await broker.publish(run, build_event("r1", t=i))
             broker.close_run(run)
             await asyncio.wait_for(persist_task, timeout=2.0)
 
@@ -149,7 +145,9 @@ def test_persist_via_sink_writes_through_shared_conn(tmp_path: Path) -> None:
     assert [e.t for e in persisted] == [0, 1, 2]
 
 
-def test_multi_run_sink_auto_opens_runs_on_first_emit(tmp_path: Path) -> None:
+def test_multi_run_sink_auto_opens_runs_on_first_emit(
+    tmp_path: Path, build_event: Callable[..., Event]
+) -> None:
     """Emitting events for two distinct run_ids must open two broker runs
     and route each event to its run's buffer."""
     db_path = tmp_path / "multi.duckdb"
@@ -160,9 +158,9 @@ def test_multi_run_sink_auto_opens_runs_on_first_emit(tmp_path: Path) -> None:
             db_sink = DuckDBEventSink(conn)
             sink = MultiRunBrokerSink(broker, db_sink, asyncio.get_running_loop())
 
-            sink.emit(_event("run_a", t=0))
-            sink.emit(_event("run_b", t=0))
-            sink.emit(_event("run_a", t=1))
+            sink.emit(build_event("run_a", t=0))
+            sink.emit(build_event("run_b", t=0))
+            sink.emit(build_event("run_a", t=1))
 
             await sink.close_all()
             assert broker.is_open(RunId("run_a")) is False
@@ -175,7 +173,9 @@ def test_multi_run_sink_auto_opens_runs_on_first_emit(tmp_path: Path) -> None:
     assert [e.t for e in b_events] == [0]
 
 
-def test_multi_run_sink_close_all_drains_queued_publishes(tmp_path: Path) -> None:
+def test_multi_run_sink_close_all_drains_queued_publishes(
+    tmp_path: Path, build_event: Callable[..., Event]
+) -> None:
     """Emits queue publishes via `call_soon_threadsafe`; `close_all` must
     wait for them before closing — otherwise the persister exits before
     the last events drain. This is the two-tick-drain invariant."""
@@ -190,7 +190,7 @@ def test_multi_run_sink_close_all_drains_queued_publishes(tmp_path: Path) -> Non
             # Emit a burst back-to-back without awaiting between — every
             # publish is queued behind the first call_soon_threadsafe hop.
             for i in range(10):
-                sink.emit(_event("burst", t=i))
+                sink.emit(build_event("burst", t=i))
 
             await sink.close_all()
 

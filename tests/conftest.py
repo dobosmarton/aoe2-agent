@@ -3,15 +3,28 @@
 Registers the `live` marker (used by tests that call the real Anthropic API)
 and adds a --runlive flag that gates whether those tests actually run.
 
+Exposes the `build_event` factory fixture used by broker/persister/SSE
+tests to construct minimal `turn_start` events without each file
+re-declaring its own copy.
+
 The project is installed as a package (`pip install -e .`), so test files
 import siblings as `from gameplay_agent.X import Y` directly — no sys.path
 manipulation required.
 """
 
+from __future__ import annotations
+
 import sys
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
+
+from evaluation.event_log import Event, TurnStartPayload
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 # Native-GUI deps that don't load on a headless Linux CI runner:
 #   - pyautogui reads $DISPLAY at import time → KeyError on Linux without X.
@@ -46,3 +59,35 @@ def pytest_collection_modifyitems(config, items):
         for item in items:
             if "live" in item.keywords:
                 item.add_marker(skip_live)
+
+
+# ---------------------------------------------------------------------------
+# Shared test factory: minimal `turn_start` Event.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def build_event() -> Callable[..., Event]:
+    """Factory fixture that returns a callable for constructing test Events.
+
+    Defaults satisfy broker/persister/SSE tests; pass `agent_id=` or
+    `ts=` explicitly when a test depends on those values (e.g. the
+    cross-broker collision test pins a specific 09:00 timestamp).
+    """
+
+    def _build(
+        run_id: str = "r1",
+        t: int = 0,
+        *,
+        agent_id: str = "agent_x",
+        ts: datetime | None = None,
+    ) -> Event:
+        return Event(
+            run_id=run_id,
+            agent_id=agent_id,
+            t=t,
+            payload=TurnStartPayload(turn_num=t),
+            ts=ts or datetime(2026, 5, 21, 12, 0, 0, tzinfo=UTC),
+        )
+
+    return _build

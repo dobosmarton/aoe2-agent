@@ -21,11 +21,13 @@ Logs root resolution:
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import json
 import logging
 import os
 from contextlib import asynccontextmanager
-from dataclasses import asdict, dataclass
-from datetime import datetime
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -35,7 +37,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from arena.web.forks import ForkRequest, ForkResponse, create_fork
-from evaluation.event_broker import EventBroker, InProcessEventBroker, RunId, Seq
+from evaluation.event_broker import (
+    BrokerOverflowError,
+    EventBroker,
+    InProcessEventBroker,
+    RunId,
+    Seq,
+)
 from evaluation.event_log import stream_cold
 from evaluation.fork import ForkError
 
@@ -64,6 +72,61 @@ class RunSummary:
     n_events: int
     first_ts: str
     last_ts: str
+
+
+# ---------------------------------------------------------------------------
+# Reaper — server-side wall-clock tracking for `broker.reap` grace policy.
+# ---------------------------------------------------------------------------
+
+
+_DEFAULT_REAP_GRACE = timedelta(minutes=30)
+
+
+@dataclass(slots=True)
+class _ReaperRegistry:
+    """Tracks when runs were closed so the lifespan reaper can drop their
+    buffers after a grace period.
+
+    The broker is intentionally time-agnostic — wall-clock policy lives
+    here, not in `evaluation/event_broker.py`. Keeps the broker's
+    semantics pure and makes the grace period swappable per deployment
+    without touching the broker.
+    """
+
+    grace_period: timedelta = _DEFAULT_REAP_GRACE
+    _closed_at: dict[RunId, datetime] = field(default_factory=dict)
+
+    def mark_closed(self, run_id: RunId) -> None:
+        self._closed_at[run_id] = datetime.now(UTC)
+
+    def reap_overdue(self, broker: EventBroker, now: datetime) -> list[RunId]:
+        """Reap runs whose close time is older than `now - grace_period`.
+
+        Returns the reaped run_ids so the caller can log them.
+        """
+        cutoff = now - self.grace_period
+        overdue = [rid for rid, t in self._closed_at.items() if t <= cutoff]
+        for rid in overdue:
+            broker.reap(rid)
+            del self._closed_at[rid]
+        return overdue
+
+
+async def _reaper_loop(broker: EventBroker, reaper: _ReaperRegistry) -> None:
+    """Background task: scan every `grace_period / 2` and drop overdue runs.
+
+    Sleeping half the grace period bounds the worst-case lateness of a
+    reap to 1.5x grace; finer scanning is wasted CPU on this workload.
+    """
+    interval = max(1.0, reaper.grace_period.total_seconds() / 2)
+    while True:
+        try:
+            await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            return
+        reaped = reaper.reap_overdue(broker, datetime.now(UTC))
+        if reaped:
+            logger.info("reaped %d run(s): %s", len(reaped), reaped)
 
 
 # ---------------------------------------------------------------------------
@@ -155,12 +218,21 @@ def _resolve_run(run_id: str, root: Path) -> Path:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    app.state.broker = InProcessEventBroker()
+    broker = InProcessEventBroker()
+    reaper = _ReaperRegistry()
     fork_tasks: set[asyncio.Task[None]] = set()
+    app.state.broker = broker
+    app.state.reaper = reaper
     app.state.fork_tasks = fork_tasks
+    reaper_task = asyncio.create_task(_reaper_loop(broker, reaper))
     try:
         yield
     finally:
+        # Stop the reaper before cancelling fork tasks — otherwise it
+        # could race with shutdown and reap a run mid-replay.
+        reaper_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await reaper_task
         # Best-effort cancel of in-flight forks on shutdown.
         tasks: set[asyncio.Task[None]] = app.state.fork_tasks
         for task in list(tasks):
@@ -183,6 +255,13 @@ def get_fork_tasks(request: Request) -> set[asyncio.Task[None]]:
     tasks = cast("object", app_state.fork_tasks)
     assert isinstance(tasks, set)
     return cast("set[asyncio.Task[None]]", tasks)
+
+
+def get_reaper(request: Request) -> _ReaperRegistry:
+    app_state = cast("FastAPI", request.app).state
+    reaper = cast("object", app_state.reaper)
+    assert isinstance(reaper, _ReaperRegistry)
+    return reaper
 
 
 def get_broker(request: Request) -> EventBroker:
@@ -211,10 +290,22 @@ async def runs() -> list[dict[str, object]]:
 async def _stream_from_broker(
     broker: EventBroker,
     run_id: RunId,
+    from_seq: Seq = Seq(0),
 ) -> AsyncIterator[str]:
-    """Phase 2 SSE generator for live runs: drain the broker."""
-    async for envelope in broker.stream(run_id, from_seq=Seq(0)):
-        yield f"data: {envelope.event.payload.model_dump_json()}\n\n"
+    """SSE generator for live runs: drain the broker, surface overflow.
+
+    On `BrokerOverflowError` (consumer fell behind the buffer head), emit
+    a final SSE event named `overflow` carrying `available_from`, then
+    return. The frontend reconnects with `?from_seq=<available_from>`
+    and accepts the gap — surfacing the loss is preferable to silently
+    serving partial history.
+    """
+    try:
+        async for envelope in broker.stream(run_id, from_seq=from_seq):
+            yield f"data: {envelope.event.payload.model_dump_json()}\n\n"
+    except BrokerOverflowError as err:
+        payload = json.dumps({"available_from": int(err.available_from)})
+        yield f"event: overflow\ndata: {payload}\n\n"
 
 
 def _stream_from_cold(db_path: Path, run_id: RunId) -> Iterator[str]:
@@ -233,18 +324,25 @@ def _stream_from_cold(db_path: Path, run_id: RunId) -> Iterator[str]:
 @app.get("/events")
 async def events(
     run_id: str = Query(..., min_length=1),
+    from_seq: int = Query(0, ge=0),
     broker: EventBroker = Depends(get_broker),
 ) -> StreamingResponse:
     """Stream events for `run_id` as Server-Sent Events.
 
     Live runs (`broker.is_open`) read from the broker — zero DuckDB
-    opens; immune to writer/reader file-mode collisions.
+    opens; immune to writer/reader file-mode collisions. `from_seq`
+    skips already-seen envelopes on reconnect; overflow recovery
+    sends `from_seq=available_from` from the previous overflow event.
+
     Finalized runs fall through to `stream_cold` (read-only DuckDB).
+    The cold path ignores `from_seq` — full replay only, since cold
+    is the post-mortem case where partial reads aren't worth the
+    extra complexity.
     """
     typed_run = RunId(run_id)
     if broker.is_open(typed_run):
         return StreamingResponse(
-            _stream_from_broker(broker, typed_run),
+            _stream_from_broker(broker, typed_run, Seq(from_seq)),
             media_type="text/event-stream",
         )
     db_path = await asyncio.to_thread(_resolve_run, run_id, _logs_root())
@@ -254,10 +352,25 @@ async def events(
     )
 
 
+@app.get("/metrics")
+async def metrics(broker: EventBroker = Depends(get_broker)) -> dict[str, int]:
+    """Broker operational counters as JSON.
+
+    The `cast` is the one place the Protocol boundary is bypassed:
+    metrics is impl-specific observational state, not lifecycle
+    semantics, so it stays off the `EventBroker` Protocol. A future
+    Phase C swap to `RedisStreamsBroker` would expose stats through
+    a different surface (Redis `INFO`) and this endpoint would gain
+    its own branch.
+    """
+    return cast("InProcessEventBroker", broker).metrics().to_dict()
+
+
 @app.post("/forks", response_model=ForkResponse)
 async def post_forks(
     request: ForkRequest,
     broker: EventBroker = Depends(get_broker),
+    reaper: _ReaperRegistry = Depends(get_reaper),
     fork_tasks: set[asyncio.Task[None]] = Depends(get_fork_tasks),
 ) -> ForkResponse:
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -268,6 +381,7 @@ async def post_forks(
             request=request,
             api_key=api_key,
             broker=broker,
+            on_close=reaper.mark_closed,
             logs_root=_logs_root(),
             fork_tasks=fork_tasks,
         )

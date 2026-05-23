@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from evaluation.event_log import DuckDBEventSink, Event, MetricPayload, TurnStartPayload
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
     from pathlib import Path
 
 
@@ -153,3 +153,56 @@ def test_cors_allows_localhost_5173(client: TestClient) -> None:
         },
     )
     assert response.headers.get("access-control-allow-origin") == "http://localhost:5173"
+
+
+# ---------------------------------------------------------------------------
+# /metrics (Phase 3)
+# ---------------------------------------------------------------------------
+
+
+def test_metrics_returns_zeroed_counters_on_fresh_server(client: TestClient) -> None:
+    """No traffic yet — all four counters are 0; the route exists and the
+    schema matches BrokerMetricsSnapshot's fields."""
+    payload = client.get("/metrics").json()
+    assert payload == {
+        "events_published": 0,
+        "events_streamed": 0,
+        "streams_dropped": 0,
+        "runs_open": 0,
+    }
+
+
+def test_metrics_reflects_broker_publish_activity(
+    client: TestClient, build_event: Callable[..., Event]
+) -> None:
+    """Drive traffic through the app's broker and assert the counters tick.
+
+    Proves the `/metrics` route reads live state — not a cached snapshot
+    — by reaching through to `app.state.broker` and running a single
+    async batch of publishes via `asyncio.run`."""
+    import asyncio
+
+    from arena.web import server as server_module
+    from evaluation.event_broker import InProcessEventBroker, RunId
+
+    broker = server_module.app.state.broker
+    assert isinstance(broker, InProcessEventBroker)
+    run = RunId("m1")
+    broker.open_run(run)
+
+    async def publish_batch() -> None:
+        for i in range(3):
+            await broker.publish(run, build_event(run, t=i))
+
+    asyncio.run(publish_batch())
+
+    payload = client.get("/metrics").json()
+    assert payload["events_published"] == 3
+    assert payload["runs_open"] == 1
+
+    # Cleanup — `client` is function-scoped (TestClient ctx), but the broker
+    # lives in app.state which persists for the duration of the test's
+    # TestClient `with` block; explicit close+reap keeps the test
+    # hermetic if more metrics tests are added later.
+    broker.close_run(run)
+    broker.reap(run)

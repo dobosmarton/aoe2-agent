@@ -21,7 +21,6 @@ that property at the route boundary:
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock, patch
 
@@ -30,23 +29,17 @@ from fastapi.responses import StreamingResponse
 
 from arena.web.server import events
 from evaluation.event_broker import InProcessEventBroker, RunId
-from evaluation.event_log import Event, TurnStartPayload
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
-
-def _event(run_id: str, t: int) -> Event:
-    return Event(
-        run_id=run_id,
-        agent_id="agent-0",
-        t=t,
-        payload=TurnStartPayload(turn_num=t),
-        ts=datetime(2026, 5, 21, 9, 0, 0, tzinfo=UTC),
-    )
+    from evaluation.event_log import Event
 
 
-def test_live_sse_does_not_collide_with_writer(tmp_path: Path) -> None:
+def test_live_sse_does_not_collide_with_writer(
+    tmp_path: Path, build_event: Callable[..., Event]
+) -> None:
     """RW handle held open on the child DB must not break the live SSE
     path. The broker serves the stream from memory; DuckDB is untouched."""
     logs_root = tmp_path / "logs" / "arena"
@@ -63,7 +56,7 @@ def test_live_sse_does_not_collide_with_writer(tmp_path: Path) -> None:
         # Pre-publish events so the stream has something to yield before
         # the close signal arrives.
         for i in range(3):
-            await broker.publish(typed_run, _event(run_id, t=i))
+            await broker.publish(typed_run, build_event(run_id, t=i))
 
         # Hold an RW connection across the SSE iteration — the exact
         # scenario that crashed the old `_live_event_stream` handler.
@@ -74,7 +67,7 @@ def test_live_sse_does_not_collide_with_writer(tmp_path: Path) -> None:
                 # Call the route function directly; it returns synchronously
                 # because the FastAPI handler is async but the broker branch
                 # never awaits before returning the `StreamingResponse`.
-                response = await events(run_id=run_id, broker=broker)
+                response = await events(run_id=run_id, from_seq=0, broker=broker)
                 assert isinstance(response, StreamingResponse)
                 # `broker.is_open` was True at handler entry, so we're on
                 # the broker branch — the route never opened DuckDB.
