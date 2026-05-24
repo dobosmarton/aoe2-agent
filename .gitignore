@@ -38,6 +38,16 @@ dist/
 experiments/
 eval_virtual_box_ideas.md
 overlay-update.zip
+# Pre-implementation plans, design sketches, scratch notes — written
+# while a feature is in flight, replaced by the design docs under
+# docs/design/ when the work lands. Kept out of git so stale planning
+# docs don't accumulate next to the canonical design.
+docs/plan/
+
+# Claude Code per-user state — `scheduled_tasks.lock`, `settings.local.json`,
+# anything else the harness writes locally. Machine-specific, no value to
+# other contributors. Equivalent of `.vscode/` for the Claude Code workflow.
+.claude/
 
 # Frontend build artefacts (arena/web/ui — Vite + Bun)
 arena/web/ui/node_modules/
