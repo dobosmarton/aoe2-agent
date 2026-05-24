@@ -324,3 +324,14 @@ set ANTHROPIC_API_KEY=sk-ant-...
 set AOE2_DETECTION_HOST=http://192.168.64.1:8420
 python -m gameplay_agent
 ```
+
+---
+
+## Beyond the real-game tier
+
+This guide covers the Mac + Windows VM setup for the **real-game agent**. If you also want to bring up the synthetic-arena tier (compose stack with Langfuse / Redis / Postgres / MinIO / ClickHouse, the arena CLI for offline evaluation, or the web UI for replay and fork), see:
+
+- [Synthetic Arena infrastructure](../README.md#synthetic-arena-infrastructure-optional) in the root README — env-var template and `just arena-infra-up`.
+- [Runbook: Redis broker operations](./runbooks/redis-broker-ops.md) — bringing up Redis, rotating the password, inspecting streams.
+- [Runbook: Windows VM agent bring-up](./runbooks/windows-vm-agent-bringup.md) — fast-path version of this guide plus a symptom matrix.
+- [Chapter 14 — Arena Overview](./part6-evaluation-arena/14-arena-overview.md) and [Chapter 21 — Running the UI Locally](./part7-arena-web/21-running-the-ui-locally.md) — what to run once the infra is up.

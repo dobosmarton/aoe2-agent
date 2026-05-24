@@ -319,9 +319,18 @@ entities = render(state, 1920, 1080)  # list[DetectedEntity], confidence=1.0
 
 ## Documentation
 
-See [docs/index.md](docs/index.md) for detailed architecture documentation.
+See [docs/index.md](docs/index.md) for the full table of contents (8 parts, 23 chapters).
 
-See [detection/README.md](detection/README.md) for the entity detection system.
+Most useful entry points:
+
+- **Real-game agent**: Parts 1–4 ([game loop](docs/part1-architecture/02-game-loop-pipeline.md), [LLM integration](docs/part2-llm-integration/04-provider-pattern.md), [detection](docs/part3-entity-detection/07-detector-architecture.md), [game knowledge](docs/part4-game-knowledge/10-knowledge-database.md)).
+- **Synthetic arena**: [Part 6](docs/part6-evaluation-arena/14-arena-overview.md) (CLI / broker / ranking / world sim).
+- **Arena web UI**: [Part 7](docs/part7-arena-web/19-web-architecture.md) (SSE backend + Vite/React frontend).
+- **Autoresearch prompt loop**: [Part 8](docs/part8-autoresearch/22-autoresearch-overview.md).
+- **Why decisions were made**: [Architecture Decision Records](docs/adr/) (broker-first, Redis Streams, basedpyright, Bradley-Terry, Vite/React).
+- **Operational checklists**: [Runbooks](docs/runbooks/) (Redis ops, switching broker backend, debug a stuck fork, Windows VM bring-up).
+- **Deployment**: [deployment-guide.md](docs/deployment-guide.md) (Mac + Windows VM first-time setup).
+- **Detection internals**: [detection/README.md](detection/README.md).
 
 ## License
 

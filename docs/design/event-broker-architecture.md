@@ -1,6 +1,6 @@
 # Event Broker Architecture — Log-First Live Streaming
 
-**Status:** Proposed
+**Status:** **SHIPPED** — Phases 0 through C complete (2026-05). Frozen historical design spec; for current state see [Chapter 15 — Event Broker](../part6-evaluation-arena/15-event-broker.md). Decisions extracted as [ADR 0001](../adr/0001-broker-first-architecture.md) and [ADR 0002](../adr/0002-redis-streams-for-cross-process.md).
 **Author:** Marton (planning session 2026-05-21)
 **Supersedes:** ad-hoc `LiveRunRegistry` + `BroadcastingSink` (Phase 9 design)
 

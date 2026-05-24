@@ -1,5 +1,8 @@
 # Autoresearch for AoE2 Agent — Continuous Improvement Plan
 
+**Status:** **PARTIALLY SHIPPED** — Phase 0 + Phase 1 (prompt-mutation loop with git-revert + memory chain) live in `autoresearch/`. Phases 2–5 unbuilt. Frozen historical plan; for current state see [Part 8 — Autoresearch](../part8-autoresearch/22-autoresearch-overview.md).
+**Original location:** repo root `AUTORESEARCH_PLAN.md` (moved 2026-05-24).
+
 > Inspired by [Karpathy's autoresearch](https://github.com/karpathy/autoresearch): let an LLM autonomously experiment in a tight loop — modify → evaluate → keep/revert → repeat. This plan adapts that pattern to continuously improve the AoE2 game-playing agent.
 
 ---

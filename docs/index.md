@@ -1,115 +1,189 @@
-# AoE2 LLM Arena - Technical Documentation
+# AoE2 LLM Arena — Technical Documentation
 
-A two-tier AI agent that plays Age of Empires II: Definitive Edition. A Sonnet strategist reads screenshots and sets goals; a Haiku executor reads YOLO entity detections (text) and executes mouse/keyboard actions. Optional YOLO detection provides entity targeting, and a game knowledge database injects dynamic context.
+A two-tier AI agent that plays Age of Empires II: Definitive Edition, plus a synthetic evaluation tier (Arena) that races prompt/model variants against an in-memory AoE2-lite world and a web UI for replaying and forking past runs.
 
 ---
 
-## Architecture Overview
+## Architecture overview
 
 ```mermaid
 graph TD
-    subgraph "Agent Core"
-        MAIN[main.py] --> LOOP[game_loop.py]
+    subgraph "Real-game tier (Windows VM)"
+        MAIN[gameplay_agent/main.py] --> LOOP[game_loop.py]
         LOOP --> SCREEN[screen.py]
         LOOP --> EXEC[executor.py]
-        LOOP --> MEM[memory.py]
         LOOP --> GOALS[goals.py]
-        SCREEN --> WIN[window.py]
-        EXEC --> MODELS[models.py]
-        EXEC --> WIN
-        GOALS --> GLOG[goal_logger.py]
-    end
-
-    subgraph "LLM Integration"
         LOOP --> PROV[providers/claude.py]
         LOOP --> STRAT[providers/strategist.py]
-        PROV --> PROMPT[prompts/system.md]
-        STRAT --> SPROMPT[prompts/strategist.md]
-        PROV -.->|optional| GK[game_knowledge.py]
-    end
-
-    subgraph "Entity Detection"
         LOOP -.->|optional| DET[detector.py]
-        DET --> YOLO[YOLO v5 Model]
-        DET --> OWN[ownership.py]
+        DET --> YOLO[YOLO v5]
     end
 
-    subgraph "Training Pipeline"
-        GEN[generate_training_data.py] --> TRAIN[train_yolo.py]
-        LABEL[prepare_training.py] --> TRAIN
-        TRAIN --> YOLO
+    subgraph "Detection (macOS host, optional)"
+        DET <-.->|HTTP| SRV[server/app.py]
+        SRV --> COREML[CoreML / ONNX]
     end
 
-    subgraph "Game Knowledge"
-        GK --> SQLITE[(SQLite DB)]
-        FETCH[fetch_aoe2_data.py] --> SQLITE
-        SLD[sld_extractor.py] --> GEN
+    subgraph "Synthetic Arena tier"
+        CLI[arena/__main__.py<br/>race / smoke / rank] --> WORLD[evaluation/world_sim.py]
+        CLI --> RANK[arena/ranking.py<br/>Bradley-Terry]
+        CLI --> SINK[MultiRunBrokerSink]
+        SINK --> BROKER{make_broker}
+        BROKER --> INPROC[InProcessEventBroker]
+        BROKER --> REDIS[RedisStreamsBroker]
+        SINK --> DUCK[(DuckDB log<br/>logs/arena/...)]
+    end
+
+    subgraph "Arena Web (operator surface)"
+        WEB[arena/web/server.py<br/>FastAPI + SSE] --> BROKER
+        WEB --> DUCK
+        WEB --> FORK[arena/web/forks.py<br/>POST /forks → async replay]
+        FORK --> CLI
+        UI[arena/web/ui<br/>Vite + React + Tailwind] -->|SSE| WEB
+    end
+
+    subgraph "Autoresearch (prompt evolution)"
+        AR[autoresearch/orchestrator.py] --> MUT[prompt_mutator.py]
+        MUT --> SYSP[prompts/system.md]
+        AR --> RUN[game_runner.py]
+        RUN --> LOOP
+        AR --> MEM[memory_chain.py]
+        MEM --> MEMDIR[memories/*.md]
+        MEMDIR --> PROV
     end
 
     style DET stroke-dasharray: 5 5
-    style GK stroke-dasharray: 5 5
-    style OWN stroke-dasharray: 5 5
+    style SRV stroke-dasharray: 5 5
+    style REDIS stroke-dasharray: 5 5
 ```
 
-Dashed lines indicate optional dependencies. The agent runs without YOLO detection or game knowledge -- both are additive enhancements.
+Dashed lines indicate optional / off-by-default components. The real-game tier runs without YOLO; the arena tier defaults to the in-process broker; Redis is a Phase C add-on.
 
 ---
 
-## Table of Contents
+## Table of contents
 
-### Part 1: Architecture
+### Part 1: Real-game architecture
 
-| # | Chapter | Description | Key Files |
-|---|---------|-------------|-----------|
+| # | Chapter | Description | Key files |
+|---|---|---|---|
 | 01 | [System Overview](./part1-architecture/01-system-overview.md) | Two-tier design, graceful degradation, async architecture | `config.py`, `main.py` |
-| 02 | [Game Loop Pipeline](./part1-architecture/02-game-loop-pipeline.md) | The capture-detect-alarm-strategist-execute-verify cycle | `game_loop.py`, `goals.py`, `screen.py` |
-| 03 | [Action Model & Execution](./part1-architecture/03-action-model-and-execution.md) | Pydantic action types, target_id/target_class resolution, coordinate translation | `models.py`, `executor.py` |
+| 02 | [Game Loop Pipeline](./part1-architecture/02-game-loop-pipeline.md) | Capture-detect-alarm-strategist-execute-verify cycle | `game_loop.py`, `goals.py`, `screen.py` |
+| 03 | [Action Model & Execution](./part1-architecture/03-action-model-and-execution.md) | Pydantic action types, target_id/target_class resolution | `models.py`, `executor.py` |
 
-### Part 2: LLM Integration
+### Part 2: LLM integration
 
-| # | Chapter | Description | Key Files |
-|---|---------|-------------|-----------|
+| # | Chapter | Description | Key files |
+|---|---|---|---|
 | 04 | [Provider Pattern](./part2-llm-integration/04-provider-pattern.md) | Abstract base, Claude executor (text-only), strategist (vision) | `providers/base.py`, `providers/claude.py`, `providers/strategist.py` |
-| 05 | [Prompt Engineering](./part2-llm-integration/05-prompt-engineering.md) | Executor and strategist prompt design | `prompts/system.md`, `prompts/strategist.md` |
+| 05 | [Prompt Engineering](./part2-llm-integration/05-prompt-engineering.md) | Executor + strategist prompt design | `prompts/system.md`, `prompts/strategist.md` |
 | 06 | [Context Injection](./part2-llm-integration/06-context-injection.md) | Memory system, goals, resources, dynamic game knowledge | `memory.py`, `goals.py`, `providers/claude.py` |
 
-### Part 3: Entity Detection
+### Part 3: Entity detection
 
-| # | Chapter | Description | Key Files |
-|---|---------|-------------|-----------|
+| # | Chapter | Description | Key files |
+|---|---|---|---|
 | 07 | [Detector Architecture](./part3-entity-detection/07-detector-architecture.md) | EntityDetector, PyTorch/ONNX/Mock backends, 60-class taxonomy | `detection/inference/detector.py` |
-| 08 | [Training Pipeline](./part3-entity-detection/08-training-pipeline.md) | Synthetic data generation, augmentations, YOLO11n training | `training/generate_training_data.py`, `training/train_yolo.py` |
+| 08 | [Training Pipeline](./part3-entity-detection/08-training-pipeline.md) | Synthetic data, augmentations, YOLO11n training | `training/generate_training_data.py`, `training/train_yolo.py` |
 | 09 | [Labeling & Active Learning](./part3-entity-detection/09-labeling-and-active-learning.md) | CVAT workflow, COCO/YOLO conversion, class remapping | `labeling/prepare_training.py`, `labeling/class_mapping.py` |
 
-### Part 4: Game Knowledge
+### Part 4: Game knowledge
 
-| # | Chapter | Description | Key Files |
-|---|---------|-------------|-----------|
+| # | Chapter | Description | Key files |
+|---|---|---|---|
 | 10 | [Knowledge Database](./part4-game-knowledge/10-knowledge-database.md) | SQLite schema, data sources, dynamic queries | `data/game_knowledge.py`, `data/fetch_aoe2_data.py` |
 | 11 | [Sprite Extraction](./part4-game-knowledge/11-sprite-extraction.md) | SLD format, DXT1 decompression, player color recoloring | `detection/extraction/sld_extractor.py` |
 
 ### Part 5: Operations
 
-| # | Chapter | Description | Key Files |
-|---|---------|-------------|-----------|
+| # | Chapter | Description | Key files |
+|---|---|---|---|
 | 12 | [Cloud Training](./part5-operations/12-cloud-training.md) | Lambda Labs workflow, dataset packaging, cost analysis | `tmp/train_v2_lambda.sh` |
 | 13 | [Class Schema Evolution](./part5-operations/13-class-schema-evolution.md) | Schema history, unified 60-class taxonomy, legacy mapping | `labeling/class_mapping.py`, `training/config/classes.yaml` |
 
+### Part 6: Evaluation arena
+
+| # | Chapter | Description | Key files |
+|---|---|---|---|
+| 14 | [Arena Overview](./part6-evaluation-arena/14-arena-overview.md) | race / smoke / rank — when to use which | `arena/__main__.py`, `arena/race.py` |
+| 15 | [Event Broker](./part6-evaluation-arena/15-event-broker.md) | Protocol, in-process vs Redis, backpressure, `/metrics` | `evaluation/event_broker.py`, `evaluation/redis_broker.py`, `evaluation/broker_factory.py` |
+| 16 | [DuckDB Persister and Replay](./part6-evaluation-arena/16-duckdb-persister-and-replay.md) | Event log schema, cold-path reader, fork primitive | `evaluation/event_log.py`, `evaluation/duckdb_persister.py`, `evaluation/fork.py` |
+| 17 | [Ranking Pipeline](./part6-evaluation-arena/17-ranking-pipeline.md) | Bradley-Terry MLE, scenarios, bootstrap CIs | `arena/ranking.py`, `arena/scenarios.py`, `arena/profiles/ranking-v1.yaml` |
+| 18 | [Synthetic World Sim](./part6-evaluation-arena/18-synthetic-world-sim.md) | AoE2-lite economy model + perception projection | `evaluation/world_sim.py` |
+
+### Part 7: Arena web
+
+| # | Chapter | Description | Key files |
+|---|---|---|---|
+| 19 | [Web Architecture](./part7-arena-web/19-web-architecture.md) | FastAPI lifespan, `/events` dispatch, reaper, `/forks` flow | `arena/web/server.py`, `arena/web/forks.py` |
+| 20 | [Fork and Diff UI](./part7-arena-web/20-fork-and-diff-ui.md) | Timeline scrubber, World/Trace/Diff/Operator tabs | `arena/web/ui/src/App.tsx`, `panels/*` |
+| 21 | [Running the UI Locally](./part7-arena-web/21-running-the-ui-locally.md) | Dev proxy, VITE_API_BASE_URL, deployment modes | `arena/web/ui/vite.config.ts` |
+
+### Part 8: Autoresearch
+
+| # | Chapter | Description | Key files |
+|---|---|---|---|
+| 22 | [Autoresearch Overview](./part8-autoresearch/22-autoresearch-overview.md) | Mutate → run → score → accept/revert loop | `autoresearch/orchestrator.py`, `autoresearch/config.yaml` |
+| 23 | [Prompt Mutation and Memory](./part8-autoresearch/23-prompt-mutation-and-memory.md) | Mutator constraints, protected sections, memory chain | `autoresearch/prompt_mutator.py`, `autoresearch/memory_chain.py` |
+
 ---
 
-## Quick Links
+## Architecture Decision Records (ADRs)
 
-- [Game loop entry point](./part1-architecture/02-game-loop-pipeline.md#the-iteration-cycle) -- the core capture-detect-think-act cycle
-- [Action types reference](./part1-architecture/03-action-model-and-execution.md#the-five-action-types) -- click, right_click, press, drag, wait
-- [System prompt](./part2-llm-integration/05-prompt-engineering.md) -- what the executor LLM knows about the game
-- [60-class taxonomy](./part3-entity-detection/07-detector-architecture.md#the-60-class-taxonomy) -- all detectable entity types
-- [Class schema evolution](./part5-operations/13-class-schema-evolution.md) -- schema history and unified class IDs
+Short (~1 page) decisions that shaped the current architecture. Read these to understand the *why*; chapters above describe the *what*.
+
+- [ADR 0001 — Broker-first event architecture](./adr/0001-broker-first-architecture.md)
+- [ADR 0002 — Redis Streams as cross-process broker backend](./adr/0002-redis-streams-for-cross-process.md)
+- [ADR 0003 — pyright → basedpyright with `reportAny`](./adr/0003-pyright-to-basedpyright.md)
+- [ADR 0004 — Bradley-Terry ranking over simple win-rate](./adr/0004-bradley-terry-ranking.md)
+- [ADR 0005 — Vite + React + Tailwind for arena UI](./adr/0005-vite-react-tailwind-for-arena-ui.md)
 
 ---
 
-## Document Conventions
+## Runbooks
 
-- **Code references**: `file.py:42` format points to exact source locations (paths relative to `agent/`)
-- **Key Insights**: `> **Key Insight**:` callouts highlight non-obvious architectural decisions
-- **Cross-references**: `[Chapter N](./path)` links between related topics
-- **Optional modules**: Dashed lines in diagrams and explicit notes for graceful-fallback dependencies
+"You have a problem right now" checklists. Symptom → diagnosis → command, not narrative.
+
+- [Redis broker operations](./runbooks/redis-broker-ops.md) — compose stack, password rotation, key inspection.
+- [Switching the broker backend](./runbooks/switching-broker-backend.md) — in-process ↔ Redis switching, verification.
+- [Debugging a stuck fork or replay](./runbooks/debug-stuck-fork.md) — what to check, in what order.
+- [Windows VM agent bring-up](./runbooks/windows-vm-agent-bringup.md) — fast path + symptom matrix. Full first-time setup is in [deployment-guide.md](./deployment-guide.md).
+
+---
+
+## Design specs (frozen historical)
+
+Original architectural proposals. Status headers note what shipped. Kept for *why we built it this way* context; current state lives in the chapters above.
+
+- [Event Broker Architecture](./design/event-broker-architecture.md) — log-first SSE design that became Parts 6 chapters 15–16 and ADRs 0001–0002. **Status: SHIPPED.**
+- [Synthetic Arena Analysis](./design/synthetic-arena-analysis.md) — fork/race/mutate/observe analysis that became Parts 6–7. **Status: SUPERSEDED BY IMPLEMENTATION.**
+- [Autoresearch Plan](./design/autoresearch-plan.md) — 5-phase Karpathy-inspired plan. **Status: PARTIALLY SHIPPED** (Phases 0–1; 2–5 unbuilt).
+
+---
+
+## Explorations
+
+Speculative scratch documents that haven't crystallized into shipped designs.
+
+- [eval-virtualbox-ideas.md](./explorations/eval-virtualbox-ideas.md) — notes on VirtualBox-based headless game replay.
+
+---
+
+## Quick links
+
+- [Game loop entry point](./part1-architecture/02-game-loop-pipeline.md#the-iteration-cycle) — the capture-detect-think-act cycle.
+- [Action types reference](./part1-architecture/03-action-model-and-execution.md#the-five-action-types).
+- [System prompt](./part2-llm-integration/05-prompt-engineering.md) — what the executor LLM knows.
+- [60-class taxonomy](./part3-entity-detection/07-detector-architecture.md#the-60-class-taxonomy).
+- [Arena CLI cheatsheet](./part6-evaluation-arena/14-arena-overview.md#the-three-subcommands).
+- [Broker backpressure semantics](./part6-evaluation-arena/15-event-broker.md#backpressure-semantics).
+
+---
+
+## Conventions
+
+- **Code references**: `file.py:42` format points to exact source lines (paths relative to `agent/`).
+- **Cross-references**: `[Chapter N](./path)` between related topics.
+- **Status callouts**: design docs carry a `Status:` line noting whether they're proposals, shipped, or superseded.
+- **Optional modules**: dashed lines in diagrams; explicit notes for graceful-fallback dependencies.
+- **ADRs vs chapters**: ADRs answer *"why?"* in 1 page. Chapters answer *"how does it work today?"* in detail. Design specs in `design/` answer *"how did we get here?"* and are frozen in time.

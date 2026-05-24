@@ -2,7 +2,7 @@
 
 **Date**: 2026-05-11
 **Author**: Claude (research + analysis)
-**Status**: Analysis with recommended solutions — not yet an execution plan
+**Status**: **SUPERSEDED BY IMPLEMENTATION** — fork / race / mutate / observe shipped through Phase 9 plus the broker rollout. Frozen historical analysis; for current state see [Part 6 — Evaluation Arena](../part6-evaluation-arena/14-arena-overview.md) and [Part 7 — Arena Web](../part7-arena-web/19-web-architecture.md).
 
 ---
 
