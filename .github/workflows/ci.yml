@@ -21,6 +21,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
+    # Job-level so every `uv` invocation in `steps` (sync, run ruff, run
+    # basedpyright, run pytest) targets the same Python environment.
+    # `uv`'s default is `.venv` (dot-prefixed); pyproject.toml's
+    # `[tool.pyright]` block configures `venvPath="." venv="venv"`, so
+    # the two must agree or basedpyright exits with code 3 ("venv
+    # subdirectory not found"). Aligning CI on the local layout (`venv/`)
+    # keeps the existing local pre-commit hook unchanged.
+    env:
+      UV_PROJECT_ENVIRONMENT: venv
+
     steps:
       - uses: actions/checkout@v4
 
@@ -60,6 +70,10 @@ jobs:
         # makes the Phase C Redis backend a first-class CI surface: any
         # future trim of `dev`'s redis dep won't silently drop the broker
         # path from coverage.
+        #
+        # `UV_PROJECT_ENVIRONMENT=venv` (set at job level above) overrides
+        # uv's default of `.venv` so the resulting site-packages directory
+        # matches `[tool.pyright]`'s `venvPath="." venv="venv"` config.
         run: uv sync --extra dev --extra server --extra broker-redis
 
       - name: Ruff lint
