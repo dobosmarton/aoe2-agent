@@ -88,3 +88,39 @@ def test_make_broker_unknown_backend_lists_valid_choices(
     monkeypatch.setenv("ARENA_BROKER_BACKEND", "bogus")
     with pytest.raises(ValueError, match=r"'inprocess'.*'redis'"):
         make_broker()
+
+
+# ---------------------------------------------------------------------------
+# `_resolved_redis_url()` priority chain — the smart default that prevents the
+# "I set ARENA_BROKER_BACKEND=redis from .env and it errored on AUTH" foot-gun.
+# ---------------------------------------------------------------------------
+
+
+def test_resolved_redis_url_prefers_explicit_redis_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from evaluation.broker_factory import _resolved_redis_url
+
+    monkeypatch.setenv("REDIS_URL", "redis://example.invalid:9999/3")
+    monkeypatch.setenv("REDIS_PASSWORD", "should-be-ignored")
+    assert _resolved_redis_url() == "redis://example.invalid:9999/3"
+
+
+def test_resolved_redis_url_falls_back_to_password_when_url_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from evaluation.broker_factory import _resolved_redis_url
+
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    monkeypatch.setenv("REDIS_PASSWORD", "hunter2")
+    assert _resolved_redis_url() == "redis://:hunter2@localhost:6379/0"
+
+
+def test_resolved_redis_url_bare_default_with_nothing_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from evaluation.broker_factory import _resolved_redis_url
+
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    monkeypatch.delenv("REDIS_PASSWORD", raising=False)
+    assert _resolved_redis_url() == "redis://localhost:6379/0"

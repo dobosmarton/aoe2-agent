@@ -105,16 +105,21 @@ Redis backend:
 | Env Var | Default | Purpose |
 |---|---|---|
 | `ARENA_BROKER_BACKEND` | `inprocess` | `inprocess` or `redis`. Read once at `make_broker()`; any other value raises `ValueError`. |
-| `REDIS_URL` | `redis://localhost:6379/0` | Connection URL when backend is `redis`. Compose stacks need `redis://:${REDIS_PASSWORD}@localhost:6379/0`. |
+| `REDIS_URL` | see below | Explicit connection URL when backend is `redis`. Takes priority over the smart default. |
+| `REDIS_PASSWORD` | unset | If set (and `REDIS_URL` is *not* set), the default becomes `redis://:${REDIS_PASSWORD}@localhost:6379/0` — the compose-stack path. Otherwise the default is bare `redis://localhost:6379/0`. |
 
 ```bash
 # Bring up the compose stack (provides Redis with REDIS_PASSWORD auth):
 just arena-infra-up
 
-# Point the agent at it:
+# Point the agent at it. REDIS_PASSWORD is already in .env from the
+# compose setup; the broker will auto-build the URL with it:
 export ARENA_BROKER_BACKEND=redis
-export REDIS_URL="redis://:${REDIS_PASSWORD}@localhost:6379/0"
 just arena-smoke   # or any other arena CLI
+
+# Or set REDIS_URL explicitly for non-compose Redis (managed cloud, remote
+# host, etc.):
+export REDIS_URL="redis://:secret@redis.example.com:6380/0"
 ```
 
 Install the Redis client when using this backend (`fakeredis` covers CI tests;

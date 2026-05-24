@@ -358,26 +358,16 @@ def test_cancelled_stream_completes_without_hanging(
     assert count == 1
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Design doc §9 requires the same broker to be reusable after a "
-        "cancelled stream. Currently broken because redis-py async leaves "
-        "the XREAD-BLOCK connection in an indeterminate state when the "
-        "awaiting coroutine is cancelled (upstream issue #2624); fakeredis "
-        "exhibits the same symptom — subsequent INCR on the shared client "
-        "returns None. Fix requires per-stream() connection isolation."
-    ),
-    strict=True,
-)
 def test_cancelled_stream_leaves_same_broker_usable(
     build_event: Callable[..., Event],
 ) -> None:
     """Strong form of the cancel-cleanup invariant — the SAME broker is reusable.
 
-    Marked `strict=True` so the day the redis-py fix lands (or we add
-    per-stream connection isolation), the test starts passing and CI fails
-    with `XPASS` — that's the prompt to flip it from xfail to a regular
-    test and close out the follow-up.
+    Design doc §9 requires the same broker to be reusable after a cancelled
+    stream. `RedisStreamsBroker.stream()` enforces this by allocating a
+    per-call isolated client (`_make_isolated_stream_client`); the parent
+    `self._client` is never touched by XREAD BLOCK, so cancellation can't
+    leak a poisoned connection into the shared pool that publishers use.
     """
 
     async def scenario() -> list[int]:

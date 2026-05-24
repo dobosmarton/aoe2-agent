@@ -46,6 +46,7 @@ CLI commands inside `asyncio.run`, fork tasks).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime
@@ -317,42 +318,65 @@ class RedisStreamsBroker:
         run_id: RunId,
         from_seq: Seq = Seq(0),
     ) -> AsyncIterator[EventEnvelope]:
-        keys = _keys_for(self._key_prefix, run_id)
-        # `cursor` tracks the last seq yielded. `from_seq=Seq(0)` means
-        # "from the beginning" — match InProcessEventBroker.stream.
-        cursor = max(0, int(from_seq) - 1)
-        while True:
-            # Flush at the TOP of each iteration — not just on entry — so
-            # a `close_run()` called mid-stream from another coroutine
-            # gets its DEL pushed to Redis before we check `is_open_remote`.
-            # Without this, the consumer's first iteration flushes the
-            # open-SET but subsequent iterations never see the close-DEL,
-            # and the `:open` sentinel stays True forever.
-            await self.flush()
-            await self._check_overflow(keys, run_id, cursor)
-            entries = cast(
-                "list[tuple[bytes, list[tuple[bytes, dict[bytes, bytes]]]]] | None",
-                await self._client.xread(
-                    streams={keys.events: _seq_to_stream_id(Seq(cursor))},
-                    block=self._xread_block_ms,
-                    count=None,
-                ),
-            )
-            yielded_any = False
-            for envelope in self._envelopes_from_xread_reply(entries, run_id):
-                cursor = int(envelope.seq)
-                self._metrics_events_streamed += 1
-                yielded_any = True
-                yield envelope
-            if yielded_any:
-                continue
-            # Empty XREAD: either the producer is paused or done. Ask
-            # Redis (not local state) — the sentinel is the cross-process
-            # truth for "is the producer still running anywhere?". Local
-            # `is_open_locally` is just an in-process optimisation that's
-            # already covered by Redis being the same value.
-            if not await self.is_open_remote(run_id):
-                return
+        # XREAD BLOCK cancellation can leave the connection it was using
+        # in an indeterminate state — redis-py async doesn't reliably mark
+        # the connection as broken when the awaiting coroutine is cancelled
+        # mid-flight (upstream redis-py issue #2624). The poisoned connection
+        # gets returned to the pool with a pending response still in flight
+        # on the socket; a subsequent `publish()` reading that response
+        # off the wire sees `None` where it expected an INCR result.
+        #
+        # Fix: the `except` below catches CancelledError (and the closely-
+        # related GeneratorExit, which fires when an async generator is
+        # closed without exhausting it — same risk shape) and force-evicts
+        # every idle connection from the pool. By the time we get here,
+        # redis-py's command-cleanup `finally` has returned the poisoned
+        # XREAD connection to the pool's idle list, so it's caught and
+        # disposed of. `inuse_connections=False` leaves connections that
+        # other coroutines are actively holding (a concurrent publisher's
+        # in-flight INCR) untouched. Normal exits skip the disconnect —
+        # the connection used during normal XREAD-then-yield rounds is
+        # clean and worth keeping in the pool for the next consumer.
+        try:
+            keys = _keys_for(self._key_prefix, run_id)
+            # `cursor` tracks the last seq yielded. `from_seq=Seq(0)` means
+            # "from the beginning" — match InProcessEventBroker.stream.
+            cursor = max(0, int(from_seq) - 1)
+            while True:
+                # Flush at the TOP of each iteration — not just on entry — so
+                # a `close_run()` called mid-stream from another coroutine
+                # gets its DEL pushed to Redis before we check `is_open_remote`.
+                # Without this, the consumer's first iteration flushes the
+                # open-SET but subsequent iterations never see the close-DEL,
+                # and the `:open` sentinel stays True forever.
+                await self.flush()
+                await self._check_overflow(keys, run_id, cursor)
+                entries = cast(
+                    "list[tuple[bytes, list[tuple[bytes, dict[bytes, bytes]]]]] | None",
+                    await self._client.xread(
+                        streams={keys.events: _seq_to_stream_id(Seq(cursor))},
+                        block=self._xread_block_ms,
+                        count=None,
+                    ),
+                )
+                yielded_any = False
+                for envelope in self._envelopes_from_xread_reply(entries, run_id):
+                    cursor = int(envelope.seq)
+                    self._metrics_events_streamed += 1
+                    yielded_any = True
+                    yield envelope
+                if yielded_any:
+                    continue
+                # Empty XREAD: either the producer is paused or done. Ask
+                # Redis (not local state) — the sentinel is the cross-process
+                # truth for "is the producer still running anywhere?". Local
+                # `is_open_locally` is just an in-process optimisation that's
+                # already covered by Redis being the same value.
+                if not await self.is_open_remote(run_id):
+                    return
+        except (asyncio.CancelledError, GeneratorExit):
+            await self._client.connection_pool.disconnect(inuse_connections=False)
+            raise
 
     async def _check_overflow(self, keys: _Keys, run_id: RunId, cursor: int) -> None:
         """Raise `BrokerOverflowError` if the consumer fell behind MAXLEN.

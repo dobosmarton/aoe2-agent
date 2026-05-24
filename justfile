@@ -140,17 +140,21 @@ arena-web-dev port="8000":
 
 # Print the env-var exports needed to point the agent at the compose-stack
 # Redis broker. The compose Redis uses `REDIS_PASSWORD` (see env.example);
-# the default REDIS_URL in evaluation/broker_factory.py is passwordless and
-# will fail AUTH against the compose stack. Use:
+# when REDIS_PASSWORD is in scope, `make_broker()` builds the
+# AUTH'd URL automatically — no need to construct REDIS_URL by hand. Use:
 #
-#     eval "$(just arena-broker-redis-env)"
+#     set -a; . ./.env; set +a
+#     export ARENA_BROKER_BACKEND=redis
 #     just arena-smoke   # or any other arena CLI
 #
-# Requires `.env` to be populated (REDIS_PASSWORD set).
+# This recipe prints the exports for shells that prefer `eval`-ing:
+#
+#     eval "$(just arena-broker-redis-env)"
 arena-broker-redis-env:
     @set -a; . ./.env; set +a; \
         echo "export ARENA_BROKER_BACKEND=redis"; \
-        echo "export REDIS_URL=\"redis://:$REDIS_PASSWORD@localhost:6379/0\""
+        echo "# REDIS_PASSWORD is already in scope from .env; make_broker()"; \
+        echo "# auto-builds redis://:\$REDIS_PASSWORD@localhost:6379/0"
 
 # Install UI dependencies via Bun.
 arena-ui-install:
