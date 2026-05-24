@@ -233,6 +233,13 @@ venv = "venv"
 # Treat third-party packages without stubs as untyped rather than failing.
 reportMissingTypeStubs = false
 reportMissingImports = "warning"
+# Stubs at `./typings/<pkg>/` are intentionally checked-in for optional
+# extras that aren't installed on every platform (e.g. `coremltools` is
+# macOS-only). When a stub is found but the source isn't, pyright defaults
+# to a `reportMissingModuleSource` warning — useful for catching *required*
+# deps that fell out of install, but pure noise for *optional* extras where
+# "stub present, source absent" is the expected steady state on Linux CI.
+reportMissingModuleSource = "none"
 # Enforce no `Any` annotations and no `cast(Any, ...)` escape hatches.
 # SDK boundaries that genuinely need to escape the type system use
 # `# pyright: ignore[reportArgumentType]` per-line instead.

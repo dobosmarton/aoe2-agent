@@ -207,11 +207,7 @@ def _load_model(model_path: str) -> ModelState:
     # Try CoreML native (.mlpackage or .mlmodel)
     if path.suffix in (".mlpackage", ".mlmodel") or path.is_dir():
         try:
-            # coremltools is macOS-only — declared in pyproject's `[coreml]`
-            # extra, deliberately not installed on Linux CI. The try/except
-            # ImportError below is the runtime guard; pyright would otherwise
-            # warn on every Linux typecheck run.
-            import coremltools as ct  # pyright: ignore[reportMissingImports]
+            import coremltools as ct
 
             model = ct.models.MLModel(str(path), compute_units=ct.ComputeUnit.CPU_AND_NE)
             input_size = _get_coreml_input_size(model)
