@@ -61,6 +61,20 @@ dev = [
 coreml = [
     "coremltools>=8.0",
 ]
+# YOLO training / inference toolchain. Installed on training boxes
+# (Windows VM, Linux GPU host) and on any dev machine that runs
+# `detection/` scripts. Not part of the core agent runtime, which
+# uses ONNX via `onnxruntime` (already in core deps).
+detection = [
+    "ultralytics>=8.4",
+]
+# Sliced inference for small-object pre-labeling (`detection/labeling/prelabel.py`
+# with `--use-sahi`). Optional; the prelabel CLI falls back to whole-image
+# inference when sahi is not installed.
+labeling = [
+    "sahi>=0.11",
+    "ultralytics>=8.4",
+]
 
 [project.scripts]
 aoe2-agent = "gameplay_agent.main:main"
@@ -189,11 +203,18 @@ exclude = [
     "memories",
     "arena/web/ui",
 ]
-# No venv= config: pre-commit runs `venv/bin/pyright` directly via the
-# `language: system` hook, which finds its own site-packages. CI runs
-# pyright from the system Python after `pip install -r ...`.
 typeCheckingMode = "basic"
 pythonVersion = "3.11"
+# Point pyright at the project venv so it can resolve installed third-party
+# packages (numpy, ultralytics, coremltools, etc.). Pyright/basedpyright are
+# Node tools: they do NOT auto-discover site-packages just because the
+# `basedpyright` binary lives inside `venv/bin/`. Without these two keys, every
+# third-party import becomes `reportMissingImports`, which then cascades into
+# `reportAttributeAccessIssue` for re-exported names (e.g. `YOLO` via
+# `detection/_ultralytics_compat.py`). Pre-commit and CI both resolve packages
+# from the same `venv/`, so a single setting covers all entry points.
+venvPath = "."
+venv = "venv"
 # Treat third-party packages without stubs as untyped rather than failing.
 reportMissingTypeStubs = false
 reportMissingImports = "warning"
