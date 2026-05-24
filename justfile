@@ -138,6 +138,20 @@ arena-rank profile="arena/profiles/ranking-v1.yaml":
 arena-web-dev port="8000":
     venv/bin/python -m arena.web --port {{port}}
 
+# Print the env-var exports needed to point the agent at the compose-stack
+# Redis broker. The compose Redis uses `REDIS_PASSWORD` (see env.example);
+# the default REDIS_URL in evaluation/broker_factory.py is passwordless and
+# will fail AUTH against the compose stack. Use:
+#
+#     eval "$(just arena-broker-redis-env)"
+#     just arena-smoke   # or any other arena CLI
+#
+# Requires `.env` to be populated (REDIS_PASSWORD set).
+arena-broker-redis-env:
+    @set -a; . ./.env; set +a; \
+        echo "export ARENA_BROKER_BACKEND=redis"; \
+        echo "export REDIS_URL=\"redis://:$REDIS_PASSWORD@localhost:6379/0\""
+
 # Install UI dependencies via Bun.
 arena-ui-install:
     cd arena/web/ui && bun install

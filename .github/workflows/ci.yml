@@ -50,11 +50,17 @@ jobs:
         # Catches "I bumped a >= but forgot to refresh the lockfile" mistakes.
         run: uv lock --locked
 
-      - name: Install project + dev + server extras
+      - name: Install project + dev + server + broker-redis extras
         # Single source of truth: pyproject.toml [project.dependencies] +
         # [project.optional-dependencies]. coremltools is a macOS-only extra
         # that we deliberately skip on Linux CI.
-        run: uv sync --extra dev --extra server
+        #
+        # `broker-redis` is explicit even though `dev` carries `redis`
+        # transitively (for the fakeredis contract tests). Pinning it here
+        # makes the Phase C Redis backend a first-class CI surface: any
+        # future trim of `dev`'s redis dep won't silently drop the broker
+        # path from coverage.
+        run: uv sync --extra dev --extra server --extra broker-redis
 
       - name: Ruff lint
         run: uv run ruff check .
@@ -65,8 +71,12 @@ jobs:
       - name: basedpyright type-check
         # Scope-explicit because the bundled pyproject `include` only kicks in
         # when basedpyright is invoked with no path args. basedpyright reads
-        # the same [tool.pyright] config section as pyright.
-        run: uv run basedpyright gameplay_agent autoresearch evaluation server
+        # the same [tool.pyright] config section as pyright. Keep this list
+        # in sync with `.pre-commit-config.yaml` — both must cover every
+        # first-party package (`arena` and `data` were silently omitted
+        # until 2026-05; the Phase C broker SSE handler shipped untyped
+        # in CI as a result).
+        run: uv run basedpyright gameplay_agent autoresearch evaluation server arena data
 
       - name: Pytest
         run: uv run pytest -q

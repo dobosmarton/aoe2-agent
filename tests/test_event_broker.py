@@ -9,10 +9,11 @@ piece (persister, SSE handler, future Redis broker) trusts these invariants:
     4. Closing a run drains active streams cleanly.
     5. Cancelled consumers leave no leaked waiters.
 
-The parametrized tests at the bottom sweep (1) and (3) across the value
-range a hypothesis property test would cover (`hypothesis` isn't a project
-dep today; add it + replace these two `parametrize` blocks with `@given`
-strategies if you want randomized exploration later).
+Invariants (1) and (3) are exercised as hypothesis property tests — see the
+`@given` blocks at the bottom. The strategies stay InProcess-only because
+hypothesis's many re-runs would dominate a Redis-backed sweep; the Redis
+path verifies the same contract through the parametrized `broker` fixture
+at the top of the file.
 
 `broker` fixture is parametrized on factory so adding a future
 `RedisStreamsBroker` (Phase C) is one fixture-list entry change —
@@ -26,6 +27,8 @@ import contextlib
 from typing import TYPE_CHECKING, TypeAlias
 
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -319,7 +322,31 @@ def test_broker_event_sink_emit_publishes_via_loop(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("n_events", [0, 1, 5, 50, 200])
+# ---------------------------------------------------------------------------
+# Property-based contract tests — design doc §9 names hypothesis as the
+# canonical correctness witness for these two Protocol invariants. The earlier
+# `@pytest.mark.parametrize` blocks (0/1/5/50/200 etc.) were a stand-in until
+# hypothesis became a project dep; we keep the same invariants but let
+# hypothesis explore the full bounded value range.
+#
+# Strategy bounds:
+#   * `n_events` 0..256 — covers the empty stream, single-event, and a
+#     buffer-stress range without making CI runtime dominated by these tests.
+#     The InProcessEventBroker buffer is _MAX_BUFFERED_PER_RUN = 10_000;
+#     overflow semantics get their own dedicated test downstream.
+#   * `n_subscribers` 1..6 — beyond a handful, the test devolves into
+#     asyncio.gather scheduling overhead, not broker semantics.
+#
+# `deadline=None` because the inner asyncio.run() startup cost on a cold loop
+# can spike past hypothesis's default 200ms ceiling on slower CI runners;
+# `suppress_health_check=[function_scoped_fixture]` so the `build_event`
+# fixture (function-scoped) doesn't trip the "fixture reuse" warning when
+# hypothesis re-runs the test body.
+# ---------------------------------------------------------------------------
+
+
+@given(n_events=st.integers(min_value=0, max_value=256))
+@settings(deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
 def test_drained_seqs_are_dense_1_to_n_for_any_publish_count(
     n_events: int, build_event: Callable[..., Event]
 ) -> None:
@@ -340,10 +367,11 @@ def test_drained_seqs_are_dense_1_to_n_for_any_publish_count(
     assert seqs == [Seq(i) for i in range(1, n_events + 1)]
 
 
-@pytest.mark.parametrize(
-    ("n_events", "n_subscribers"),
-    [(1, 1), (1, 5), (5, 3), (10, 2), (20, 5), (50, 1)],
+@given(
+    n_events=st.integers(min_value=0, max_value=64),
+    n_subscribers=st.integers(min_value=1, max_value=6),
 )
+@settings(deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
 def test_all_subscribers_observe_identical_sequences(
     n_events: int, n_subscribers: int, build_event: Callable[..., Event]
 ) -> None:

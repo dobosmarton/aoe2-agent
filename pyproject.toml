@@ -66,6 +66,11 @@ dev = [
     # dev needs it transitively for the contract test to import RedisStreamsBroker.
     "redis>=5.0",
     "fakeredis>=2.20",
+    # Hypothesis powers the broker's property-based contract tests in
+    # tests/test_event_broker.py — the design doc names hypothesis as the
+    # canonical correctness witness for the Seq-dense / identical-observation
+    # invariants. Pure-Python, ~1MB.
+    "hypothesis>=6.0",
 ]
 # macOS-only — install separately when running CoreML inference.
 coreml = [

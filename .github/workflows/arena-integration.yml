@@ -109,6 +109,34 @@ jobs:
           fi
           echo "All health-checked services healthy."
 
+      - name: Set up Python (for broker cross-process test)
+        # The fast `ci.yml` runs the broker contract sweep against `fakeredis`;
+        # this integration job has a *real* Redis up (with `REDIS_PASSWORD`
+        # AUTH) and is the only CI surface where the cross-process test —
+        # publisher in OS process A, consumer in OS process B — actually
+        # gets to run. Without this step that test auto-skips on every CI run.
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install broker test dependencies
+        run: uv sync --extra dev --extra broker-redis
+
+      - name: Run cross-process Redis broker test
+        # Source .env so REDIS_PASSWORD is in scope, then point pytest at the
+        # compose Redis (port 6379 published to host). Test auto-skips if
+        # Redis is unreachable, so a failure here means a real regression.
+        run: |
+          set -a; . ./.env; set +a
+          export REDIS_URL="redis://:${REDIS_PASSWORD}@localhost:6379/0"
+          uv run pytest tests/test_redis_broker_cross_process.py -v
+
       - name: Dump logs on failure
         if: failure()
         run: docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --no-color

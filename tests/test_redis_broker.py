@@ -17,6 +17,7 @@ without external services. The module is skipped entirely when
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -272,3 +273,140 @@ def test_reap_removes_all_redis_keys_for_run(
 
     remaining = asyncio.run(scenario())
     assert remaining == 0
+
+
+# ---------------------------------------------------------------------------
+# Cancellation cleanup — the Redis equivalent of the InProcess `_waiters == 0`
+# invariant from design doc §9. The InProcess broker maintains an explicit
+# waiter list and the existing `test_consumer_cancellation_removes_waiter`
+# inspects it directly. RedisStreamsBroker polls via `XREAD BLOCK` so there's
+# no equivalent waiter list — the leak surface is the Redis client's
+# connection pool, which doesn't reliably reset when an `XREAD BLOCK` is
+# cancelled mid-flight (upstream redis-py #2624).
+#
+# We split the invariant into two tests:
+#
+#   1. The bare-minimum leak guarantee: cancellation MUST complete without
+#      hanging. A consumer task that's stuck forever after cancel is the
+#      worst possible leak (it pins the event loop, pins connections,
+#      and breaks `asyncio.run` cleanup). That's covered by the passing
+#      test below.
+#
+#   2. The stronger Protocol promise: the SAME broker must be fully usable
+#      after a cancelled stream. That's the `xfail` test — currently broken
+#      because of the redis-py cancellation quirk. Restoring it requires
+#      isolating each `stream()` to its own connection (or pool-disconnect
+#      on cancel). Tracked as a Phase C follow-up.
+# ---------------------------------------------------------------------------
+
+
+def test_cancelled_stream_completes_without_hanging(
+    build_event: Callable[..., Event],
+) -> None:
+    """Cancelling a `stream()` mid-XREAD must complete inside a finite window.
+
+    The worst leak shape would be a consumer that never observes the cancel
+    — `await task` would hang, pinning the event loop forever. `asyncio.timeout`
+    turns that failure mode into an explicit test failure instead of a stuck
+    CI run.
+
+    A fresh broker after the cancellation is fully functional (verified by
+    creating one inside the same scenario) — this isolates the failure mode
+    documented in the xfail test: it's per-broker, not process-global.
+    """
+
+    async def scenario() -> int:
+        broker = _make_harness().broker
+        run = RunId("r1")
+        broker.open_run(run)
+        await broker.publish(run, build_event(run, t=0))
+
+        seen: list[int] = []
+
+        async def consumer() -> None:
+            async for env in broker.stream(run, from_seq=Seq(0)):
+                seen.append(env.event.t)
+
+        task = asyncio.create_task(consumer())
+        # Spin briefly so the consumer reads seq=1 and re-enters XREAD BLOCK
+        # waiting for seq=2. xread_block_ms=10 (from _make_harness) keeps
+        # the next BLOCK-then-cancel window short.
+        for _ in range(20):
+            await asyncio.sleep(0.01)
+            if seen:
+                break
+        assert seen == [0], "consumer must reach mid-XREAD state for this test to mean anything"
+
+        task.cancel()
+        async with asyncio.timeout(2.0):
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+        # Fresh broker against a fresh fakeredis client. Proves the cancellation
+        # didn't leak anything process-global (asyncio state, event-loop hooks,
+        # threadlocals). The first broker's connection pool may be poisoned by
+        # the redis-py cancel quirk; that's covered by the xfail test below.
+        fresh = _make_harness().broker
+        run2 = RunId("r2")
+        fresh.open_run(run2)
+        await fresh.publish(run2, build_event(run2, t=0))
+        fresh.close_run(run2)
+        envs = [env async for env in fresh.stream(run2, from_seq=Seq(0))]
+        return len(envs)
+
+    count = asyncio.run(scenario())
+    assert count == 1
+
+
+@pytest.mark.xfail(
+    reason=(
+        "Design doc §9 requires the same broker to be reusable after a "
+        "cancelled stream. Currently broken because redis-py async leaves "
+        "the XREAD-BLOCK connection in an indeterminate state when the "
+        "awaiting coroutine is cancelled (upstream issue #2624); fakeredis "
+        "exhibits the same symptom — subsequent INCR on the shared client "
+        "returns None. Fix requires per-stream() connection isolation."
+    ),
+    strict=True,
+)
+def test_cancelled_stream_leaves_same_broker_usable(
+    build_event: Callable[..., Event],
+) -> None:
+    """Strong form of the cancel-cleanup invariant — the SAME broker is reusable.
+
+    Marked `strict=True` so the day the redis-py fix lands (or we add
+    per-stream connection isolation), the test starts passing and CI fails
+    with `XPASS` — that's the prompt to flip it from xfail to a regular
+    test and close out the follow-up.
+    """
+
+    async def scenario() -> list[int]:
+        broker = _make_broker()
+        run = RunId("r1")
+        broker.open_run(run)
+        await broker.publish(run, build_event(run, t=0))
+
+        seen: list[int] = []
+
+        async def consumer() -> None:
+            async for env in broker.stream(run, from_seq=Seq(0)):
+                seen.append(env.event.t)
+
+        task = asyncio.create_task(consumer())
+        for _ in range(20):
+            await asyncio.sleep(0.01)
+            if seen:
+                break
+
+        task.cancel()
+        async with asyncio.timeout(2.0):
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+        # The same broker should accept publishes and serve a fresh stream.
+        await broker.publish(run, build_event(run, t=1))
+        broker.close_run(run)
+        return [env.event.t async for env in broker.stream(run, from_seq=Seq(0))]
+
+    seen = asyncio.run(scenario())
+    assert seen == [0, 1]

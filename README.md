@@ -91,6 +91,39 @@ export ANTHROPIC_API_KEY=your-key-here
 | `AOE2_TEMPERATURE` | `0.0` | Anthropic Messages API temperature (lowest variance) |
 | `AOE2_SEED` | — | Local-RNG seed (build-retry jitter); unset = OS entropy |
 
+### Event broker backend (Phase C)
+
+The arena runs every event through an `EventBroker` (see
+`docs/design/event-broker-architecture.md`). The default in-process broker has
+zero external dependencies and is fine for single-machine work — local
+development, CI, and `just arena-smoke` all use it implicitly.
+
+For cross-process replay (a producer in one process feeding consumers in
+another — e.g. the FastAPI web server live-tailing a CLI race), switch to the
+Redis backend:
+
+| Env Var | Default | Purpose |
+|---|---|---|
+| `ARENA_BROKER_BACKEND` | `inprocess` | `inprocess` or `redis`. Read once at `make_broker()`; any other value raises `ValueError`. |
+| `REDIS_URL` | `redis://localhost:6379/0` | Connection URL when backend is `redis`. Compose stacks need `redis://:${REDIS_PASSWORD}@localhost:6379/0`. |
+
+```bash
+# Bring up the compose stack (provides Redis with REDIS_PASSWORD auth):
+just arena-infra-up
+
+# Point the agent at it:
+export ARENA_BROKER_BACKEND=redis
+export REDIS_URL="redis://:${REDIS_PASSWORD}@localhost:6379/0"
+just arena-smoke   # or any other arena CLI
+```
+
+Install the Redis client when using this backend (`fakeredis` covers CI tests;
+real-Redis local work needs the `broker-redis` extra):
+
+```bash
+pip install -e ".[broker-redis]"
+```
+
 ### Reproducibility (Phase 3)
 
 Determinism is asymptotic — per [arxiv 2408.04667](https://arxiv.org/html/2408.04667v5), expect ~5–12% per-decision variance even with `temperature=0`. Promise *statistical* replay over N trials, not byte-identical traces.

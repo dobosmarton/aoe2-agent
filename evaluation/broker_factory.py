@@ -25,6 +25,11 @@ if TYPE_CHECKING:
 
 _BACKEND_ENV: Final = "ARENA_BROKER_BACKEND"
 _REDIS_URL_ENV: Final = "REDIS_URL"
+# Passwordless default targets a bare `redis-server` on localhost (the
+# zero-config path for ad-hoc dev). The repo's compose-stack Redis runs
+# with `REDIS_PASSWORD` AUTH (see docker-compose.yml + env.example), so
+# pointing the agent at it requires `REDIS_URL=redis://:<pw>@localhost:6379/0`.
+# `just arena-broker-redis-env` emits the right exports from `.env`.
 _DEFAULT_REDIS_URL: Final = "redis://localhost:6379/0"
 
 

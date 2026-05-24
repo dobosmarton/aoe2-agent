@@ -7,6 +7,10 @@ URL contract (frozen for future-frontend compatibility):
                              Switches to live-tail mode for in-flight runs.
   POST /forks             -> create a child run with mutation patch + N-turn
                              async replay (Phase 9)
+  GET  /metrics           -> BrokerMetricsSnapshot JSON (Phase 3). Backend-
+                             agnostic: dispatches via isinstance(broker, ...)
+                             so InProcess and Redis snapshots are surfaced
+                             through the same shape.
 
 Each SSE line is `data: <payload_json>\\n\\n`, where `<payload_json>` is the
 raw column value from the events table (Pydantic-serialised by the writer

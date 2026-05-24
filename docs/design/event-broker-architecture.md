@@ -330,7 +330,7 @@ Before vs after:
 **New files:**
 - `evaluation/event_broker.py` — `EventBroker`, `EventEnvelope`, `RunId`, `Seq`, `InProcessEventBroker`, `BrokerEventSink`
 - `evaluation/duckdb_persister.py` — `persist_to_duckdb()` coroutine
-- `tests/evaluation/test_event_broker.py` — broker contract tests + property tests
+- `tests/test_event_broker.py` — broker contract tests + property tests
 - `tests/arena/web/test_live_sse_during_replay.py` — regression test for the original bug
 
 **Modified files:**
@@ -471,7 +471,7 @@ Property test (hypothesis): given any sequence of `publish`/`stream` operations 
 
 **Automated:**
 
-- `pytest tests/evaluation/test_event_broker.py -v` — broker contract green.
+- `pytest tests/test_event_broker.py -v` — broker contract green.
 - `pytest tests/arena/web/test_live_sse_during_replay.py -v` — regression test green (was the original bug).
 - `pytest` (full suite) — no other regressions; `test_web_forks.py` updated to test against the broker, not `LiveRunRegistry`.
 
