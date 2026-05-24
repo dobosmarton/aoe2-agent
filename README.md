@@ -45,12 +45,23 @@ Each iteration (~3-5 seconds):
 
 ## Installation
 
+The repo is a **uv workspace** with 9 packages under `packages/`. One `uv sync`
+installs every workspace member editable into a shared `.venv/`, plus the dev
+dependency-group (ruff, basedpyright, pytest, fakeredis, hypothesis, pre-commit).
+
 ```bash
-python -m venv venv
-venv\Scripts\activate          # Windows; on macOS/Linux: source venv/bin/activate
-pip install -e .               # core agent
-pip install -e ".[dev,server]" # add dev tooling + detection server
+# Install uv: https://docs.astral.sh/uv/getting-started/installation/
+uv sync                        # everything (members + dev)
+uv sync --no-dev               # slim install, no dev tools
+# Or run a specific package's entry point directly:
+uv run --package gameplay-agent aoe2-agent
+uv run --package arena aoe2-arena race
+uv run --package detection-server aoe2-server --model <path>
 ```
+
+Per-package optional extras (e.g. `aoe2_yolo_v5.mlpackage` builds need CoreML,
+detection training needs ultralytics) are declared on each package's own
+`pyproject.toml`. Reach them via `uv sync --all-extras`.
 
 ## Configuration
 
@@ -212,52 +223,39 @@ just agent --iterations 20
 just agent --test
 
 # Run the detection server (macOS host)
-just server --model detection/inference/models/aoe2_yolo_v5.onnx
+just server --model packages/detection/src/inference/models/aoe2_yolo_v5.onnx
 
 # Autoresearch: timed experiment with metrics
-python -m autoresearch.game_runner --time-budget 600 --description "test run"
+uv run --package autoresearch python -m autoresearch.game_runner --time-budget 600 --description "test run"
 ```
 
 ## Project Structure
 
 ```
-agent/
-├── gameplay_agent/                # Gameplay agent (Windows VM)
-│   ├── main.py                    # CLI entry point
-│   ├── config.py                  # Pydantic config with env var overrides
-│   ├── game_loop.py               # Main capture→detect→think→act loop
-│   ├── executor.py                # Mouse/keyboard action execution (dispatch pattern)
-│   ├── models.py                  # Pydantic models (7 action types, LLMResponse)
-│   ├── entity_utils.py            # Entity attribute extraction and summary formatting
-│   ├── memory.py                  # Working memory and game state tracking
-│   ├── goals.py                   # Goal management, alarm system, rewards
-│   ├── screen.py                  # Screenshot capture via mss
-│   ├── window.py                  # AoE2 window detection and focus
-│   └── providers/                 # LLM providers (Claude executor + strategist)
-├── server/                        # Detection API server (macOS host)
-│   ├── app.py                     # FastAPI + CoreML/ONNX inference
-│   └── classes.yaml               # Bundled class definitions
-├── pyproject.toml                 # Project + tool config; single source of truth for deps
-├── detection/                     # YOLO entity detection (shared)
-│   ├── inference/
-│   │   ├── detector.py            # EntityDetector, 60 classes, tracking
-│   │   ├── remote_detector.py     # HTTP client for detection server
-│   │   ├── ownership.py           # Blue-dominance ownership classifier
-│   │   ├── thresholds.py          # Per-class confidence thresholds
-│   │   ├── frame_diff.py          # Frame differencing for rescan optimization
-│   │   └── models/                # YOLO model weights
-│   ├── training/                  # Synthetic data gen + YOLO training
-│   ├── labeling/                  # CVAT/COCO labeling tools
-│   └── docs/                      # Detection documentation
-├── data/                          # Game knowledge database
-├── prompts/                       # System prompts (executor + strategist)
-├── evaluation/                    # Synthetic-arena evaluation harness
-│   ├── world_sim.py               # WorldState model + render() (Phase 1 perception projection)
-│   └── runner.py                  # Multi-turn scenario harness with assertion DSL
-├── autoresearch/                  # Automated experiment framework
-├── justfile                       # Monorepo commands
-└── logs/                          # Screenshots and goal logs
+agent/                                     # uv workspace root
+├── pyproject.toml                         # workspace declaration + shared tool config
+├── justfile                               # monorepo commands (uv run --package …)
+├── ui/                                    # Vite + React arena replay UI
+├── docs/                                  # Architecture chapters, ADRs, runbooks
+├── tests/                                 # Cross-package integration tests
+├── packages/                              # 9 first-party packages
+│   ├── core/                              # Pure types: Event, Payload, WorldState, DetectedEntity
+│   ├── detection/                         # YOLO inference, training, labeling, SLD extraction
+│   ├── evaluation/                        # Event broker, DuckDB persister, world sim, fork
+│   ├── gameplay-agent/                    # Real-game loop + providers + scenario runner + prompts
+│   ├── arena/                             # Synthetic arena CLI (race / smoke / rank)
+│   ├── arena-web/                         # FastAPI + SSE backend for replay/fork
+│   ├── detection-server/                  # macOS-hosted YOLO inference endpoint
+│   ├── autoresearch/                      # Prompt-optimization loop (orchestrator + mutator)
+│   └── data/                              # AoE2 game-knowledge SQLite DB
+└── logs/                                  # Runtime: screenshots, goal logs, DuckDB event files
 ```
+
+Each package has its own `pyproject.toml` declaring deps + optional extras. The
+dependency graph is one-way (`core` → leaves), enforced by uv at install time
+via `[tool.uv.sources]` in the workspace root.
+
+For the full chapter-level walkthrough see [`docs/index.md`](docs/index.md).
 
 ## Key Systems
 

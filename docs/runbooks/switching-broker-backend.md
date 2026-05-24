@@ -76,7 +76,7 @@ curl -s http://localhost:8000/metrics | jq
 - **`ARENA_BROKER_BACKEND` set in a tmux pane that's no longer your producer.** Both producer and consumer processes need it set in *their* env. `printenv ARENA_BROKER_BACKEND` in each shell is the quickest sanity check.
 - **`make_broker()` reads the env var at call time, not import time.** So `os.environ["ARENA_BROKER_BACKEND"] = "redis"; from evaluation.broker_factory import make_broker; make_broker()` works. The factory is intentionally not module-level cached for this reason.
 - **The compose Redis uses AUTH.** A raw `REDIS_URL=redis://localhost:6379/0` without the password gets `AuthenticationError`. Use `REDIS_PASSWORD` (and let `make_broker()` build the URL) unless you have a specific reason to set `REDIS_URL` directly — see [Runbook: redis-broker-ops](./redis-broker-ops.md).
-- **Unknown backend values raise `ValueError` immediately.** `ARENA_BROKER_BACKEND=Redis` (capital R) is rejected — the factory lowercases but doesn't fuzzy-match. This is deliberate (`evaluation/broker_factory.py:81`): silent fallback to in-process would hide deployment misconfigurations.
+- **Unknown backend values raise `ValueError` immediately.** `ARENA_BROKER_BACKEND=Redis` (capital R) is rejected — the factory lowercases but doesn't fuzzy-match. This is deliberate (`packages/evaluation/src/broker_factory.py:81`): silent fallback to in-process would hide deployment misconfigurations.
 
 ## Contract test
 

@@ -13,8 +13,6 @@ Layers:
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
-
 from gameplay_agent.models import (
     ClickAction,
     DetectAction,
@@ -28,6 +26,7 @@ from gameplay_agent.models import (
     validate_action,
     validate_actions,
 )
+from pydantic import ValidationError
 
 # ---------------------------------------------------------------------------
 # Layer 1 — per-action validation (happy paths)

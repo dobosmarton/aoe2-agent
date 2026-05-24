@@ -11,7 +11,6 @@ without much marginal coverage gain.
 from __future__ import annotations
 
 import pytest
-
 from gameplay_agent.memory import AgentMemory
 from gameplay_agent.turn_phases import (
     INITIAL_ZOOM_CLICKS,

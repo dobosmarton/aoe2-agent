@@ -18,7 +18,7 @@ flowchart LR
 
 ## 8.2 Synthetic Data Generation
 
-`detection/training/generate_training_data.py` generates labeled training images by compositing sprites onto backgrounds.
+`packages/detection/src/training/generate_training_data.py` generates labeled training images by compositing sprites onto backgrounds.
 
 ### Sprite Configurations
 
@@ -66,7 +66,7 @@ For each image generation:
 
 Three background types, selected randomly per image:
 
-1. **Real screenshots** (50% probability via `real_background_ratio=0.5`) -- actual game screenshots from `detection/real_screenshots/raw/`, Gaussian-blurred with radius=1 to reduce overfitting on specific game states while preserving terrain colors and textures.
+1. **Real screenshots** (50% probability via `real_background_ratio=0.5`) -- actual game screenshots from `packages/detection/src/real_screenshots/raw/`, Gaussian-blurred with radius=1 to reduce overfitting on specific game states while preserving terrain colors and textures.
 
 2. **Synthetic backgrounds** -- pre-generated terrain images.
 
@@ -105,7 +105,7 @@ Game-realistic effects that simulate actual screenshot conditions:
 
 ## 8.4 YOLO Training
 
-`detection/training/train_yolo.py` trains a YOLO11 nano model:
+`packages/detection/src/training/train_yolo.py` trains a YOLO11 nano model:
 
 ### Model
 
@@ -150,7 +150,7 @@ training_data/
 Training produces:
 - `runs/aoe2_yolo_v2/weights/best.pt` -- best validation mAP checkpoint
 - Optionally exported to ONNX with `--export-onnx` flag
-- Copied to `detection/inference/models/aoe2_yolo_v2.pt` and `.onnx`
+- Copied to `packages/detection/src/inference/models/aoe2_yolo_v2.pt` and `.onnx`
 
 ### Results
 

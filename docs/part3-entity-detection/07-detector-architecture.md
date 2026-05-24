@@ -4,7 +4,7 @@ The entity detection system runs YOLO inference on game screenshots, producing l
 
 ## 7.1 DetectedEntity
 
-The core output type (`detection/inference/detector.py`):
+The core output type (`packages/detection/src/inference/detector.py`):
 
 ```python
 @dataclass
@@ -21,7 +21,7 @@ class DetectedEntity:
 
 ## 7.2 The 60-Class Taxonomy
 
-Defined in `detection/training/config/classes.yaml` (source of truth). The detector loads classes dynamically: the PyTorch backend reads `model.names` at load time; ONNX and mock backends use `_load_default_classes()` which parses `classes.yaml` at import time (with a hardcoded fallback if YAML loading fails).
+Defined in `packages/detection/src/training/config/classes.yaml` (source of truth). The detector loads classes dynamically: the PyTorch backend reads `model.names` at load time; ONNX and mock backends use `_load_default_classes()` which parses `classes.yaml` at import time (with a hardcoded fallback if YAML loading fails).
 
 | Range | Category | Classes |
 |-------|----------|---------|
@@ -45,7 +45,7 @@ The `_line` suffix denotes unit upgrade paths (e.g., `militia_line` covers Milit
 
 ## 7.3 EntityDetector Class
 
-Defined at `detection/inference/detector.py`. Key initialization parameters:
+Defined at `packages/detection/src/inference/detector.py`. Key initialization parameters:
 
 | Parameter | Default | Purpose |
 |-----------|---------|---------|
@@ -142,7 +142,7 @@ When using the ONNX backend with SAHI, all tiles are batched into a single infer
 4. Runs **one** `session.run()` call for all tiles
 5. Parses results per tile via `_parse_onnx_tile()` and offsets coordinates
 
-This provides ~3-5x speedup over sequential PyTorch SAHI. The ONNX model must be exported with `dynamic=True` to support variable batch sizes (see `detection/training/export_onnx.py`).
+This provides ~3-5x speedup over sequential PyTorch SAHI. The ONNX model must be exported with `dynamic=True` to support variable batch sizes (see `packages/detection/src/training/export_onnx.py`).
 
 ## 7.6 Backend: Mock
 
@@ -190,7 +190,7 @@ Entity IDs persist across detection frames so the LLM can consistently reference
 
 ### Kalman Filter Tracker (Primary)
 
-Implemented in `detection/inference/tracker.py`. The `EntityTracker` maintains a list of `TrackedEntity` objects, each with a Kalman filter state that estimates position and velocity.
+Implemented in `packages/detection/src/inference/tracker.py`. The `EntityTracker` maintains a list of `TrackedEntity` objects, each with a Kalman filter state that estimates position and velocity.
 
 **State Vector** (6D):
 
@@ -356,7 +356,7 @@ detected_entities = detector.detect_adaptive(screenshot, force_full=force_full)
 
 ## 7.12 Frame Differencing
 
-`detection/inference/frame_diff.py` provides `FrameDiffer`, which compares consecutive screenshots to skip redundant mid-turn rescans.
+`packages/detection/src/inference/frame_diff.py` provides `FrameDiffer`, which compares consecutive screenshots to skip redundant mid-turn rescans.
 
 ### How It Works
 

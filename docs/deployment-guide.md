@@ -64,7 +64,7 @@ just export-coreml detection/inference/models/aoe2_yolo_v5.pt
 just server --model detection/inference/models/aoe2_yolo_v5.onnx
 
 # Or directly
-python -m server --model detection/inference/models/aoe2_yolo_v5.onnx --host 0.0.0.0 --port 8420
+python -m detection_server --model detection/inference/models/aoe2_yolo_v5.onnx --host 0.0.0.0 --port 8420
 ```
 
 For CoreML model:
@@ -233,7 +233,7 @@ actions_executed             iteration=1 total=3 successful=3
 
 | Problem | Fix |
 |---------|-----|
-| `ModuleNotFoundError: No module named 'server'` | Run from the `agent/` directory: `cd agent && python -m server ...` |
+| `ModuleNotFoundError: No module named 'server'` | Run from the `agent/` directory: `cd agent && python -m detection_server ...` |
 | `onnxruntime` import error on macOS | `pip install onnxruntime` (not `onnxruntime-gpu`) |
 | CoreML model fails to load | Fall back to ONNX: `--model path/to/model.onnx` |
 
@@ -258,7 +258,7 @@ actions_executed             iteration=1 total=3 successful=3
 | Problem | Fix |
 |---------|-----|
 | Few entities detected | The agent zooms in on turn 1. If entities are tiny, they may be too far away |
-| False positives | Per-class thresholds in `detection/inference/thresholds.py` can be tuned |
+| False positives | Per-class thresholds in `packages/detection/src/inference/thresholds.py` can be tuned |
 | Slow detection | Use CoreML model on Mac for ~15ms/tile vs ~100ms/tile with ONNX CPU |
 
 ### Agent falls back to local detection
@@ -284,7 +284,7 @@ The remote detector logs `remote_detector_unavailable` and falls back to local O
 ### Server CLI Flags
 
 ```
-python -m server --model PATH --host HOST --port PORT
+python -m detection_server --model PATH --host HOST --port PORT
 ```
 
 | Flag | Default | Purpose |

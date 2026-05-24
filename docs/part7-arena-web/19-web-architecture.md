@@ -1,9 +1,9 @@
 # Chapter 19 — Arena Web Architecture
 
-`arena/web/` is the operator-facing surface for inspecting and steering arena runs. It has two halves:
+`packages/arena-web/src/` is the operator-facing surface for inspecting and steering arena runs. It has two halves:
 
-- **Backend** (`arena/web/server.py`) — FastAPI + SSE. Reads from the event broker for live runs, falls back to a read-only DuckDB scan for finalized ones. Hosts the `/forks` endpoint that branches a parent run into a child replay.
-- **Frontend** (`arena/web/ui/`) — Vite + React 19 + Tailwind v4 + Radix UI primitives. Connects to the backend over SSE, renders a Timeline scrubber, a World/Trace/Diff/Operator tab layout, and posts mutation patches to `/forks`.
+- **Backend** (`packages/arena-web/src/server.py`) — FastAPI + SSE. Reads from the event broker for live runs, falls back to a read-only DuckDB scan for finalized ones. Hosts the `/forks` endpoint that branches a parent run into a child replay.
+- **Frontend** (`packages/arena-web/src/ui/`) — Vite + React 19 + Tailwind v4 + Radix UI primitives. Connects to the backend over SSE, renders a Timeline scrubber, a World/Trace/Diff/Operator tab layout, and posts mutation patches to `/forks`.
 
 Both are optional. They sit on top of the broker and the DuckDB log — the agent and arena CLIs work without them.
 
@@ -19,11 +19,11 @@ The HTTP contract is frozen so the frontend can evolve independently:
 | `POST` | `/forks` | `ForkResponse` | Snapshot the parent at `parent_t`, optionally mutate, schedule an N-turn async replay. |
 | `GET` | `/metrics` | `BrokerMetricsSnapshot` JSON | Operational counters (see Chapter 15). Backend-agnostic via `isinstance` dispatch. |
 
-SSE line shape: `data: <payload_json>\n\n` where `<payload_json>` is the raw `Payload.model_dump_json()` from `evaluation/event_log.py`. The frontend parses it and matches on the embedded `kind` discriminator. On overflow, the backend emits a final `event: overflow\ndata: {"available_from": N}\n\n` line; the frontend reconnects with `?from_seq=N` and accepts the gap (see Chapter 15's backpressure section).
+SSE line shape: `data: <payload_json>\n\n` where `<payload_json>` is the raw `Payload.model_dump_json()` from `packages/evaluation/src/event_log.py`. The frontend parses it and matches on the embedded `kind` discriminator. On overflow, the backend emits a final `event: overflow\ndata: {"available_from": N}\n\n` line; the frontend reconnects with `?from_seq=N` and accepts the gap (see Chapter 15's backpressure section).
 
 ## Lifespan and shared state
 
-`arena/web/server.py:224` (`lifespan`) is the FastAPI lifespan context. On startup it:
+`packages/arena-web/src/server.py:224` (`lifespan`) is the FastAPI lifespan context. On startup it:
 
 1. Calls `make_broker()` — picks the backend per `ARENA_BROKER_BACKEND`.
 2. Constructs a `_ReaperRegistry` (`server.py:90`) for wall-clock-based buffer reap.
@@ -54,7 +54,7 @@ The frontend doesn't need to know which path it's getting. The byte-equivalence 
 
 ## `/forks` — branching a run
 
-`server.py:385` is a thin handler; the work happens in `arena/web/forks.py:create_fork`. The flow:
+`server.py:385` is a thin handler; the work happens in `packages/arena-web/src/forks.py:create_fork`. The flow:
 
 1. Locate the parent's DuckDB file (`_resolve_parent_db`, `forks.py:119`) — newest-first scan, raises `FileNotFoundError` → 404.
 2. Open the parent read-only, call `evaluation.fork.fork()` to snapshot the parent's `turn_start` state. Capture the fork event into an in-memory `_CapturingSink` (`forks.py:183`) — the fork primitive is sync but we need to publish via async broker.
@@ -76,7 +76,7 @@ Fork tasks are tracked in `app.state.fork_tasks` (a strong-reference set). Witho
 
 ## Frontend topology
 
-`arena/web/ui/src/App.tsx`. The shape is a 2-column grid:
+`packages/arena-web/src/ui/src/App.tsx`. The shape is a 2-column grid:
 
 ```
 ┌─ aside (300px) ──┬─ main ───────────────────────────────────────┐
@@ -107,7 +107,7 @@ Three wiring modes are supported:
 | Mode | When | What you set |
 |---|---|---|
 | Vite dev proxy | Local dev — UI on :5173, FastAPI on :8000 | Nothing. `vite.config.ts` proxies `/runs`, `/events`, `/forks`, `/health` to `http://localhost:8000`. |
-| Cross-origin dev | UI local, backend on a VM | `VITE_API_BASE_URL=http://vm:8000` in `arena/web/ui/.env.local`, plus `ARENA_WEB_CORS_ORIGINS` on the backend to allow the SPA origin. |
+| Cross-origin dev | UI local, backend on a VM | `VITE_API_BASE_URL=http://vm:8000` in `packages/arena-web/src/ui/.env.local`, plus `ARENA_WEB_CORS_ORIGINS` on the backend to allow the SPA origin. |
 | Prod build | SPA served from the API origin | Build with `bun run build`, mount `dist/` behind FastAPI (not wired by default — the contract above is enough to do it). |
 
 See [Chapter 21 — Running the UI Locally](./21-running-the-ui-locally.md) for the actual recipes.

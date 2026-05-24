@@ -1,0 +1,25 @@
+[project]
+name = "autoresearch"
+version = "0.1.0"
+description = "Autonomous prompt-optimization loop — mutate, run, score, accept/revert."
+requires-python = ">=3.11"
+dependencies = [
+    "core",
+    "gameplay-agent",
+    "anthropic>=0.84.0",
+    "structlog>=24.1.0",
+]
+
+[project.scripts]
+aoe2-autoresearch = "autoresearch.orchestrator:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = { "autoresearch" = "src" }
+packages = ["autoresearch"]
+
+[tool.setuptools.package-data]
+autoresearch = ["config.yaml"]

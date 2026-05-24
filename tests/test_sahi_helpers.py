@@ -9,8 +9,6 @@ exercise meaningfully and are intentionally skipped here.
 
 from __future__ import annotations
 
-from PIL import Image
-
 from detection.inference.detector import DetectedEntity
 from detection.inference.sahi import (
     SAHI_OVERLAP,
@@ -20,6 +18,7 @@ from detection.inference.sahi import (
     merge_detections,
     merge_overlapping_rois,
 )
+from PIL import Image
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -16,8 +16,7 @@ from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import duckdb
-
-from arena.web.server import _stream_from_broker
+from arena_web.server import _stream_from_broker
 from evaluation.event_broker import InProcessEventBroker, RunId, Seq
 
 if TYPE_CHECKING:

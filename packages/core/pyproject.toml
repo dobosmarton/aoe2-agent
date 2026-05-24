@@ -1,0 +1,14 @@
+[project]
+name = "core"
+version = "0.1.0"
+description = "Shared types — Event/Payload, WorldState, DetectedEntity. Zero I/O."
+requires-python = ">=3.11"
+dependencies = ["pydantic>=2.5.0"]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = { "core" = "src" }
+packages = ["core"]

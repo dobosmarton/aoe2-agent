@@ -15,11 +15,10 @@ from __future__ import annotations
 
 import io
 
-import pytest
-from PIL import Image
-
 import detection.inference.detector as detector_mod
+import pytest
 from detection.inference.detector import DetectedEntity, EntityDetector, get_detector
+from PIL import Image
 
 # ---------------------------------------------------------------------------
 # Helpers

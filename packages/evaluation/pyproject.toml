@@ -1,0 +1,23 @@
+[project]
+name = "evaluation"
+version = "0.1.0"
+description = "Event broker, DuckDB persister, synthetic world sim. No agent coupling."
+requires-python = ">=3.11"
+dependencies = [
+    "core",
+    "duckdb>=1.0.0",
+    "numpy>=1.24.0",
+    "pydantic>=2.5.0",
+    "structlog>=24.1.0",
+]
+
+[project.optional-dependencies]
+broker-redis = ["redis>=5.0"]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = { "evaluation" = "src" }
+packages = ["evaluation"]

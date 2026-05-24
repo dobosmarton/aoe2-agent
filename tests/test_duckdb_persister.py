@@ -10,7 +10,6 @@ import asyncio
 from typing import TYPE_CHECKING, cast
 
 import duckdb
-
 from evaluation.duckdb_persister import (
     MultiRunBrokerSink,
     persist_to_duckdb,

@@ -24,7 +24,7 @@ The context string is built in two stages: `_build_llm_context()` in the game lo
 
 ## 6.2 Memory System
 
-### Data Structures (`gameplay_agent/memory.py`)
+### Data Structures (`packages/gameplay-agent/src/memory.py`)
 
 **Turn** -- a single decision cycle:
 ```python

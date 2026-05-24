@@ -9,8 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import yaml
-
-from evaluation.log_to_scenario import (
+from gameplay_agent.log_to_scenario import (
     TurnSnapshot,
     emit_fixture,
     find_age_transitions,

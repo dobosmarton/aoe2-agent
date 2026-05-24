@@ -1,0 +1,38 @@
+[project]
+name = "detection"
+version = "0.1.0"
+description = "YOLO inference, training, labeling, and SLD sprite extraction."
+requires-python = ">=3.11"
+dependencies = [
+    "core",
+    "numpy>=1.24.0",
+    "onnxruntime>=1.17.0",
+    "Pillow>=10.0.0",
+    "pyyaml>=6.0",
+    "scipy>=1.11.0",
+    "structlog>=24.1.0",
+]
+
+[project.optional-dependencies]
+training = ["ultralytics>=8.4"]
+labeling = ["sahi>=0.11", "ultralytics>=8.4"]
+coreml = ["coremltools>=8.0"]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+# Explicit packages list — setuptools' `find(where=["src"])` combined with
+# `package-dir` rewriting registers subdirs as top-level packages instead of
+# `detection.*` subpackages (seen via .egg-info/top_level.txt). Enumerating
+# the subpackages dodges that interaction.
+[tool.setuptools]
+package-dir = { "detection" = "src" }
+packages = [
+    "detection",
+    "detection.extraction",
+    "detection.inference",
+    "detection.labeling",
+    "detection.testing",
+    "detection.training",
+]

@@ -1,0 +1,27 @@
+[project]
+name = "detection-server"
+version = "0.1.0"
+description = "FastAPI detection server — macOS-hosted YOLO inference."
+requires-python = ">=3.11"
+dependencies = [
+    "core",
+    "detection",
+    "fastapi>=0.115.0",
+    "Pillow>=10.0.0",
+    "python-multipart>=0.0.7",
+    "uvicorn>=0.30.0",
+]
+
+[project.scripts]
+aoe2-server = "detection_server.app:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = { "detection_server" = "src" }
+packages = ["detection_server"]
+
+[tool.setuptools.package-data]
+detection_server = ["classes.yaml"]

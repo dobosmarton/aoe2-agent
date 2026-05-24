@@ -10,7 +10,6 @@ import asyncio
 
 import duckdb
 import pytest
-
 from evaluation.event_log import DuckDBEventSink, Event, NullEventSink, TurnStartPayload
 from evaluation.fork import ForkError, fork
 from evaluation.world_sim import WorldState

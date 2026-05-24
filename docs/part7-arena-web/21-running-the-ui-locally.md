@@ -20,7 +20,7 @@ just arena-ui-dev
 
 Browse to <http://localhost:5173>. Pick a run from the left sidebar.
 
-`just arena-web-dev` resolves to `python -m arena.web --port 8000` (`arena/web/__main__.py`). `just arena-ui-dev` runs `bun install` (idempotent) then `bun run dev`. Both recipes are in `justfile:138` and `:165`.
+`just arena-web-dev` resolves to `python -m arena_web --port 8000` (`packages/arena-web/src/__main__.py`). `just arena-ui-dev` runs `bun install` (idempotent) then `bun run dev`. Both recipes are in `justfile:138` and `:165`.
 
 ## Configuration knobs
 
@@ -37,9 +37,9 @@ Browse to <http://localhost:5173>. Pick a run from the left sidebar.
 
 | Env Var | Default | Purpose |
 |---|---|---|
-| `VITE_API_BASE_URL` | unset (use Vite dev proxy) | Set to a full `http(s)://host:port` URL to bypass the proxy. Necessary when the backend is on a different machine. Live in `arena/web/ui/.env.local`; the example is `arena/web/ui/.env.example`. |
+| `VITE_API_BASE_URL` | unset (use Vite dev proxy) | Set to a full `http(s)://host:port` URL to bypass the proxy. Necessary when the backend is on a different machine. Live in `packages/arena-web/src/ui/.env.local`; the example is `packages/arena-web/src/ui/.env.example`. |
 
-The proxy paths (`/runs`, `/events`, `/forks`, `/health`) are listed in `arena/web/ui/vite.config.ts`. When `VITE_API_BASE_URL` is set, the frontend prepends it to every API call instead of using relative URLs.
+The proxy paths (`/runs`, `/events`, `/forks`, `/health`) are listed in `packages/arena-web/src/ui/vite.config.ts`. When `VITE_API_BASE_URL` is set, the frontend prepends it to every API call instead of using relative URLs.
 
 ## Three deployment modes
 
@@ -102,7 +102,7 @@ The end-to-end Operator workflow:
 6. The new run appears in the sidebar; the timeline starts streaming live as `_replay` publishes events.
 7. Switch to the **Diff** tab to see parent vs child side-by-side.
 
-For this to work you need `ANTHROPIC_API_KEY` exported in the shell that started `arena-web-dev` — the fork replay drives a real LLM. The default fork profile is Haiku at temperature 0.5 (`arena/web/forks.py:95`, `DEFAULT_FORK_PROFILE`). Cost per 10-turn fork is roughly the same per-profile cost as one race-instance variant from `arena race` — see Chapter 17 for the breakdown.
+For this to work you need `ANTHROPIC_API_KEY` exported in the shell that started `arena-web-dev` — the fork replay drives a real LLM. The default fork profile is Haiku at temperature 0.5 (`packages/arena-web/src/forks.py:95`, `DEFAULT_FORK_PROFILE`). Cost per 10-turn fork is roughly the same per-profile cost as one race-instance variant from `arena race` — see Chapter 17 for the breakdown.
 
 ## Troubleshooting
 

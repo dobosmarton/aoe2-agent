@@ -75,7 +75,7 @@ These are accumulated failure modes from many bring-up attempts:
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `ModuleNotFoundError: No module named 'detection'` after `pip install` | Editable install missed the `detection/` directory because `pyproject.toml` excludes it; you ran `pip install` from the wrong dir | `cd agent` and run `pip install -e .` from the project root. |
+| `ModuleNotFoundError: No module named 'detection'` after `pip install` | Editable install missed the `packages/detection/src/` directory because `pyproject.toml` excludes it; you ran `pip install` from the wrong dir | `cd agent` and run `pip install -e .` from the project root. |
 | Agent starts but `detector_initialized` shows `mode=local`, not `remote` | `AOE2_DETECTION_HOST` not set or unreachable | `printenv AOE2_DETECTION_HOST` on the VM; `curl` the URL; check Mac firewall. |
 | `game_not_found` on first iteration | AoE2 window not detected | Click the AoE2 window once. Don't minimize it. Run the agent from Command Prompt, not from inside an IDE that might steal focus. |
 | `could_not_focus_game` | Focus race | Add a 2-second `time.sleep` between starting AoE2 and the agent. Easier: focus the AoE2 window manually, then `Win+R`, switch to Command Prompt, hit enter. |

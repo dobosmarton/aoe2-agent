@@ -37,7 +37,7 @@ def actions():
 
 
 def test_must_include_pass(actions):
-    from evaluation.assertions import evaluate
+    from gameplay_agent.assertions import evaluate
 
     failures = evaluate(
         {"must_include": {"type": "press", "key": "z"}}, actions=actions, reasoning=""
@@ -46,14 +46,14 @@ def test_must_include_pass(actions):
 
 
 def test_must_include_fail(actions):
-    from evaluation.assertions import evaluate
+    from gameplay_agent.assertions import evaluate
 
     failures = evaluate({"must_include": {"type": "build"}}, actions=actions, reasoning="")
     assert any("must_include FAILED" in f for f in failures)
 
 
 def test_must_include_first_pass(actions):
-    from evaluation.assertions import evaluate
+    from gameplay_agent.assertions import evaluate
 
     expected = {
         "must_include_first": [{"type": "press", "key": "h"}, {"type": "press", "key": "z"}]
@@ -63,7 +63,7 @@ def test_must_include_first_pass(actions):
 
 
 def test_must_include_first_wrong_order(actions):
-    from evaluation.assertions import evaluate
+    from gameplay_agent.assertions import evaluate
 
     expected = {"must_include_first": [{"type": "press", "key": "z"}]}
     failures = evaluate(expected, actions=actions, reasoning="")
@@ -71,7 +71,7 @@ def test_must_include_first_wrong_order(actions):
 
 
 def test_must_not_include_list(actions):
-    from evaluation.assertions import evaluate
+    from gameplay_agent.assertions import evaluate
 
     expected = {"must_not_include": [{"type": "press", "key": "b"}, {"type": "queue_villager"}]}
     failures = evaluate(expected, actions=actions, reasoning="")
@@ -79,7 +79,7 @@ def test_must_not_include_list(actions):
 
 
 def test_must_not_include_hit(actions):
-    from evaluation.assertions import evaluate
+    from gameplay_agent.assertions import evaluate
 
     failures = evaluate(
         {"must_not_include": {"type": "press", "key": "h"}}, actions=actions, reasoning=""
@@ -88,21 +88,21 @@ def test_must_not_include_hit(actions):
 
 
 def test_count_at_most_zero(actions):
-    from evaluation.assertions import evaluate
+    from gameplay_agent.assertions import evaluate
 
     failures = evaluate({"count_at_most": {"type": "build", "n": 0}}, actions=actions, reasoning="")
     assert failures == []
 
 
 def test_count_at_most_exceeded(actions):
-    from evaluation.assertions import evaluate
+    from gameplay_agent.assertions import evaluate
 
     failures = evaluate({"count_at_most": {"type": "press", "n": 1}}, actions=actions, reasoning="")
     assert any("count_at_most FAILED" in f for f in failures)
 
 
 def test_count_at_least_match():
-    from evaluation.assertions import evaluate
+    from gameplay_agent.assertions import evaluate
 
     actions = [{"type": "build", "building_key": "a"}, {"type": "build", "building_key": "a"}]
     failures = evaluate(
@@ -114,7 +114,7 @@ def test_count_at_least_match():
 
 
 def test_applied_memories_exact(actions):
-    from evaluation.assertions import evaluate
+    from gameplay_agent.assertions import evaluate
 
     failures = evaluate(
         {"applied_memories": ["foo"]}, actions=actions, reasoning="[applied: foo] reasoning text"
@@ -123,7 +123,7 @@ def test_applied_memories_exact(actions):
 
 
 def test_applied_memories_subset_extras_ok(actions):
-    from evaluation.assertions import evaluate
+    from gameplay_agent.assertions import evaluate
 
     failures = evaluate(
         {"applied_memories_subset": ["foo"]},
@@ -140,7 +140,7 @@ def test_applied_memories_tag_anywhere_in_reasoning(actions):
     (`**Plan:**\n1. [applied: foo] ...`). The contract is "model self-reports
     somewhere", so position should not gate the assertion.
     """
-    from evaluation.assertions import evaluate
+    from gameplay_agent.assertions import evaluate
 
     reasoning = "**Plan:**\n1. [applied: foo] Population is at 13/15, build a house now."
     failures = evaluate({"applied_memories_subset": ["foo"]}, actions=actions, reasoning=reasoning)
@@ -149,7 +149,7 @@ def test_applied_memories_tag_anywhere_in_reasoning(actions):
 
 def test_applied_memories_no_tag_still_fails(actions):
     """Sanity: missing-tag still produces a failure (regex change didn't go too far)."""
-    from evaluation.assertions import evaluate
+    from gameplay_agent.assertions import evaluate
 
     failures = evaluate(
         {"applied_memories_subset": ["foo"]}, actions=actions, reasoning="No tag here, just prose."
@@ -158,7 +158,7 @@ def test_applied_memories_no_tag_still_fails(actions):
 
 
 def test_reasoning_contains_case_insensitive(actions):
-    from evaluation.assertions import evaluate
+    from gameplay_agent.assertions import evaluate
 
     failures = evaluate(
         {"reasoning_contains": "FEUDAL"}, actions=actions, reasoning="going to feudal age"
@@ -167,7 +167,7 @@ def test_reasoning_contains_case_insensitive(actions):
 
 
 def test_unknown_assertion_caught(actions):
-    from evaluation.assertions import evaluate
+    from gameplay_agent.assertions import evaluate
 
     failures = evaluate({"bogus_assertion": True}, actions=actions, reasoning="")
     assert any("unknown assertion key" in f for f in failures)
@@ -180,7 +180,7 @@ def test_unknown_assertion_caught(actions):
 
 def test_differs_must_include_pass():
     """Variant has the pattern, baseline doesn't → pass."""
-    from evaluation.assertions import evaluate
+    from gameplay_agent.assertions import evaluate
 
     baseline = [{"type": "queue_villager"}]
     variant = [{"type": "queue_villager"}, {"type": "build", "building_key": "q"}]
@@ -193,7 +193,7 @@ def test_differs_must_include_pass():
 
 def test_differs_must_include_fail_when_pattern_in_baseline():
     """Pattern in BOTH baseline and variant → fail (no actual difference)."""
-    from evaluation.assertions import evaluate
+    from gameplay_agent.assertions import evaluate
 
     baseline = [{"type": "build", "building_key": "q"}]
     variant = [{"type": "build", "building_key": "q"}, {"type": "queue_villager"}]
@@ -206,7 +206,7 @@ def test_differs_must_include_fail_when_pattern_in_baseline():
 
 def test_differs_must_not_include_pass():
     """Baseline has pattern, variant doesn't → pass."""
-    from evaluation.assertions import evaluate
+    from gameplay_agent.assertions import evaluate
 
     baseline = [{"type": "queue_villager"}, {"type": "press", "key": "q"}]
     variant = [{"type": "build", "building_key": "a"}]
@@ -217,7 +217,7 @@ def test_differs_must_not_include_pass():
 
 def test_differs_no_baseline_fails_explicitly():
     """differs_from_baseline_by without a baseline must produce a clear error."""
-    from evaluation.assertions import evaluate
+    from gameplay_agent.assertions import evaluate
 
     expected = {"differs_from_baseline_by": {"must_include": {"type": "build"}}}
     failures = evaluate(expected, actions=[], reasoning="", baseline_actions=None)
@@ -226,7 +226,7 @@ def test_differs_no_baseline_fails_explicitly():
 
 def test_differs_combined_must_include_and_must_not_include():
     """Both directions can be checked in one assertion."""
-    from evaluation.assertions import evaluate
+    from gameplay_agent.assertions import evaluate
 
     baseline = [{"type": "queue_villager"}]
     variant = [{"type": "build", "building_key": "a"}]
@@ -246,7 +246,7 @@ def test_differs_combined_must_include_and_must_not_include():
 
 
 def test_expand_variants_no_variants_returns_single_anonymous():
-    from evaluation.runner import _expand_variants
+    from gameplay_agent.scenario_runner import _expand_variants
 
     fixture = {"name": "x", "inputs": {"age": "Dark Age"}, "expected": {"x": 1}}
     expanded = _expand_variants(fixture)
@@ -256,7 +256,7 @@ def test_expand_variants_no_variants_returns_single_anonymous():
 
 
 def test_expand_variants_overlays_memories_on_base_inputs():
-    from evaluation.runner import _expand_variants
+    from gameplay_agent.scenario_runner import _expand_variants
 
     base_mem = {"title": "base"}
     variant_mem = {"title": "variant"}
@@ -283,7 +283,7 @@ def test_expand_variants_overlays_memories_on_base_inputs():
 
 
 def test_expand_variants_inherits_base_memories_when_variant_omits():
-    from evaluation.runner import _expand_variants
+    from gameplay_agent.scenario_runner import _expand_variants
 
     base_mem = {"title": "base"}
     fixture = {
@@ -297,7 +297,7 @@ def test_expand_variants_inherits_base_memories_when_variant_omits():
 
 def test_expand_variants_overrides_strategist_overrides_per_variant():
     """Each variant can carry its own `strategist_overrides:` block."""
-    from evaluation.runner import _expand_variants
+    from gameplay_agent.scenario_runner import _expand_variants
 
     fixture = {
         "name": "x",
@@ -323,7 +323,7 @@ def test_expand_variants_overrides_strategist_overrides_per_variant():
 
 def test_apply_strategist_overrides_resources_shallow_merge():
     """Override only specified resource fields; preserve the rest."""
-    from evaluation.context_builder import _apply_strategist_overrides
+    from gameplay_agent.context_builder import _apply_strategist_overrides
 
     inputs = {
         "resources": {"food": 200, "wood": 150, "gold": 50},
@@ -337,7 +337,7 @@ def test_apply_strategist_overrides_resources_shallow_merge():
 
 def test_apply_strategist_overrides_goals_replace_entirely():
     """Goals are a list; partial-merge is ambiguous, so we replace wholesale."""
-    from evaluation.context_builder import _apply_strategist_overrides
+    from gameplay_agent.context_builder import _apply_strategist_overrides
 
     inputs = {
         "goals": [{"name": "old", "priority": 9}],
@@ -348,7 +348,7 @@ def test_apply_strategist_overrides_goals_replace_entirely():
 
 
 def test_apply_strategist_overrides_no_overrides_passes_through():
-    from evaluation.context_builder import _apply_strategist_overrides
+    from gameplay_agent.context_builder import _apply_strategist_overrides
 
     inputs = {"resources": {"food": 200}, "goals": [{"name": "x"}]}
     result = _apply_strategist_overrides(inputs)
@@ -359,7 +359,7 @@ def test_apply_strategist_overrides_no_overrides_passes_through():
 def test_apply_strategist_overrides_does_not_mutate_input():
     """Critical: Phase 1 multi-turn calls _build_context per turn — mutation
     would corrupt the fixture across turns."""
-    from evaluation.context_builder import _apply_strategist_overrides
+    from gameplay_agent.context_builder import _apply_strategist_overrides
 
     inputs = {
         "resources": {"food": 200, "wood": 150},
@@ -372,7 +372,7 @@ def test_apply_strategist_overrides_does_not_mutate_input():
 
 def test_apply_strategist_overrides_empty_dict_is_noop():
     """A `strategist_overrides: {}` key means "no overrides" — just like absent."""
-    from evaluation.context_builder import _apply_strategist_overrides
+    from gameplay_agent.context_builder import _apply_strategist_overrides
 
     inputs = {"resources": {"food": 200}, "strategist_overrides": {}}
     result = _apply_strategist_overrides(inputs)
@@ -381,7 +381,7 @@ def test_apply_strategist_overrides_empty_dict_is_noop():
 
 def test_build_context_applies_strategist_overrides():
     """End-to-end: _build_context emits strategist-overridden values in the LLM prompt."""
-    from evaluation.context_builder import _build_context
+    from gameplay_agent.context_builder import _build_context
 
     fixture = {
         "inputs": {
@@ -405,9 +405,9 @@ def test_build_context_applies_strategist_overrides():
 def test_scenario_display_name_with_and_without_variant():
     from pathlib import Path
 
-    from evaluation.runner import _scenario_display_name
+    from gameplay_agent.scenario_runner import _scenario_display_name
 
-    path = Path("evaluation/scenarios/x.yaml")
+    path = Path("gameplay_agent/scenarios/x.yaml")
     assert _scenario_display_name(path, None) == "x"
     assert _scenario_display_name(path, "baseline") == "x [baseline]"
 
@@ -419,8 +419,8 @@ def test_scenario_display_name_with_and_without_variant():
 
 def test_isolate_memories_dir_normal_flow_backs_up_and_restores(tmp_path, monkeypatch):
     """Real memories are moved aside, fixtures planted, then restored on exit."""
-    from autoresearch import memory_chain
-    from evaluation.test_isolation import _isolate_memories_dir
+    from gameplay_agent import memory_chain
+    from gameplay_agent.test_isolation import _isolate_memories_dir
 
     fake_memories = tmp_path / "memories"
     fake_memories.mkdir()
@@ -440,8 +440,8 @@ def test_isolate_memories_dir_normal_flow_backs_up_and_restores(tmp_path, monkey
 
 def test_isolate_memories_dir_raises_on_orphan_backup(tmp_path, monkeypatch):
     """An orphan backup from a crashed prior run blocks new runs (no silent data loss)."""
-    from autoresearch import memory_chain
-    from evaluation.test_isolation import _isolate_memories_dir
+    from gameplay_agent import memory_chain
+    from gameplay_agent.test_isolation import _isolate_memories_dir
 
     fake_memories = tmp_path / "memories"
     fake_backup = tmp_path / "memories_eval_backup"
@@ -460,8 +460,8 @@ def test_isolate_memories_dir_raises_on_orphan_backup(tmp_path, monkeypatch):
 
 def test_isolate_memories_dir_no_existing_memories(tmp_path, monkeypatch):
     """Fresh state (no memories dir) works without errors."""
-    from autoresearch import memory_chain
-    from evaluation.test_isolation import _isolate_memories_dir
+    from gameplay_agent import memory_chain
+    from gameplay_agent.test_isolation import _isolate_memories_dir
 
     fake_memories = tmp_path / "memories"  # does NOT exist yet
     monkeypatch.setattr(memory_chain, "MEMORIES_DIR", fake_memories)
@@ -541,7 +541,7 @@ def test_scenario_runs(fixture_path):
     For variant fixtures, fails if ANY variant fails — the failure message
     aggregates per-variant details so all problems surface at once.
     """
-    from evaluation.runner import _load_dotenv, run_scenario
+    from gameplay_agent.scenario_runner import _load_dotenv, run_scenario
 
     _load_dotenv()
     if not os.environ.get("ANTHROPIC_API_KEY"):

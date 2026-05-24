@@ -1,190 +1,93 @@
-[build-system]
-requires = ["setuptools>=68.0"]
-build-backend = "setuptools.build_meta"
+# Workspace root — not a Python package itself; declares the workspace members
+# and holds shared tooling config (ruff, basedpyright, coverage) that every
+# member inherits.
+#
+# Install everything editable in one shot:
+#     uv sync                        # all members + dev tools
+#     uv sync --no-dev               # all members, no dev tools
+#
+# Run a specific package's entry point:
+#     uv run --package gameplay-agent aoe2-agent
+#     uv run --package arena aoe2-arena race
+#     uv run --package arena-web aoe2-arena-web
+#     uv run --package detection-server aoe2-server
 
+[tool.uv.workspace]
+members = ["packages/*"]
 
-# ---------------------------------------------------------------------------
-# Project metadata (PEP 621)
-# ---------------------------------------------------------------------------
-# Single source of truth for dependencies and scripts. Install with:
-#   pip install -e .                  # core agent (Mac dev)
-#   pip install -e ".[server]"        # also install the detection server
-#   pip install -e ".[dev]"           # core + dev tooling (ruff, pytest, ...)
-#   pip install -e ".[server,dev]"    # everything for full local work
-#   pip install -e ".[coreml]"        # macOS-only CoreML inference
-[project]
-name = "aoe2-agent"
-version = "0.1.0"
-description = "AoE2 LLM Arena — gameplay agent + detection server + evaluation framework"
-requires-python = ">=3.11"
-authors = [{ name = "Marton Dobos" }]
-readme = { file = "README.md", content-type = "text/markdown" }
+# Wire every workspace member to its sibling source. Without these `[tool.uv.sources]`
+# entries, uv would try to resolve the package names from PyPI.
+[tool.uv.sources]
+core             = { workspace = true }
+detection        = { workspace = true }
+evaluation       = { workspace = true }
+gameplay-agent   = { workspace = true }
+arena            = { workspace = true }
+arena-web        = { workspace = true }
+detection-server = { workspace = true }
+autoresearch     = { workspace = true }
+data             = { workspace = true }
 
-# Core runtime — used by gameplay_agent and indirectly by tests.
-# Mirrors gameplay_agent/requirements.txt; the .txt file is kept as a
-# convenience alias but `pip install -e .` is the source of truth.
-dependencies = [
-    "anthropic>=0.84.0",
-    "colorama>=0.4.6",
-    "duckdb>=1.0.0",
-    "httpx>=0.27.0",
-    "mss>=9.0.0",
-    "numpy>=1.24.0",
-    "onnxruntime>=1.17.0",
-    "Pillow>=10.0.0",
-    "pyautogui>=0.9.54",
-    "pydantic>=2.5.0",
-    "pygetwindow>=0.0.9",
-    "python-multipart>=0.0.7",
-    "pyyaml>=6.0",
-    "scipy>=1.11.0",
-    "structlog>=24.1.0",
-    "tenacity>=8.2.0",
-]
-
-[project.optional-dependencies]
-server = [
-    "fastapi>=0.115.0",
-    "uvicorn>=0.30.0",
-]
-# Distributed event-broker backend (Phase C). Opt-in: install only when
-# ARENA_BROKER_BACKEND=redis. Default in-process broker has no external deps.
-broker-redis = [
-    "redis>=5.0",
-]
+# Dev tooling — installed alongside every member. PEP 735 dependency-groups
+# are the modern replacement for the old `[project.optional-dependencies] dev`
+# pattern; uv installs them on `uv sync` (unless `--no-dev`).
+[dependency-groups]
 dev = [
-    "ruff>=0.15.0",
+    "basedpyright>=1.39.0",
+    "fakeredis>=2.20",
+    "hypothesis>=6.0",
+    "pre-commit>=4.0.0",
     "pytest>=9.0.0",
     "pytest-cov>=5.0.0",
-    # basedpyright = stricter pyright fork; recognizes reportAny /
-    # reportExplicitAny (Microsoft's pyright deliberately omits them).
-    # Configured under [tool.pyright] — basedpyright reads the same section.
-    "basedpyright>=1.39.0",
-    "pre-commit>=4.0.0",
-    # Redis broker contract tests use fakeredis (in-memory) so CI doesn't
-    # need a real Redis server. `redis` ships in the broker-redis extra;
-    # dev needs it transitively for the contract test to import RedisStreamsBroker.
     "redis>=5.0",
-    "fakeredis>=2.20",
-    # Hypothesis powers the broker's property-based contract tests in
-    # tests/test_event_broker.py — the design doc names hypothesis as the
-    # canonical correctness witness for the Seq-dense / identical-observation
-    # invariants. Pure-Python, ~1MB.
-    "hypothesis>=6.0",
+    "ruff>=0.15.0",
 ]
-# macOS-only — install separately when running CoreML inference.
-coreml = [
-    "coremltools>=8.0",
-]
-# YOLO training / inference toolchain. Installed on training boxes
-# (Windows VM, Linux GPU host) and on any dev machine that runs
-# `detection/` scripts. Not part of the core agent runtime, which
-# uses ONNX via `onnxruntime` (already in core deps).
-detection = [
-    "ultralytics>=8.4",
-]
-# Sliced inference for small-object pre-labeling (`detection/labeling/prelabel.py`
-# with `--use-sahi`). Optional; the prelabel CLI falls back to whole-image
-# inference when sahi is not installed.
-labeling = [
-    "sahi>=0.11",
-    "ultralytics>=8.4",
-]
-
-[project.scripts]
-aoe2-agent = "gameplay_agent.main:main"
-aoe2-server = "server.app:main"
-
-[tool.setuptools.packages.find]
-include = [
-    "gameplay_agent*",
-    "autoresearch*",
-    "evaluation*",
-    "server*",
-    "detection*",
-    "data*",
-    "arena*",
-]
-exclude = ["tests*", "experiments*", "venv*", "memories*", "logs*", "tmp*", "arena.web.ui*"]
 
 
 # ---------------------------------------------------------------------------
-# Ruff
+# Ruff — applies repo-wide via `[tool.ruff]` here.
 # ---------------------------------------------------------------------------
 
 [tool.ruff]
 target-version = "py311"
 line-length = 100
 
-# Skip vendored / scratch / non-source dirs. Ruff's defaults already exclude
-# venv, build, dist, etc., but spell out the project-specific ones. Every
-# first-party package (gameplay_agent, autoresearch, evaluation, server,
-# detection, arena, data) is linted — only scratch dirs and bundled assets
-# are skipped.
+# Lint all first-party source under packages/ + tests. Scratch / vendored /
+# non-source dirs stay excluded.
 extend-exclude = [
     "experiments",
     "logs",
     "tmp",
     "memories",
     "game_graphics",
-    "arena/web/ui",
+    "ui",                          # Vite/TypeScript frontend, not Python
 ]
 
 [tool.ruff.lint]
-# Active rule set. Rules that have been baselined and triaged are below;
-# deliberately deferred rules + the reason are listed in the comment block
-# after `select`.
 select = [
     "E",   # pycodestyle errors
-    "F",   # pyflakes (unused imports, undefined names)
+    "F",   # pyflakes
     "W",   # pycodestyle warnings
     "I",   # isort
-    "UP",  # pyupgrade (modern Python idioms)
-    "B",   # flake8-bugbear (likely bugs)
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
     "SIM", # flake8-simplify
     "RUF", # ruff-specific
-    "PTH", # flake8-use-pathlib (prefer Path over os.path/builtin open)
-    "DTZ", # flake8-datetimez (require explicit tz on datetime calls)
-    "RET", # flake8-return (drop superfluous else-after-return / build-then-return)
-    "TCH", # flake8-type-checking (push type-only imports under TYPE_CHECKING)
-    "C4",  # flake8-comprehensions (idiomatic comprehensions / dict construction)
-    "ANN", # flake8-annotations (require type hints on AI-agent code)
-    "PGH", # pygrep-hooks: forbid blanket `# type: ignore` without a code; flag eval/exec usage
+    "PTH", # flake8-use-pathlib
+    "DTZ", # flake8-datetimez
+    "RET", # flake8-return
+    "TCH", # flake8-type-checking
+    "C4",  # flake8-comprehensions
+    "ANN", # flake8-annotations
+    "PGH", # pygrep-hooks
 ]
-# Rules audited and intentionally NOT enabled (re-evaluate when the
-# corresponding baseline shrinks or a contributor wants to do the cleanup):
-#   ANN   — 249 missing-annotation errors. Worth attacking once core
-#           modules have full type hints; doing it as a global pass would
-#           churn 30+ files for low marginal value.
-#   BLE001 — 41 broad `except Exception:` sites, all legitimate boundary
-#           catches (anthropic SDK, optional-resource init, harness
-#           tolerance). See note in `ignore` below.
-#   S     — 348 hits dominated by S101 (267 `assert` in tests; the standard
-#           way to write pytest assertions) and S311 (67 random.*; used for
-#           game-variety, not crypto). Real signal would be drowned.
-#   N     — naming. Several established names (e.g. `_DETECTED_ENTITIES`)
-#           would flip on enabling.
-#   PL    — pylint-style rules; ~1k findings, mostly stylistic.
 ignore = [
-    "E501",   # line-too-long: ruff format handles formatting; long literals are fine
-    "B008",   # function-call-in-default-argument: common with FastAPI Depends() etc.
+    "E501",   # line-too-long handled by formatter
+    "B008",   # function-call-in-default-argument: FastAPI Depends(), etc.
     "SIM108", # use ternary: not always more readable
-    # ANN401 (`Any` in type annotations) IS enforced. The codebase aims to have
-    # zero `Any` annotations. SDK boundaries that genuinely need to escape the
-    # type system use `# pyright: ignore[reportArgumentType]` per-line instead
-    # of the previous `cast(Any, ...)` pattern.
-    # BLE001 (blind-except) deliberately NOT enabled. Audited 2026-05: all 41
-    # `except Exception:` sites are legitimate boundary catches (anthropic API
-    # calls, optional-resource init, scenario-harness tolerance, file-parser
-    # robustness, Tkinter overlay, conftest GUI-import shim). Narrowing them
-    # would mean every new exception type from a third-party SDK becomes an
-    # unhandled crash. Re-run `ruff check . --select BLE001` for an ad-hoc
-    # audit before adding new broad catches.
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# Tests don't need annotations — pytest doesn't care about test return types,
-# and `dataclass` test fixtures get annotation-free defaults.
 "tests/**" = ["ANN"]
 
 [tool.ruff.format]
@@ -193,127 +96,50 @@ indent-style = "space"
 
 
 # ---------------------------------------------------------------------------
-# Pyright — static type checker
+# basedpyright — applies repo-wide. Discovers each package via the workspace
+# install (uv puts editable shims under .venv/lib/.../site-packages).
 # ---------------------------------------------------------------------------
-# Covers every first-party python package in the repo. Exclusions are scratch
-# / vendored / non-source dirs only — no first-party package is allowed to
-# skip type checking. numpy / PIL / ultralytics boundaries are crossed via
-# explicit `cast(...)` at the call site, not by excluding the file.
+
 [tool.pyright]
-include = [
-    "gameplay_agent",
-    "autoresearch",
-    "evaluation",
-    "server",
-    "detection",
-    "arena",
-    "data",
-]
+# Scope to first-party source only — tests were never typechecked under
+# the previous setup either (matches the pre-workspace CI scope).
+include = ["packages/*/src"]
 exclude = [
-    "venv",
+    ".venv",
     "**/__pycache__",
     "experiments",
     "tmp",
     "logs",
     "memories",
-    "arena/web/ui",
+    "ui",
 ]
 typeCheckingMode = "basic"
 pythonVersion = "3.11"
-# Point pyright at the project venv so it can resolve installed third-party
-# packages (numpy, ultralytics, coremltools, etc.). Pyright/basedpyright are
-# Node tools: they do NOT auto-discover site-packages just because the
-# `basedpyright` binary lives inside `venv/bin/`. Without these two keys, every
-# third-party import becomes `reportMissingImports`, which then cascades into
-# `reportAttributeAccessIssue` for re-exported names (e.g. `YOLO` via
-# `detection/_ultralytics_compat.py`). Pre-commit and CI both resolve packages
-# from the same `venv/`, so a single setting covers all entry points.
 venvPath = "."
-venv = "venv"
-# Treat third-party packages without stubs as untyped rather than failing.
+venv = ".venv"
 reportMissingTypeStubs = false
 reportMissingImports = "warning"
-# Stubs at `./typings/<pkg>/` are intentionally checked-in for optional
-# extras that aren't installed on every platform (e.g. `coremltools` is
-# macOS-only). When a stub is found but the source isn't, pyright defaults
-# to a `reportMissingModuleSource` warning — useful for catching *required*
-# deps that fell out of install, but pure noise for *optional* extras where
-# "stub present, source absent" is the expected steady state on Linux CI.
 reportMissingModuleSource = "none"
-# Enforce no `Any` annotations and no `cast(Any, ...)` escape hatches.
-# SDK boundaries that genuinely need to escape the type system use
-# `# pyright: ignore[reportArgumentType]` per-line instead.
 reportExplicitAny = "error"
 reportAny = "error"
-
-# Per-directory extraPaths via executionEnvironments. Each scoped dir
-# needs `.` in its path so basedpyright's resolver can find sibling
-# packages (gameplay_agent, autoresearch, evaluation, etc.) without
-# strict-checking transitively-imported third-party code.
-#
-# NOTE: the original intent of these blocks was to enable
-# `typeCheckingMode = "strict"` per dir, but that key is unsupported
-# inside executionEnvironments by both pyright AND basedpyright —
-# the setting was silently inert. The whole repo runs at the base
-# `typeCheckingMode = "basic"`. Re-enabling per-dir strict requires
-# either explicit `reportXxx` overrides per env, or separate
-# pyrightconfig.json files in each dir. Tracked as a follow-up.
-[[tool.pyright.executionEnvironments]]
-root = "evaluation"
-extraPaths = ["."]
-
-[[tool.pyright.executionEnvironments]]
-root = "autoresearch"
-extraPaths = ["."]
-
-[[tool.pyright.executionEnvironments]]
-root = "gameplay_agent"
-extraPaths = ["."]
-
-[[tool.pyright.executionEnvironments]]
-root = "server"
-extraPaths = ["."]
-
-[[tool.pyright.executionEnvironments]]
-root = "arena"
-extraPaths = ["."]
-
-[[tool.pyright.executionEnvironments]]
-root = "detection"
-extraPaths = ["."]
-
-[[tool.pyright.executionEnvironments]]
-root = "data"
-extraPaths = ["."]
 
 
 # ---------------------------------------------------------------------------
 # Coverage (pytest-cov)
 # ---------------------------------------------------------------------------
-# Default `pytest --cov` to scope to first-party source dirs. Tests
-# themselves are excluded from coverage measurement (they're not what
-# we're trying to cover).
+
 [tool.coverage.run]
-source = [
-    "gameplay_agent",
-    "autoresearch",
-    "evaluation",
-    "server",
-    "detection",
-    "arena",
-]
+source = ["packages"]
 omit = [
     "*/tests/*",
     "*/__pycache__/*",
-    "venv/*",
+    ".venv/*",
     "experiments/*",
 ]
 branch = true
 
 [tool.coverage.report]
-# Show the missing line numbers — much more actionable than a bare percentage.
 show_missing = true
-# Skip files with 100% coverage to keep the report focused on gaps.
 skip_covered = false
 exclude_lines = [
     "pragma: no cover",
@@ -322,3 +148,12 @@ exclude_lines = [
     "raise NotImplementedError",
     "\\.\\.\\.",
 ]
+
+
+# ---------------------------------------------------------------------------
+# pytest — workspace-wide test discovery.
+# ---------------------------------------------------------------------------
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = []

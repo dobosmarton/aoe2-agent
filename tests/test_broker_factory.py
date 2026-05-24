@@ -14,7 +14,6 @@ isn't leaked across tests. The redis branch is exercised through `fakeredis`
 from __future__ import annotations
 
 import pytest
-
 from evaluation.broker_factory import make_broker
 from evaluation.event_broker import InProcessEventBroker
 
@@ -47,9 +46,8 @@ def test_make_broker_redis_returns_protocol_satisfying_object(
     # the whole wiring (env-var read → Redis client construction →
     # RedisStreamsBroker(client)) without a real Redis server.
     fakeredis = pytest.importorskip("fakeredis.aioredis")
-    from redis import asyncio as redis_asyncio
-
     from evaluation.redis_broker import RedisStreamsBroker
+    from redis import asyncio as redis_asyncio
 
     monkeypatch.setenv("ARENA_BROKER_BACKEND", "redis")
     monkeypatch.setenv("REDIS_URL", "redis://test-host:6379/0")

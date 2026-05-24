@@ -6,10 +6,10 @@ The game knowledge system provides structured AoE2 data to the agent. A SQLite d
 
 Two layers:
 
-1. **Static knowledge base** (`data/knowledge_base/`) -- JSON files fetched from external APIs, stored on disk.
-2. **Runtime database** (`data/game_knowledge.py`) -- SQLite wrapper that loads the JSON data and provides query methods for dynamic context injection.
+1. **Static knowledge base** (`packages/data/src/knowledge_base/`) -- JSON files fetched from external APIs, stored on disk.
+2. **Runtime database** (`packages/data/src/game_knowledge.py`) -- SQLite wrapper that loads the JSON data and provides query methods for dynamic context injection.
 
-The static files are fetched once by `data/fetch_aoe2_data.py` and committed to the repo. The runtime database is populated from these files (or directly from APIs) at agent startup.
+The static files are fetched once by `packages/data/src/fetch_aoe2_data.py` and committed to the repo. The runtime database is populated from these files (or directly from APIs) at agent startup.
 
 ## 10.2 Data Sources
 
@@ -35,7 +35,7 @@ Provides civilization and technology data:
 
 ## 10.3 Static Knowledge Base
 
-6 files in `data/knowledge_base/`:
+6 files in `packages/data/src/knowledge_base/`:
 
 | File | Records | Content |
 |------|---------|---------|
@@ -69,7 +69,7 @@ A concise strategic reference designed to be token-efficient for LLM consumption
 
 ## 10.4 SQLite Runtime Database
 
-`data/game_knowledge.py` wraps a SQLite database with four tables.
+`packages/data/src/game_knowledge.py` wraps a SQLite database with four tables.
 
 ### Schema
 
@@ -168,7 +168,7 @@ Returns counter relationships from hardcoded data:
 
 ## 10.6 Data Fetching Pipeline
 
-`data/fetch_aoe2_data.py` orchestrates the full data pipeline:
+`packages/data/src/fetch_aoe2_data.py` orchestrates the full data pipeline:
 
 1. **fetch_json(url)** -- HTTP GET with User-Agent header and 30s timeout
 2. **process_halfon_data(data)** -- parses the halfon JSON into unit and building lists

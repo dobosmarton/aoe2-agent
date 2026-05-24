@@ -4,7 +4,7 @@ This chapter zooms into the two mechanical pieces of the autoresearch loop: the 
 
 ## The mutator
 
-`autoresearch/prompt_mutator.py:50` — `PromptMutator`.
+`packages/autoresearch/src/prompt_mutator.py:50` — `PromptMutator`.
 
 ### The system prompt
 
@@ -39,7 +39,7 @@ None of these waste a game run — they short-circuit before `run_game` is calle
 
 ## The memory chain
 
-`autoresearch/memory_chain.py:99` — `MemoryChain`. Two responsibilities: extracting memories after a game, and loading them as context for the next game.
+`packages/autoresearch/src/memory_chain.py:99` — `MemoryChain`. Two responsibilities: extracting memories after a game, and loading them as context for the next game.
 
 ### Extraction
 

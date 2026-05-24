@@ -1,8 +1,8 @@
 logs/
 venv/
+.venv
 __pycache__/
 .env
-.venv
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
@@ -29,19 +29,20 @@ game_graphics/
 tmp/
 .superset/
 
-# Build / packaging artifacts (created by pip install -e .)
+# Build / packaging artifacts (setuptools, uv).
+# `*.egg-info/` is a wildcard — catches every workspace member's egg-info,
+# whether at `packages/<name>/<name>.egg-info/` (setuptools default) or
+# `packages/<name>/src/<name>.egg-info/` (our src-layout).
 *.egg-info/
 build/
 dist/
 
-# WIP scratch dirs / files (kept out of git deliberately)
+# WIP scratch dirs (kept out of git deliberately).
 experiments/
-eval_virtual_box_ideas.md
 overlay-update.zip
-# Pre-implementation plans, design sketches, scratch notes — written
-# while a feature is in flight, replaced by the design docs under
-# docs/design/ when the work lands. Kept out of git so stale planning
-# docs don't accumulate next to the canonical design.
+# Pre-implementation plans, design sketches, scratch notes — written while a
+# feature is in flight; replaced by canonical docs under docs/design/ when
+# the work lands. Kept out of git so stale planning docs don't accumulate.
 docs/plan/
 
 # Claude Code per-user state — `scheduled_tasks.lock`, `settings.local.json`,
@@ -49,23 +50,24 @@ docs/plan/
 # other contributors. Equivalent of `.vscode/` for the Claude Code workflow.
 .claude/
 
-# Frontend build artefacts (arena/web/ui — Vite + Bun)
-arena/web/ui/node_modules/
-arena/web/ui/dist/
-arena/web/ui/.vite/
-arena/web/ui/*.tsbuildinfo
+# Frontend build artefacts (ui/ — Vite + Bun).
+ui/node_modules/
+ui/dist/
+ui/.vite/
+ui/*.tsbuildinfo
 
-# Detection data (large files)
-detection/**/training_data*/
-detection/real_screenshots/
-detection/labeling/output/
+# Detection: training images, screenshots, label outputs — large, regenerated.
+packages/detection/src/**/training_data*/
+packages/detection/src/real_screenshots/
+packages/detection/src/labeling/output/
 training_data*.tar.gz
 
-# Model weights (except deployed models)
+# Model weights — large binaries, mostly regenerated. Keep only the deployed
+# model snapshots checked in via the negation patterns at the bottom.
 **/models/*.pt
 **/models/*.onnx
 **/models/*.mlpackage/
 yolov8n.pt
 yolo11n.pt
-!detection/inference/models/aoe2_yolo_v5.pt
-!detection/inference/models/aoe2_yolo_v5.onnx
+!packages/detection/src/inference/models/aoe2_yolo_v5.pt
+!packages/detection/src/inference/models/aoe2_yolo_v5.onnx

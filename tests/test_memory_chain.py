@@ -82,7 +82,7 @@ def _bullets(rendered: str) -> str:
 
 def test_load_memories_caps_at_20(memories_dir: Path):
     """25 input files → exactly 20 bullets in output (the rest get dropped)."""
-    from autoresearch.memory_chain import MemoryChain
+    from gameplay_agent.memory_chain import MemoryChain
 
     for i in range(25):
         _write_memory(
@@ -100,7 +100,7 @@ def test_load_memories_caps_at_20(memories_dir: Path):
 
 def test_load_memories_under_cap_returns_all(memories_dir: Path):
     """5 input files → 5 bullets, no truncation."""
-    from autoresearch.memory_chain import MemoryChain
+    from gameplay_agent.memory_chain import MemoryChain
 
     for i in range(5):
         _write_memory(memories_dir, file_num=i, title=f"rule_{i}")
@@ -118,7 +118,7 @@ def test_load_memories_under_cap_returns_all(memories_dir: Path):
 
 def test_negative_impact_ranks_before_positive(memories_dir: Path):
     """Negative-impact memories (traps to avoid) appear before positive ones."""
-    from autoresearch.memory_chain import MemoryChain
+    from gameplay_agent.memory_chain import MemoryChain
 
     _write_memory(
         memories_dir,
@@ -143,7 +143,7 @@ def test_negative_impact_ranks_before_positive(memories_dir: Path):
 
 def test_positive_impact_ranks_before_neutral(memories_dir: Path):
     """Positive-impact memories appear before neutral ones."""
-    from autoresearch.memory_chain import MemoryChain
+    from gameplay_agent.memory_chain import MemoryChain
 
     _write_memory(
         memories_dir,
@@ -168,7 +168,7 @@ def test_positive_impact_ranks_before_neutral(memories_dir: Path):
 
 def test_within_tier_newer_first(memories_dir: Path):
     """Within the same score_impact tier, newer `created` dates rank first."""
-    from autoresearch.memory_chain import MemoryChain
+    from gameplay_agent.memory_chain import MemoryChain
 
     _write_memory(
         memories_dir,
@@ -195,7 +195,7 @@ def test_within_tier_newer_first(memories_dir: Path):
 
 def test_cap_keeps_negatives_drops_neutrals(memories_dir: Path):
     """When 25 files cross all three tiers, the 5 dropped ones are neutrals."""
-    from autoresearch.memory_chain import MemoryChain
+    from gameplay_agent.memory_chain import MemoryChain
 
     for i in range(10):
         _write_memory(memories_dir, file_num=i, title=f"neg_{i}", score_impact="negative")
@@ -224,7 +224,7 @@ def test_cap_keeps_negatives_drops_neutrals(memories_dir: Path):
 
 def test_any_trigger_omits_when_prefix(memories_dir: Path):
     """A memory with applies_when=any renders WITHOUT a `(when: …)` prefix."""
-    from autoresearch.memory_chain import MemoryChain
+    from gameplay_agent.memory_chain import MemoryChain
 
     _write_memory(
         memories_dir,
@@ -241,7 +241,7 @@ def test_any_trigger_omits_when_prefix(memories_dir: Path):
 
 def test_specific_trigger_renders_when_prefix(memories_dir: Path):
     """A memory with a specific applies_when renders the `(when: ...)` prefix."""
-    from autoresearch.memory_chain import MemoryChain
+    from gameplay_agent.memory_chain import MemoryChain
 
     _write_memory(
         memories_dir,
@@ -263,7 +263,7 @@ def test_bullet_starts_with_bracketed_title(memories_dir: Path):
     described in prompts/core.md (Telemetry: Tag Applied Memories). If the
     title isn't surfaced, the model has no way to honestly tag.
     """
-    from autoresearch.memory_chain import MemoryChain
+    from gameplay_agent.memory_chain import MemoryChain
 
     _write_memory(
         memories_dir,
@@ -296,7 +296,7 @@ def test_title_falls_back_to_filename_when_frontmatter_missing(memories_dir: Pat
     filename pattern. Protects forward-compatibility for memories created
     before the title field was introduced.
     """
-    from autoresearch.memory_chain import MemoryChain
+    from gameplay_agent.memory_chain import MemoryChain
 
     # Hand-write a frontmatter block with NO title field — pre-2026-04-25 layout.
     path = memories_dir / "007_legacy_rule_no_title_field.md"
@@ -324,7 +324,7 @@ def test_title_falls_back_to_filename_when_frontmatter_missing(memories_dir: Pat
 
 def test_whitespace_only_content_is_dropped(memories_dir: Path):
     """A memory with only whitespace as content should not appear in output."""
-    from autoresearch.memory_chain import MemoryChain
+    from gameplay_agent.memory_chain import MemoryChain
 
     _write_memory(memories_dir, file_num=1, title="empty", content="   ")
     _write_memory(memories_dir, file_num=2, title="real", content="I should do something.")

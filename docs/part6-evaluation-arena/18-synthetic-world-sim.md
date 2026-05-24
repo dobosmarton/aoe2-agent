@@ -1,6 +1,6 @@
 # Chapter 18 — Synthetic World Sim
 
-`evaluation/world_sim.py` is an **AoE2-lite economy simulator**: enough state to let the agent's actions meaningfully evolve a world across N turns, without booting the real game. It is the substrate for the arena harness (`race`, `rank`, `smoke`) and for the multi-turn scenario runner (`evaluation/runner.py`).
+`packages/evaluation/src/world_sim.py` is an **AoE2-lite economy simulator**: enough state to let the agent's actions meaningfully evolve a world across N turns, without booting the real game. It is the substrate for the arena harness (`race`, `rank`, `smoke`) and for the multi-turn scenario runner (`packages/evaluation/src/runner.py`).
 
 The fidelity is deliberately low. This is a behavioural regression harness, not a game engine. The goal is catching stuck loops, inhibitory-memory failures, and age-transition regressions — not simulating AoE2 exactly.
 
@@ -33,7 +33,7 @@ Constants are all named at the top of `world_sim.py:30–70`:
 - **Resource gather** is flat per turn: `+20 food`, `+15 wood` (`FOOD_GATHER_RATE`, `WOOD_GATHER_RATE`). No villager-assignment tracking — gather rates are constant regardless of how many villagers exist. This is the load-bearing simplification.
 - **Villagers cost 50 food** and take 3 ticks to produce (`VILLAGER_COST_FOOD`, `VILLAGER_PRODUCTION_TICKS`). The queue is a list of countdown ints; each `tick()` decrements them and promotes any that hit zero into `population`.
 - **Buildings** have a wood cost and a name keyed by the same key the executor uses in real-game prompts. `q` = house (25 wood, +5 pop_cap), `w` = mill, `r` = lumber camp, `e` = mining camp, `a` = farm, `s` = blacksmith, `t` = dock. See `BUILDING_COSTS` and `BUILDING_NAMES`.
-- **Age-up costs 500 food and takes 6 ticks**, gated by four prerequisites checked in `_feudal_prereqs_met`: age must be Dark, food ≥ 500, population ≥ 22, and `{mill, lumber_camp}` both built. Press `z` (`_apply_age_up`) silently no-ops if *any* prerequisite is missing. The "silently no-ops" behaviour is the one the `strategy` prompt variant is built to compensate for — see `arena/prompts.py:23`.
+- **Age-up costs 500 food and takes 6 ticks**, gated by four prerequisites checked in `_feudal_prereqs_met`: age must be Dark, food ≥ 500, population ≥ 22, and `{mill, lumber_camp}` both built. Press `z` (`_apply_age_up`) silently no-ops if *any* prerequisite is missing. The "silently no-ops" behaviour is the one the `strategy` prompt variant is built to compensate for — see `packages/arena/src/prompts.py:23`.
 
 ## How a turn is applied
 
@@ -57,7 +57,7 @@ The `replace`-style state evolution (`dataclasses.replace` everywhere) keeps eac
 
 ## Synthetic perception (`render`)
 
-`world_sim.py:430` is the perception-projection layer. It maps a `WorldState` to a list of `DetectedEntity` — the same schema `detection/inference/detector.py` emits from real YOLO inference:
+`world_sim.py:430` is the perception-projection layer. It maps a `WorldState` to a list of `DetectedEntity` — the same schema `packages/detection/src/inference/detector.py` emits from real YOLO inference:
 
 - 1 `town_center` near screen centre, jittered ±100 px x / ±50 px y by the RNG.
 - `state.population` villagers scattered around the TC within ±150/±100 px.
@@ -70,7 +70,7 @@ Key invariants:
 - **Confidence = 1.0** everywhere (ground truth). No bbox jitter, no missed detections.
 - **The RNG is local** (`random.Random(seed)`). Never mutates global `random` state — important because the real-game tier still uses module-level `random`.
 
-This function is the substrate for `detection/inference/mock.py:mock_detect_from_world` — the entry the arena uses where the real-game tier would call YOLO.
+This function is the substrate for `packages/detection/src/inference/mock.py:mock_detect_from_world` — the entry the arena uses where the real-game tier would call YOLO.
 
 ### Schema-lock test
 
@@ -86,11 +86,11 @@ end_state:
   population: 15        # at least 15
 ```
 
-Failures come back as plain strings (`evaluation/runner.py` formats them with turn counts). Unknown WorldState field names produce a failure rather than silently passing — `end_state: { spaghetti: 7 }` will tell you it's a typo.
+Failures come back as plain strings (`packages/evaluation/src/runner.py` formats them with turn counts). Unknown WorldState field names produce a failure rather than silently passing — `end_state: { spaghetti: 7 }` will tell you it's a typo.
 
 ## Real-game tier impact: zero
 
-Nothing in `gameplay_agent/` was modified by the arena buildout. The existing `mock_detect()` keeps its frozen Dark-Age fixture behaviour. Arena callers reach for `render()` / `mock_detect_from_world()` explicitly. The synth_game_loop in `gameplay_agent/synth_game_loop.py` is a separate code path from the real `game_loop.py`.
+Nothing in `packages/gameplay-agent/src/` was modified by the arena buildout. The existing `mock_detect()` keeps its frozen Dark-Age fixture behaviour. Arena callers reach for `render()` / `mock_detect_from_world()` explicitly. The synth_game_loop in `packages/gameplay-agent/src/synth_game_loop.py` is a separate code path from the real `game_loop.py`.
 
 This is the line that keeps the architecture honest: arena improvements never threaten the production agent.
 

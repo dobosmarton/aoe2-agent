@@ -10,9 +10,8 @@ from typing import TYPE_CHECKING
 
 import duckdb
 import pytest
-from fastapi.testclient import TestClient
-
 from evaluation.event_log import DuckDBEventSink, Event, MetricPayload, TurnStartPayload
+from fastapi.testclient import TestClient
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -57,7 +56,7 @@ def logs_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def client(logs_root: Path) -> Iterator[TestClient]:
     # Re-import to pick up env-var-driven CORS list and a fresh app instance
     # per test (avoids middleware state leakage between fixtures).
-    from arena.web import server as server_module
+    from arena_web import server as server_module
 
     importlib.reload(server_module)
     with TestClient(server_module.app) as test_client:
@@ -182,7 +181,7 @@ def test_metrics_reflects_broker_publish_activity(
     async batch of publishes via `asyncio.run`."""
     import asyncio
 
-    from arena.web import server as server_module
+    from arena_web import server as server_module
     from evaluation.event_broker import InProcessEventBroker, RunId
 
     broker = server_module.app.state.broker

@@ -33,14 +33,13 @@ pytest.importorskip("fakeredis.aioredis")
 
 # Real imports (not the importorskip return) so basedpyright sees concrete
 # types; the importorskip above gates the whole module on availability.
-from fakeredis.aioredis import FakeRedis
-
 from evaluation.event_broker import (
     BrokerOverflowError,
     RunId,
     Seq,
 )
 from evaluation.redis_broker import RedisStreamsBroker
+from fakeredis.aioredis import FakeRedis
 
 # ---------------------------------------------------------------------------
 # Helpers

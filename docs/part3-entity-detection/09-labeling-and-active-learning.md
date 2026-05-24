@@ -20,7 +20,7 @@ Raw Screenshots              Pre-label with YOLO         CVAT
 
 ## 9.2 Pre-Labeling
 
-`detection/labeling/prelabel.py` bootstraps annotation by running the existing model on unlabeled screenshots:
+`packages/detection/src/labeling/prelabel.py` bootstraps annotation by running the existing model on unlabeled screenshots:
 
 1. Loads the current YOLO model (v1 or v2)
 2. Runs inference on each image in `real_screenshots/raw/`
@@ -38,7 +38,7 @@ Pre-labels are not training-quality -- they provide a starting point for human a
 
 ### Export Format Detection
 
-`prepare_training.py` auto-detects the export format at `detection/labeling/prepare_training.py:43-66`:
+`prepare_training.py` auto-detects the export format at `packages/detection/src/labeling/prepare_training.py:43-66`:
 
 ```python
 def detect_export_format(cvat_dir) -> "coco" | "yolo":
@@ -74,7 +74,7 @@ The code handles multiple CVAT export directory layouts:
 
 All data sources now use `classes.yaml` IDs directly (60 classes). See [Chapter 13](../part5-operations/13-class-schema-evolution.md) for schema history.
 
-`detection/labeling/class_mapping.py` provides utilities:
+`packages/detection/src/labeling/class_mapping.py` provides utilities:
 
 **`build_v1_to_v2_mapping()`** -- maps legacy model class IDs to classes.yaml IDs. Only needed when running inference with older models (v1-v4) in `prelabel.py`.
 
@@ -82,7 +82,7 @@ All data sources now use `classes.yaml` IDs directly (60 classes). See [Chapter 
 
 ## 9.5 Hybrid Dataset Merge
 
-`prepare_training()` at `detection/labeling/prepare_training.py:248-445` orchestrates the full merge:
+`prepare_training()` at `packages/detection/src/labeling/prepare_training.py:248-445` orchestrates the full merge:
 
 1. **Scan local images** -- builds an index of all raw screenshots by filename
 2. **Detect export format** -- auto-detects COCO or YOLO from the CVAT export directory
@@ -111,7 +111,7 @@ training_data/
 
 ## 9.6 Active Learning Pipeline
 
-`detection/labeling/active_learning.py` optimizes which images to label next.
+`packages/detection/src/labeling/active_learning.py` optimizes which images to label next.
 
 ### Triage: Scoring Images by Informativeness
 
@@ -145,7 +145,7 @@ After manual correction in CVAT, `integrate()` copies the corrected labels into 
 | Real (labeled) | 50 | 8 | 58 |
 | **Total** | **2,450** | **608** | **3,058** |
 
-220 raw screenshots exist in `detection/real_screenshots/raw/`. 58 have been labeled in CVAT so far.
+220 raw screenshots exist in `packages/detection/src/real_screenshots/raw/`. 58 have been labeled in CVAT so far.
 
 ---
 

@@ -25,10 +25,9 @@ from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock, patch
 
 import duckdb
-from fastapi.responses import StreamingResponse
-
-from arena.web.server import events
+from arena_web.server import events
 from evaluation.event_broker import InProcessEventBroker, RunId
+from fastapi.responses import StreamingResponse
 
 if TYPE_CHECKING:
     from collections.abc import Callable

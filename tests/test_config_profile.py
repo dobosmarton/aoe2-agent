@@ -5,11 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from arena.config_profile import ConfigProfile, RaceConfig
 from pydantic import ValidationError
 
-from arena.config_profile import ConfigProfile, RaceConfig
-
-_PROFILES_DIR = Path(__file__).parent.parent / "arena" / "profiles"
+_PROFILES_DIR = Path(__file__).parent.parent / "packages" / "arena" / "src" / "profiles"
 
 
 def test_race_config_from_yaml_loads_profiles() -> None:

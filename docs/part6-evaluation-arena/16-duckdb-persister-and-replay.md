@@ -6,7 +6,7 @@ The structural inversion this chapter documents — *nobody but the persister op
 
 ## The events table
 
-Schema lives in `evaluation/event_log.py:255` and is unchanged since Phase 4:
+Schema lives in `packages/evaluation/src/event_log.py:255` and is unchanged since Phase 4:
 
 ```sql
 CREATE TABLE IF NOT EXISTS events (
@@ -24,7 +24,7 @@ Forward compatibility lives in `schema_version`. Multiple `run_id`s share one ta
 
 ### The 9 payload kinds
 
-Each `kind` maps to a frozen Pydantic model defined in `evaluation/event_log.py:115–175`:
+Each `kind` maps to a frozen Pydantic model defined in `packages/evaluation/src/event_log.py:115–175`:
 
 | Kind | Purpose | Carries |
 |---|---|---|
@@ -42,7 +42,7 @@ The discriminated `Payload` union (`event_log.py:178`) is validated by a single 
 
 ## The two persister flavours
 
-`evaluation/duckdb_persister.py` exports two related primitives:
+`packages/evaluation/src/duckdb_persister.py` exports two related primitives:
 
 ### Fork case — one run, one file
 
@@ -53,7 +53,7 @@ asyncio.create_task(persist_to_duckdb(broker, run_id, db_path))
 broker.close_run(run_id)   # persister drains and returns
 ```
 
-`persist_to_duckdb` (`evaluation/duckdb_persister.py:59`) opens the DuckDB file exclusively, subscribes from `Seq(0)` so no events are missed, and exits when the broker closes the run. Used by the fork endpoint (`arena/web/forks.py:324`).
+`persist_to_duckdb` (`packages/evaluation/src/duckdb_persister.py:59`) opens the DuckDB file exclusively, subscribes from `Seq(0)` so no events are missed, and exits when the broker closes the run. Used by the fork endpoint (`packages/arena-web/src/forks.py:324`).
 
 ### CLI case — many runs, one file
 
@@ -80,7 +80,7 @@ A single shared `DuckDBEventSink` keeps the "one file per CLI command" invariant
 
 `MultiRunBrokerSink.close_all()` (`duckdb_persister.py:155`) is what makes CLI flows leak-free. It:
 
-1. Does a **two-tick `asyncio.sleep(0)` drain** so the queued `call_soon_threadsafe` callbacks fire and the publish tasks they schedule get to run. (Same pattern as `arena/web/forks.py:_replay`.)
+1. Does a **two-tick `asyncio.sleep(0)` drain** so the queued `call_soon_threadsafe` callbacks fire and the publish tasks they schedule get to run. (Same pattern as `packages/arena-web/src/forks.py:_replay`.)
 2. `await gather`s any still-pending publishes — otherwise a publish-after-close would raise.
 3. Closes every opened run, awaits every persister, and finally `reap`s — a single process can run thousands of `synth_game_loop` invocations through this sink and never accumulate per-run state past `close_all`.
 
@@ -88,7 +88,7 @@ The server uses a grace-period reaper instead (see Chapter 19); the CLI process 
 
 ## The cold-path reader
 
-For runs that have been closed and reaped from the broker buffer, consumers fall back to `stream_cold` (`evaluation/event_log.py:305`):
+For runs that have been closed and reaped from the broker buffer, consumers fall back to `stream_cold` (`packages/evaluation/src/event_log.py:305`):
 
 ```python
 def stream_cold(db_path: Path, run_id: str) -> Iterator[EventEnvelope]:
@@ -103,14 +103,14 @@ def stream_cold(db_path: Path, run_id: str) -> Iterator[EventEnvelope]:
 Three things to know:
 
 - `ORDER BY t, rowid` is load-bearing. Same-turn events share `t`; `rowid` is DuckDB's stable insert-order tiebreak. Without it, replays silently reorder events that share a turn number.
-- `Seq` is reassigned from row index (1-indexed). Cold readers see the same envelope shape the broker delivers live — that uniformity is what lets the SSE endpoint switch transparently between the broker (live runs) and `stream_cold` (finalized runs); see `arena/web/server.py:330` (`events()`).
+- `Seq` is reassigned from row index (1-indexed). Cold readers see the same envelope shape the broker delivers live — that uniformity is what lets the SSE endpoint switch transparently between the broker (live runs) and `stream_cold` (finalized runs); see `packages/arena-web/src/server.py:330` (`events()`).
 - The caller must guarantee no in-process writer holds `db_path` RW. The persister's "exclusive RW for the run's lifetime" rule is the other half of this contract.
 
 `Event.from_row` (`event_log.py:217`) is the inverse of `DuckDBEventSink.emit` — it validates `payload_json` through the cached `TypeAdapter` and ignores the redundant `kind` column (the discriminator inside the JSON is the source of truth).
 
 ## Forking off a turn
 
-`evaluation/fork.py:73` (`fork`) is the primitive every fork flow goes through:
+`packages/evaluation/src/fork.py:73` (`fork`) is the primitive every fork flow goes through:
 
 ```python
 new_run_id, forked_state = fork(
@@ -126,7 +126,7 @@ It reads the `WorldStateSnapshot` embedded in the parent's `turn_start` event (e
 
 `ForkError` is raised when the parent has no `turn_start` at the requested `t`, or when the `turn_start` is a Phase 4 legacy event with no snapshot. Schema versioning is what lets us catch this cleanly instead of silently restoring an empty world.
 
-The HTTP wrapper around `fork()` plus the `n_turn` async replay is in `arena/web/forks.py` — see [Chapter 19](../part7-arena-web/19-web-architecture.md) and [Chapter 20](../part7-arena-web/20-fork-and-diff-ui.md).
+The HTTP wrapper around `fork()` plus the `n_turn` async replay is in `packages/arena-web/src/forks.py` — see [Chapter 19](../part7-arena-web/19-web-architecture.md) and [Chapter 20](../part7-arena-web/20-fork-and-diff-ui.md).
 
 ## Why the persister is "just a consumer"
 
@@ -134,7 +134,7 @@ Reframing DuckDB as a broker consumer (rather than the source of truth) buys thr
 
 1. **No file-mode collisions.** Only the persister opens the writer's file. SSE reads from the broker for live runs; the cold path opens read-only only for finalized runs.
 2. **N consumers, same wire.** Adding a Langfuse mirror or an OLAP store is a new `async for envelope in broker.stream(...)` coroutine — no producer changes, no DuckDB churn.
-3. **Cold and live look the same to readers.** Same `EventEnvelope` shape, same `Seq` semantics, swap is transparent in `arena/web/server.py:events()`.
+3. **Cold and live look the same to readers.** Same `EventEnvelope` shape, same `Seq` semantics, swap is transparent in `packages/arena-web/src/server.py:events()`.
 
 ## Related reading
 

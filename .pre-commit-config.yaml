@@ -33,12 +33,11 @@ repos:
     hooks:
       - id: basedpyright
         name: basedpyright
-        # Explicit scope: the hook ignores pyproject's `include` when given
-        # filenames, so pass the AI-agent dirs ourselves.
-        # Mirrors the CI scope in .github/workflows/ci.yml — keep them in sync.
-        # `arena` and `data` are first-party packages too: omitting them silently
-        # skipped the broker SSE handler, `/metrics` dispatch, and DB persisters.
-        entry: venv/bin/basedpyright gameplay_agent autoresearch evaluation server arena data
+        # Pass-filenames=false + no args lets basedpyright use the
+        # `[tool.pyright] include` block in the workspace root pyproject
+        # (packages/*/src + tests). Run via `uv run` so the workspace
+        # venv (.venv/) is on PATH for resolving every member package.
+        entry: uv run basedpyright
         language: system
         types: [python]
         pass_filenames: false

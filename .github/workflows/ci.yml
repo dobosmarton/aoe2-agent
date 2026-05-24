@@ -6,13 +6,10 @@ on:
   pull_request:
     branches: [main]
 
-# Cancel in-flight runs when a branch is force-pushed.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Opt JavaScript-based actions onto the Node 24 runtime ahead of GitHub's
-# June 2026 forced cutover. Removes the Node-20 deprecation annotation.
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -21,23 +18,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
-    # Job-level so every `uv` invocation in `steps` (sync, run ruff, run
-    # basedpyright, run pytest) targets the same Python environment.
-    # `uv`'s default is `.venv` (dot-prefixed); pyproject.toml's
-    # `[tool.pyright]` block configures `venvPath="." venv="venv"`, so
-    # the two must agree or basedpyright exits with code 3 ("venv
-    # subdirectory not found"). Aligning CI on the local layout (`venv/`)
-    # keeps the existing local pre-commit hook unchanged.
-    env:
-      UV_PROJECT_ENVIRONMENT: venv
-
     steps:
       - uses: actions/checkout@v4
 
       - name: Verify all docker-compose images are digest-pinned
-        # Fails if any `image:` line in any docker-compose*.yml lacks `@sha256:`.
-        # Renovate keeps digests fresh; this guard prevents accidental floating-tag
-        # commits. See docs/design/synthetic-arena-analysis.md §H "Image pinning".
         run: |
           if grep -rE '^\s*image:' docker-compose*.yml | grep -v '@sha256:'; then
             echo "::error::Found docker-compose image lines without @sha256: digests"
@@ -56,25 +40,14 @@ jobs:
           cache-dependency-glob: "uv.lock"
 
       - name: Verify uv.lock is up to date
-        # Fails if pyproject.toml was edited without re-running `uv lock`.
-        # Catches "I bumped a >= but forgot to refresh the lockfile" mistakes.
         run: uv lock --locked
 
-      - name: Install project + dev + server + broker-redis extras
-        # Single source of truth: pyproject.toml [project.dependencies] +
-        # [project.optional-dependencies]. coremltools is a macOS-only extra
-        # that we deliberately skip on Linux CI.
-        #
-        # `broker-redis` is explicit even though `dev` carries `redis`
-        # transitively (for the fakeredis contract tests). Pinning it here
-        # makes the Phase C Redis backend a first-class CI surface: any
-        # future trim of `dev`'s redis dep won't silently drop the broker
-        # path from coverage.
-        #
-        # `UV_PROJECT_ENVIRONMENT=venv` (set at job level above) overrides
-        # uv's default of `.venv` so the resulting site-packages directory
-        # matches `[tool.pyright]`'s `venvPath="." venv="venv"` config.
-        run: uv sync --extra dev --extra server --extra broker-redis
+      - name: Sync workspace (all members + dev tools)
+        # `uv sync` installs every package under packages/* in editable mode
+        # plus the dev dependency-group (basedpyright, pytest, ruff,
+        # fakeredis, hypothesis, ...). `--all-extras` pulls package-level
+        # optional deps too (broker-redis, server, coreml, training, labeling).
+        run: uv sync --all-extras
 
       - name: Ruff lint
         run: uv run ruff check .
@@ -83,27 +56,19 @@ jobs:
         run: uv run ruff format --check .
 
       - name: basedpyright type-check
-        # Scope-explicit because the bundled pyproject `include` only kicks in
-        # when basedpyright is invoked with no path args. basedpyright reads
-        # the same [tool.pyright] config section as pyright. Keep this list
-        # in sync with `.pre-commit-config.yaml` — both must cover every
-        # first-party package (`arena` and `data` were silently omitted
-        # until 2026-05; the Phase C broker SSE handler shipped untyped
-        # in CI as a result).
-        run: uv run basedpyright gameplay_agent autoresearch evaluation server arena data
+        # `[tool.pyright]` in the root pyproject scopes the check to
+        # packages/*/src + tests.
+        run: uv run basedpyright
 
       - name: Pytest
         run: uv run pytest -q
 
   ui-build:
-    # Runs in parallel with lint-typecheck-test. The arena/web/ui/ frontend
-    # has its own toolchain (Bun + Vite + TypeScript + Tailwind + shadcn)
-    # disjoint from the Python side, so a separate job keeps signal clean.
     runs-on: ubuntu-latest
     timeout-minutes: 5
     defaults:
       run:
-        working-directory: arena/web/ui
+        working-directory: ui
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2

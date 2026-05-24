@@ -87,11 +87,10 @@ def _publisher_main(redis_url: str, key_prefix: str, run_id_str: str, n_events: 
     """
     import asyncio
 
-    from redis.asyncio import Redis
-
     from evaluation.event_broker import RunId
     from evaluation.event_log import Event, TurnStartPayload
     from evaluation.redis_broker import RedisStreamsBroker
+    from redis.asyncio import Redis
 
     async def run() -> None:
         client = Redis.from_url(redis_url)
@@ -134,10 +133,9 @@ def test_cross_process_publisher_to_consumer_preserves_order() -> None:
     """
     import asyncio
 
-    from redis.asyncio import Redis
-
     from evaluation.event_broker import RunId, Seq
     from evaluation.redis_broker import RedisStreamsBroker
+    from redis.asyncio import Redis
 
     n_events = 100
     key_prefix = f"xprocess:{uuid.uuid4().hex[:8]}"

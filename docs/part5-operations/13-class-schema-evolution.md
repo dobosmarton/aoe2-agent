@@ -6,11 +6,11 @@ The detection system uses a single class schema defined in `classes.yaml` with 6
 
 ### v1 Schema (46 classes) — Legacy
 
-The original training schema, defined in `detection/training_data/dataset.yaml`. Created when the first synthetic dataset was generated. Class IDs were assigned in a different order than the final taxonomy, and unique units were individual classes (longbowman, mangudai, war_wagon).
+The original training schema, defined in `packages/detection/src/training_data/dataset.yaml`. Created when the first synthetic dataset was generated. Class IDs were assigned in a different order than the final taxonomy, and unique units were individual classes (longbowman, mangudai, war_wagon).
 
 ### v2/Current Schema (60 classes)
 
-The reorganized schema, defined in `detection/training/config/classes.yaml` (source of truth). Key changes from v1:
+The reorganized schema, defined in `packages/detection/src/training/config/classes.yaml` (source of truth). Key changes from v1:
 
 1. **Reordered IDs** — classes organized by category (resources 0-8, economy buildings 9-16, military buildings 17-24, etc.)
 2. **Unique unit grouping** — individual unique units replaced with 5 type-based groups: unique_archer, unique_cavalry, unique_infantry, unique_siege, unique_ship
@@ -29,7 +29,7 @@ This eliminates the v1/v2 ID mismatch that previously required remapping during 
 
 ## 13.2 The Mapping Utility
 
-`detection/labeling/class_mapping.py` provides utilities for class schema operations.
+`packages/detection/src/labeling/class_mapping.py` provides utilities for class schema operations.
 
 ### Core Functions
 
@@ -78,7 +78,7 @@ CVAT COCO exports use 1-indexed category IDs with names. The conversion matches 
 
 ## 13.4 The Source of Truth
 
-`detection/training/config/classes.yaml` is the single source of truth for the class taxonomy:
+`packages/detection/src/training/config/classes.yaml` is the single source of truth for the class taxonomy:
 
 - **YOLO training** — `dataset.yaml` references these class names
 - **Synthetic data** — `SPRITE_CONFIGS` in `generate_training_data.py` uses these IDs directly

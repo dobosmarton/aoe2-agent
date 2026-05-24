@@ -13,7 +13,7 @@ Every iteration executes the same pipeline. Steps marked **conditional** only ru
 | 3 | Screenshot capture | ~20 ms | `screen.py:capture_screenshot()` via mss | Every turn |
 | 4a | YOLO detection (adaptive SAHI) | ~150 ms | `detector.detect_adaptive()` | Turns without forced full SAHI |
 | 4b | YOLO detection (full SAHI) | ~234 ms | `detector.detect_adaptive(force_full=True)` | Turn 1, every 5th turn, on alarm |
-| 5 | Entity ownership classification | ~5 ms | `detection/inference/ownership.py` | Every turn (if entities detected) |
+| 5 | Entity ownership classification | ~5 ms | `packages/detection/src/inference/ownership.py` | Every turn (if entities detected) |
 | 6 | Alarm check | ~10 ms | `goals.py:check_alarm()` | Every turn (if entities detected) |
 | 7 | Strategist API call (Sonnet vision) | ~5000 ms | `providers/strategist.py` | Turn 1, every 10th turn, on alarm (3-turn cooldown) |
 | 8 | Build LLM context | ~10 ms | `game_loop.py:_build_llm_context()` | Every turn |

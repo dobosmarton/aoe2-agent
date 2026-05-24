@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 
 import numpy as np
-
 from arena.config_profile import ConfigProfile, RankingConfig
 from arena.ranking import (
     PairwiseOutcome,

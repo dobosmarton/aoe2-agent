@@ -20,12 +20,12 @@ For multi-profile evaluation, fit a Bradley–Terry MLE on the pairwise win matr
 
 - **The matchup structure is already pairwise.** A "race instance" pits N profiles against each other on one scenario. The natural primitive is the win matrix.
 - **Same approach LMSys Chatbot Arena uses.** Well-understood, widely-explained model; reviewers don't need to learn a custom rating scheme.
-- **Closed-form symmetric smoothing handles degenerate cases.** When profile A beats profile B in every round, vanilla MLE diverges to `+inf`. The `+0.5` phantom-games prior (`arena/ranking.py:101`) keeps ratings finite; bootstrap CIs reflect the resulting uncertainty.
+- **Closed-form symmetric smoothing handles degenerate cases.** When profile A beats profile B in every round, vanilla MLE diverges to `+inf`. The `+0.5` phantom-games prior (`packages/arena/src/ranking.py:101`) keeps ratings finite; bootstrap CIs reflect the resulting uncertainty.
 - **Bootstrap CI gives reviewers what they actually need:** "Is the difference between strategy and bare significant?" — answered by whether the 95% CIs overlap.
 
 ## What we explicitly traded away
 
-- **Cross-round score persistence.** Each `arena rank` invocation is self-contained. There's no global rating ladder accumulating across CLI runs. The `MetricPayload` events emitted under `run_id="ranking"` (`arena/ranking.py:235`) make this possible later, but nothing reads them today.
+- **Cross-round score persistence.** Each `arena rank` invocation is self-contained. There's no global rating ladder accumulating across CLI runs. The `MetricPayload` events emitted under `run_id="ranking"` (`packages/arena/src/ranking.py:235`) make this possible later, but nothing reads them today.
 - **Per-scenario ratings.** `_collect_outcomes` keeps scenario in the matchup key (so cross-scenario pairs don't compare), but the final rating is aggregated across scenarios. Per-scenario breakdowns are recoverable from the events; the table summary collapses them.
 
 ## Why the lexicographic scoring (not a weighted sum)

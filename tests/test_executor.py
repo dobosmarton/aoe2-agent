@@ -19,7 +19,6 @@ import random
 from typing import TYPE_CHECKING
 
 import pytest
-
 from gameplay_agent import executor as ex
 
 if TYPE_CHECKING:

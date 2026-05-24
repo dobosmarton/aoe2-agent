@@ -6,7 +6,7 @@ This chapter is the kept-current reference. For the architectural rationale (why
 
 ## The Protocol
 
-`evaluation/event_broker.py:130` defines the `EventBroker` Protocol. Six methods, no inheritance:
+`packages/evaluation/src/event_broker.py:130` defines the `EventBroker` Protocol. Six methods, no inheritance:
 
 ```python
 class EventBroker(Protocol):
@@ -25,20 +25,20 @@ Two new types make illegal states unrepresentable at the type checker:
 - `RunId = NewType("RunId", str)` — opaque per-run identity.
 - `Seq = NewType("Seq", int)` — monotonic per-run sequence number assigned by the broker, starting at 1. Distinct from `Event.t` (the turn number, which multiple events per turn share). `Seq` makes ordering total across the whole run, which the SSE client needs for unambiguous dedupe on reconnect.
 
-`EventEnvelope` (`evaluation/event_broker.py:60`) wraps `(run_id, seq, event)`. Keeping `seq` out of the `Event` dataclass means no DuckDB schema change and keeps the broker's "I assigned this" concern out of the domain model.
+`EventEnvelope` (`packages/evaluation/src/event_broker.py:60`) wraps `(run_id, seq, event)`. Keeping `seq` out of the `Event` dataclass means no DuckDB schema change and keeps the broker's "I assigned this" concern out of the domain model.
 
 ## Two implementations
 
 | Impl | When to use | External deps | Cross-process? |
 |---|---|---|---|
-| `InProcessEventBroker` (`evaluation/event_broker.py:189`) | Default. Single-process work — CLI, tests, single-machine dev. | None | No |
-| `RedisStreamsBroker` (`evaluation/redis_broker.py:178`) | Phase C and beyond. Cross-process replay — e.g. FastAPI live-tailing a CLI race. | `redis` (install via `broker-redis` extra) | Yes |
+| `InProcessEventBroker` (`packages/evaluation/src/event_broker.py:189`) | Default. Single-process work — CLI, tests, single-machine dev. | None | No |
+| `RedisStreamsBroker` (`packages/evaluation/src/redis_broker.py:178`) | Phase C and beyond. Cross-process replay — e.g. FastAPI live-tailing a CLI race. | `redis` (install via `broker-redis` extra) | Yes |
 
 Both implement the same Protocol and pass the same parametrized contract test suite in `tests/test_event_broker.py` byte-for-byte at the envelope level. That's the design's strongest guarantee: a publisher does not know which backend is in play, and a subscriber sees identical `Seq` values, ordering, drain-on-close, and overflow semantics either way.
 
 ## Switching backends
 
-`evaluation/broker_factory.py:60` is the single place `ARENA_BROKER_BACKEND` is read. Every callsite that needs a broker goes through `make_broker()`:
+`packages/evaluation/src/broker_factory.py:60` is the single place `ARENA_BROKER_BACKEND` is read. Every callsite that needs a broker goes through `make_broker()`:
 
 ```python
 broker = make_broker()   # InProcessEventBroker by default
@@ -60,7 +60,7 @@ In-process broker (`event_broker.py:189`):
 - Per-run buffer is a `deque` with `maxlen=10_000`.
 - When full, the next `publish` evicts the oldest envelope (O(1)) and bumps `head_seq` by one.
 - A consumer whose cursor falls below `head_seq` self-raises `BrokerOverflowError(run_id, requested_seq, available_from)` from inside `stream()` on the next wake-up. The slow consumer self-evicts; publishers never block or raise on buffer pressure.
-- The SSE handler (`arena/web/server.py:296`, `_stream_from_broker`) catches the error, emits a final `event: overflow` SSE line carrying `available_from`, and returns. The frontend reconnects with `?from_seq=<available_from>` and accepts the gap — surfacing the loss is the contract; silent partial reads would be worse.
+- The SSE handler (`packages/arena-web/src/server.py:296`, `_stream_from_broker`) catches the error, emits a final `event: overflow` SSE line carrying `available_from`, and returns. The frontend reconnects with `?from_seq=<available_from>` and accepts the gap — surfacing the loss is the contract; silent partial reads would be worse.
 
 Redis broker (`redis_broker.py:178`):
 - `XADD MAXLEN ~ 10_000` matches the in-process buffer size (the `~` form is approximate — Redis trims in radix-tree node chunks, within a few dozen entries of the limit).
@@ -87,7 +87,7 @@ Both impls expose `metrics()` returning `BrokerMetricsSnapshot` (`event_broker.p
 }
 ```
 
-The FastAPI `/metrics` endpoint (`arena/web/server.py:362`) dispatches on the concrete type — `metrics()` is intentionally **not** on the `EventBroker` Protocol, because each impl has a different counter surface (in-process: pure dataclass; Redis: an `await` on Redis state). At N=2 impls, an `isinstance` branch is less ceremony than a `BrokerMetrics` Protocol. The Redis import in the metrics handler is lazy so the slim install never has to import `redis` just to start the web server in in-process mode.
+The FastAPI `/metrics` endpoint (`packages/arena-web/src/server.py:362`) dispatches on the concrete type — `metrics()` is intentionally **not** on the `EventBroker` Protocol, because each impl has a different counter surface (in-process: pure dataclass; Redis: an `await` on Redis state). At N=2 impls, an `isinstance` branch is less ceremony than a `BrokerMetrics` Protocol. The Redis import in the metrics handler is lazy so the slim install never has to import `redis` just to start the web server in in-process mode.
 
 ## Producer adapter
 
@@ -100,7 +100,7 @@ self.loop.call_soon_threadsafe(
 )
 ```
 
-This keeps `emit()` non-blocking and preserves FIFO order per loop thread. The fork replay path uses it directly (`arena/web/forks.py:228`). The CLI path uses the higher-level `MultiRunBrokerSink` (`evaluation/duckdb_persister.py:99`), which auto-opens runs on first emit and routes each `run_id` to its own drainer — see [Chapter 16](./16-duckdb-persister-and-replay.md).
+This keeps `emit()` non-blocking and preserves FIFO order per loop thread. The fork replay path uses it directly (`packages/arena-web/src/forks.py:228`). The CLI path uses the higher-level `MultiRunBrokerSink` (`packages/evaluation/src/duckdb_persister.py:99`), which auto-opens runs on first emit and routes each `run_id` to its own drainer — see [Chapter 16](./16-duckdb-persister-and-replay.md).
 
 ## The invariant you should not break
 

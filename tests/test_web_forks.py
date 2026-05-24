@@ -13,10 +13,8 @@ from typing import TYPE_CHECKING, cast
 
 import duckdb
 import pytest
-from pydantic import ValidationError
-
-from arena.web import forks as forks_module
-from arena.web.forks import ForkRequest, MutationPatch, create_fork
+from arena_web import forks as forks_module
+from arena_web.forks import ForkRequest, MutationPatch, create_fork
 from evaluation.event_broker import InProcessEventBroker, RunId
 from evaluation.event_log import (
     DuckDBEventSink,
@@ -25,6 +23,7 @@ from evaluation.event_log import (
     WorldStateSnapshot,
 )
 from evaluation.world_sim import WorldState
+from pydantic import ValidationError
 
 if TYPE_CHECKING:
     from pathlib import Path

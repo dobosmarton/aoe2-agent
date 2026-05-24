@@ -1,0 +1,29 @@
+[project]
+name = "arena"
+version = "0.1.0"
+description = "Synthetic arena CLI — race, smoke, rank (Bradley-Terry)."
+requires-python = ">=3.11"
+dependencies = [
+    "core",
+    "evaluation",
+    "gameplay-agent",
+    "anthropic>=0.84.0",
+    "duckdb>=1.0.0",
+    "numpy>=1.24.0",
+    "pydantic>=2.5.0",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+aoe2-arena = "arena.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = { "arena" = "src" }
+packages = ["arena"]
+
+[tool.setuptools.package-data]
+arena = ["profiles/*.yaml"]

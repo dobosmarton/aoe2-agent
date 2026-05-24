@@ -106,7 +106,7 @@ For training data, sprites are extracted in 2-3 random player colors to teach th
 
 ## 11.6 Batch Extraction
 
-`detection/extraction/extract_sprites.py` defines 46 sprite categories with glob patterns:
+`packages/detection/src/extraction/extract_sprites.py` defines 46 sprite categories with glob patterns:
 
 ```python
 ("villager", [

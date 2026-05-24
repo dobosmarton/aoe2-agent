@@ -1,0 +1,41 @@
+[project]
+name = "gameplay-agent"
+version = "0.1.0"
+description = "AoE2 gameplay agent — real-game loop, providers, executor, scenario runner."
+requires-python = ">=3.11"
+dependencies = [
+    "core",
+    "detection",
+    "evaluation",
+    "data",
+    "anthropic>=0.84.0",
+    "colorama>=0.4.6",
+    "httpx>=0.27.0",
+    "mss>=9.0.0",
+    "numpy>=1.24.0",
+    "Pillow>=10.0.0",
+    "pyautogui>=0.9.54",
+    "pydantic>=2.5.0",
+    "pygetwindow>=0.0.9",
+    "python-multipart>=0.0.7",
+    "pyyaml>=6.0",
+    "structlog>=24.1.0",
+    "tenacity>=8.2.0",
+]
+
+[project.scripts]
+aoe2-agent = "gameplay_agent.main:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = { "gameplay_agent" = "src" }
+packages = [
+    "gameplay_agent",
+    "gameplay_agent.providers",
+]
+
+[tool.setuptools.package-data]
+gameplay_agent = ["scenarios/**/*.yaml", "prompts/**/*.md"]

@@ -18,9 +18,8 @@ import os
 from pathlib import Path
 
 import pytest
-
-from evaluation.runner import _load_dotenv
-from evaluation.strategist_eval import (
+from gameplay_agent.scenario_runner import _load_dotenv
+from gameplay_agent.strategist_eval import (
     all_vision_fixtures,
     evaluate_resource_readings,
     load_vision_fixture,

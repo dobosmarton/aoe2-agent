@@ -20,7 +20,6 @@ from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
-
 from evaluation.event_log import Event, TurnStartPayload
 
 if TYPE_CHECKING:

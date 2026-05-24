@@ -68,7 +68,6 @@ def _make_fakeredis_broker() -> EventBroker:
     import uuid
 
     import fakeredis.aioredis
-
     from evaluation.redis_broker import RedisStreamsBroker
 
     client = fakeredis.aioredis.FakeRedis()

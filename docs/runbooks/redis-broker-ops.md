@@ -60,7 +60,7 @@ redis-cli -a "$REDIS_PASSWORD" XINFO STREAM arena:run:<uuid>:events
 redis-cli -a "$REDIS_PASSWORD" --scan --pattern 'arena:run:*:open'
 ```
 
-The three key namespaces per run (`evaluation/redis_broker.py:96`):
+The three key namespaces per run (`packages/evaluation/src/redis_broker.py:96`):
 
 | Key | Type | Purpose |
 |---|---|---|
@@ -93,12 +93,12 @@ Persistence model: AOF (append-only file). Good for crash recovery, bad if you d
 | `redis.exceptions.ConnectionError: Error 61 connecting to localhost:6379` | Redis container not running, or not bound to `localhost` | `docker compose ps redis` — should be Up. Check `docker compose logs redis`. |
 | `BrokerOverflowError` raised in consumers right after starting | Consumer asked for `from_seq` below stream's `first-entry` | Reconnect with `from_seq=available_from` from the overflow event (frontend does this automatically). |
 | `XREAD` consumer hangs forever, never sees a published event | Publisher and consumer on different brokers (one on Redis, one on InProcess) | Both processes need `ARENA_BROKER_BACKEND=redis` and the same `REDIS_URL`. |
-| Stream `XINFO` shows growing length but consumers see nothing | Connection-pool poisoning from a cancelled `XREAD BLOCK` (upstream redis-py #2624) | The broker has a workaround (`evaluation/redis_broker.py:340–379`) that should handle this; if you still see it, file an issue with reproducer. |
+| Stream `XINFO` shows growing length but consumers see nothing | Connection-pool poisoning from a cancelled `XREAD BLOCK` (upstream redis-py #2624) | The broker has a workaround (`packages/evaluation/src/redis_broker.py:340–379`) that should handle this; if you still see it, file an issue with reproducer. |
 | `flush()` never lands the `:open` DELETE | Pub or stream methods aren't being called after the sync `close_run()` | Call `await broker.flush()` explicitly before the producer process exits, OR let the FastAPI lifespan handle teardown. |
 
 ## Where things live
 
-- Broker impl: `evaluation/redis_broker.py`.
-- Factory + env-var read: `evaluation/broker_factory.py`.
+- Broker impl: `packages/evaluation/src/redis_broker.py`.
+- Factory + env-var read: `packages/evaluation/src/broker_factory.py`.
 - Healthcheck + compose config: `docker-compose.yml` (Redis service starts at line 155).
 - Compose env-var template: `env.example` (look for `REDIS_PASSWORD`).
