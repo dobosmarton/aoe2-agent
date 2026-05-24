@@ -47,6 +47,11 @@ server = [
     "fastapi>=0.115.0",
     "uvicorn>=0.30.0",
 ]
+# Distributed event-broker backend (Phase C). Opt-in: install only when
+# ARENA_BROKER_BACKEND=redis. Default in-process broker has no external deps.
+broker-redis = [
+    "redis>=5.0",
+]
 dev = [
     "ruff>=0.15.0",
     "pytest>=9.0.0",
@@ -56,6 +61,11 @@ dev = [
     # Configured under [tool.pyright] — basedpyright reads the same section.
     "basedpyright>=1.39.0",
     "pre-commit>=4.0.0",
+    # Redis broker contract tests use fakeredis (in-memory) so CI doesn't
+    # need a real Redis server. `redis` ships in the broker-redis extra;
+    # dev needs it transitively for the contract test to import RedisStreamsBroker.
+    "redis>=5.0",
+    "fakeredis>=2.20",
 ]
 # macOS-only — install separately when running CoreML inference.
 coreml = [

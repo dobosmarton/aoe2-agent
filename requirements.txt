@@ -11,6 +11,10 @@ anyio==4.13.0
     #   anthropic
     #   httpx
     #   starlette
+async-timeout==5.0.1 ; python_full_version < '3.11.3'
+    # via redis
+basedpyright==1.39.5
+    # via aoe2-agent
 certifi==2026.4.22
     # via
     #   httpcore
@@ -33,6 +37,8 @@ distro==1.9.0
 docstring-parser==0.18.0
     # via anthropic
 duckdb==1.5.2
+    # via aoe2-agent
+fakeredis==2.35.1
     # via aoe2-agent
 fastapi==0.136.1
     # via aoe2-agent
@@ -67,9 +73,9 @@ mouseinfo==0.1.3
 mss==10.2.0
     # via aoe2-agent
 nodeenv==1.10.0
-    # via
-    #   pre-commit
-    #   pyright
+    # via pre-commit
+nodejs-wheel-binaries==24.15.0
+    # via basedpyright
 numpy==2.4.5
     # via
     #   aoe2-agent
@@ -127,10 +133,6 @@ pyperclip==1.11.0
     # via mouseinfo
 pyrect==0.2.0
     # via pygetwindow
-basedpyright==1.39.5
-    # via aoe2-agent
-nodejs-wheel-binaries==24.15.0
-    # via basedpyright
 pyscreeze==1.0.1
     # via pyautogui
 pytest==9.0.3
@@ -153,6 +155,10 @@ pyyaml==6.0.3
     # via
     #   aoe2-agent
     #   pre-commit
+redis==7.4.0
+    # via
+    #   aoe2-agent
+    #   fakeredis
 rubicon-objc==0.5.4 ; sys_platform == 'darwin'
     # via mouseinfo
 ruff==0.15.13
@@ -161,6 +167,8 @@ scipy==1.17.1
     # via aoe2-agent
 sniffio==1.3.1
     # via anthropic
+sortedcontainers==2.4.0
+    # via fakeredis
 starlette==1.0.0
     # via fastapi
 structlog==25.5.0
@@ -176,7 +184,6 @@ typing-extensions==4.15.0
     #   fastapi
     #   pydantic
     #   pydantic-core
-    #   pyright
     #   starlette
     #   typing-inspection
 typing-inspection==0.4.2

@@ -37,6 +37,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from arena.web.forks import ForkRequest, ForkResponse, create_fork
+from evaluation.broker_factory import make_broker
 from evaluation.event_broker import (
     BrokerOverflowError,
     EventBroker,
@@ -218,7 +219,7 @@ def _resolve_run(run_id: str, root: Path) -> Path:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    broker = InProcessEventBroker()
+    broker = make_broker()
     reaper = _ReaperRegistry()
     fork_tasks: set[asyncio.Task[None]] = set()
     app.state.broker = broker
@@ -267,13 +268,14 @@ def get_reaper(request: Request) -> _ReaperRegistry:
 def get_broker(request: Request) -> EventBroker:
     """FastAPI dependency: yields the process-wide `EventBroker`.
 
-    Phase 1 always returns the `InProcessEventBroker` installed at startup;
-    Phase C swaps to a Redis/NATS broker — same Protocol, zero handler
-    changes."""
+    Returns whichever impl `make_broker()` selected at lifespan startup
+    (defaults to `InProcessEventBroker`; set `ARENA_BROKER_BACKEND=redis`
+    for `RedisStreamsBroker`). The lifespan installer is the single
+    writer to `app.state.broker`, so a runtime `isinstance` check here
+    would be hostile to the multi-impl design — `cast` is the right
+    boundary: the static type stays `EventBroker`."""
     app_state = cast("FastAPI", request.app).state
-    broker = cast("object", app_state.broker)
-    assert isinstance(broker, InProcessEventBroker)
-    return broker
+    return cast("EventBroker", app_state.broker)
 
 
 @app.get("/health")
@@ -356,14 +358,24 @@ async def events(
 async def metrics(broker: EventBroker = Depends(get_broker)) -> dict[str, int]:
     """Broker operational counters as JSON.
 
-    The `cast` is the one place the Protocol boundary is bypassed:
-    metrics is impl-specific observational state, not lifecycle
-    semantics, so it stays off the `EventBroker` Protocol. A future
-    Phase C swap to `RedisStreamsBroker` would expose stats through
-    a different surface (Redis `INFO`) and this endpoint would gain
-    its own branch.
+    `metrics()` is intentionally OFF the `EventBroker` Protocol because
+    each impl exposes a different counter surface (in-process: pure
+    dataclass; Redis: an `await` on Redis state). We dispatch on the
+    concrete type here rather than promoting a `BrokerMetrics` Protocol
+    — at N=2 impls, an `isinstance` branch is less ceremony than a new
+    Protocol. The Redis import is lazy so the slim install
+    (`pip install -e .`, no broker-redis extra) never has to import
+    `redis` just to start the web server in in-process mode.
     """
-    return cast("InProcessEventBroker", broker).metrics().to_dict()
+    if isinstance(broker, InProcessEventBroker):
+        return broker.metrics().to_dict()
+    try:
+        from evaluation.redis_broker import RedisStreamsBroker
+    except ImportError as exc:
+        raise HTTPException(503, "broker metrics unavailable") from exc
+    if isinstance(broker, RedisStreamsBroker):
+        return (await broker.metrics()).to_dict()
+    raise HTTPException(503, "broker impl exposes no metrics surface")
 
 
 @app.post("/forks", response_model=ForkResponse)

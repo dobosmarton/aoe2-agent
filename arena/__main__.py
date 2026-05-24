@@ -25,8 +25,8 @@ from arena.metrics import summarise
 from arena.race import race, race_with_mock
 from arena.ranking import RankingResult, rank
 from arena.scenarios import DEFAULT_SCENARIOS, get_scenario
+from evaluation.broker_factory import make_broker
 from evaluation.duckdb_persister import MultiRunBrokerSink
-from evaluation.event_broker import InProcessEventBroker
 from evaluation.event_log import DuckDBEventSink
 from evaluation.world_sim import WorldState
 
@@ -76,7 +76,7 @@ async def _run_through_broker(
     invariant (close every opened run before exiting the `with`) is what
     guarantees the file is consistent on disk by the time we return.
     """
-    broker = InProcessEventBroker()
+    broker = make_broker()
     with duckdb.connect(str(db_path)) as conn:
         db_sink = DuckDBEventSink(conn)
         sink = MultiRunBrokerSink(broker, db_sink, asyncio.get_running_loop())

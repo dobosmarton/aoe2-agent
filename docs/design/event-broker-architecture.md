@@ -408,9 +408,18 @@ Defer until someone wants live UI for non-fork runs.
 - **Memory reclamation:** `broker.reap(run_id)` after grace period post-close.
 - **Metrics:** counters for `events_published`, `events_streamed`, `streams_dropped`, `runs_open`. Wire to `/metrics`.
 
-### Phase C — Distributed swap (future, opt-in)
+### Phase C — Distributed swap (shipped, opt-in)
 
-Implement `RedisStreamsBroker(EventBroker)` or `NatsJetStreamBroker(EventBroker)`. Only change in the rest of the codebase: `get_broker` dependency returns the new impl. Cold-path readers continue using DuckDB; live-path readers transparently get cross-process semantics.
+`RedisStreamsBroker(EventBroker)` implements the full Protocol against a Redis stream per run. Selected at process startup via `ARENA_BROKER_BACKEND=redis` (default remains `inprocess`); the only callsite change is `evaluation/broker_factory.make_broker()` reading the env. Cold-path readers continue using DuckDB; live-path readers transparently get cross-process semantics — a producer in process A and an SSE handler in process B share state through Redis keys.
+
+Key design decisions:
+- **Seq mapping**: `INCR :seq` + `XADD MAXLEN ~ N {seq}-0` keeps `Seq = NewType(int)` stable across both impls. Native Redis IDs (`<ms>-<n>`) would have forced a translation table at every consumer.
+- **Liveness sentinel**: `SET :open 1 EX <grace>` written by `open_run`, `DEL` by `close_run`; `stream()` watches Redis (not the producer's `_open_locally`) so cross-process consumers terminate cleanly.
+- **Sync lifecycle methods queue thunks** (`_pending_admin`) drained at the top of each `stream()` iteration and `publish()` — keeps the Protocol surface unchanged while honoring Redis's async-only client.
+- **Codec reuse**: `_fields_to_event` packs Redis stream fields into the same `EventRow` tuple shape DuckDB returns, then delegates to `Event.from_row`. One deserializer for cold and live paths.
+- **Metrics dispatch**: `metrics()` stays OFF the Protocol (impl-specific surface). The `/metrics` endpoint dispatches via `isinstance` — at N=2 impls, simpler than a new `BrokerMetrics` Protocol.
+
+NATS JetStream was the alternative considered and explicitly deferred: Redis was already in `docker-compose.yml` for Langfuse, so Phase C added zero infra. Backend choice can be revisited as a Phase D follow-up.
 
 ---
 
@@ -466,9 +475,11 @@ Property test (hypothesis): given any sequence of `publish`/`stream` operations 
 - `pytest tests/arena/web/test_live_sse_during_replay.py -v` — regression test green (was the original bug).
 - `pytest` (full suite) — no other regressions; `test_web_forks.py` updated to test against the broker, not `LiveRunRegistry`.
 
-**Distributed-future verification (Phase C, when relevant):**
+**Distributed verification (Phase C — shipped):**
 
-- Same contract tests, run against `RedisStreamsBroker`. Same property tests. No other code changes required.
+- `pytest tests/test_event_broker.py -v` runs the 20-test contract suite against **both** impls (~41 cases total) via the parametrized `_BROKER_FACTORIES` fixture. The Redis row uses `fakeredis.aioredis.FakeRedis` so CI doesn't need a real Redis.
+- `pytest tests/test_redis_broker.py -v` covers Redis-only concerns: codec round-trip, MAXLEN trimming, XINFO-based overflow detection, metrics counters, `is_open_remote()` sentinel lifecycle.
+- `pytest tests/test_redis_broker_cross_process.py -v` is the headline verification: a `multiprocessing.Process` publisher emits 100 events; the parent test process consumes them via a separate `RedisStreamsBroker` instance against the same real Redis, asserts byte-identical Seq sequence. Gated on `redis://localhost:6379/0` reachability (skips cleanly when no Redis is running).
 
 ---
 
@@ -486,18 +497,24 @@ Things to verify on first read in Phase 0:
 - Exact helper used today to reconstruct `Event` from `payload_json` (likely in `_stream_events_sync` in `server.py`) — extract for reuse in `stream_cold()`.
 - Whether `_event_from_payload` needs the `kind` column too (the schema has it; today's helper may or may not).
 
+Resolved during Phase C (2026-05-23):
+- ✅ `RedisStreamsBroker` satisfies the contract test suite under `fakeredis`; the parametrized fixture at `tests/test_event_broker.py:55` now sweeps both impls.
+- ✅ Cross-process publish/consume verified end-to-end in `tests/test_redis_broker_cross_process.py` (real Redis, `multiprocessing.spawn` subprocess).
+- ✅ Existing `Event.from_row` + `payload.model_dump_json()` were enough — no `event_codec.py` extraction was needed (the conditional extraction in the Phase C plan was correctly skipped).
+
 ---
 
 ## 12. Effort estimate
 
-| Phase | Effort |
-|---|---|
-| 0 — Prep & regression test | 0.5 day |
-| 1 — Broker + persister + tests | 1.5–2 days |
-| 2 — Cutover & deletions | 1 day |
-| 2.5 — Non-fork producers (optional) | 1 day |
-| 3 — Hardening (optional) | 1 day |
-| **Total to fix the bug correctly** | **~4 working days** |
+| Phase | Effort | Status |
+|---|---|---|
+| 0 — Prep & regression test | 0.5 day | ✅ shipped |
+| 1 — Broker + persister + tests | 1.5–2 days | ✅ shipped (`d408401`) |
+| 2 — Cutover & deletions | 1 day | ✅ shipped (`74eb7c6`) |
+| 2.5 — Non-fork producers (optional) | 1 day | ✅ shipped (`60da488`) |
+| 3 — Hardening (optional) | 1 day | ✅ shipped (`6b53a0c`) |
+| C — Distributed swap (Redis Streams) | 1 day | ✅ shipped |
+| **Total to fix the bug correctly** | **~5 working days** | |
 
 For reference: the tactical patch ("option B") was ~0.5 day, at the cost of locking in the file-coupling assumption.
 

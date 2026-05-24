@@ -50,14 +50,58 @@ from evaluation.event_broker import (
 
 _BrokerFactory: TypeAlias = "Callable[[], EventBroker]"
 
+
+def _make_fakeredis_broker() -> EventBroker:
+    """Phase C factory: `RedisStreamsBroker` against an in-memory `FakeRedis`.
+
+    Each call constructs a fresh `FakeRedis` so per-test isolation is
+    automatic (no shared backing store). `xread_block_ms=10` keeps the
+    close-detection round-trip fast — the contract tests run a "open,
+    publish N, close, drain" cycle ~30 times across the fixture sweep,
+    and the default 100ms block would add several seconds of overhead.
+    A unique `key_prefix` is belt-and-braces against any future
+    fakeredis change that might share state across instances.
+    """
+    import uuid
+
+    import fakeredis.aioredis
+
+    from evaluation.redis_broker import RedisStreamsBroker
+
+    client = fakeredis.aioredis.FakeRedis()
+    return RedisStreamsBroker(
+        client,
+        key_prefix=f"test:{uuid.uuid4().hex[:8]}",
+        xread_block_ms=10,
+    )
+
+
 # Parametrize on factory, not instance — every test gets a fresh broker.
-# Future RedisStreamsBroker plugs in here as a one-line addition.
+# `RedisStreamsBroker` participates iff `fakeredis` is installed; CI installs
+# it via the `dev` extra, slim installs skip it cleanly.
 _BROKER_FACTORIES: list[_BrokerFactory] = [InProcessEventBroker]
+try:
+    import fakeredis.aioredis  # noqa: F401
+except ImportError:
+    pass
+else:
+    _BROKER_FACTORIES.append(_make_fakeredis_broker)
 
 
-@pytest.fixture(params=_BROKER_FACTORIES, ids=lambda f: f.__name__)
+def _factory_id(f: _BrokerFactory) -> str:
+    # `Callable` doesn't promise `__name__` in pyright's view, but every entry
+    # in `_BROKER_FACTORIES` is either a class or a `def`, both of which carry
+    # it at runtime. `getattr` keeps the fixture id useful even if a future
+    # factory entry is a `functools.partial` or similar nameless callable.
+    return getattr(f, "__name__", repr(f))
+
+
+_BROKER_IDS: list[str] = [_factory_id(f) for f in _BROKER_FACTORIES]
+
+
+@pytest.fixture(params=_BROKER_FACTORIES, ids=_BROKER_IDS)
 def broker(request: pytest.FixtureRequest) -> EventBroker:
-    factory: _BrokerFactory = request.param
+    factory: _BrokerFactory = request.param  # pyright: ignore[reportAny]
     return factory()
 
 
