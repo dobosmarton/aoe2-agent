@@ -18,7 +18,7 @@ Ratings are log-ratings centred on zero (mean = 0). Two profiles separated by `r
 
 ## The configuration
 
-`packages/arena/src/config_profile.py:53` defines `RankingConfig`:
+`apps/arena/src/config_profile.py:53` defines `RankingConfig`:
 
 ```yaml
 turns: 60                  # turns per race-instance
@@ -37,11 +37,11 @@ bootstrap_samples: 1000    # percentile-bootstrap iterations for CIs
 bootstrap_seed: 42         # makes CIs reproducible
 ```
 
-`packages/arena/src/profiles/ranking-v1.yaml` is the shipped default. Cost depends on `rounds × |scenarios| × |profiles| × turns × per-turn-token-cost` — the CLI prints the estimate before running and prompts on TTY.
+`apps/arena/src/profiles/ranking-v1.yaml` is the shipped default. Cost depends on `rounds × |scenarios| × |profiles| × turns × per-turn-token-cost` — the CLI prints the estimate before running and prompts on TTY.
 
 ## The scoring function
 
-Each completed race-instance produces a per-profile final `WorldState`. `composite_score` (`packages/arena/src/ranking.py:80`) computes a **lexicographic** tuple:
+Each completed race-instance produces a per-profile final `WorldState`. `composite_score` (`apps/arena/src/ranking.py:80`) computes a **lexicographic** tuple:
 
 ```python
 (AGE_SEQUENCE.index(state.age), state.population, state.food + state.wood)
@@ -53,7 +53,7 @@ The scoring function is passed in as `score_fn` (`ranking.py:307`), so a researc
 
 ## The Bradley–Terry solver
 
-`_solve_bt` (`packages/arena/src/ranking.py:104`) implements iterative Minorization-Maximization on the pairwise win matrix. Reference: Hunter (2004), "MM algorithms for generalized Bradley–Terry models". Output is mean-centred log-ratings.
+`_solve_bt` (`apps/arena/src/ranking.py:104`) implements iterative Minorization-Maximization on the pairwise win matrix. Reference: Hunter (2004), "MM algorithms for generalized Bradley–Terry models". Output is mean-centred log-ratings.
 
 Two practical guardrails:
 
@@ -76,7 +76,7 @@ The `bootstrap_seed` knob (`config_profile.py:68`) seeds `np.random.default_rng`
 
 ## Scenarios
 
-`packages/arena/src/scenarios.py` defines `DEFAULT_SCENARIOS` (`scenarios.py:88`): four named starting `WorldState` positions, deliberately covering a range of openings:
+`apps/arena/src/scenarios.py` defines `DEFAULT_SCENARIOS` (`scenarios.py:88`): four named starting `WorldState` positions, deliberately covering a range of openings:
 
 | Scenario | Food | Wood | Pop | Notes |
 |---|---|---|---|---|
@@ -117,7 +117,7 @@ Everything is recorded. Final ratings + CI bounds are emitted as `MetricPayload`
 
 ## Offline mode for tests
 
-`rank_with_mock` (`ranking.py:323`) wires `race_with_mock` from `packages/arena/src/race.py:84` into the same `_rank_with_race_fn` pipeline. No API key needed, deterministic outcomes. Used by ranking unit tests to exercise the BT solver and bootstrap CI without spending dollars.
+`rank_with_mock` (`ranking.py:323`) wires `race_with_mock` from `apps/arena/src/race.py:84` into the same `_rank_with_race_fn` pipeline. No API key needed, deterministic outcomes. Used by ranking unit tests to exercise the BT solver and bootstrap CI without spending dollars.
 
 ## Related reading
 

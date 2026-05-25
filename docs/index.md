@@ -35,11 +35,11 @@ graph TD
     end
 
     subgraph "Arena Web (operator surface)"
-        WEB[arena/web/server.py<br/>FastAPI + SSE] --> BROKER
+        WEB[apps/api/src/server.py<br/>FastAPI + SSE] --> BROKER
         WEB --> DUCK
-        WEB --> FORK[arena/web/forks.py<br/>POST /forks → async replay]
+        WEB --> FORK[apps/api/src/forks.py<br/>POST /forks → async replay]
         FORK --> CLI
-        UI[arena/web/ui<br/>Vite + React + Tailwind] -->|SSE| WEB
+        UI[apps/dashboard<br/>Vite + React + Tailwind] -->|SSE| WEB
     end
 
     subgraph "Autoresearch (prompt evolution)"
@@ -105,26 +105,26 @@ Dashed lines indicate optional / off-by-default components. The real-game tier r
 
 | # | Chapter | Description | Key files |
 |---|---|---|---|
-| 14 | [Arena Overview](./part6-evaluation-arena/14-arena-overview.md) | race / smoke / rank — when to use which | `packages/arena/src/__main__.py`, `packages/arena/src/race.py` |
+| 14 | [Arena Overview](./part6-evaluation-arena/14-arena-overview.md) | race / smoke / rank — when to use which | `apps/arena/src/__main__.py`, `apps/arena/src/race.py` |
 | 15 | [Event Broker](./part6-evaluation-arena/15-event-broker.md) | Protocol, in-process vs Redis, backpressure, `/metrics` | `packages/evaluation/src/event_broker.py`, `packages/evaluation/src/redis_broker.py`, `packages/evaluation/src/broker_factory.py` |
 | 16 | [DuckDB Persister and Replay](./part6-evaluation-arena/16-duckdb-persister-and-replay.md) | Event log schema, cold-path reader, fork primitive | `packages/evaluation/src/event_log.py`, `packages/evaluation/src/duckdb_persister.py`, `packages/evaluation/src/fork.py` |
-| 17 | [Ranking Pipeline](./part6-evaluation-arena/17-ranking-pipeline.md) | Bradley-Terry MLE, scenarios, bootstrap CIs | `packages/arena/src/ranking.py`, `packages/arena/src/scenarios.py`, `packages/arena/src/profiles/ranking-v1.yaml` |
+| 17 | [Ranking Pipeline](./part6-evaluation-arena/17-ranking-pipeline.md) | Bradley-Terry MLE, scenarios, bootstrap CIs | `apps/arena/src/ranking.py`, `apps/arena/src/scenarios.py`, `apps/arena/src/profiles/ranking-v1.yaml` |
 | 18 | [Synthetic World Sim](./part6-evaluation-arena/18-synthetic-world-sim.md) | AoE2-lite economy model + perception projection | `packages/evaluation/src/world_sim.py` |
 
 ### Part 7: Arena web
 
 | # | Chapter | Description | Key files |
 |---|---|---|---|
-| 19 | [Web Architecture](./part7-arena-web/19-web-architecture.md) | FastAPI lifespan, `/events` dispatch, reaper, `/forks` flow | `packages/arena-web/src/server.py`, `packages/arena-web/src/forks.py` |
-| 20 | [Fork and Diff UI](./part7-arena-web/20-fork-and-diff-ui.md) | Timeline scrubber, World/Trace/Diff/Operator tabs | `packages/arena-web/src/ui/src/App.tsx`, `panels/*` |
-| 21 | [Running the UI Locally](./part7-arena-web/21-running-the-ui-locally.md) | Dev proxy, VITE_API_BASE_URL, deployment modes | `packages/arena-web/src/ui/vite.config.ts` |
+| 19 | [Web Architecture](./part7-arena-web/19-web-architecture.md) | FastAPI lifespan, `/events` dispatch, reaper, `/forks` flow | `apps/api/src/server.py`, `apps/api/src/forks.py` |
+| 20 | [Fork and Diff UI](./part7-arena-web/20-fork-and-diff-ui.md) | Timeline scrubber, World/Trace/Diff/Operator tabs | `apps/dashboard/src/App.tsx`, `panels/*` |
+| 21 | [Running the UI Locally](./part7-arena-web/21-running-the-ui-locally.md) | Dev proxy, VITE_API_BASE_URL, deployment modes | `apps/dashboard/vite.config.ts` |
 
 ### Part 8: Autoresearch
 
 | # | Chapter | Description | Key files |
 |---|---|---|---|
-| 22 | [Autoresearch Overview](./part8-autoresearch/22-autoresearch-overview.md) | Mutate → run → score → accept/revert loop | `packages/autoresearch/src/orchestrator.py`, `packages/autoresearch/src/config.yaml` |
-| 23 | [Prompt Mutation and Memory](./part8-autoresearch/23-prompt-mutation-and-memory.md) | Mutator constraints, protected sections, memory chain | `packages/autoresearch/src/prompt_mutator.py`, `packages/autoresearch/src/memory_chain.py` |
+| 22 | [Autoresearch Overview](./part8-autoresearch/22-autoresearch-overview.md) | Mutate → run → score → accept/revert loop | `apps/autoresearch/src/orchestrator.py`, `apps/autoresearch/src/config.yaml` |
+| 23 | [Prompt Mutation and Memory](./part8-autoresearch/23-prompt-mutation-and-memory.md) | Mutator constraints, protected sections, memory chain | `apps/autoresearch/src/prompt_mutator.py`, `apps/autoresearch/src/memory_chain.py` |
 
 ---
 

@@ -60,7 +60,7 @@ In-process broker (`event_broker.py:189`):
 - Per-run buffer is a `deque` with `maxlen=10_000`.
 - When full, the next `publish` evicts the oldest envelope (O(1)) and bumps `head_seq` by one.
 - A consumer whose cursor falls below `head_seq` self-raises `BrokerOverflowError(run_id, requested_seq, available_from)` from inside `stream()` on the next wake-up. The slow consumer self-evicts; publishers never block or raise on buffer pressure.
-- The SSE handler (`packages/arena-web/src/server.py:296`, `_stream_from_broker`) catches the error, emits a final `event: overflow` SSE line carrying `available_from`, and returns. The frontend reconnects with `?from_seq=<available_from>` and accepts the gap — surfacing the loss is the contract; silent partial reads would be worse.
+- The SSE handler (`apps/api/src/server.py:296`, `_stream_from_broker`) catches the error, emits a final `event: overflow` SSE line carrying `available_from`, and returns. The frontend reconnects with `?from_seq=<available_from>` and accepts the gap — surfacing the loss is the contract; silent partial reads would be worse.
 
 Redis broker (`redis_broker.py:178`):
 - `XADD MAXLEN ~ 10_000` matches the in-process buffer size (the `~` form is approximate — Redis trims in radix-tree node chunks, within a few dozen entries of the limit).
@@ -87,7 +87,7 @@ Both impls expose `metrics()` returning `BrokerMetricsSnapshot` (`event_broker.p
 }
 ```
 
-The FastAPI `/metrics` endpoint (`packages/arena-web/src/server.py:362`) dispatches on the concrete type — `metrics()` is intentionally **not** on the `EventBroker` Protocol, because each impl has a different counter surface (in-process: pure dataclass; Redis: an `await` on Redis state). At N=2 impls, an `isinstance` branch is less ceremony than a `BrokerMetrics` Protocol. The Redis import in the metrics handler is lazy so the slim install never has to import `redis` just to start the web server in in-process mode.
+The FastAPI `/metrics` endpoint (`apps/api/src/server.py:362`) dispatches on the concrete type — `metrics()` is intentionally **not** on the `EventBroker` Protocol, because each impl has a different counter surface (in-process: pure dataclass; Redis: an `await` on Redis state). At N=2 impls, an `isinstance` branch is less ceremony than a `BrokerMetrics` Protocol. The Redis import in the metrics handler is lazy so the slim install never has to import `redis` just to start the web server in in-process mode.
 
 ## Producer adapter
 
@@ -100,7 +100,7 @@ self.loop.call_soon_threadsafe(
 )
 ```
 
-This keeps `emit()` non-blocking and preserves FIFO order per loop thread. The fork replay path uses it directly (`packages/arena-web/src/forks.py:228`). The CLI path uses the higher-level `MultiRunBrokerSink` (`packages/evaluation/src/duckdb_persister.py:99`), which auto-opens runs on first emit and routes each `run_id` to its own drainer — see [Chapter 16](./16-duckdb-persister-and-replay.md).
+This keeps `emit()` non-blocking and preserves FIFO order per loop thread. The fork replay path uses it directly (`apps/api/src/forks.py:228`). The CLI path uses the higher-level `MultiRunBrokerSink` (`packages/evaluation/src/duckdb_persister.py:99`), which auto-opens runs on first emit and routes each `run_id` to its own drainer — see [Chapter 16](./16-duckdb-persister-and-replay.md).
 
 ## The invariant you should not break
 

@@ -20,7 +20,7 @@ just arena-ui-dev
 
 Browse to <http://localhost:5173>. Pick a run from the left sidebar.
 
-`just arena-web-dev` resolves to `python -m arena_web --port 8000` (`packages/arena-web/src/__main__.py`). `just arena-ui-dev` runs `bun install` (idempotent) then `bun run dev`. Both recipes are in `justfile:138` and `:165`.
+`just arena-web-dev` resolves to `python -m arena_web --port 8000` (`apps/api/src/__main__.py`). `just arena-ui-dev` runs `bun install` (idempotent) then `bun run dev`. Both recipes are in `justfile:138` and `:165`.
 
 ## Configuration knobs
 
@@ -37,9 +37,9 @@ Browse to <http://localhost:5173>. Pick a run from the left sidebar.
 
 | Env Var | Default | Purpose |
 |---|---|---|
-| `VITE_API_BASE_URL` | unset (use Vite dev proxy) | Set to a full `http(s)://host:port` URL to bypass the proxy. Necessary when the backend is on a different machine. Live in `packages/arena-web/src/ui/.env.local`; the example is `packages/arena-web/src/ui/.env.example`. |
+| `VITE_API_BASE_URL` | unset (use Vite dev proxy) | Set to a full `http(s)://host:port` URL to bypass the proxy. Necessary when the backend is on a different machine. Live in `apps/dashboard/.env.local`; the example is `apps/dashboard/.env.example`. |
 
-The proxy paths (`/runs`, `/events`, `/forks`, `/health`) are listed in `packages/arena-web/src/ui/vite.config.ts`. When `VITE_API_BASE_URL` is set, the frontend prepends it to every API call instead of using relative URLs.
+The proxy paths (`/runs`, `/events`, `/forks`, `/health`) are listed in `apps/dashboard/vite.config.ts`. When `VITE_API_BASE_URL` is set, the frontend prepends it to every API call instead of using relative URLs.
 
 ## Three deployment modes
 
@@ -57,7 +57,7 @@ just arena-web-dev   # binds to 127.0.0.1 by default; pass --host 0.0.0.0 if nee
 
 ```bash
 # On the laptop
-echo 'VITE_API_BASE_URL=http://vm.local:8000' > arena/web/ui/.env.local
+echo 'VITE_API_BASE_URL=http://vm.local:8000' > apps/dashboard/.env.local
 just arena-ui-dev
 ```
 
@@ -66,7 +66,7 @@ The CORS list on the backend must include the laptop's SPA origin. If you change
 ### 3. Production build
 
 ```bash
-just arena-web-build     # writes arena/web/ui/dist/
+just arena-web-build     # writes apps/dashboard/dist/
 ```
 
 The `dist/` bundle is a standard Vite static site — drop it behind any HTTP server, or mount it from FastAPI with a `StaticFiles` mount. Wiring that into `server.py` is intentionally not done; the URL contract in [Chapter 19](./19-web-architecture.md) is the stable surface, and how you serve the bundle is up to your deployment.
@@ -102,7 +102,7 @@ The end-to-end Operator workflow:
 6. The new run appears in the sidebar; the timeline starts streaming live as `_replay` publishes events.
 7. Switch to the **Diff** tab to see parent vs child side-by-side.
 
-For this to work you need `ANTHROPIC_API_KEY` exported in the shell that started `arena-web-dev` — the fork replay drives a real LLM. The default fork profile is Haiku at temperature 0.5 (`packages/arena-web/src/forks.py:95`, `DEFAULT_FORK_PROFILE`). Cost per 10-turn fork is roughly the same per-profile cost as one race-instance variant from `arena race` — see Chapter 17 for the breakdown.
+For this to work you need `ANTHROPIC_API_KEY` exported in the shell that started `arena-web-dev` — the fork replay drives a real LLM. The default fork profile is Haiku at temperature 0.5 (`apps/api/src/forks.py:95`, `DEFAULT_FORK_PROFILE`). Cost per 10-turn fork is roughly the same per-profile cost as one race-instance variant from `arena race` — see Chapter 17 for the breakdown.
 
 ## Troubleshooting
 

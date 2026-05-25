@@ -35,7 +35,7 @@ basedpyright's `reportAny` flips this: any expression whose static type is `Any`
 **Positive**
 - New code is far more likely to have correct types at SDK boundaries.
 - The strict-mode-on-by-default story means a contributor doesn't have to know about a separate "strict mode" — there is only one mode.
-- Catches subtle bugs at type-check time (numpy stubs returning `Any` from `.shape[i]` is the canonical one — see `packages/arena/src/ranking.py:104`'s carefully-typed BT solver).
+- Catches subtle bugs at type-check time (numpy stubs returning `Any` from `.shape[i]` is the canonical one — see `apps/arena/src/ranking.py:104`'s carefully-typed BT solver).
 
 **Negative**
 - More ceremony at SDK boundaries (explicit `cast("int", ...)` on values that obviously *are* `int`). Cost is paid once per boundary; the value is auditability.

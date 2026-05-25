@@ -33,7 +33,7 @@ Constants are all named at the top of `world_sim.py:30–70`:
 - **Resource gather** is flat per turn: `+20 food`, `+15 wood` (`FOOD_GATHER_RATE`, `WOOD_GATHER_RATE`). No villager-assignment tracking — gather rates are constant regardless of how many villagers exist. This is the load-bearing simplification.
 - **Villagers cost 50 food** and take 3 ticks to produce (`VILLAGER_COST_FOOD`, `VILLAGER_PRODUCTION_TICKS`). The queue is a list of countdown ints; each `tick()` decrements them and promotes any that hit zero into `population`.
 - **Buildings** have a wood cost and a name keyed by the same key the executor uses in real-game prompts. `q` = house (25 wood, +5 pop_cap), `w` = mill, `r` = lumber camp, `e` = mining camp, `a` = farm, `s` = blacksmith, `t` = dock. See `BUILDING_COSTS` and `BUILDING_NAMES`.
-- **Age-up costs 500 food and takes 6 ticks**, gated by four prerequisites checked in `_feudal_prereqs_met`: age must be Dark, food ≥ 500, population ≥ 22, and `{mill, lumber_camp}` both built. Press `z` (`_apply_age_up`) silently no-ops if *any* prerequisite is missing. The "silently no-ops" behaviour is the one the `strategy` prompt variant is built to compensate for — see `packages/arena/src/prompts.py:23`.
+- **Age-up costs 500 food and takes 6 ticks**, gated by four prerequisites checked in `_feudal_prereqs_met`: age must be Dark, food ≥ 500, population ≥ 22, and `{mill, lumber_camp}` both built. Press `z` (`_apply_age_up`) silently no-ops if *any* prerequisite is missing. The "silently no-ops" behaviour is the one the `strategy` prompt variant is built to compensate for — see `apps/arena/src/prompts.py:23`.
 
 ## How a turn is applied
 
@@ -90,7 +90,7 @@ Failures come back as plain strings (`packages/evaluation/src/runner.py` formats
 
 ## Real-game tier impact: zero
 
-Nothing in `packages/gameplay-agent/src/` was modified by the arena buildout. The existing `mock_detect()` keeps its frozen Dark-Age fixture behaviour. Arena callers reach for `render()` / `mock_detect_from_world()` explicitly. The synth_game_loop in `packages/gameplay-agent/src/synth_game_loop.py` is a separate code path from the real `game_loop.py`.
+Nothing in `apps/agent/src/` was modified by the arena buildout. The existing `mock_detect()` keeps its frozen Dark-Age fixture behaviour. Arena callers reach for `render()` / `mock_detect_from_world()` explicitly. The synth_game_loop in `apps/agent/src/synth_game_loop.py` is a separate code path from the real `game_loop.py`.
 
 This is the line that keeps the architecture honest: arena improvements never threaten the production agent.
 

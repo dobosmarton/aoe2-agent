@@ -61,7 +61,7 @@ agent/
 
 The agent won't crash without optional subsystems, but YOLO detection is practically required for meaningful gameplay.
 
-**Detection** — imported inside a try/except at module level in `packages/gameplay-agent/src/game_loop.py`:
+**Detection** — imported inside a try/except at module level in `apps/agent/src/game_loop.py`:
 
 ```python
 try:
@@ -73,7 +73,7 @@ except ImportError:
 
 Without detection, the executor has no entity list — it cannot target units, buildings, or resources by class or ID. The strategist can still read screenshots and set goals, but the executor is limited to hotkeys and hardcoded coordinates. In practice, this makes the agent nearly non-functional: it can't gather resources, train units, or build at specific locations. Detection is technically optional (the agent starts and runs) but practically required for any useful gameplay.
 
-**Game Knowledge** — imported inside a try/except in `packages/gameplay-agent/src/providers/claude.py`:
+**Game Knowledge** — imported inside a try/except in `apps/agent/src/providers/claude.py`:
 
 ```python
 try:
@@ -85,13 +85,13 @@ except ImportError:
 
 Without the knowledge database, no dynamic context injection occurs. The executor still receives the system prompt and memory context. This is a minor degradation — the agent plays reasonably without it.
 
-**Window Management** — pygetwindow is optional at `packages/gameplay-agent/src/window.py`. When unavailable, functions return `True` by default — the agent assumes the game is running and focused. Screenshot capture falls back to the full primary monitor.
+**Window Management** — pygetwindow is optional at `apps/agent/src/window.py`. When unavailable, functions return `True` by default — the agent assumes the game is running and focused. Screenshot capture falls back to the full primary monitor.
 
 > **Key Insight**: Detection is the critical optional dependency. Without YOLO, the executor is essentially blind — the experience is very poor. Game knowledge and window management are truly additive enhancements that degrade gracefully.
 
 ## 1.4 Configuration
 
-Configuration uses a Pydantic `BaseModel` with environment variable overrides (`packages/gameplay-agent/src/config.py`):
+Configuration uses a Pydantic `BaseModel` with environment variable overrides (`apps/agent/src/config.py`):
 
 | Setting | Env Var | Default | Purpose |
 |---------|---------|---------|---------|
@@ -113,17 +113,17 @@ A global singleton `config = Config.from_env()` is created at module load time a
 
 The entire agent runs on asyncio:
 
-- **Entry point**: `asyncio.run(main_async(args))` in `packages/gameplay-agent/src/main.py`
+- **Entry point**: `asyncio.run(main_async(args))` in `apps/agent/src/main.py`
 - **API clients**: `anthropic.AsyncAnthropic` for both executor and strategist
-- **Game loop**: `game_loop()` in `packages/gameplay-agent/src/game_loop.py`
-- **Action execution**: `execute_actions()` in `packages/gameplay-agent/src/executor.py`
+- **Game loop**: `game_loop()` in `apps/agent/src/game_loop.py`
+- **Action execution**: `execute_actions()` in `apps/agent/src/executor.py`
 - **Delays**: `asyncio.sleep()` for non-blocking waits
 
 pyautogui calls are synchronous but fast (sub-millisecond per click), so they don't block meaningfully.
 
 ## 1.6 Logging
 
-Structured logging via structlog with colored console output, configured in `packages/gameplay-agent/src/main.py`.
+Structured logging via structlog with colored console output, configured in `apps/agent/src/main.py`.
 
 Key log events: `iteration_start`, `screenshot_captured`, `detection_complete`, `strategist_response`, `strategist_goals_updated`, `llm_response`, `actions_executed`, `action_verification`, `alarm_triggered`, `turn_reward`.
 

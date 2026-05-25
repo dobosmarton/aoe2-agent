@@ -1,6 +1,6 @@
 # Chapter 20 — Fork and Diff UI
 
-The four tabs in `packages/arena-web/src/ui/src/App.tsx` are the operator's main surface:
+The four tabs in `apps/dashboard/src/App.tsx` are the operator's main surface:
 
 | Tab | Component | Purpose |
 |---|---|---|
@@ -43,7 +43,7 @@ Clicking the parent's run-id in the diff header calls `onOpenRun(parent_run_id)`
 
 ## Operator panel
 
-`src/panels/operator.tsx`. The form fields map directly to `ForkRequest` (`packages/arena-web/src/forks.py:77`):
+`src/panels/operator.tsx`. The form fields map directly to `ForkRequest` (`apps/api/src/forks.py:77`):
 
 - `parent_run_id` — pre-filled with the currently selected run.
 - `parent_t` — pre-filled with the scrubber's `selectedTurn`.

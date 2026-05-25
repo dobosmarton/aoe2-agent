@@ -1,12 +1,12 @@
 # Chapter 22 — Autoresearch Overview
 
-`packages/autoresearch/src/` is the **prompt-optimization loop**: an LLM proposes a small targeted edit to `prompts/system.md`, the agent plays a real game with the modified prompt, a composite score decides accept or revert, and the change is committed to git so the history is auditable.
+`apps/autoresearch/src/` is the **prompt-optimization loop**: an LLM proposes a small targeted edit to `prompts/system.md`, the agent plays a real game with the modified prompt, a composite score decides accept or revert, and the change is committed to git so the history is auditable.
 
 The pattern is borrowed from [Karpathy's autoresearch](https://github.com/karpathy/autoresearch): modify → evaluate → keep/revert → repeat. The original 5-phase plan lives at [`docs/design/autoresearch-plan.md`](../design/autoresearch-plan.md) (frozen historical spec). This chapter covers what's actually shipped: Phase 0 (foundation) and Phase 1 (prompt-mutation loop).
 
 ## How a single experiment runs
 
-`packages/autoresearch/src/orchestrator.py:73` — `Orchestrator.run_experiment`:
+`apps/autoresearch/src/orchestrator.py:73` — `Orchestrator.run_experiment`:
 
 1. **Read recent experiments and failure modes.** `get_recent_experiments(5)` from the TSV ledger; `_extract_failure_modes` derives natural-language hints from the last game's metric breakdown (e.g. "Population stayed very low — agent may not be queueing villagers", `orchestrator.py:254`).
 2. **Propose a change.** `PromptMutator.propose_change` (`prompt_mutator.py:61`) sends the current prompt, recent results, and failure modes to Haiku. The mutator system prompt (`prompt_mutator.py:20`) enforces tight constraints: change ≤5 lines, don't touch `## Output Format` or `## Game State Detection`, focus on one specific weakness, return JSON with `description`, `old_text`, `new_text`, `rationale`.
@@ -20,7 +20,7 @@ A baseline game with the unmodified prompt runs once before the loop starts (unl
 
 ## Scoring
 
-`packages/autoresearch/src/metrics.py` (`compute_score`) is a weighted composite, with weights frozen in `packages/autoresearch/src/config.yaml`:
+`apps/autoresearch/src/metrics.py` (`compute_score`) is a weighted composite, with weights frozen in `apps/autoresearch/src/config.yaml`:
 
 | Component | Weight | Source |
 |---|---|---|
@@ -36,7 +36,7 @@ The weight choice is an explicit value judgment: survival dominates because game
 
 ## Cross-game memory chain
 
-`packages/autoresearch/src/memory_chain.py` is the second half of the loop. After each game, `MemoryChain.extract_memories` (`memory_chain.py:107`) sends a turn-by-turn summary to Haiku with an extraction prompt that demands first-person imperative rules ("I should…", not "the agent should…") and one rule per file.
+`apps/autoresearch/src/memory_chain.py` is the second half of the loop. After each game, `MemoryChain.extract_memories` (`memory_chain.py:107`) sends a turn-by-turn summary to Haiku with an extraction prompt that demands first-person imperative rules ("I should…", not "the agent should…") and one rule per file.
 
 The output is markdown frontmatter + body, written under `memories/NNN_<title>.md`:
 

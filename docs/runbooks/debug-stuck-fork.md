@@ -13,7 +13,7 @@ When `POST /forks` returns a `child_run_id` but the run never finishes — no `C
 
 ## Step 1 — read the server log
 
-The replay task uses `logger.exception(...)` on any exception (`packages/arena-web/src/forks.py:248`). The trace shows up wherever `uvicorn` is writing logs. Most "stuck" cases turn out to be:
+The replay task uses `logger.exception(...)` on any exception (`apps/api/src/forks.py:248`). The trace shows up wherever `uvicorn` is writing logs. Most "stuck" cases turn out to be:
 
 - `anthropic.APIError` — bad/expired `ANTHROPIC_API_KEY`, rate limit, network blip. The replay aborts cleanly; check `/metrics → runs_open` to confirm the run was closed.
 - `pydantic.ValidationError` — LLM returned malformed JSON that the action parser couldn't fix. Rare; usually intermittent.
@@ -75,7 +75,7 @@ If `EXISTS` returns 1 and the stream length is stable, the producer is stuck mid
 Options, in order of preference:
 
 1. **Wait it out.** If the producer is genuinely doing an LLM call, give it 60s.
-2. **Restart the server.** The lifespan teardown cancels all `fork_tasks` and `gather`s them with `return_exceptions=True` (`packages/arena-web/src/server.py:241`), so a clean restart drains. Existing finalized runs in DuckDB are unaffected.
+2. **Restart the server.** The lifespan teardown cancels all `fork_tasks` and `gather`s them with `return_exceptions=True` (`apps/api/src/server.py:241`), so a clean restart drains. Existing finalized runs in DuckDB are unaffected.
 3. **Manual reap (Redis).** If the run is wedged with no persister catching up, you can delete the Redis keys directly:
    ```bash
    redis-cli -a "$REDIS_PASSWORD" DEL arena:run:<rid>:events arena:run:<rid>:seq arena:run:<rid>:open
@@ -92,7 +92,7 @@ If the stuck case is reproducible, capture:
 - The fork request body (`ForkRequest` JSON).
 - For Redis: `XLEN` and `XINFO STREAM` output.
 
-The replay path (`packages/arena-web/src/forks.py:_replay`) has annotated lifecycle ordering — any new "stuck" failure mode is usually a violation of that ordering or a new SDK gotcha worth recording in the source as a comment.
+The replay path (`apps/api/src/forks.py:_replay`) has annotated lifecycle ordering — any new "stuck" failure mode is usually a violation of that ordering or a new SDK gotcha worth recording in the source as a comment.
 
 ## Related
 

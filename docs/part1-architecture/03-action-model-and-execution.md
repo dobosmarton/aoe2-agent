@@ -4,11 +4,11 @@ The agent's output is a list of actions that must be validated, resolved to scre
 
 ## 3.1 Action Types
 
-The agent has **seven base action types** (Pydantic-validated in `packages/gameplay-agent/src/models.py`) and **three composite tools** (defined in `packages/gameplay-agent/src/providers/claude.py`) that bundle multi-step sequences to eliminate API roundtrips.
+The agent has **seven base action types** (Pydantic-validated in `apps/agent/src/models.py`) and **three composite tools** (defined in `apps/agent/src/providers/claude.py`) that bundle multi-step sequences to eliminate API roundtrips.
 
 ### Base Actions
 
-All base action types are defined as Pydantic models in `packages/gameplay-agent/src/models.py`.
+All base action types are defined as Pydantic models in `apps/agent/src/models.py`.
 
 ### PointTargetAction (base class)
 
@@ -274,7 +274,7 @@ pyautogui.PAUSE = 0.02       # 20ms between pyautogui calls (default is 100ms)
 
 ## 3.6 Action Validation Utilities
 
-Two helper functions for ad-hoc validation in `packages/gameplay-agent/src/models.py`:
+Two helper functions for ad-hoc validation in `apps/agent/src/models.py`:
 
 **`validate_action(action_dict)`** — validates a single action dict against a type map. Returns a Pydantic model or `None`.
 
