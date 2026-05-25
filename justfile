@@ -1,8 +1,10 @@
 # AoE2 LLM Arena — Monorepo Commands
 #
-# After the workspace migration, every recipe runs through `uv run --package
-# <name>` so the right editable install resolves. `uv sync` installs every
-# workspace member from packages/* into .venv/ in one shot.
+# Layout: apps/* are deployable units (services, CLIs, frontends);
+# packages/* are reusable libraries imported by apps. Every Python recipe runs
+# through `uv run --package <name>`, which resolves by package name regardless
+# of which subdirectory the member lives in. `uv sync` installs every member
+# (apps + packages) into .venv/ in one shot.
 
 set dotenv-load
 
@@ -35,13 +37,13 @@ autoresearch *ARGS:
     uv run --package autoresearch aoe2-autoresearch {{ARGS}}
 
 # Arena CLI subcommands.
-arena-race profile="packages/arena/src/profiles/v1.yaml":
+arena-race profile="apps/arena/src/profiles/v1.yaml":
     uv run --package arena aoe2-arena race {{profile}}
 
 arena-smoke:
     uv run --package arena aoe2-arena smoke
 
-arena-rank profile="packages/arena/src/profiles/ranking-v1.yaml":
+arena-rank profile="apps/arena/src/profiles/ranking-v1.yaml":
     uv run --package arena aoe2-arena rank {{profile}}
 
 # Arena replay/inspect web server.
@@ -90,7 +92,7 @@ train model="yolo11n.pt" *ARGS:
     uv run --package detection python -m detection.training.train_yolo --model {{model}} {{ARGS}}
 
 sync-classes:
-    cp packages/detection/src/training/config/classes.yaml packages/detection-server/src/classes.yaml
+    cp packages/detection/src/training/config/classes.yaml apps/detection-server/src/classes.yaml
 
 # ── Synthetic arena infrastructure ────────────────────────────────────────
 
@@ -127,13 +129,31 @@ arena-broker-redis-env:
         echo "# REDIS_PASSWORD is already in scope from .env; make_broker()"; \
         echo "# auto-builds redis://:\$REDIS_PASSWORD@localhost:6379/0"
 
-# ── UI (Vite + React + Tailwind) ──────────────────────────────────────────
+# ── Dashboard (apps/dashboard — Vite + React + Tailwind) ──────────────────
+#
+# JS install is workspace-wide from repo root: `bun install` populates the
+# hoisted node_modules/ for both apps/dashboard and apps/landing in one shot.
 
 arena-ui-install:
-    cd ui && bun install
+    bun install
 
 arena-ui-dev: arena-ui-install
-    cd ui && bun run dev
+    cd apps/dashboard && bun run dev
 
 arena-web-build: arena-ui-install
-    cd ui && bun run build
+    cd apps/dashboard && bun run build
+
+# ── Landing (apps/landing — Astro docs site) ──────────────────────────────
+
+landing-dev: arena-ui-install
+    cd apps/landing && bun run dev
+
+landing-build: arena-ui-install
+    cd apps/landing && bun run build
+
+# Drive the dashboard with Playwright and capture the four arena UI panel
+# screenshots embedded in the landing's "See it in action" section. Reads
+# real events from DuckDB fixtures under logs/arena/, so no Anthropic API
+# key is needed. Auto-starts api (:8000) + dashboard (:5173) if not running.
+capture-screenshots: arena-ui-install
+    cd apps/landing && bun run capture:screenshots

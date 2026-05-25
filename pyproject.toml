@@ -6,14 +6,23 @@
 #     uv sync                        # all members + dev tools
 #     uv sync --no-dev               # all members, no dev tools
 #
+# Layout: apps/* are deployable units (CLIs + long-running services);
+# packages/* are reusable libraries imported by apps. uv resolves workspace
+# members by package name (not path), so the [tool.uv.sources] mapping below
+# does not change when a member moves between apps/ and packages/.
+#
 # Run a specific package's entry point:
-#     uv run --package gameplay-agent aoe2-agent
-#     uv run --package arena aoe2-arena race
-#     uv run --package arena-web aoe2-arena-web
-#     uv run --package detection-server aoe2-server
+#     uv run --package gameplay-agent aoe2-agent        # apps/agent/
+#     uv run --package arena aoe2-arena race            # apps/arena/
+#     uv run --package arena-web aoe2-arena-web         # apps/api/
+#     uv run --package detection-server aoe2-server     # apps/detection-server/
 
 [tool.uv.workspace]
-members = ["packages/*"]
+members = ["apps/*", "packages/*"]
+# JS-only apps live alongside Python ones under apps/ — exclude them so uv
+# doesn't expect a pyproject.toml in each. The bun workspace (root
+# package.json) owns these instead.
+exclude = ["apps/dashboard", "apps/landing"]
 
 # Wire every workspace member to its sibling source. Without these `[tool.uv.sources]`
 # entries, uv would try to resolve the package names from PyPI.
@@ -60,7 +69,8 @@ extend-exclude = [
     "tmp",
     "memories",
     "game_graphics",
-    "ui",                          # Vite/TypeScript frontend, not Python
+    "apps/dashboard",              # Vite/TypeScript frontend, not Python
+    "apps/landing",                # Astro/TypeScript site, not Python
 ]
 
 [tool.ruff.lint]
@@ -103,7 +113,7 @@ indent-style = "space"
 [tool.pyright]
 # Scope to first-party source only — tests were never typechecked under
 # the previous setup either (matches the pre-workspace CI scope).
-include = ["packages/*/src"]
+include = ["apps/*/src", "packages/*/src"]
 exclude = [
     ".venv",
     "**/__pycache__",
@@ -111,7 +121,8 @@ exclude = [
     "tmp",
     "logs",
     "memories",
-    "ui",
+    "apps/dashboard",
+    "apps/landing",
 ]
 typeCheckingMode = "basic"
 pythonVersion = "3.11"
@@ -129,7 +140,7 @@ reportAny = "error"
 # ---------------------------------------------------------------------------
 
 [tool.coverage.run]
-source = ["packages"]
+source = ["apps", "packages"]
 omit = [
     "*/tests/*",
     "*/__pycache__/*",

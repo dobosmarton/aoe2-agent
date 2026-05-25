@@ -50,11 +50,14 @@ docs/plan/
 # other contributors. Equivalent of `.vscode/` for the Claude Code workflow.
 .claude/
 
-# Frontend build artefacts (ui/ — Vite + Bun).
-ui/node_modules/
-ui/dist/
-ui/.vite/
-ui/*.tsbuildinfo
+# JS workspace — root hoisted node_modules + per-app build artefacts.
+node_modules/
+apps/dashboard/dist/
+apps/dashboard/.vite/
+apps/dashboard/*.tsbuildinfo
+apps/landing/dist/
+apps/landing/.astro/
+apps/landing/node_modules/
 
 # Detection: training images, screenshots, label outputs — large, regenerated.
 packages/detection/src/**/training_data*/

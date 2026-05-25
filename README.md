@@ -45,9 +45,16 @@ Each iteration (~3-5 seconds):
 
 ## Installation
 
-The repo is a **uv workspace** with 9 packages under `packages/`. One `uv sync`
-installs every workspace member editable into a shared `.venv/`, plus the dev
-dependency-group (ruff, basedpyright, pytest, fakeredis, hypothesis, pre-commit).
+The repo is a polyglot monorepo:
+
+- **Python (`uv workspace`)** — 9 workspace members. Deployable units live in `apps/`
+  (agent, api, arena, autoresearch, detection-server); reusable libraries live in
+  `packages/` (core, data, detection, evaluation). One `uv sync` installs every
+  member editable into a shared `.venv/`, plus the dev dependency-group (ruff,
+  basedpyright, pytest, fakeredis, hypothesis, pre-commit).
+- **TypeScript (`bun workspace`)** — two frontend apps (`apps/dashboard` Vite/React,
+  `apps/landing` Astro) share a single root `bun.lock` and hoisted `node_modules/`.
+  One `bun install` from the repo root resolves both apps.
 
 ```bash
 # Install uv: https://docs.astral.sh/uv/getting-started/installation/
@@ -225,6 +232,11 @@ just agent --test
 # Run the detection server (macOS host)
 just server --model packages/detection/src/inference/models/aoe2_yolo_v5.onnx
 
+# Frontend dev servers (workspace-wide install happens once at repo root)
+bun install
+just arena-ui-dev          # apps/dashboard (Vite + React, dashboard SPA)
+just landing-dev           # apps/landing (Astro docs site)
+
 # Autoresearch: timed experiment with metrics
 uv run --package autoresearch python -m autoresearch.game_runner --time-budget 600 --description "test run"
 ```
@@ -232,28 +244,35 @@ uv run --package autoresearch python -m autoresearch.game_runner --time-budget 6
 ## Project Structure
 
 ```
-agent/                                     # uv workspace root
-├── pyproject.toml                         # workspace declaration + shared tool config
-├── justfile                               # monorepo commands (uv run --package …)
-├── ui/                                    # Vite + React arena replay UI
+agent/                                     # monorepo root (uv + bun workspaces)
+├── pyproject.toml                         # uv workspace declaration + shared tool config
+├── package.json                           # bun workspace declaration (apps/dashboard, apps/landing)
+├── bun.lock                               # single root lockfile for the JS workspace
+├── justfile                               # cross-language task runner
 ├── docs/                                  # Architecture chapters, ADRs, runbooks
 ├── tests/                                 # Cross-package integration tests
-├── packages/                              # 9 first-party packages
+├── apps/                                  # Deployable units (services, CLIs, frontends)
+│   ├── agent/                             # Python — real-game loop + providers + scenarios (was packages/gameplay-agent)
+│   ├── api/                               # Python — FastAPI + SSE backend for replay/fork (was packages/arena-web)
+│   ├── arena/                             # Python — synthetic arena CLI (race / smoke / rank)
+│   ├── autoresearch/                      # Python — prompt-optimization loop
+│   ├── dashboard/                         # TypeScript — Vite + React arena replay UI (was ui/)
+│   ├── detection-server/                  # Python — macOS-hosted YOLO inference endpoint
+│   └── landing/                           # TypeScript — Astro docs site (was web/)
+├── packages/                              # Reusable libraries (imported by apps)
 │   ├── core/                              # Pure types: Event, Payload, WorldState, DetectedEntity
+│   ├── data/                              # AoE2 game-knowledge SQLite DB
 │   ├── detection/                         # YOLO inference, training, labeling, SLD extraction
-│   ├── evaluation/                        # Event broker, DuckDB persister, world sim, fork
-│   ├── gameplay-agent/                    # Real-game loop + providers + scenario runner + prompts
-│   ├── arena/                             # Synthetic arena CLI (race / smoke / rank)
-│   ├── arena-web/                         # FastAPI + SSE backend for replay/fork
-│   ├── detection-server/                  # macOS-hosted YOLO inference endpoint
-│   ├── autoresearch/                      # Prompt-optimization loop (orchestrator + mutator)
-│   └── data/                              # AoE2 game-knowledge SQLite DB
+│   └── evaluation/                        # Event broker, DuckDB persister, world sim, fork
 └── logs/                                  # Runtime: screenshots, goal logs, DuckDB event files
 ```
 
-Each package has its own `pyproject.toml` declaring deps + optional extras. The
-dependency graph is one-way (`core` → leaves), enforced by uv at install time
-via `[tool.uv.sources]` in the workspace root.
+Each Python workspace member has its own `pyproject.toml` declaring deps + optional
+extras. The dependency graph is one-way (`apps/` → `packages/`, never the reverse),
+enforced by uv at install time via `[tool.uv.sources]` in the workspace root. uv
+resolves members **by package name**, not by directory path — so internal
+dependencies like `dependencies = ["core", "detection"]` work regardless of which
+subdirectory the member lives in.
 
 For the full chapter-level walkthrough see [`docs/index.md`](docs/index.md).
 

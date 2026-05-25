@@ -8,7 +8,7 @@ import pytest
 from arena.config_profile import ConfigProfile, RaceConfig
 from pydantic import ValidationError
 
-_PROFILES_DIR = Path(__file__).parent.parent / "packages" / "arena" / "src" / "profiles"
+_PROFILES_DIR = Path(__file__).parent.parent / "apps" / "arena" / "src" / "profiles"
 
 
 def test_race_config_from_yaml_loads_profiles() -> None:
