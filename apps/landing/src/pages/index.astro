@@ -1,0 +1,205 @@
+---
+import Site from "@/layouts/Site.astro";
+import ArchitectureMap from "@/components/figures/ArchitectureMap.tsx";
+import GameplayLoopDemo from "@/components/figures/GameplayLoopDemo.tsx";
+import PackageMap from "@/components/figures/PackageMap.tsx";
+import PhaseTimeline from "@/components/figures/PhaseTimeline.tsx";
+import ArenaScreenshots from "@/components/figures/ArenaScreenshots.tsx";
+import ReferenceList from "@/components/ReferenceList.astro";
+import { getCollection } from "astro:content";
+import { FIRST_CHAPTER } from "@/lib/taxonomy";
+import {
+  ArrowRight,
+  BookOpen,
+  Boxes,
+  FileCode,
+  GitFork,
+  Workflow,
+} from "lucide-react";
+
+const docs = await getCollection("docs");
+
+// Reference-tab content: collected ADRs / runbooks / design / explorations.
+const adrs = docs
+  .filter((d) => d.id.startsWith("adr/"))
+  .sort((a, b) => a.id.localeCompare(b.id));
+const runbooks = docs
+  .filter((d) => d.id.startsWith("runbooks/"))
+  .sort((a, b) => a.id.localeCompare(b.id));
+const designs = docs
+  .filter((d) => d.id.startsWith("design/"))
+  .sort((a, b) => a.id.localeCompare(b.id));
+const explorations = docs
+  .filter((d) => d.id.startsWith("explorations/"))
+  .sort((a, b) => a.id.localeCompare(b.id));
+
+function firstHeading(id: string): string {
+  // Astro renders entries with a `body` we could parse; for the landing page
+  // the filename is already a reasonable label without an extra fetch.
+  return id.split("/").pop()?.replace(/\.md$/, "").replace(/^\d+-/, "") ?? id;
+}
+---
+
+<Site>
+  {/* Hero */}
+  <section class="mx-auto max-w-6xl px-4 pb-8 pt-10 lg:pt-16">
+    <div class="mb-6 max-w-3xl">
+      <div class="mb-3 inline-flex items-center gap-2 rounded-full border bg-card px-3 py-1 text-xs text-muted-foreground">
+        <span class="h-1.5 w-1.5 rounded-full bg-green-500"></span>
+        Two-tier LLM agent · Synthetic evaluation arena
+      </div>
+      <h1 class="text-balance text-4xl font-bold tracking-tight md:text-5xl">
+        An AI agent that plays Age of Empires II — and the arena that tests it.
+      </h1>
+      <p class="mt-4 text-balance text-lg text-muted-foreground">
+        A Sonnet strategist reads the screen and sets goals. A Haiku executor reads YOLO entity detections and emits actions. A synthetic
+        arena races prompt and model variants against a deterministic world. This site is the technical documentation.
+      </p>
+      <div class="mt-6 flex flex-wrap items-center gap-3">
+        <a
+          href={`/docs/${FIRST_CHAPTER.fullSlug}`}
+          class="inline-flex h-10 items-center gap-2 rounded-md bg-primary px-5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+        >
+          Start the tutorial
+          <ArrowRight className="h-4 w-4" />
+        </a>
+        <a
+          href="#packages"
+          class="inline-flex h-10 items-center gap-2 rounded-md border bg-background px-5 text-sm font-medium hover:bg-accent"
+        >
+          Browse by package
+        </a>
+        <a
+          href="#reference"
+          class="inline-flex h-10 items-center gap-2 rounded-md border bg-background px-5 text-sm font-medium hover:bg-accent"
+        >
+          Reference
+        </a>
+      </div>
+    </div>
+
+    <div class="mt-8">
+      <GameplayLoopDemo client:load />
+    </div>
+    <div class="mt-6">
+      <ArchitectureMap client:load />
+    </div>
+  </section>
+
+  {/* Three entry-path cards */}
+  <section class="mx-auto max-w-6xl px-4 py-10">
+    <div class="grid gap-4 md:grid-cols-3">
+      <a
+        href={`/docs/${FIRST_CHAPTER.fullSlug}`}
+        class="group rounded-xl border bg-card p-5 transition-colors hover:border-foreground"
+      >
+        <BookOpen className="h-5 w-5 text-muted-foreground" />
+        <h2 class="mt-3 font-semibold">Start the tutorial</h2>
+        <p class="mt-1 text-sm text-muted-foreground">
+          Eight Parts, ~23 chapters. Starts at the system overview and ends at autoresearch.
+        </p>
+        <p class="mt-3 inline-flex items-center gap-1 text-sm font-medium">
+          Begin <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
+        </p>
+      </a>
+      <a
+        href="#packages"
+        class="group rounded-xl border bg-card p-5 transition-colors hover:border-foreground"
+      >
+        <Boxes className="h-5 w-5 text-muted-foreground" />
+        <h2 class="mt-3 font-semibold">Browse by package</h2>
+        <p class="mt-1 text-sm text-muted-foreground">
+          Nine packages in a uv workspace. Pick the one closest to what you want to change.
+        </p>
+        <p class="mt-3 inline-flex items-center gap-1 text-sm font-medium">
+          Package map <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
+        </p>
+      </a>
+      <a
+        href="#reference"
+        class="group rounded-xl border bg-card p-5 transition-colors hover:border-foreground"
+      >
+        <FileCode className="h-5 w-5 text-muted-foreground" />
+        <h2 class="mt-3 font-semibold">Reference</h2>
+        <p class="mt-1 text-sm text-muted-foreground">
+          ADRs, runbooks, design docs, explorations — the why behind the what.
+        </p>
+        <p class="mt-3 inline-flex items-center gap-1 text-sm font-medium">
+          Open reference <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
+        </p>
+      </a>
+    </div>
+  </section>
+
+  {/* Phase timeline */}
+  <section class="mx-auto max-w-6xl px-4 py-10">
+    <div class="mb-4 flex items-baseline justify-between gap-4">
+      <div>
+        <h2 class="text-2xl font-semibold tracking-tight">The tutorial arc</h2>
+        <p class="mt-1 text-sm text-muted-foreground">
+          The eight Parts in order. Pick a part to jump in.
+        </p>
+      </div>
+      <Workflow className="hidden h-5 w-5 text-muted-foreground md:block" />
+    </div>
+    <PhaseTimeline client:visible variant="full" />
+  </section>
+
+  {/* Package map */}
+  <section id="packages" class="mx-auto max-w-6xl px-4 py-10">
+    <div class="mb-6">
+      <h2 class="text-2xl font-semibold tracking-tight">Packages</h2>
+      <p class="mt-1 max-w-2xl text-sm text-muted-foreground">
+        Nine packages share types through <code class="rounded bg-muted px-1 py-0.5 font-mono text-xs">core</code>.
+        Hover a card to see what it depends on.
+      </p>
+    </div>
+    <PackageMap client:visible />
+  </section>
+
+  {/* Arena screenshots */}
+  <section class="mx-auto max-w-6xl px-4 py-10">
+    <div class="mb-6">
+      <h2 class="text-2xl font-semibold tracking-tight">See it in action</h2>
+      <p class="mt-1 max-w-2xl text-sm text-muted-foreground">
+        The internal arena UI shows what the agent perceives, decides, and does — turn by turn. Click any panel to expand.
+      </p>
+    </div>
+    <ArenaScreenshots client:visible />
+  </section>
+
+  {/* Reference grid */}
+  <section id="reference" class="mx-auto max-w-6xl px-4 py-10">
+    <div class="mb-6">
+      <h2 class="text-2xl font-semibold tracking-tight">Reference</h2>
+      <p class="mt-1 max-w-2xl text-sm text-muted-foreground">
+        ADRs explain why decisions were made. Runbooks help when something is broken. Design docs and explorations are kept for historical context.
+      </p>
+    </div>
+    <div class="grid gap-6 md:grid-cols-2">
+      <ReferenceList title="Architecture Decision Records" iconColor="text-blue-500" items={adrs.map((d) => ({ href: `/docs/${d.id}`, label: firstHeading(d.id) }))} />
+      <ReferenceList title="Runbooks" iconColor="text-orange-500" items={runbooks.map((d) => ({ href: `/docs/${d.id}`, label: firstHeading(d.id) }))} />
+      <ReferenceList title="Design specs" iconColor="text-purple-500" items={designs.map((d) => ({ href: `/docs/${d.id}`, label: firstHeading(d.id) }))} />
+      <ReferenceList title="Explorations" iconColor="text-emerald-500" items={explorations.map((d) => ({ href: `/docs/${d.id}`, label: firstHeading(d.id) }))} />
+    </div>
+  </section>
+
+  {/* Footer CTA */}
+  <section class="mx-auto max-w-6xl px-4 py-16">
+    <div class="rounded-xl border bg-card p-8 text-center">
+      <GitFork class="mx-auto h-6 w-6 text-muted-foreground" />
+      <h2 class="mt-3 text-2xl font-semibold tracking-tight">Ready to dig in?</h2>
+      <p class="mx-auto mt-2 max-w-xl text-sm text-muted-foreground">
+        The tutorial walks the full system end to end. Each chapter calls out the
+        files it describes, so you can read the code alongside the docs.
+      </p>
+      <a
+        href={`/docs/${FIRST_CHAPTER.fullSlug}`}
+        class="mt-5 inline-flex h-10 items-center gap-2 rounded-md bg-primary px-5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+      >
+        Start at Chapter 01
+        <ArrowRight className="h-4 w-4" />
+      </a>
+    </div>
+  </section>
+</Site>
