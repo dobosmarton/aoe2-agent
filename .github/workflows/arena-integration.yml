@@ -126,7 +126,11 @@ jobs:
           cache-dependency-glob: "uv.lock"
 
       - name: Install broker test dependencies
-        run: uv sync --extra dev --extra broker-redis
+        # `dev` is a PEP 735 dependency-group at the workspace root (auto-installed
+        # by `uv sync` unless `--no-dev`), not an extra. `broker-redis` is an extra
+        # on the `evaluation` package. `--all-extras` traverses every workspace
+        # member, matching the fast `ci.yml` install step.
+        run: uv sync --all-extras
 
       - name: Run cross-process Redis broker test
         # Source .env so REDIS_PASSWORD is in scope, then point pytest at the
