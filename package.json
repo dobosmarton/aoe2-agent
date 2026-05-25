@@ -1,0 +1,23 @@
+{
+  "name": "aoe2-llm-arena-monorepo",
+  "version": "0.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/dashboard",
+    "apps/landing"
+  ],
+  "trustedDependencies": [
+    "esbuild",
+    "sharp",
+    "@parcel/watcher",
+    "@biomejs/biome"
+  ],
+  "scripts": {
+    "dev:dashboard": "bun --filter arena-web-ui dev",
+    "dev:landing": "bun --filter aoe2-llm-arena-web dev",
+    "build:dashboard": "bun --filter arena-web-ui build",
+    "build:landing": "bun --filter aoe2-llm-arena-web build",
+    "build": "bun --filter '*' build",
+    "typecheck": "bun --filter '*' typecheck"
+  }
+}

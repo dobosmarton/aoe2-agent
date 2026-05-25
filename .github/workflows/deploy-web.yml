@@ -1,0 +1,58 @@
+name: Deploy public docs site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/landing/**"
+      - "docs/**"
+      - "package.json"
+      - "bun.lock"
+      - ".github/workflows/deploy-web.yml"
+  pull_request:
+    paths:
+      - "apps/landing/**"
+      - "docs/**"
+      - "package.json"
+      - "bun.lock"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  deployments: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # `bun install` from repo root resolves the workspace lockfile and
+      # hoists deps for every workspace member (apps/landing + apps/dashboard)
+      # into the root node_modules/.
+      - name: Install dependencies (workspace, frozen lockfile)
+        run: bun install --frozen-lockfile
+
+      - name: Install Playwright Chromium (for rehype-mermaid)
+        working-directory: apps/landing
+        run: bunx playwright install --with-deps chromium
+
+      - name: Build site (Astro + Pagefind)
+        working-directory: apps/landing
+        env:
+          SITE_URL: ${{ vars.SITE_URL || 'https://aoe2-llm-arena.example.com' }}
+        run: bun run build
+
+      - name: Deploy to Cloudflare Pages
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          projectName: aoe2-llm-arena
+          directory: apps/landing/dist
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}

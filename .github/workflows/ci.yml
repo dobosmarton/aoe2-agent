@@ -63,20 +63,19 @@ jobs:
       - name: Pytest
         run: uv run pytest -q
 
-  ui-build:
+  dashboard-build:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    defaults:
-      run:
-        working-directory: ui
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+      # `bun install` from repo root populates the hoisted node_modules/ for
+      # every workspace member (apps/dashboard + apps/landing) in one shot.
       - name: Install (frozen lockfile)
         run: bun install --frozen-lockfile
-      - name: Typecheck
-        run: bun run typecheck
-      - name: Build
-        run: bun run build
+      - name: Typecheck (dashboard)
+        run: bun --filter arena-web-ui typecheck
+      - name: Build (dashboard)
+        run: bun --filter arena-web-ui build
