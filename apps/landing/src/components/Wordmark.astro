@@ -1,0 +1,24 @@
+---
+import { Swords } from "lucide-react";
+interface Props {
+  href?: string;
+  size?: "sm" | "md";
+}
+const { href = "/", size = "md" } = Astro.props;
+const textCls = size === "sm" ? "text-sm" : "text-base";
+---
+
+<a
+  href={href}
+  class="inline-flex items-center gap-2 font-semibold tracking-tight text-foreground hover:opacity-80 transition-opacity"
+>
+  <span
+    class="inline-flex h-7 w-7 items-center justify-center rounded-md border bg-card text-primary"
+    aria-hidden="true"
+  >
+    <Swords className="h-4 w-4" />
+  </span>
+  <span class={textCls}>
+    AoE2 <span class="text-muted-foreground">·</span> LLM Arena
+  </span>
+</a>

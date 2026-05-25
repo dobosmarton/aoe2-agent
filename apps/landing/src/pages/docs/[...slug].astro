@@ -1,0 +1,47 @@
+---
+import { getCollection, render, type CollectionEntry } from "astro:content";
+import Doc from "@/layouts/Doc.astro";
+import Site from "@/layouts/Site.astro";
+
+export async function getStaticPaths() {
+  const docs = await getCollection("docs");
+  return docs.map((entry) => ({
+    params: { slug: entry.id },
+    props: { entry },
+  }));
+}
+
+interface Props {
+  entry: CollectionEntry<"docs">;
+}
+
+const { entry } = Astro.props;
+const { Content, headings } = await render(entry);
+
+// Title precedence: frontmatter > first H1 heading > slug.
+const title =
+  entry.data.title ??
+  headings.find((h) => h.depth === 1)?.text ??
+  entry.id.split("/").pop() ??
+  "Documentation";
+const description = entry.data.description;
+
+// Only chapters under a `partN-*/` prefix get the tutorial sidebar + timeline.
+const isTutorialChapter = /^part[1-8]-/.test(entry.id);
+---
+
+{
+  isTutorialChapter ? (
+    <Doc title={title} description={description} slug={entry.id}>
+      <Content />
+    </Doc>
+  ) : (
+    <Site title={`${title} — AoE2 LLM Arena`} description={description}>
+      <div class="mx-auto max-w-3xl px-4 py-10">
+        <article data-pagefind-body class="prose-doc">
+          <Content />
+        </article>
+      </div>
+    </Site>
+  )
+}

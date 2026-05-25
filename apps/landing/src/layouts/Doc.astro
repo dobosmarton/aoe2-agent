@@ -1,0 +1,111 @@
+---
+import Site from "./Site.astro";
+import DocSidebar from "@/components/DocSidebar.astro";
+import PhaseTimeline from "@/components/figures/PhaseTimeline.tsx";
+import { partFor, prevChapter, nextChapter, getChapter } from "@/lib/taxonomy";
+
+interface Props {
+  title: string;
+  description?: string;
+  /** Full slug like "part1-architecture/01-system-overview". */
+  slug: string;
+}
+
+const { title, description, slug } = Astro.props;
+
+const part = partFor(slug);
+const prev = prevChapter(slug);
+const next = nextChapter(slug);
+const currentChapter = getChapter(slug);
+---
+
+<Site title={`${title} — AoE2 LLM Arena`} description={description}>
+  <div class="mx-auto grid max-w-7xl grid-cols-1 gap-8 px-4 py-6 lg:grid-cols-[16rem_minmax(0,1fr)] xl:grid-cols-[16rem_minmax(0,1fr)_14rem]">
+    <aside class="hidden lg:block">
+      <div class="sticky top-20 max-h-[calc(100vh-6rem)] overflow-y-auto pr-2">
+        <DocSidebar currentSlug={slug} />
+      </div>
+    </aside>
+
+    <main class="min-w-0">
+      {
+        part && currentChapter && (
+          <div class="mb-6">
+            <PhaseTimeline client:visible currentSlug={slug} />
+          </div>
+        )
+      }
+
+      <article
+        data-pagefind-body
+        class="prose-doc"
+      >
+        <slot />
+      </article>
+
+      <nav class="mt-12 grid gap-3 border-t pt-6 sm:grid-cols-2" aria-label="Chapter navigation">
+        {
+          prev ? (
+            <a
+              href={`/docs/${prev.fullSlug}`}
+              class="group rounded-lg border bg-card p-4 transition-colors hover:bg-accent"
+            >
+              <p class="text-xs text-muted-foreground">← Previous</p>
+              <p class="mt-1 font-medium group-hover:text-foreground">{prev.chapter.title}</p>
+            </a>
+          ) : (
+            <span />
+          )
+        }
+        {
+          next && (
+            <a
+              href={`/docs/${next.fullSlug}`}
+              class="group rounded-lg border bg-card p-4 text-right transition-colors hover:bg-accent sm:col-start-2"
+            >
+              <p class="text-xs text-muted-foreground">Next →</p>
+              <p class="mt-1 font-medium group-hover:text-foreground">{next.chapter.title}</p>
+            </a>
+          )
+        }
+      </nav>
+    </main>
+
+    <aside class="hidden xl:block">
+      <div class="sticky top-20 max-h-[calc(100vh-6rem)] overflow-y-auto pr-2">
+        <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          On this page
+        </p>
+        <div id="on-this-page" class="text-sm text-muted-foreground"></div>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    // Build on-page TOC from rendered <h2>/<h3> at hydration time.
+    (() => {
+      const container = document.getElementById("on-this-page");
+      const article = document.querySelector("article.prose-doc");
+      if (!container || !article) return;
+      const headings = Array.from(
+        article.querySelectorAll<HTMLHeadingElement>("h2[id], h3[id]"),
+      );
+      if (headings.length === 0) return;
+      const ul = document.createElement("ul");
+      ul.className = "space-y-1";
+      for (const h of headings) {
+        const li = document.createElement("li");
+        const a = document.createElement("a");
+        a.href = `#${h.id}`;
+        a.textContent = h.textContent ?? "";
+        a.className =
+          h.tagName === "H3"
+            ? "block pl-3 text-xs hover:text-foreground"
+            : "block hover:text-foreground";
+        li.appendChild(a);
+        ul.appendChild(li);
+      }
+      container.appendChild(ul);
+    })();
+  </script>
+</Site>

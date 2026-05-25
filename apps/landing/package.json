@@ -1,0 +1,50 @@
+{
+  "name": "aoe2-llm-arena-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "start": "astro dev",
+    "build": "astro build && pagefind --site dist",
+    "build:astro": "astro build",
+    "preview": "astro preview",
+    "astro": "astro",
+    "typecheck": "astro check",
+    "capture:screenshots": "tsx scripts/capture-arena-screenshots.ts"
+  },
+  "dependencies": {
+    "@astrojs/mdx": "^4.0.3",
+    "@astrojs/react": "^4.1.2",
+    "@astrojs/sitemap": "^3.2.1",
+    "@radix-ui/react-dialog": "^1.1.4",
+    "@radix-ui/react-scroll-area": "^1.2.2",
+    "@radix-ui/react-separator": "^1.1.1",
+    "@radix-ui/react-slot": "^1.1.1",
+    "@radix-ui/react-tabs": "^1.1.2",
+    "@tailwindcss/vite": "^4.1.4",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "astro": "^5.1.5",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "cmdk": "^1.0.4",
+    "lucide-react": "^0.476.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "rehype-autolink-headings": "^7.1.0",
+    "rehype-mermaid": "^3.0.0",
+    "rehype-slug": "^6.0.0",
+    "remark-gfm": "^4.0.0",
+    "tailwind-merge": "^3.0.2",
+    "tailwindcss": "^4.1.4",
+    "unist-util-visit": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "pagefind": "^1.3.0",
+    "playwright": "^1.49.1",
+    "tsx": "^4.19.2",
+    "typescript": "~5.7.2"
+  }
+}

@@ -1,0 +1,82 @@
+---
+import { PARTS } from "@/lib/taxonomy";
+
+interface Props {
+  /** Full slug of the currently rendered doc (e.g. "part1-architecture/01-system-overview"). */
+  currentSlug?: string;
+}
+
+const { currentSlug } = Astro.props;
+
+const referenceGroups = [
+  {
+    label: "Reference",
+    items: [
+      { href: "/docs/index", label: "Documentation index" },
+      { href: "/docs/deployment-guide", label: "Deployment guide" },
+    ],
+  },
+];
+---
+
+<nav class="space-y-6 text-sm" aria-label="Documentation navigation">
+  <div>
+    <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+      Tutorial
+    </p>
+    <ol class="space-y-4">
+      {
+        PARTS.map((part) => (
+          <li>
+            <p class="mb-1 flex items-baseline gap-2 font-semibold text-foreground">
+              <span class="text-xs font-mono text-muted-foreground">{part.label}</span>
+              {part.title}
+            </p>
+            <ul class="ml-3 border-l border-border">
+              {part.chapters.map((chapter) => {
+                const slug = `${part.id}/${chapter.slug}`;
+                const isActive = currentSlug === slug;
+                return (
+                  <li>
+                    <a
+                      href={`/docs/${slug}`}
+                      class:list={[
+                        "block border-l-2 -ml-px px-3 py-1 text-sm transition-colors",
+                        isActive
+                          ? "border-foreground text-foreground font-medium"
+                          : "border-transparent text-muted-foreground hover:border-border hover:text-foreground",
+                      ]}
+                    >
+                      {chapter.title}
+                    </a>
+                  </li>
+                );
+              })}
+            </ul>
+          </li>
+        ))
+      }
+    </ol>
+  </div>
+  {
+    referenceGroups.map((group) => (
+      <div>
+        <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {group.label}
+        </p>
+        <ul>
+          {group.items.map((item) => (
+            <li>
+              <a
+                href={item.href}
+                class="block rounded px-2 py-1 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                {item.label}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+    ))
+  }
+</nav>

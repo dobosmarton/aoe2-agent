@@ -1,0 +1,40 @@
+---
+interface Item {
+  href: string;
+  label: string;
+}
+interface Props {
+  title: string;
+  iconColor?: string;
+  items: Item[];
+}
+const { title, iconColor = "text-muted-foreground", items } = Astro.props;
+---
+
+<div class="rounded-xl border bg-card p-5">
+  <div class="mb-3 flex items-center gap-2">
+    <span class:list={["inline-block h-1.5 w-1.5 rounded-full", iconColor.replace("text-", "bg-")]}></span>
+    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+      {title}
+    </h3>
+    <span class="ml-auto text-xs text-muted-foreground">{items.length}</span>
+  </div>
+  {
+    items.length > 0 ? (
+      <ul class="space-y-1">
+        {items.map((item) => (
+          <li>
+            <a
+              href={item.href}
+              class="block rounded-md px-2 py-1.5 text-sm text-foreground hover:bg-accent hover:text-accent-foreground"
+            >
+              {item.label}
+            </a>
+          </li>
+        ))}
+      </ul>
+    ) : (
+      <p class="text-sm text-muted-foreground">No entries yet.</p>
+    )
+  }
+</div>
