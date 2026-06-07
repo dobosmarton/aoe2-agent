@@ -22,7 +22,7 @@ const docs = defineCollection({
     part: z.number().int().min(1).max(8).optional(),
     chapter: z.number().int().optional(),
     type: z
-      .enum(["adr", "runbook", "design", "exploration", "tutorial", "deployment"])
+      .enum(["runbook", "design", "exploration", "tutorial", "deployment"])
       .optional(),
     status: z.string().optional(),
     phase: z.string().optional(),

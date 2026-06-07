@@ -236,3 +236,130 @@
   border-radius: 0.5rem;
   padding: 1rem;
 }
+
+/* ============================================================
+ * Educational admonitions.
+ *
+ *   .concept    — short "what is X" callout (~150 words).
+ *   .deep-dive  — collapsible <details>/<summary> sidebar
+ *                  for algorithm intuition (~400 words).
+ *   .prereqs    — per-chapter on-ramp at the top of a chapter.
+ *
+ * Authored inline in markdown. Blank lines around the content
+ * are required so the inner markdown is re-parsed by remark:
+ *
+ *   <aside class="concept" data-title="Prompt caching">
+ *
+ *   Body **markdown** here, including `code` and [links](...).
+ *
+ *   </aside>
+ * ============================================================ */
+.prose-doc .concept,
+.prose-doc details.deep-dive,
+.prose-doc .prereqs {
+  margin: 1.5em 0;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  line-height: 1.65;
+}
+
+.prose-doc .concept > * + *,
+.prose-doc details.deep-dive > * + *,
+.prose-doc .prereqs > * + * {
+  margin-top: 0.75em;
+}
+
+/* === .concept ============================================== */
+.prose-doc .concept {
+  background: color-mix(in oklab, var(--color-primary) 5%, var(--color-background));
+  border: 1px solid color-mix(in oklab, var(--color-primary) 18%, var(--color-border));
+  border-left: 3px solid color-mix(in oklab, var(--color-primary) 55%, var(--color-border));
+  padding: 0.9em 1.1em;
+}
+.prose-doc .concept[data-title]::before {
+  content: "💡 " attr(data-title);
+  display: block;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--color-foreground);
+  letter-spacing: -0.005em;
+}
+
+/* === .deep-dive (collapsible) ============================== */
+.prose-doc details.deep-dive {
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  padding: 0;
+  overflow: hidden;
+}
+.prose-doc details.deep-dive > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 0.85em 1.1em;
+  font-weight: 600;
+  color: var(--color-foreground);
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  background: color-mix(in oklab, var(--color-accent) 60%, var(--color-card));
+  transition: background 120ms ease;
+}
+.prose-doc details.deep-dive > summary::-webkit-details-marker {
+  display: none;
+}
+.prose-doc details.deep-dive > summary::before {
+  content: "▸";
+  font-size: 0.85rem;
+  color: var(--color-muted-foreground);
+  transition: transform 150ms ease;
+  display: inline-block;
+}
+.prose-doc details.deep-dive[open] > summary::before {
+  transform: rotate(90deg);
+}
+.prose-doc details.deep-dive > summary:hover {
+  background: var(--color-accent);
+}
+.prose-doc details.deep-dive > :not(summary) {
+  padding-left: 1.1em;
+  padding-right: 1.1em;
+}
+.prose-doc details.deep-dive > :not(summary):first-of-type {
+  padding-top: 1em;
+  margin-top: 0;
+}
+.prose-doc details.deep-dive > :not(summary):last-child {
+  padding-bottom: 1em;
+}
+
+/* === .prereqs ============================================== */
+.prose-doc .prereqs {
+  background: transparent;
+  border: 1px dashed var(--color-border);
+  padding: 0.75em 1em;
+  color: var(--color-muted-foreground);
+  font-size: 0.8125rem;
+}
+.prose-doc .prereqs::before {
+  content: "📚 Prerequisites";
+  display: block;
+  margin-bottom: 0.4em;
+  font-weight: 600;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-foreground);
+}
+.prose-doc .prereqs a {
+  color: var(--color-foreground);
+  text-decoration-color: color-mix(in oklab, var(--color-foreground) 45%, transparent);
+}
+
+/* Code spans inside admonitions are slightly smaller so they don't dominate. */
+.prose-doc .concept code,
+.prose-doc details.deep-dive code,
+.prose-doc .prereqs code {
+  font-size: 0.82em;
+}

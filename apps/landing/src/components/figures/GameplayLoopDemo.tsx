@@ -67,11 +67,15 @@ interface Step {
   caption: string;
 }
 
+// Per prompts/strategist.md:1-9, the strategist reads the *screenshot* (for
+// resource bar / pop / age text that YOLO can't detect) and emits goals;
+// the executor is text-only and uses YOLO entity ids to resolve targets
+// (providers/claude.py:233). Captions reflect that data flow.
 const STEPS: Step[] = [
   { title: "1. Capture screen", caption: "Frame grabbed from the AoE2 client" },
   { title: "2. Detect entities", caption: "YOLOv8 finds units, buildings, resources" },
-  { title: "3. Strategist reasons", caption: "Sonnet picks the next goal" },
-  { title: "4. Executor acts", caption: "Haiku emits tool calls" },
+  { title: "3. Strategist reasons", caption: "Sonnet reads the screenshot, sets goals" },
+  { title: "4. Executor acts", caption: "Haiku turns goals into tool calls on YOLO ids" },
 ];
 
 const STEP_DURATIONS_MS = [1500, 2500, 2500, 2500] as const;
@@ -90,8 +94,11 @@ const ENTITY_SUMMARY_LINES = ENTITIES.map(
     `${e.id}: ${e.class} at (${Math.round(e.cx * IMG_W)},${Math.round(e.cy * IMG_H)}) [${Math.round(e.conf * 100)}%]`,
 );
 
+// Strategist-shaped output: reasoning + resource readings (read from the
+// screenshot's UI bar, not from YOLO) + prioritized goals. Mirrors the
+// StrategistResponse model in providers/strategist.py:43-48.
 const REASONING_TEXT =
-  "Dark Age opener. villager_0 is idle near the town center; nearest forest is tree_0. Send to chop wood and queue another villager.";
+  "Dark Age opener — resource bar reads F=200 W=100 G=0 S=200, pop 3/5. Wood is the bottleneck. Goals: gather wood→200 (P9), queue villagers→10 (P8), advance to Feudal Age (P4).";
 
 // Real tool names from apps/agent/src/providers/claude_tools.py.
 const TOOL_CALLS = [
@@ -293,19 +300,19 @@ export default function GameplayLoopDemo(): React.ReactElement {
 
         {/* Narration panel */}
         <aside className="flex flex-col gap-3 text-xs">
-          <Section label="Entity detections" active={step === 1} done={step > 1}>
+          <Section label="Entity detections (YOLOv8)" active={step === 1} done={step > 1}>
             <pre className="whitespace-pre-wrap font-mono text-[11px] leading-snug text-foreground">
               {entitiesTyped || " "}
               {step === 1 && !reducedMotion && <Caret />}
             </pre>
           </Section>
-          <Section label="Strategist (Sonnet)" active={step === 2} done={step > 2} dimmed={step < 2}>
+          <Section label="Strategist (Sonnet · reads screenshot)" active={step === 2} done={step > 2} dimmed={step < 2}>
             <p className="leading-snug text-foreground">
               {reasoningTyped || " "}
               {step === 2 && !reducedMotion && <Caret />}
             </p>
           </Section>
-          <Section label="Executor (Haiku)" active={step === 3} dimmed={step < 3}>
+          <Section label="Executor (Haiku · text only, uses YOLO ids)" active={step === 3} dimmed={step < 3}>
             <pre className="whitespace-pre-wrap font-mono text-[11px] leading-snug text-foreground">
               {toolCallsTyped || " "}
               {step === 3 && !reducedMotion && <Caret />}

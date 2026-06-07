@@ -1,36 +1,102 @@
 ---
 import Site from "@/layouts/Site.astro";
-import ArchitectureMap from "@/components/figures/ArchitectureMap.tsx";
 import GameplayLoopDemo from "@/components/figures/GameplayLoopDemo.tsx";
 import PackageMap from "@/components/figures/PackageMap.tsx";
 import PhaseTimeline from "@/components/figures/PhaseTimeline.tsx";
 import ArenaScreenshots from "@/components/figures/ArenaScreenshots.tsx";
-import ReferenceList from "@/components/ReferenceList.astro";
 import { getCollection } from "astro:content";
-import { FIRST_CHAPTER } from "@/lib/taxonomy";
+import { FIRST_CHAPTER, getChapter } from "@/lib/taxonomy";
 import {
   ArrowRight,
   BookOpen,
   Boxes,
+  Brain,
+  Eye,
   FileCode,
   GitFork,
+  Network,
+  Rocket,
   Workflow,
 } from "lucide-react";
 
+// Reading paths: curated, short routes through the tutorial so newcomers
+// don't have to start at Chapter 1. Each path is a list of chapter slugs
+// from `taxonomy.ts` plus an optional one-line "why this chapter" note.
+// Titles are pulled from taxonomy so they stay in sync if a chapter is renamed.
+type ReadingPathChapter = { slug: string; note?: string };
+type ReadingPath = {
+  title: string;
+  duration: string;
+  description: string;
+  icon: typeof Rocket;
+  chapters: ReadingPathChapter[];
+};
+
+const READING_PATHS: ReadingPath[] = [
+  {
+    title: "15-minute tour",
+    duration: "~15 min",
+    description:
+      "Three chapters that give you the whole system in one sitting: how the agent thinks, what it sees, and how we know it's getting better.",
+    icon: Rocket,
+    chapters: [
+      { slug: "part1-architecture/01-system-overview", note: "the big picture" },
+      { slug: "part3-entity-detection/07-detector-architecture", note: "what the agent sees" },
+      { slug: "part6-evaluation-arena/14-arena-overview", note: "how we measure progress" },
+    ],
+  },
+  {
+    title: "LLM-agent design",
+    duration: "~6 chapters",
+    description:
+      "If you build LLM agents and want to see how a two-tier strategist/executor split, prompt caching, and prompt-evolution loops actually play out in production.",
+    icon: Brain,
+    chapters: [
+      { slug: "part1-architecture/01-system-overview" },
+      { slug: "part2-llm-integration/04-provider-pattern" },
+      { slug: "part2-llm-integration/05-prompt-engineering" },
+      { slug: "part2-llm-integration/06-context-injection" },
+      { slug: "part8-autoresearch/22-autoresearch-overview" },
+      { slug: "part8-autoresearch/23-prompt-mutation-and-memory" },
+    ],
+  },
+  {
+    title: "Computer vision",
+    duration: "~5 chapters",
+    description:
+      "If you train detectors or care about synthetic data: YOLO architecture, our 60-class taxonomy, training pipeline, sprite extraction, and class-schema evolution.",
+    icon: Eye,
+    chapters: [
+      { slug: "part3-entity-detection/07-detector-architecture" },
+      { slug: "part3-entity-detection/08-training-pipeline" },
+      { slug: "part3-entity-detection/09-labeling-and-active-learning" },
+      { slug: "part4-game-knowledge/11-sprite-extraction" },
+      { slug: "part5-operations/13-class-schema-evolution" },
+    ],
+  },
+  {
+    title: "Arena infra",
+    duration: "~7 chapters",
+    description:
+      "If you build distributed/observability systems: event broker, DuckDB persister, Bradley-Terry ranking, FastAPI + SSE backend, and the fork/diff UI.",
+    icon: Network,
+    chapters: [
+      { slug: "part6-evaluation-arena/14-arena-overview" },
+      { slug: "part6-evaluation-arena/15-event-broker" },
+      { slug: "part6-evaluation-arena/16-duckdb-persister-and-replay" },
+      { slug: "part6-evaluation-arena/17-ranking-pipeline" },
+      { slug: "part6-evaluation-arena/18-synthetic-world-sim" },
+      { slug: "part7-arena-web/19-web-architecture" },
+      { slug: "part7-arena-web/20-fork-and-diff-ui" },
+    ],
+  },
+];
+
 const docs = await getCollection("docs");
 
-// Reference-tab content: collected ADRs / runbooks / design / explorations.
-const adrs = docs
-  .filter((d) => d.id.startsWith("adr/"))
-  .sort((a, b) => a.id.localeCompare(b.id));
+// The "Runbooks" section on the home page surfaces /docs/runbooks/* as a flat list.
 const runbooks = docs
   .filter((d) => d.id.startsWith("runbooks/"))
-  .sort((a, b) => a.id.localeCompare(b.id));
-const designs = docs
-  .filter((d) => d.id.startsWith("design/"))
-  .sort((a, b) => a.id.localeCompare(b.id));
-const explorations = docs
-  .filter((d) => d.id.startsWith("explorations/"))
   .sort((a, b) => a.id.localeCompare(b.id));
 
 function firstHeading(id: string): string {
@@ -64,25 +130,28 @@ function firstHeading(id: string): string {
           <ArrowRight className="h-4 w-4" />
         </a>
         <a
+          href="#reading-paths"
+          class="inline-flex h-10 items-center gap-2 rounded-md border bg-background px-5 text-sm font-medium hover:bg-accent"
+        >
+          Pick a path
+        </a>
+        <a
           href="#packages"
           class="inline-flex h-10 items-center gap-2 rounded-md border bg-background px-5 text-sm font-medium hover:bg-accent"
         >
           Browse by package
         </a>
         <a
-          href="#reference"
+          href="#runbooks"
           class="inline-flex h-10 items-center gap-2 rounded-md border bg-background px-5 text-sm font-medium hover:bg-accent"
         >
-          Reference
+          Runbooks
         </a>
       </div>
     </div>
 
     <div class="mt-8">
       <GameplayLoopDemo client:load />
-    </div>
-    <div class="mt-6">
-      <ArchitectureMap client:load />
     </div>
   </section>
 
@@ -116,18 +185,63 @@ function firstHeading(id: string): string {
         </p>
       </a>
       <a
-        href="#reference"
+        href="#runbooks"
         class="group rounded-xl border bg-card p-5 transition-colors hover:border-foreground"
       >
         <FileCode className="h-5 w-5 text-muted-foreground" />
-        <h2 class="mt-3 font-semibold">Reference</h2>
+        <h2 class="mt-3 font-semibold">Runbooks</h2>
         <p class="mt-1 text-sm text-muted-foreground">
-          ADRs, runbooks, design docs, explorations — the why behind the what.
+          Operational guides for when something is broken or needs to be restarted.
         </p>
         <p class="mt-3 inline-flex items-center gap-1 text-sm font-medium">
-          Open reference <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
+          Open runbooks <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
         </p>
       </a>
+    </div>
+  </section>
+
+  {/* Reading paths — curated, shorter routes through the tutorial. */}
+  <section id="reading-paths" class="mx-auto max-w-6xl px-4 py-10">
+    <div class="mb-6">
+      <h2 class="text-2xl font-semibold tracking-tight">Pick a reading path</h2>
+      <p class="mt-1 max-w-2xl text-sm text-muted-foreground">
+        Short curated routes through the 23-chapter tutorial. Pick the one closest to what you want to learn — or scroll down for the full arc.
+      </p>
+    </div>
+    <div class="grid gap-4 md:grid-cols-2">
+      {READING_PATHS.map((path) => {
+        const Icon = path.icon;
+        return (
+          <div class="rounded-xl border bg-card p-5">
+            <div class="flex items-center gap-2">
+              <Icon className="h-4 w-4 text-muted-foreground" />
+              <h3 class="font-semibold">{path.title}</h3>
+              <span class="ml-auto text-xs text-muted-foreground">{path.duration}</span>
+            </div>
+            <p class="mt-2 text-sm text-muted-foreground">{path.description}</p>
+            <ol class="mt-4 space-y-0.5 text-sm">
+              {path.chapters.map((c, i) => {
+                const flat = getChapter(c.slug);
+                const title = flat?.chapter.title ?? c.slug;
+                return (
+                  <li>
+                    <a
+                      href={`/docs/${c.slug}`}
+                      class="group flex items-baseline gap-2 rounded px-2 py-1 hover:bg-accent"
+                    >
+                      <span class="font-mono text-xs text-muted-foreground">{i + 1}.</span>
+                      <span class="flex-1 group-hover:text-foreground">{title}</span>
+                      {c.note && (
+                        <span class="hidden text-xs italic text-muted-foreground sm:inline">{c.note}</span>
+                      )}
+                    </a>
+                  </li>
+                );
+              })}
+            </ol>
+          </div>
+        );
+      })}
     </div>
   </section>
 
@@ -168,20 +282,31 @@ function firstHeading(id: string): string {
     <ArenaScreenshots client:visible />
   </section>
 
-  {/* Reference grid */}
-  <section id="reference" class="mx-auto max-w-6xl px-4 py-10">
+  {/* Runbooks */}
+  <section id="runbooks" class="mx-auto max-w-6xl px-4 py-10">
     <div class="mb-6">
-      <h2 class="text-2xl font-semibold tracking-tight">Reference</h2>
+      <h2 class="text-2xl font-semibold tracking-tight">Runbooks</h2>
       <p class="mt-1 max-w-2xl text-sm text-muted-foreground">
-        ADRs explain why decisions were made. Runbooks help when something is broken. Design docs and explorations are kept for historical context.
+        Operational guides for the moments when something is broken or needs to be restarted.
       </p>
     </div>
-    <div class="grid gap-6 md:grid-cols-2">
-      <ReferenceList title="Architecture Decision Records" iconColor="text-blue-500" items={adrs.map((d) => ({ href: `/docs/${d.id}`, label: firstHeading(d.id) }))} />
-      <ReferenceList title="Runbooks" iconColor="text-orange-500" items={runbooks.map((d) => ({ href: `/docs/${d.id}`, label: firstHeading(d.id) }))} />
-      <ReferenceList title="Design specs" iconColor="text-purple-500" items={designs.map((d) => ({ href: `/docs/${d.id}`, label: firstHeading(d.id) }))} />
-      <ReferenceList title="Explorations" iconColor="text-emerald-500" items={explorations.map((d) => ({ href: `/docs/${d.id}`, label: firstHeading(d.id) }))} />
-    </div>
+    {runbooks.length > 0 ? (
+      <ul class="max-w-2xl divide-y divide-border rounded-md border">
+        {runbooks.map((d) => (
+          <li>
+            <a
+              href={`/docs/${d.id}`}
+              class="flex items-center gap-2 px-4 py-2.5 text-sm text-foreground hover:bg-accent hover:text-accent-foreground"
+            >
+              <span class="inline-block h-1.5 w-1.5 rounded-full bg-orange-500" aria-hidden="true"></span>
+              {firstHeading(d.id)}
+            </a>
+          </li>
+        ))}
+      </ul>
+    ) : (
+      <p class="text-sm text-muted-foreground">No runbooks yet.</p>
+    )}
   </section>
 
   {/* Footer CTA */}

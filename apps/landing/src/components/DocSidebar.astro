@@ -10,9 +10,27 @@ const { currentSlug } = Astro.props;
 
 const referenceGroups = [
   {
+    label: "Appendix",
+    items: [
+      {
+        href: "/docs/appendix/01-yolo-and-object-detection",
+        label: "A · YOLO and object detection",
+      },
+      {
+        href: "/docs/appendix/02-event-brokers-and-redis-streams",
+        label: "B · Event brokers and Redis Streams",
+      },
+      {
+        href: "/docs/appendix/03-bradley-terry-and-bootstrap",
+        label: "C · Bradley-Terry and bootstrap CIs",
+      },
+    ],
+  },
+  {
     label: "Reference",
     items: [
       { href: "/docs/index", label: "Documentation index" },
+      { href: "/docs/glossary", label: "Glossary" },
       { href: "/docs/deployment-guide", label: "Deployment guide" },
     ],
   },
