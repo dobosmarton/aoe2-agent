@@ -17,7 +17,6 @@ from gameplay_agent.turn_phases import (
     _build_llm_context,
     _extract_applied_memories,
     _get_ground_commands,
-    _get_maintenance_actions,
 )
 
 # ---------------------------------------------------------------------------
@@ -132,52 +131,6 @@ def test_ground_commands_first_iter_includes_auto_scout():
     cmds = _get_ground_commands(iteration=1)
     keys = [c.get("key") for c in cmds if c["type"] == "press"]
     assert "g" in keys
-
-
-# ---------------------------------------------------------------------------
-# _get_maintenance_actions
-# ---------------------------------------------------------------------------
-
-
-def _memory_with_population(pop: int, pop_cap: int, age: str = "Dark Age") -> AgentMemory:
-    m = AgentMemory()
-    m.game_state.population = pop
-    m.game_state.population_cap = pop_cap
-    m.game_state.current_age = age
-    return m
-
-
-def test_maintenance_queues_villagers_when_below_caps():
-    """Below both pop_cap and age_cap → emit the queue-villager hotkey pair."""
-    memory = _memory_with_population(pop=10, pop_cap=30)  # Dark Age cap is 22
-    actions = _get_maintenance_actions(memory)
-    assert len(actions) == 2
-    keys = [a["key"] for a in actions]
-    assert keys == ["h", "q"]
-
-
-def test_maintenance_skipped_at_pop_cap():
-    """When population equals cap, no more villagers can fit — skip."""
-    memory = _memory_with_population(pop=20, pop_cap=20)
-    assert _get_maintenance_actions(memory) == []
-
-
-def test_maintenance_skipped_at_age_cap_dark():
-    """Dark Age cap is 22 — even with room in pop_cap, stop queuing."""
-    memory = _memory_with_population(pop=22, pop_cap=30, age="Dark Age")
-    assert _get_maintenance_actions(memory) == []
-
-
-def test_maintenance_skipped_at_age_cap_feudal():
-    memory = _memory_with_population(pop=35, pop_cap=80, age="Feudal Age")
-    assert _get_maintenance_actions(memory) == []
-
-
-def test_maintenance_unknown_age_uses_pop_cap_only():
-    """Castle/Imperial don't have entries — fall back to pop_cap as the limit."""
-    memory = _memory_with_population(pop=70, pop_cap=80, age="Castle Age")
-    actions = _get_maintenance_actions(memory)
-    assert len(actions) == 2
 
 
 # ---------------------------------------------------------------------------

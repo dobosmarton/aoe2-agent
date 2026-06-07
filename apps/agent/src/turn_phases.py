@@ -2,9 +2,8 @@
 
 Owns the four pieces the game loop runs once per iteration:
 
-  - `_get_ground_commands` / `_get_maintenance_actions`: hardcoded actions that
-    run alongside the LLM call (zoom on turn 1, queue villagers while the LLM
-    thinks). Pure functions of game state.
+  - `_get_ground_commands`: hardcoded actions that run alongside the LLM call
+    (zoom on turn 1). Pure function of the iteration number.
   - `_build_llm_context`: stitches memory + goals + entities into the prompt
     string the executor sees. Mirrors `evaluation.context_builder._build_context`.
   - `_process_response`: parses the LLM's response, strips the
@@ -18,15 +17,23 @@ Owns the four pieces the game loop runs once per iteration:
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Literal
 
 import structlog
 
-from .executor import clear_detected_entities, execute_actions
+from .entity_utils import extract_attrs
+from .executor import (
+    clear_detected_entities,
+    execute_actions,
+    get_detected_entities,
+    get_rescan_fn,
+)
 from .memory import GameState
 from .models import validate_actions
 
 if TYPE_CHECKING:
+    from .executor import ActionResult
     from .goal_logger import GoalLogger
     from .goals import GoalManager
     from .memory import AgentMemory
@@ -83,25 +90,6 @@ def _get_ground_commands(iteration: int) -> list[dict]:
 
 # Age-dependent population thresholds for maintenance villager queuing.
 # Beyond these caps, stop queuing to save food for age-up research.
-_MAINTENANCE_POP_CAP: dict[str, int] = {
-    "Dark Age": 22,
-    "Feudal Age": 35,
-}
-
-
-def _get_maintenance_actions(memory: AgentMemory) -> list[dict]:
-    """Safe hotkey actions to execute while the LLM call is in-flight."""
-    pop = memory.game_state.population
-    pop_cap = memory.game_state.population_cap
-    age_cap = _MAINTENANCE_POP_CAP.get(memory.game_state.current_age, pop_cap)
-    if pop < min(pop_cap, age_cap):
-        return [
-            {"type": "press", "key": "h", "intent": "Select TC (maintenance)"},
-            {"type": "press", "key": "q", "intent": "Queue villager (maintenance)"},
-        ]
-    return []
-
-
 def _build_llm_context(
     memory: AgentMemory,
     goal_manager: GoalManager,
@@ -198,6 +186,120 @@ def _process_response(
     return actions, None
 
 
+# ---------------------------------------------------------------------------
+# Action-effect verification (R1)
+# ---------------------------------------------------------------------------
+
+# Building classes whose appearance confirms a successful build/place action.
+_BUILDING_CLASSES: frozenset[str] = frozenset(
+    {
+        "town_center",
+        "house",
+        "lumber_camp",
+        "mining_camp",
+        "mill",
+        "market",
+        "dock",
+        "farm",
+        "barracks",
+        "archery_range",
+        "stable",
+        "blacksmith",
+        "siege_workshop",
+        "monastery",
+        "castle",
+        "university",
+        "gate",
+        "wall",
+        "tower",
+        "wonder",
+        "krepost",
+    }
+)
+
+# Camera-moving hotkeys whose press should change what's on screen.
+_CAMERA_KEYS: frozenset[str] = frozenset({"h", ".", ","})
+
+
+@dataclass(frozen=True, slots=True)
+class _Expectation:
+    """The observable effect an action should produce, if any."""
+
+    kind: Literal["new_building", "selection_change", "none"]
+    detail: str
+
+
+def _expectation_for(action: dict) -> _Expectation:
+    """Map an action to its verifiable effect (bounded and honest)."""
+    a_type = str(action.get("type", ""))
+    intent = str(action.get("intent", "")).lower()
+    if a_type == "build" or (
+        a_type in ("click", "right_click") and ("build" in intent or "place" in intent)
+    ):
+        return _Expectation("new_building", "build/place should add a building")
+    if a_type == "press":
+        key = str(action.get("key", "")).lower()
+        if action.get("rescan") or key in _CAMERA_KEYS:
+            return _Expectation("selection_change", f"press {key} should change the view")
+    return _Expectation("none", "")
+
+
+def _any_entity_expectation(actions: list) -> bool:
+    """True if any action expects an entity/view change worth a rescan."""
+    return any(_expectation_for(a).kind != "none" for a in actions if isinstance(a, dict))
+
+
+def _class_counts(entities: list[dict]) -> dict[str, int]:
+    """Count detected entities by class (robust to bbox jitter)."""
+    counts: dict[str, int] = {}
+    for e in entities:
+        cls = extract_attrs(e).class_name
+        counts[cls] = counts.get(cls, 0) + 1
+    return counts
+
+
+def _new_buildings(before: list[dict], after: list[dict]) -> list[str]:
+    """Building classes whose count increased from before → after."""
+    bc, ac = _class_counts(before), _class_counts(after)
+    return sorted(cls for cls in _BUILDING_CLASSES if ac.get(cls, 0) > bc.get(cls, 0))
+
+
+def _failed_lines(actions: list, results: list[ActionResult]) -> list[str]:
+    """Verification lines for actions the executor reported as failed."""
+    lines: list[str] = []
+    for action, result in zip(actions, results, strict=True):
+        if not result.success:
+            a_intent = action.get("intent", "") if isinstance(action, dict) else ""
+            a_type = action.get("type", "") if isinstance(action, dict) else ""
+            lines.append(f"- FAILED {a_type}: {a_intent} — {result.detail}")
+    return lines
+
+
+def _build_verification(
+    actions: list,
+    results: list[ActionResult],
+    before_entities: list[dict],
+    after_entities: list[dict],
+) -> str:
+    """Combine executor failures with positive/negative effect checks.
+
+    Emits the exact phrase "no visible change" on unmet expectations so the
+    stuck-loop detector in AgentMemory.get_context_for_llm picks it up.
+    """
+    lines = _failed_lines(actions, results)
+    kinds = {_expectation_for(a).kind for a in actions if isinstance(a, dict)}
+    if "new_building" in kinds:
+        built = _new_buildings(before_entities, after_entities)
+        if built:
+            lines.append(f"- CONFIRMED built: {', '.join(built)}")
+        else:
+            lines.append("- no visible change: build produced no new building")
+    counts_unchanged = _class_counts(before_entities) == _class_counts(after_entities)
+    if "selection_change" in kinds and counts_unchanged:
+        lines.append("- no visible change: view unchanged after camera action")
+    return "\n".join(lines)
+
+
 async def _execute_turn_actions(
     actions: list,
     iteration: int,
@@ -207,9 +309,14 @@ async def _execute_turn_actions(
     """Execute LLM actions or fallback actions.
 
     Ground commands (zoom, scout) are handled separately in the main loop
-    to ensure they always run, even in agentic tool loop mode.
+    to ensure they always run, even in agentic tool loop mode. After
+    entity-affecting actions, re-detect and record positive/negative
+    verification (R1).
     """
     if actions:
+        verify = _any_entity_expectation(actions)
+        before_entities = list(get_detected_entities()) if verify else []
+
         results = await execute_actions(actions)
         success_count = sum(1 for r in results if r.success)
         memory.record_action_results(success_count, len(actions))
@@ -217,14 +324,17 @@ async def _execute_turn_actions(
             "actions_executed", iteration=iteration, total=len(actions), successful=success_count
         )
 
-        verification_lines = []
-        for action, result in zip(actions, results, strict=True):
-            if not result.success:
-                a_intent = action.get("intent", "") if isinstance(action, dict) else ""
-                a_type = action.get("type", "") if isinstance(action, dict) else ""
-                verification_lines.append(f"- FAILED {a_type}: {a_intent} — {result.detail}")
-        if verification_lines:
-            memory.set_last_verification("\n".join(verification_lines))
+        if verify:
+            rescan = get_rescan_fn()
+            if rescan is not None:
+                await rescan()
+            verification = _build_verification(
+                actions, results, before_entities, list(get_detected_entities())
+            )
+        else:
+            verification = "\n".join(_failed_lines(actions, results))
+        if verification:
+            memory.set_last_verification(verification)
     else:
         log.warning("no_actions_fallback", iteration=iteration, reasoning=reasoning[:200])
         fallback = [

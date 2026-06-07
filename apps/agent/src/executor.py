@@ -57,6 +57,11 @@ def set_rescan_full_fn(fn: Callable[[], Awaitable[None]]) -> None:
     _rescan_full_fn = fn
 
 
+def get_rescan_fn() -> Callable[[], Awaitable[None]] | None:
+    """Return the registered fast-rescan callback, or None if unset."""
+    return _rescan_fn
+
+
 def set_detected_entities(entities: Sequence[object]) -> None:
     """Cache detected entities for target_id/target_class resolution.
 
@@ -167,6 +172,19 @@ def _resolve_coords(action_dict: dict[str, object]) -> tuple[str, tuple[int, int
         return ("", (ix, iy))
 
     return ("no coordinates, target_id, or target_class provided", None)
+
+
+def can_resolve(action_dict: dict[str, object]) -> bool:
+    """Whether a targeted action still resolves against the current entity cache.
+
+    Non-targeted actions (press / scroll / wait / detect) carry no target and
+    always pass; targeted ones pass only while their entity is still detected.
+    Used by the S6 pipeline to drop committed actions gone stale (RTC).
+    """
+    if not (action_dict.get("target_id") or action_dict.get("target_class")):
+        return True
+    error, _coords = _resolve_coords(action_dict)
+    return not error
 
 
 def _translate(x: int, y: int) -> tuple[int, int]:

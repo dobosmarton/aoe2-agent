@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -11,8 +12,9 @@ from typing import TYPE_CHECKING
 import structlog
 
 if TYPE_CHECKING:
-    from .providers.base import BaseLLMProvider
+    from .providers.base import BaseLLMProvider, LLMResult
 
+from . import reactive
 from .config import config
 from .detection_phase import (
     DETECTION_AVAILABLE,
@@ -26,6 +28,7 @@ from .detection_phase import (
 )
 from .entity_utils import build_entity_summary
 from .executor import (
+    can_resolve,
     clear_detected_entities,
     execute_actions,
     set_detected_entities,
@@ -34,6 +37,7 @@ from .goal_logger import GoalLogger
 from .goals import GoalManager
 from .memory import AgentMemory
 from .models import validate_actions
+from .providers.claude import ClaudeProvider
 from .providers.strategist import StrategistProvider, get_default_goals
 from .screen import capture_screenshot, save_screenshot
 from .strategist_phase import _maybe_launch_strategist
@@ -41,12 +45,122 @@ from .turn_phases import (
     _build_llm_context,
     _execute_turn_actions,
     _get_ground_commands,
-    _get_maintenance_actions,
     _process_response,
 )
 from .window import ensure_game_focused, get_game_window_rect, is_game_running
 
 log = structlog.stdlib.get_logger()
+
+
+# ---------------------------------------------------------------------------
+# Turn pipelining (S6, RTC-style)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class _PendingPlan:
+    """A single-shot plan launched last turn, executed this turn (RTC overlap)."""
+
+    task: asyncio.Task[LLMResult]
+    iteration: int
+
+
+def _should_pipeline(context: str, provider: BaseLLMProvider) -> bool:
+    """Whether this turn is routine (single-shot) and can pipeline.
+
+    Only single-shot (routine) turns pipeline: the tool loop executes its
+    actions during its own run, so pre-launching it would double-act. Combat
+    and housing emergencies return False and run synchronously.
+    """
+    if isinstance(provider, ClaudeProvider):
+        return provider._use_single_shot(context)
+    return False
+
+
+def _commit_head(actions: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Keep only the leading actions; the tail is discarded because next turn's
+    plan supersedes it from fresher perception."""
+    return actions[: config.pipeline_commit_max]
+
+
+def _revalidate_against_fresh(actions: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Drop committed actions whose target no longer resolves against the current
+    entity cache — a plan computed last turn may have gone stale."""
+    return [action for action in actions if can_resolve(action)]
+
+
+async def _execute_or_record(
+    response: LLMResult,
+    actions: list[dict[str, object]],
+    memory: AgentMemory,
+    iteration: int,
+) -> None:
+    """Execute the actions, or only record results when the provider's tool loop
+    already executed them this turn."""
+    if response.get("actions_already_executed"):
+        success = response.get("success_count", len(actions))
+        memory.record_action_results(success, len(actions))
+        log.info("actions_executed", iteration=iteration, total=len(actions), successful=success)
+    else:
+        await _execute_turn_actions(actions, iteration, memory, response.get("reasoning", ""))
+
+
+async def _run_routine_upkeep(
+    iteration: int,
+    memory: AgentMemory,
+    detected_entities: list[object],
+    alarm: bool,
+) -> None:
+    """Ground commands + routine villager upkeep — the work done in the LLM's
+    in-flight window while the turn's plan computes."""
+    ground_cmds = _get_ground_commands(iteration)
+    if ground_cmds:
+        ground_actions = validate_actions(ground_cmds)
+        if ground_actions:
+            await execute_actions(ground_actions)
+    routine_cmds = reactive.decide(detected_entities, memory.game_state, alarm)
+    if routine_cmds:
+        routine_actions = validate_actions(routine_cmds)
+        if routine_actions:
+            await execute_actions(routine_actions)
+            log.info("routine_executed", iteration=iteration, count=len(routine_actions))
+
+
+async def _drain_pending(
+    plan: _PendingPlan,
+    memory: AgentMemory,
+    goal_manager: GoalManager,
+    iteration: int,
+    goal_logger: GoalLogger,
+    time_budget: float | None,
+) -> str | None:
+    """Await last turn's plan and execute its revalidated head. Returns a
+    game_end_reason when the game ended, else None."""
+    response = await plan.task
+    actions, game_end_reason = _process_response(
+        response, memory, goal_manager, iteration, goal_logger, time_budget
+    )
+    if game_end_reason:
+        return game_end_reason
+    head = _commit_head(_revalidate_against_fresh(actions))
+    log.info(
+        "pipeline_head_committed",
+        iteration=iteration,
+        from_iteration=plan.iteration,
+        committed=len(head),
+        proposed=len(actions),
+    )
+    await _execute_or_record(response, head, memory, iteration)
+    return None
+
+
+async def _cancel_pending(plan: _PendingPlan | None) -> None:
+    """Discard an in-flight plan (combat transition or shutdown)."""
+    if plan is None or plan.task.done():
+        return
+    plan.task.cancel()
+    with contextlib.suppress(Exception):
+        await plan.task
 
 
 # ---------------------------------------------------------------------------
@@ -100,6 +214,7 @@ async def game_loop(
     iteration = 0
     alarm = False
     strategist_task: asyncio.Task | None = None
+    pending_plan: _PendingPlan | None = None  # S6: plan from last turn, run this turn
 
     # Propagate cross-game memory titles from the provider onto memory so
     # _process_response can validate `[applied: ...]` prefixes against the set
@@ -167,61 +282,31 @@ async def game_loop(
 
             context = _build_llm_context(memory, goal_manager, entity_summary)
 
-            # Launch LLM call as background task so we can act while it thinks.
-            llm_task = asyncio.create_task(provider.get_actions(context, width, height))
-
-            # Ground commands (zoom, scout) run while LLM is in-flight.
-            ground_cmds = _get_ground_commands(iteration)
-            if ground_cmds:
-                ground_actions = validate_actions(ground_cmds)
-                if ground_actions:
-                    gc_results = await execute_actions(ground_actions)
-                    gc_count = sum(1 for r in gc_results if r.success)
-                    log.info(
-                        "ground_commands_executed",
-                        iteration=iteration,
-                        count=gc_count,
-                        total=len(ground_actions),
+            # S6: pipeline routine turns — compute this turn's plan while last
+            # turn's committed head executes; combat turns stay synchronous.
+            if _should_pipeline(context, provider):
+                this_task = asyncio.create_task(provider.get_actions(context, width, height))
+                await _run_routine_upkeep(iteration, memory, detected_entities, alarm)
+                if pending_plan is not None:
+                    game_end_reason = await _drain_pending(
+                        pending_plan, memory, goal_manager, iteration, goal_logger, time_budget
                     )
-
-            # Safe maintenance actions (queue villagers) while LLM is thinking.
-            if not llm_task.done():
-                maint_cmds = _get_maintenance_actions(memory)
-                if maint_cmds:
-                    maint_actions = validate_actions(maint_cmds)
-                    if maint_actions:
-                        await execute_actions(maint_actions)
-                        log.info(
-                            "maintenance_executed", iteration=iteration, count=len(maint_actions)
-                        )
-
-            # Wait for LLM result.
-            response = await llm_task
-
-            actions, game_end_reason = _process_response(
-                response,
-                memory,
-                goal_manager,
-                iteration,
-                goal_logger,
-                time_budget,
-            )
-            if game_end_reason:
-                break
-
-            if response.get("actions_already_executed"):
-                success = response.get("success_count", len(actions))
-                memory.record_action_results(success, len(actions))
-                log.info(
-                    "actions_executed", iteration=iteration, total=len(actions), successful=success
-                )
+                    if game_end_reason:
+                        break
+                pending_plan = _PendingPlan(task=this_task, iteration=iteration)
             else:
-                await _execute_turn_actions(
-                    actions,
-                    iteration,
-                    memory,
-                    response.get("reasoning", ""),
+                # Combat/tool-loop turn: discard the stale routine plan and
+                # act synchronously on the current frame.
+                await _cancel_pending(pending_plan)
+                pending_plan = None
+                await _run_routine_upkeep(iteration, memory, detected_entities, alarm)
+                response = await provider.get_actions(context, width, height)
+                actions, game_end_reason = _process_response(
+                    response, memory, goal_manager, iteration, goal_logger, time_budget
                 )
+                if game_end_reason:
+                    break
+                await _execute_or_record(response, actions, memory, iteration)
 
             await asyncio.sleep(config.loop_delay)
 
@@ -240,6 +325,8 @@ async def game_loop(
         if strategist_task is not None and not strategist_task.done():
             with contextlib.suppress(Exception):
                 await strategist_task
+        # Discard any pipelined plan still in flight (S6).
+        await _cancel_pending(pending_plan)
         if overlay:
             overlay.close()
         metrics = memory.get_metrics_snapshot()

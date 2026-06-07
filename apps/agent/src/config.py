@@ -56,6 +56,9 @@ class Config(BaseModel):
     )
     action_delay: float = 0.05  # Seconds between actions
 
+    # Phase 2 tuning
+    pipeline_commit_max: int = 2  # S6: actions committed per pipelined turn (tail discarded)
+
     # Logging
     log_dir: Path = Path("logs")
     save_screenshots: bool = True
@@ -74,6 +77,7 @@ class Config(BaseModel):
             detection_host=os.environ.get("AOE2_DETECTION_HOST", ""),
             temperature=float(os.environ.get("AOE2_TEMPERATURE", "0.0")),
             seed=_parse_optional_int(os.environ.get("AOE2_SEED")),
+            pipeline_commit_max=int(os.environ.get("AOE2_PIPELINE_COMMIT_MAX", "2")),
         )
 
 
