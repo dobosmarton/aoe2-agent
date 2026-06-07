@@ -2,6 +2,14 @@
 
 A complete timing breakdown of the first 7 iterations (rounds) of a game run, showing every step the agent executes and its estimated wall-clock cost. Includes analysis of two realistic optimizations: async strategist and loop delay reduction.
 
+<aside class="prereqs">
+
+[Chapter 2 — Game Loop Pipeline](./02-game-loop-pipeline.md). This chapter is the per-step timing table behind chapter 2's prose description.
+
+</aside>
+
+> **Note (since this analysis was written).** Two of the optimizations below have shipped: the strategist runs asynchronously (Optimization A) and `loop_delay` now defaults to **0.3 s** (Optimization B). The executor also gained a **single-shot path** for routine turns (one roundtrip instead of the agentic tool loop — see [Chapter 4 §4.3](../part2-llm-integration/04-provider-pattern.md)). The tables below keep the original `loop_delay = 1.0 s` / always-tool-loop baseline so the optimization math in §14.5 stays self-consistent; treat them as the methodology, not today's wall-clock.
+
 ## 14.1 Per-Step Timing Reference
 
 Every iteration executes the same pipeline. Steps marked **conditional** only run on specific turns.
@@ -23,7 +31,7 @@ Every iteration executes the same pipeline. Steps marked **conditional** only ru
 | 12 | Action execution (3–5 actions) | ~250 ms | `executor.py` at 50 ms/action | Every turn (or fallback) |
 | 13 | Loop delay (sleep) | 1000 ms | `config.loop_delay = 1.0` | Every turn |
 
-**Config defaults** (from `config.py`): `loop_delay=1.0`, `strategist_interval=10`, `full_sahi_interval=5`, `action_delay=0.05`, `max_tool_iterations=7`.
+**Config defaults** (from `config.py`): `loop_delay=0.3` (the tables below use the pre-optimization `1.0` baseline — see the note above), `strategist_interval=10`, `full_sahi_interval=5`, `action_delay=0.05`, `max_tool_iterations=7`, `executor_effort="low"`.
 
 ---
 

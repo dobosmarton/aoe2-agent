@@ -2,6 +2,12 @@
 
 Real screenshots are labeled in CVAT, exported in COCO format, converted to YOLO labels, and merged with synthetic data. An active learning pipeline prioritizes the most informative images for labeling.
 
+<aside class="prereqs">
+
+[Chapter 8 — Training Pipeline](./08-training-pipeline.md) for where labels feed into training. If [COCO vs YOLO label formats](../glossary.md#c) are new terms, the [Glossary](../glossary.md) defines them.
+
+</aside>
+
 ## 9.1 The Labeling Workflow
 
 ```
@@ -35,6 +41,20 @@ Pre-labels are not training-quality -- they provide a starting point for human a
 ### Export Format: COCO 1.0 (Not YOLO)
 
 > **Key Insight**: CVAT's YOLO 1.1 export format silently drops polygon annotations -- only rectangles survive the export. Since some entities are labeled with polygon shapes in CVAT (for precise outlines), the project uses COCO 1.0 export format instead. `prepare_training.py` handles the COCO-to-YOLO conversion, computing bounding boxes from polygon vertices.
+
+<aside class="concept" data-title="COCO vs YOLO label formats">
+
+**COCO** is JSON-based: one file per dataset, with `images`, `categories`, and `annotations` arrays. Each annotation references an image by ID, carries a `bbox` `[x, y, width, height]` *in absolute pixels*, optionally a `segmentation` (polygon vertices), and a `category_id` that points into the global `categories` table. **1-indexed.**
+
+**YOLO** is plain-text: one `.txt` per image, one annotation per line, `class_id x_center y_center width height` *normalized to [0, 1]*. No category names in the file — they live separately in `dataset.yaml`. **0-indexed.**
+
+Three traps that bite people doing CVAT → YOLO conversions:
+
+1. **Polygons silently dropped.** CVAT's YOLO export only writes rectangles. If you labeled with polygons for precision, you lose them. Export as COCO, convert to YOLO yourself, and compute bboxes from the polygon vertices' min/max.
+2. **Off-by-one class IDs.** COCO is 1-indexed; YOLO is 0-indexed. The safe move is *never* convert by numeric ID — convert by class *name* through your canonical `classes.yaml` taxonomy. That's why this chapter's converter looks up COCO categories by name and writes YOLO class IDs from the taxonomy.
+3. **Coordinate-format confusion.** COCO is top-left + width/height. YOLO is center + width/height. The numbers look interchangeable until they're not.
+
+</aside>
 
 ### Export Format Detection
 

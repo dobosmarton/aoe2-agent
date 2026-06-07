@@ -2,6 +2,12 @@
 
 `python -m arena rank` runs a multi-round, multi-scenario tournament between profiles and produces Bradley–Terry log-ratings with 95% bootstrap confidence intervals. This chapter walks through the math, the YAML, and the failure modes.
 
+<aside class="prereqs">
+
+**New to Bradley-Terry, MLE, or bootstrap CIs?** Read [Appendix C — Bradley-Terry MLE and bootstrap confidence intervals](../appendix/03-bradley-terry-and-bootstrap.md) first — it explains why win-rate is misleading, how the MM algorithm fits the model, the undefeated-profile problem and the +0.5 smoothing fix, when bootstrap CIs lie, and how this compares to Elo.
+
+</aside>
+
 ## The shape of the output
 
 ```

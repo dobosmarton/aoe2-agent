@@ -2,6 +2,12 @@
 
 The YOLO model is trained on a hybrid dataset: synthetic images generated from extracted game sprites, plus real screenshots labeled in CVAT. This chapter covers synthetic data generation, augmentation, and the YOLO training process.
 
+<aside class="prereqs">
+
+[Appendix A — YOLO and object detection](../appendix/01-yolo-and-object-detection.md) for the underlying model and what mAP measures. [Chapter 11 — Sprite Extraction](../part4-game-knowledge/11-sprite-extraction.md) for where the synthetic-data sprites come from.
+
+</aside>
+
 ## 8.1 Pipeline Overview
 
 ```mermaid
@@ -71,6 +77,29 @@ Three background types, selected randomly per image:
 2. **Synthetic backgrounds** -- pre-generated terrain images.
 
 3. **Procedural terrain** -- generated at runtime with biome-aware color palettes. A biome is selected randomly (weighted) from 9 types: grass (25%), desert (15%), snow (10%), autumn (10%), jungle (10%), dirt (10%), mixed (10%), water_shore (5%), dark_forest (5%). Each biome defines 5 terrain colors used for 20 elliptical patches (200-500px) with Gaussian blur (radius=3). The "mixed" biome merges colors from 2-3 random biomes.
+
+<details class="deep-dive">
+<summary>Deep dive — Designing synthetic training data (why these numbers, not other numbers)</summary>
+
+The four numbers most likely to make a beginner squint at this chapter are: **z-order layers**, the **z-order-aware overlap thresholds (10% / 15% / 35%)**, the **50% real-background mix**, and the **JPEG-compression augmentation**. Each is a small deliberate choice that addresses a specific failure mode we've observed.
+
+**Z-order layers (0–3).** Real game scenes have a depth order: trees grow up from the ground, units walk on top of the ground, buildings sit at intermediate depth. If you composite sprites in random order, you end up with sheep painted *over* trees that should be in front of them — a visual configuration the model would never see in a real screenshot. Painting buildings first, then resources, then animals, then units mirrors AoE2's actual rendering pipeline and produces training images that look like real game scenes. **The model learns the partial-occlusion patterns it'll encounter at inference.**
+
+**Why three different overlap thresholds.** Earlier versions used a flat "boxes can overlap by at most 40% IoU" rule and got systematic label noise: stacked villagers ended up with their boxes overlapping enough that NMS would later treat them as duplicates. The per-class thresholds capture an observable fact about the game:
+
+- *Buildings (10%)* are large, static, and never genuinely overlap in-game (you can't build through walls). Allowing 10% gives us a tolerance for the small inaccuracies in extracted sprite bounds.
+- *Resources (15%)* — trees and animals can cluster but mostly stay distinct.
+- *Units (35%)* — villagers and military units cluster heavily, and the model *needs* to be able to count them when they're packed together.
+
+The "skip rather than force-place" rule is just as important: if 20 random positions can't satisfy the overlap constraint, drop the sprite. Better to have fewer training instances than to introduce a malformed label that pushes the network in the wrong direction.
+
+**The 50% real-background mix.** Pure synthetic backgrounds let the network cheat: it can learn "this is a sheep because the background is solid green," which fails the moment a real screenshot has a different terrain. Mixing in actual blurred screenshots forces the network to find the *foreground sprite* against authentic visual noise (UI fragments, terrain transitions, fog). Blurring the backgrounds (Gaussian radius=1) keeps the terrain colors and global structure but destroys high-frequency texture — so the network can't memorize specific real game states.
+
+**JPEG compression as augmentation.** Real screenshots are saved as JPEG before reaching the detector. If you train only on lossless PNG composites, your model is mildly fragile at inference because it never saw the JPEG ringing artifacts around sprite edges. A 30% probability of re-encoding the training image at quality 70–90 closes the gap.
+
+**The meta-lesson.** Every one of these knobs corresponds to a failure mode we caught either in unit tests on labels or in the form of a falling mAP curve during training. Synthetic data design is *the* practical leverage point for object detection — it's almost always cheaper to fix the data than to change the architecture.
+
+</details>
 
 ## 8.3 Augmentation Pipeline
 

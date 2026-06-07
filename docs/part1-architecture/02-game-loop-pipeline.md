@@ -2,6 +2,12 @@
 
 The game loop is the heartbeat of the agent. Every ~1 second, it captures a screenshot, detects entities, checks for threats, optionally runs the strategist, builds text context, asks the executor for actions, and executes them.
 
+<aside class="prereqs">
+
+Python asyncio and [Chapter 1](./01-system-overview.md). Computer-vision basics help — YOLO detection and Kalman tracking each get their own deep dives ([Appendix A — YOLO and object detection](../appendix/01-yolo-and-object-detection.md) and the Kalman/Hungarian sidebar at the end of §2.1).
+
+</aside>
+
 ## 2.1 The Iteration Cycle
 
 ```mermaid
@@ -109,7 +115,7 @@ The executor LLM call is launched as a background task via `asyncio.create_task(
 
 After these complete, the agent awaits the LLM task result.
 
-The executor is 100% text-based — no screenshot. It runs an **agentic tool loop** (`_call_api` in `claude.py`): Claude calls tools one at a time (up to `max_tool_iterations = 7`), each tool is executed locally via `execute_action()`, and the result is fed back. Composite tools (`build`, `send_villager`, `queue_villager`) execute multi-step sequences within a single tool call, eliminating intermediate API roundtrips.
+The executor is 100% text-based — no screenshot. `get_actions()` picks one of two paths per turn (`_use_single_shot`): routine turns take a **single-shot** structured call (`_call_single_shot` — one roundtrip; the returned actions are executed by the game loop), while combat/housing turns take an **agentic tool loop** (`_call_api`) where Claude calls tools one at a time (up to `max_tool_iterations = 7`), each executed locally via `execute_action()` with the result fed back. Composite tools (`build`, `send_villager`, `queue_villager`) execute multi-step sequences within a single tool call, eliminating intermediate API roundtrips.
 
 ### Step 10: Update memory and goals — `_process_response()`
 
@@ -131,7 +137,62 @@ If the agentic tool loop already executed actions (indicated by `actions_already
 
 ### Step 12: Wait
 
-`asyncio.sleep(config.loop_delay)` — default 1.0 seconds.
+`asyncio.sleep(config.loop_delay)` — default 0.3 seconds.
+
+<aside class="concept" data-title="Frame differencing and the MAD threshold (why we skip detection sometimes)">
+
+The rescan branch in Step 11 skips detection entirely when the frame hasn't changed enough to matter. "Enough" is measured with **Mean Absolute Difference (MAD)**: compute the per-pixel absolute difference between the current and previous frame, average across all pixels, divide by 255 to get a 0–1 score. If MAD < 3% (the chapter's threshold), we treat the frame as visually identical and reuse the previous detection.
+
+Two tuning notes a reader might not anticipate:
+
+- **The top 4% of the frame is excluded from the MAD computation.** That strip is the resource bar — its numbers tick constantly even when nothing else changes, and including it would push MAD over the threshold on frames that are otherwise static. The clip is a single `frame[int(h*0.04):]` slice.
+- **The threshold (3%) is a noise/signal trade-off.** Lower (1%) and you'll trigger detection on JPEG-compression noise alone — wasted work. Higher (10%) and you'll skip detection during real action — stale entities. 3% was found by sweeping the threshold against a labeled set of "did this frame need re-detection?" decisions.
+
+MAD is the cheapest possible change-detection metric — one subtraction and one mean per frame, ~0.5 ms on a 1080p image. SSIM (structural similarity) is more semantically meaningful but ~10× slower, and overkill for our binary "did anything change?" question.
+
+</aside>
+
+<details class="deep-dive">
+<summary>Deep dive — Adaptive SAHI and ROI clustering (how 18 tiles becomes 3–8)</summary>
+
+**The base problem.** A single 1920×1080 game screenshot resized to YOLO's standard 640×640 throws away most of the resolution that small entities (sheep, scouts) depend on. Run YOLO on the resized image and you'll miss anything under ~20 px in the original. Run YOLO on the full 1920×1080 and you spend a lot of GPU time on the 70% of the screen that's empty terrain.
+
+**SAHI — the classic fix.** *Slicing Aided Hyper Inference* (Akyon et al., 2022) slices the input into overlapping tiles, runs the detector on each tile at full resolution, then merges the per-tile predictions back into image coordinates (with extra NMS on overlap zones). For a 1920×1080 screen with 640×640 tiles and 20% overlap, that's ~18 tiles per frame. Recall on small objects skyrockets. Latency triples.
+
+**Adaptive SAHI — what we ship.** A two-pass scheme that only pays the tiling cost where it matters:
+
+1. **Fast scan.** Run YOLO once at `imgsz=1280` (in-between the fast 640 and the slow tiled approach). Catches every medium-and-large object plus a noisy first guess at where the small stuff is. ~60 ms.
+2. **ROI clustering.** Take the bounding boxes of the small/uncertain detections, cluster them into a handful of regions of interest using a **Union-Find** (disjoint-set) data structure. Two boxes belong to the same ROI if their inflated bounding boxes intersect; Union-Find walks the box list once and assigns each to its cluster root in near-constant amortized time.
+3. **Targeted SAHI.** Run YOLO at full resolution only on those 3–8 ROI tiles. ~40–140 ms depending on ROI count.
+4. **Merge + NMS.** Combine fast-scan predictions outside the ROIs with the targeted-SAHI predictions inside them, then a final NMS pass.
+
+**Why Union-Find for clustering?** We need: *given N boxes, group any pair that overlap into the same cluster*. The naive O(N²) pairwise intersection works at N ≤ 50 but degrades. K-means doesn't fit — clusters aren't centroidal, they're connectivity components. DBSCAN works but is more code. **Union-Find runs in O(N · α(N))** — practically O(N) — and the implementation is ~30 lines: each box starts in its own set, and any time two boxes overlap you `union()` their sets. The chapter's full SAHI fallback is what you'd use if you wanted exhaustive coverage of every tile regardless of content.
+
+**When adaptive SAHI is wrong to use.** First frame (no prior boxes → no ROIs → only the fast scan runs → you miss things). Solution: force full SAHI on the first frame, and on every Nth frame (`full_sahi_interval=5`), and after an alarm. These are the three branches you see in Step 4.
+
+**Further reading.** Akyon et al., *Slicing Aided Hyper Inference and Fine-tuning for Small Object Detection* (2022). Sedgewick & Wayne, *Algorithms* (4th ed.), §1.5 for the Union-Find treatment.
+
+</details>
+
+<details class="deep-dive">
+<summary>Deep dive — Kalman filters and the Hungarian algorithm (how IDs persist across frames)</summary>
+
+**Why we need this:** the detector gives you a fresh list of boxes every frame, but those boxes don't carry identity — frame N's `sheep` at (455, 790) and frame N+1's `sheep` at (462, 794) have to be linked back to *the same sheep* so the LLM can refer to `sheep_0` across turns. That's the multi-object tracking problem, and the canonical solution is a two-step loop: **predict where each tracked entity is now → match predictions to detections → update tracks with the matched detections**.
+
+**The Kalman filter — mental model.** Picture each tracked entity carrying a small Gaussian "cloud" describing where the system thinks it is. The cloud has a mean (best guess: `[x, y, vx, vy]` for a constant-velocity model) and a covariance (how uncertain that guess is). On every frame we do two things:
+
+1. **Predict.** Push the mean forward by `Δt` using the velocity (`x' = x + vx·Δt`) and *grow* the covariance — uncertainty always increases when you don't see new evidence. This is the closed-form update `μ' = F·μ`, `Σ' = F·Σ·Fᵀ + Q`, where `F` is the state-transition matrix and `Q` is the process noise (how much we expect the entity to deviate from constant velocity per step).
+2. **Update.** When a detection arrives, the filter computes a weighted average between the prediction and the observation, weighted by their relative uncertainties (the Kalman gain `K`). A confident prediction + noisy observation → trust the prediction. Stale prediction + crisp observation → trust the observation.
+
+**Hungarian assignment — the matching step.** Before we can call "update," we have to know *which* detection goes with *which* track. Build an `N × M` cost matrix (N tracked entities × M detections this frame) where each cell is some distance — pixel distance, `1 - IoU`, or a Mahalanobis distance using the track's covariance. The Hungarian algorithm finds the assignment that minimizes total cost in **O((N+M)³)** — globally optimal, not greedy. Unmatched detections become new tracks; unmatched tracks decay (and after a few frames of misses, get retired).
+
+**Why we picked it.** Kalman is *lightweight* (a few small matrix ops per track, no training, no GPU), *probabilistic* (the covariance is a built-in confidence score — the rescan path uses `confidence > 80%` to skip a screenshot entirely), and *well-behaved under partial occlusion* (the prediction carries the entity forward through a few missed frames). Hungarian is *exact and fast* at the scale of dozens of entities.
+
+**When it breaks.** Rapid acceleration (a knight charging) violates the constant-velocity model — the prediction lags and matching can swap IDs. Heavy occlusion (a building behind a tree) eventually exhausts the "no-update tolerance" and the track is retired, then re-spawns with a new ID. For our use case (top-down isometric, slow units, mostly-visible entities) this is rarely a problem; for highway traffic or sports you'd reach for a learned tracker like ByteTrack or BoT-SORT.
+
+**Further reading.** Welch & Bishop, *An Introduction to the Kalman Filter* (2006) — the classic 20-page write-up. SORT (Bewley et al., 2016) is the original "Kalman + Hungarian" multi-object tracker and is the algorithmic ancestor of our tracker.
+
+</details>
 
 ## 2.2 Single-Iteration Test Mode
 
@@ -153,14 +214,14 @@ Captures a screenshot, runs detection, builds context, gets actions from Claude 
 | YOLO detection (full SAHI) | ~234ms | Full tiled inference (first turn, periodic, alarm) |
 | Ownership classification | ~5ms | NumPy pixel analysis |
 | Strategist call (periodic) | 3-8s | Sonnet vision API call |
-| Executor call (first response) | ~8-10s | Sonnet text API call (parallelized with maintenance) |
-| Executor call (per tool iteration) | ~3s | Subsequent API roundtrips in agentic loop |
+| Executor single-shot (routine turns) | ~2-4s | One `messages.parse` call, no tool loop |
+| Executor call (per tool iteration) | ~3s | Roundtrips in the agentic loop (combat/housing) |
 | Action execution | ~50ms per action | pyautogui + 50ms inter-action delay |
 | Rescan: tracker prediction | ~0ms | Kalman extrapolation (confidence > 80%) |
 | Rescan: fast detection | ~50ms | Single-pass YOLO at imgsz=1280 |
-| Loop delay | 1.0s | `config.loop_delay` |
+| Loop delay | 0.3s | `config.loop_delay` |
 
-Total cycle time is ~30-40 seconds per turn due to the agentic tool loop (7 tool calls x ~3s each). Composite tools reduce this significantly (~9s saved per building placement). The strategist runs in the background and does not add to cycle time.
+Cycle time depends on the path: **routine turns single-shot in ~one roundtrip** (~2-4s of API + 0.3s loop delay), while combat/housing turns run the agentic tool loop and can reach ~20-30s when they use all 7 iterations. Composite tools cut the loop path further (~9s saved per building placement). The strategist runs in the background and does not add to cycle time.
 
 ## 2.4 Error Handling
 
@@ -184,7 +245,7 @@ The game loop supports a `time_budget` parameter (seconds). When elapsed time ex
 ## Summary
 
 - 12-step iteration cycle: check → focus → capture → detect → classify → alarm → strategist → context → executor → memory → execute → wait
-- ~30-40 second cycle time dominated by Claude API roundtrips in the agentic tool loop
+- Cycle time depends on the path: routine turns single-shot in ~2-4s; combat/housing turns run the agentic tool loop and can reach ~30s
 - Executor LLM call parallelized with maintenance actions (villager queuing) via `asyncio.create_task()`
 - Strategist runs asynchronously in the background; executor runs every turn
 - Composite tools (build, send_villager, queue_villager) eliminate multiple API roundtrips per sequence

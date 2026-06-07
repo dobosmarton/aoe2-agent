@@ -2,6 +2,12 @@
 
 The detection system uses a single class schema defined in `classes.yaml` with 60 classes. This chapter explains the schema history, the current unified approach, and where legacy mapping still exists.
 
+<aside class="prereqs">
+
+[Chapter 7 — Detector Architecture](../part3-entity-detection/07-detector-architecture.md) for the current 60-class taxonomy whose history this chapter explains.
+
+</aside>
+
 ## 13.1 Schema History
 
 ### v1 Schema (46 classes) — Legacy

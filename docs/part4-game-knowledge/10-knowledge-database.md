@@ -2,6 +2,12 @@
 
 The game knowledge system provides structured AoE2 data to the agent. A SQLite database stores unit stats, building costs, technologies, and counter relationships. At runtime, it answers queries like "what units can I afford with 300 food and 200 gold in Feudal Age?"
 
+<aside class="prereqs">
+
+Basic SQL (SELECT / WHERE / JOIN). [Chapter 6 — Context Injection](../part2-llm-integration/06-context-injection.md) for how the LLM consumes the queries this database powers.
+
+</aside>
+
 ## 10.1 Architecture
 
 Two layers:

@@ -2,6 +2,12 @@
 
 Training data generation requires individual sprite images for each entity class. These are extracted from AoE2:DE's proprietary SLD file format -- a GPU-compressed sprite format used by the game engine.
 
+<aside class="prereqs">
+
+Comfortable with binary file formats (offsets, headers, fixed-width fields) and Python's `struct` module. The chapter introduces [DXT1 block compression](../glossary.md#d) in §11 — no GPU background required.
+
+</aside>
+
 ## 11.1 SLD File Format
 
 SLD (Sprite Layer Data) files use the `SLDX` signature and store multi-layer sprite data with GPU texture compression.
@@ -64,6 +70,29 @@ Four palette colors are derived:
 | Transparent (c0 <= c1) | c0 | c1 | 1/2*c0 + 1/2*c1 | transparent (alpha=0) |
 
 Each pixel in the 4x4 block uses a 2-bit index to select one of these 4 colors.
+
+<details class="deep-dive">
+<summary>Deep dive — DXT1 / BC4 block compression (why 4×4 blocks and what they trade)</summary>
+
+DXT1 (aka BC1) and BC4 are part of the **block-compression** family used by GPUs since the late 1990s. Both compress 4×4 pixel blocks into 8 bytes. The motivation is simple and unchanged: **GPUs need texture data to be small enough to fit in cache and aligned to a power-of-two pixel grid** so they can fetch a sample in one memory transaction.
+
+**Why 4×4 blocks specifically.** GPU texture samplers always fetch a 2×2 quad (for trilinear filtering), and most modern GPUs further coalesce that into 4×4 cache lines. So 4×4 is the smallest block size where the compressed unit fits neatly into one cache fetch — anything smaller wastes the slack; anything larger spreads a single sample across multiple fetches.
+
+**DXT1's encoding.** Each block stores two reference colors as RGB565 (a packed 16-bit color: 5 bits red, 6 bits green, 5 bits blue — green gets extra precision because the eye is most sensitive to it). A 2-bit index per pixel picks one of four colors: the two reference colors plus two interpolated colors at 1/3 and 2/3 along the line between them. **Per pixel cost: 4 bits** — a 32× compression over uncompressed RGBA8.
+
+**The clever transparency bit.** If the first reference color is *less than or equal to* the second (treating them as 16-bit ints), DXT1 switches modes: now there are only three colors, and the fourth index value (`0b11`) means *fully transparent*. The compression is the same 8 bytes, but you've gained 1-bit alpha for free. AoE2's SLD format uses this for cutout sprites.
+
+**The lossy part.** Two reference colors per 4×4 block is fine for smooth gradients (skin tones, sky) but visibly worse for **sharp color transitions** (text, fine line art, vibrant rainbow patterns). Sprites with strong color contrast inside a 4×4 region get ugly artifacts. AoE2's sprites are visually noisy enough (organic textures, painted brush strokes) that DXT1 is invisible in practice.
+
+**BC4 — single-channel.** Same idea, applied to one channel only (alpha or luminance). Each 4×4 block stores two reference *single-byte* values and uses 3 bits per pixel to interpolate between them. Result: 8 alpha levels per block, 3 bits × 16 pixels = 6 bytes + 2 bytes for refs = 8 bytes total. **AoE2 shadows are perfect for this** — pure alpha gradients with no color information.
+
+**The trade-off:** 4× to 8× smaller textures, vs lossy compression that's typically invisible on photorealistic or hand-painted art and ugly on text/icons. Modern alternatives — BC7 (better quality at the same ratio), ASTC (variable block size) — exist but are slower to decode and weren't around when AoE2:DE was built.
+
+**Why we decode in software rather than ship to a GPU.** We're not rendering sprites; we're extracting them to PNGs for training data generation. A pure-Python decompressor runs once per sprite at extraction time, then never again. Decoding is ~50 lines of bit-twiddling per format.
+
+**Further reading.** The OpenGL extension spec for `EXT_texture_compression_s3tc` is the canonical DXT1 reference. The openage project (open-source AoE engine) has the most complete public reverse-engineering notes on the SLD format that wraps these compression blocks.
+
+</details>
 
 ## 11.3 BC4 Shadow Decompression
 

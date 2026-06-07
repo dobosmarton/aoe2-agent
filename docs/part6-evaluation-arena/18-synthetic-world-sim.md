@@ -4,6 +4,12 @@
 
 The fidelity is deliberately low. This is a behavioural regression harness, not a game engine. The goal is catching stuck loops, inhibitory-memory failures, and age-transition regressions — not simulating AoE2 exactly.
 
+<aside class="prereqs">
+
+[Chapter 14 — Arena Overview](./14-arena-overview.md) for what consumes this simulator. Familiarity with discrete-time simulation (state → step → state) — no PDE or physics background needed.
+
+</aside>
+
 ## `WorldState`
 
 `world_sim.py:106`. A mutable dataclass:
@@ -87,6 +93,32 @@ end_state:
 ```
 
 Failures come back as plain strings (`packages/evaluation/src/runner.py` formats them with turn counts). Unknown WorldState field names produce a failure rather than silently passing — `end_state: { spaghetti: 7 }` will tell you it's a typo.
+
+<details class="deep-dive">
+<summary>Deep dive — Determinism in LLM agents (why temp=0 is not enough)</summary>
+
+This chapter's synthetic world sim is **fully deterministic** — same state, same seed, identical output. The agent that runs against it is decidedly not. That asymmetry is worth understanding because every "is this prompt better?" experiment depends on being able to attribute outcome differences to the change you made, not to noise from the LLM.
+
+**Sources of LLM nondeterminism, ranked by impact:**
+
+1. **Sampling temperature > 0.** `temperature=0.5` means each token is sampled from the distribution, so re-running the same prompt yields different completions. Knob is obvious; impact is enormous.
+2. **Temperature = 0 doesn't mean deterministic.** With `temperature=0` the API returns the argmax token. But the underlying inference still has *internal* nondeterminism because (a) modern accelerators do BF16/FP16 reduction in non-deterministic order across batch elements, and (b) the provider may route your request to different GPU clusters with slightly different numerics. Anthropic's docs are explicit: temperature=0 minimizes but does not eliminate variance.
+3. **Tool-path variance.** Even with the same first action, a small difference downstream (a tool returning a slightly different snapshot) can cascade into completely different sequences over 60 turns. This dominates run-to-run variance in long agentic loops more than token-level sampling does.
+4. **Hidden retries and load balancing.** A transient 5xx + automatic retry from tenacity can change the order of operations subtly. Provider-side load balancing can route consecutive calls to different model replicas with different cache hit rates.
+5. **Prompt-cache hits vs misses.** A request that hits the cache reuses the provider's pre-computed KV state. A miss recomputes it. The completions *should* be identical at temperature=0; in practice there are reports of marginal drift.
+
+**How to measure your nondeterminism.** Pick a fixed prompt and a deterministic environment (this chapter's synth sim). Run N times at the same temperature and measure outcome divergence. Empirically: at `temperature=0` we see ~3–5% of runs diverge by turn 20; at `temperature=0.5` it's ~30–60%. That's why the ranking chapter uses 5 rounds per (profile × scenario) — fewer rounds and the bootstrap CIs swallow the actual signal.
+
+**The standard mitigations.**
+
+- **Pass a `seed` parameter** where the API supports it (OpenAI does; Anthropic doesn't have a public seed parameter as of writing). At best this reduces sampling variance to zero; it does *not* eliminate hardware-level nondeterminism.
+- **Run more samples.** Boring, expensive, and the most reliable. The bootstrap CIs in chapter 17 are honest about how much of the result is noise.
+- **Hold non-causal variables fixed.** Same prompt cache state (warm up the cache once before the experiment), same model snapshot (Anthropic versions models by date), same temperature.
+- **Test with the *deterministic* substrate.** The synth world sim is deterministic by design. If two runs against it produce different scores, all of that difference came from the LLM. That's the only experimental setup where you can cleanly attribute variance.
+
+**The pragmatic bar:** "deterministic enough that a real effect at the 5% level is detectable in N=5 rounds with bootstrap CIs." We don't try to make the LLM perfectly reproducible — we make the *experiment* statistically powerful enough that we don't need to.
+
+</details>
 
 ## Real-game tier impact: zero
 

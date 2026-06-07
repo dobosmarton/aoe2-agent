@@ -2,6 +2,12 @@
 
 This is the recipe for getting from a fresh clone to "click around past runs in a browser" in three commands.
 
+<aside class="prereqs">
+
+[Chapter 19 — Web Architecture](./19-web-architecture.md) and [Chapter 20 — Fork and Diff UI](./20-fork-and-diff-ui.md) describe what you're running. This chapter is the recipe. The **Prerequisites** section below covers installation prereqs (bun, Python) — distinct from the conceptual ones here.
+
+</aside>
+
 ## Prerequisites
 
 - Python env set up per the root README (`uv sync` or `pip install -e ".[dev,server]"`). The web backend is part of the base install; no extra extra is needed.
@@ -40,6 +46,28 @@ Browse to <http://localhost:5173>. Pick a run from the left sidebar.
 | `VITE_API_BASE_URL` | unset (use Vite dev proxy) | Set to a full `http(s)://host:port` URL to bypass the proxy. Necessary when the backend is on a different machine. Live in `apps/dashboard/.env.local`; the example is `apps/dashboard/.env.example`. |
 
 The proxy paths (`/runs`, `/events`, `/forks`, `/health`) are listed in `apps/dashboard/vite.config.ts`. When `VITE_API_BASE_URL` is set, the frontend prepends it to every API call instead of using relative URLs.
+
+<aside class="concept" data-title="The Vite dev proxy (what it does and why it disappears in production)">
+
+In dev, your browser talks to `localhost:5173` (Vite) and your backend listens on `localhost:8000` (FastAPI). Cross-origin requests (`5173 → 8000`) would normally trigger CORS preflights and cookie quirks. The Vite dev proxy makes that go away by forwarding any request matching configured paths from the dev server to the backend, server-side:
+
+```ts
+// vite.config.ts (sketch)
+server: {
+  proxy: {
+    '/events': { target: 'http://localhost:8000', changeOrigin: true },
+    '/runs':   'http://localhost:8000',
+    '/forks':  'http://localhost:8000',
+    '/health': 'http://localhost:8000',
+  },
+}
+```
+
+To the browser, it looks like `/events` is served by `localhost:5173` — same origin, no CORS preflight, cookies attach by default. To FastAPI, the request arrives just like any direct call. The proxy is **dev-only** — `vite build` produces a static `dist/` bundle that's served from somewhere else entirely (often the FastAPI process itself in production), and the `/events` requests then go to the same origin. That's why `VITE_API_BASE_URL` exists: it lets you bypass the proxy in dev to point at a backend on another machine, *without* changing any of the frontend's `fetch` calls — they remain relative paths and the env var is prepended at build time.
+
+The pattern generalizes to webpack-dev-server, Next.js's `rewrites`, and esbuild's serve mode. They all solve the same "cross-origin in dev, same-origin in prod" problem.
+
+</aside>
 
 ## Three deployment modes
 

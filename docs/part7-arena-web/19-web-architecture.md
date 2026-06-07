@@ -7,6 +7,24 @@
 
 Both are optional. They sit on top of the broker and the DuckDB log — the agent and arena CLIs work without them.
 
+<aside class="concept" data-title="SSE vs WebSocket vs long-polling (why SSE was the right call)">
+
+Three ways for a server to push updates to a browser without the browser asking:
+
+- **Long-polling.** Browser opens a normal HTTP request; server holds it open until it has data; closes; browser immediately reopens. Simple, but every push pays the overhead of an HTTP request, and reconnect timing is brittle.
+- **WebSocket.** Full-duplex, persistent TCP-over-HTTP-upgrade connection. The fastest and most flexible — but it's binary-framed, requires its own auth/proxy story (no automatic cookies on upgrade in some browsers), and gives you no built-in reconnect or replay.
+- **SSE (Server-Sent Events).** One-way HTTP stream of `text/event-stream` chunks. Native browser API (`EventSource`), automatic reconnect with last-seen event ID, plays nicely with HTTP/2 multiplexing, and "just works" through any HTTP proxy that doesn't aggressively buffer.
+
+Our needs are dead-simple: *server → browser, fan-out telemetry, replay from a known offset.* That maps exactly onto SSE. We don't need browser → server messages (the operator mutations go through a normal POST `/forks`), so the half-duplex restriction costs us nothing, and the built-in reconnect-with-`Last-Event-ID` semantics map perfectly onto the broker's `Seq` numbers — a reconnecting client resumes where it left off without us writing any code. Picking WebSocket would have meant rebuilding all of that machinery to gain duplex we don't use.
+
+</aside>
+
+<aside class="prereqs">
+
+FastAPI basics (decorators, dependency injection, lifespan). [Server-Sent Events (SSE)](../glossary.md#s) — there's a callout further down this chapter that compares SSE to WebSocket and long-polling.
+
+</aside>
+
 ## URL contract (backend)
 
 The HTTP contract is frozen so the frontend can evolve independently:

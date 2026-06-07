@@ -2,6 +2,12 @@
 
 The `apps/arena/src/` package is the **synthetic evaluation tier**: it runs the agent against an in-memory AoE2-lite world (`packages/evaluation/src/world_sim.py`) instead of the real game. It exists so we can iterate on prompts, models, and decision logic without booting a Windows VM or paying live-game prices, and so we can rank variants against each other with statistical rigour.
 
+<aside class="prereqs">
+
+[Chapter 1 — System Overview](../part1-architecture/01-system-overview.md) for the real-game tier this synthetic tier is testing. CLI fluency (click-style commands) for the `python -m arena` interface.
+
+</aside>
+
 ## When you'd use it
 
 | You want to … | Reach for | Cost | API key? |

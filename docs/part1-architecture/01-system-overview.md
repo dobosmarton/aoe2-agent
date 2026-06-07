@@ -1,6 +1,12 @@
 # Chapter 1: System Overview
 
-The AoE2 LLM Arena agent plays Age of Empires II autonomously using a two-tier LLM architecture. A Sonnet strategist reads screenshots and sets goals; a Haiku executor reads YOLO-detected entities as text and executes mouse/keyboard actions. No game API, no OCR, no memory-mapped data.
+The AoE2 LLM Arena agent plays Age of Empires II autonomously using a two-tier LLM architecture. A Sonnet strategist reads screenshots and sets goals; a Sonnet executor reads YOLO-detected entities as text and executes mouse/keyboard actions. No game API, no OCR, no memory-mapped data.
+
+<aside class="prereqs">
+
+Python 3 and the `async`/`await` mental model. If `asyncio` is new, see [Glossary §asyncio](../glossary.md#a).
+
+</aside>
 
 ## 1.1 Two-Tier Architecture
 
@@ -8,9 +14,9 @@ The agent splits decision-making into two models:
 
 **Strategist (Sonnet)** — Runs every 10 turns (or on alarm). Receives the full screenshot as a vision input. Reads resource values, population, and age from the game UI. Creates 3-5 prioritized goals and caches resource readings for the executor.
 
-**Executor (Haiku)** — Runs every turn (~1 second). Receives only text: YOLO entity list, cached resource readings, active goals, memory context, and game knowledge. Returns structured actions (clicks, key presses) validated as Pydantic models.
+**Executor (Sonnet)** — Runs every turn. Receives only text: YOLO entity list, cached resource readings, active goals, memory context, and game knowledge. Returns structured actions (clicks, key presses) validated as Pydantic models. Routine turns take a fast single-shot call; combat/housing turns take an agentic tool loop (see [Chapter 4 §4.3](../part2-llm-integration/04-provider-pattern.md)).
 
-This split optimizes for cost and speed: the expensive vision call (Sonnet) happens infrequently, while the cheap text-only call (Haiku) handles rapid tactical decisions.
+The split separates concerns: the strategist owns slow, vision-based planning; the executor owns rapid, text-only tactics. Both run `claude-sonnet-4-6` — the executor was moved from Haiku to Sonnet for more reliable instruction-following — and a per-call `effort` knob (default `low`) keeps the executor fast.
 
 ## 1.2 Component Map
 
@@ -30,7 +36,7 @@ agent/
 │   ├── window.py              # Game window detection and focus management
 │   └── providers/
 │       ├── base.py            # Abstract LLM provider interface
-│       ├── claude.py          # Haiku executor (text-only, no images)
+│       ├── claude.py          # Sonnet executor (text-only, no images)
 │       └── strategist.py      # Sonnet strategist (vision + goal generation)
 ├── detection/                 # YOLO entity detection (optional)
 │   ├── inference/
@@ -96,13 +102,15 @@ Configuration uses a Pydantic `BaseModel` with environment variable overrides (`
 | Setting | Env Var | Default | Purpose |
 |---------|---------|---------|---------|
 | `anthropic_api_key` | `ANTHROPIC_API_KEY` | `""` | Claude API authentication |
-| `model` | `AOE2_MODEL` | `claude-haiku-4-5` | Executor model (fast, cheap) |
+| `model` | `AOE2_MODEL` | `claude-sonnet-4-6` | Executor model (instruction-following) |
+| `executor_effort` | `AOE2_EXECUTOR_EFFORT` | `low` | Executor `output_config` effort (`low`/`medium`/`high`) |
 | `strategist_model` | `AOE2_STRATEGIST_MODEL` | `claude-sonnet-4-6` | Strategist model (vision, deeper reasoning) |
 | `strategist_interval` | `AOE2_STRATEGIST_INTERVAL` | `10` | Run strategist every N turns |
 | `max_tokens` | — | `1536` | Max response tokens per executor call |
+| `max_tool_iterations` | — | `7` | Max tool roundtrips per turn (tool-loop path) |
 | `detection_imgsz` | — | `1280` | YOLO inference resolution |
 | `screenshot_quality` | — | `85` | JPEG quality (1-100) |
-| `loop_delay` | `AOE2_LOOP_DELAY` | `1.0` | Seconds between iterations |
+| `loop_delay` | `AOE2_LOOP_DELAY` | `0.3` | Seconds between iterations |
 | `action_delay` | — | `0.05` | Seconds between individual actions |
 | `save_screenshots` | `AOE2_SAVE_SCREENSHOTS` | `true` | Log screenshots to disk |
 | `log_dir` | — | `logs` | Screenshot and log output directory |
@@ -121,6 +129,19 @@ The entire agent runs on asyncio:
 
 pyautogui calls are synchronous but fast (sub-millisecond per click), so they don't block meaningfully.
 
+<aside class="concept" data-title="Async-first architecture (why one event loop, not threads)">
+
+The agent is built on a single asyncio event loop, not threads or processes. The reason is **structural concurrency without locks**: every coroutine runs to the next `await` before yielding, so two coroutines reading and writing the same in-memory data (the entity cache, the goal manager, the memory deque) can never interleave mid-statement. No `threading.Lock`, no race conditions on shared state, no `asyncio.to_thread` for the hot path.
+
+Two patterns recur:
+
+- **`await foo()` for sequential work** — the most common shape. You're waiting on the result before continuing.
+- **`asyncio.create_task(foo())` for fire-and-forget parallelism** — you want the work to run *while* something else proceeds, and you'll await the result later (or never). The strategist call in §2.1 Step 7 is the canonical example: the loop dispatches the strategist into the background and continues with maintenance + executor on the main path, then awaits the strategist result at cleanup.
+
+The single-loop invariant breaks the moment you call into blocking code (the synchronous `pyautogui.click()` is fast enough that we accept the block; a sync database driver wouldn't be). For genuine background CPU work you'd use `loop.run_in_executor` to dispatch to a thread pool; the broker uses `loop.call_soon_threadsafe` to marshal CLI cross-thread publishes back onto the main loop — see [Appendix B §B.6](../appendix/02-event-brokers-and-redis-streams.md).
+
+</aside>
+
 ## 1.6 Logging
 
 Structured logging via structlog with colored console output, configured in `apps/agent/src/main.py`.
@@ -131,7 +152,7 @@ Key log events: `iteration_start`, `screenshot_captured`, `detection_complete`, 
 
 ## Summary
 
-- Two-tier architecture: Sonnet strategist (vision, goals) + Haiku executor (text-only, actions)
+- Two-tier architecture: Sonnet strategist (vision, goals) + Sonnet executor (text-only, actions; single-shot routine turns + tool loop for combat)
 - Detection is practically required for useful gameplay; game knowledge and window management are truly optional
 - Pydantic for config and validation, structlog for observability, asyncio for concurrency
 - Goal-driven gameplay with alarm system for emergency defense

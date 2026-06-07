@@ -4,6 +4,44 @@ DuckDB is **one of N broker consumers**, not the primary store. The live story i
 
 The structural inversion this chapter documents — *nobody but the persister opens the writer's DuckDB file* — is what makes the rest of the architecture work. The original Phase 9 bug (concurrent RW/RO opens of the same DuckDB file crashing on the in-process invariant) disappears as a side effect of this rule.
 
+<details class="deep-dive">
+<summary>Deep dive — Why DuckDB? (columnar, vectorized, and what "OLAP" really means)</summary>
+
+**The category.** DuckDB is an **embedded OLAP database**. Two words to unpack:
+
+- *Embedded* — runs in-process, no daemon, single `.duckdb` file. Like SQLite. You `import duckdb`, `connect("foo.duckdb")`, and you're done. No `pg_ctl`, no docker-compose, no port. The whole engine is ~30 MB statically linked.
+- *OLAP* — Online **Analytical** Processing, as opposed to *OLTP* (transactional). The split matters because the two workloads want opposite things from a storage engine:
+
+| Property | OLTP (Postgres, SQLite) | OLAP (DuckDB, ClickHouse) |
+|---|---|---|
+| Query shape | `SELECT * FROM users WHERE id = 42` | `SELECT agent_id, AVG(cost_usd) FROM events GROUP BY agent_id` |
+| Touches | Few rows, many columns | Many rows, few columns |
+| Storage layout | Row-oriented (a tuple is contiguous) | Column-oriented (a column is contiguous) |
+| Execution | One row at a time | One *vector* (batch of ~2048 values) at a time |
+| Concurrency | High write concurrency, MVCC | Low write concurrency, but parallel reads |
+
+**Why columnar wins on our queries.** Our `events` table has 7 columns but ranking queries usually only need 3 (`run_id`, `kind`, `payload_json`). A row store has to read every row's full width off disk, then discard 4/7 of the bytes. A column store reads only the three columns we asked for. On a 100 GB log that's the difference between scanning 100 GB and scanning 43 GB — and disk I/O is usually the bottleneck.
+
+**Why vectorized wins on top of that.** Row-at-a-time engines have an interpreter cost per row: virtual-function dispatch, type checks, branch mispredictions. Vectorized engines process a batch (typically 2048 values of one column) through each operator with one tight loop per type — the CPU can use SIMD, the branch predictor warms up, the data fits in L1. This is why DuckDB and ClickHouse routinely beat Postgres by 10–100× on analytical scans.
+
+**Why not SQLite?** SQLite is excellent and embedded, but it's row-oriented and one-row-at-a-time. For our `SELECT * FROM events WHERE run_id=? ORDER BY t, rowid` it's roughly fine, but for any `GROUP BY agent_id, kind` ranking aggregate it would be markedly slower and would burn far more CPU.
+
+**Why not Postgres?** Operational overhead. The arena CLI needs to write a single-file event log on a developer's laptop with zero setup. Postgres is the right answer if you're running a multi-writer service; for "one process appends, many readers read after the run is done," Postgres is a sledgehammer.
+
+**Why not raw Parquet?** Parquet is the storage *format* DuckDB can natively read, but on its own it's not a query engine. You'd need to bring DuckDB / Polars / DataFusion to query it anyway. DuckDB-the-database is essentially "Parquet plus a SQL engine plus a write path" in one binary — strictly more capable for our needs.
+
+**The single sharp edge.** DuckDB allows **one writer at a time** per file (it takes a file lock). That's exactly why this chapter's "only the persister opens the writer's file" rule is load-bearing: violating it crashes the process. The `read_only=True` connection in `stream_cold` is what lets the SSE endpoint and other readers coexist with the writer — but those readers only attach after the run is closed.
+
+**Further reading.** Raasveldt & Mühleisen, *DuckDB: an Embeddable Analytical Database* (SIGMOD 2019) for the original paper; the DuckDB docs' [Why DuckDB](https://duckdb.org/why_duckdb) page for the pitch in plain English.
+
+</details>
+
+<aside class="prereqs">
+
+Basic SQL. The "Why DuckDB?" deep dive earlier in this chapter explains columnar vs row-oriented storage, OLAP vs OLTP, and vectorized execution from scratch. [Chapter 15 — Event Broker](./15-event-broker.md) for the upstream this persister consumes.
+
+</aside>
+
 ## The events table
 
 Schema lives in `packages/evaluation/src/event_log.py:255` and is unchanged since Phase 4:

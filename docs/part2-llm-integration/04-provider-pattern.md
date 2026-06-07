@@ -2,6 +2,12 @@
 
 The agent abstracts LLM communication behind a provider interface. Currently only Claude is implemented, but the pattern allows adding OpenAI, Gemini, or local models without touching the game loop.
 
+<aside class="prereqs">
+
+Python ABCs and async/await. If "tool use" or "function calling" is new, jump to the agentic-tool-loop deep dive at the end of §4.3 first.
+
+</aside>
+
 ## 4.1 The Abstract Interface
 
 `apps/agent/src/providers/base.py:7-37` defines the contract:
@@ -69,55 +75,82 @@ class ClaudeProvider(BaseLLMProvider):
 
 Loads from `prompts/system.md` on disk. If the file doesn't exist, falls back to a minimal inline prompt that teaches the JSON output format and basic action types. See [Chapter 5](./05-prompt-engineering.md) for prompt content.
 
-### Content Building (`claude.py:155-190`)
+### Content Building (`claude.py:_build_content`)
 
-`_build_content()` assembles the user message:
+The executor is **text-only** — no screenshot — so all visual information arrives as the YOLO entity list plus the strategist's cached resource readings. `_build_content()` assembles a single text content block:
 
-1. Base64-encodes the JPEG screenshot as a vision image block
-2. Enhances context with dynamic game knowledge (if available)
-3. Appends dimensions info: `"Screenshot dimensions: 1920x1080 pixels. Center=(960,540). Valid x=0-1920, y=0-1080."`
-4. Ends with `"What should I do next?"`
+1. Enhances the context with dynamic game knowledge (affordable units/buildings) when the knowledge DB is available
+2. Prepends a dimensions line: `"Game window: 1920x1080 pixels. Center=(960,540). ..."`
+3. Returns `[{"type": "text", "text": ...}]`
 
-### API Call with Structured Output (`claude.py:189-208`)
+### The two executor paths (`claude.py`)
+
+The executor runs `claude-sonnet-4-6` (`config.model`). `get_actions()` routes each turn to one of two paths via `_use_single_shot(context)`:
+
+- **Single-shot (routine turns).** `_call_single_shot()` makes **one** `messages.parse()` call — no tool loop. The returned actions are handed to the game loop to execute (`actions_already_executed=False`). This is the fast, cheap path for ordinary economy turns.
+- **Agentic tool loop (interactive turns).** `_call_api()` runs `messages.create(..., tools=_ACTION_TOOLS)` up to `config.max_tool_iterations` (7) times: Claude calls a tool, the host executes it, the result is fed back, and composite tools (`build`, `send_villager`) run multi-step sequences within one iteration. Used when the turn needs mid-turn rescans or composite tools the single-shot `Action` union can't express.
+
+`_use_single_shot` keeps the loop for combat/housing emergencies — it scans the context for signals like `under attack: true`, `defend`, `housed (cannot` — and takes the single-shot path otherwise.
 
 ```python
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=10), reraise=True)
-async def _call_api(self, content: list[dict]) -> LLMResponse:
+async def _call_single_shot(self, content, age="Dark Age") -> LLMResult:
+    output_config: OutputConfigParam = {"effort": config.executor_effort}
     response = await self.client.messages.parse(
         model=self.model,
         max_tokens=config.max_tokens,
-        system=self.get_system_prompt(),
+        temperature=config.temperature,
+        system=self.get_system_prompt(age),
         messages=[{"role": "user", "content": content}],
-        output_format=LLMResponse,
+        output_format=LLMResponse,   # SDK merges this into output_config.format
+        output_config=output_config,
     )
-    return response.parsed_output
+    # ... accumulate usage ...
+    return self._serialize_single_shot(response.parsed_output)
 ```
 
-Uses the Anthropic SDK's native `messages.parse()` with `output_format=LLMResponse` to get validated Pydantic output directly. This replaced the previous custom two-tier JSON extraction approach (regex for markdown fences, then raw JSON matching) which was fragile and error-prone.
+Both paths share the **effort knob** (`config.executor_effort`, default `low`, env `AOE2_EXECUTOR_EFFORT`) passed as `output_config={"effort": ...}`: a low effort trims latency and consolidates tool calls on Sonnet 4.6 (the SDK rejects `xhigh`/`max` for this tier, so the config type is `Literal["low","medium","high"]`). `messages.parse()` returns a validated `LLMResponse` Pydantic model directly (requires `anthropic>=0.84.0`); the tool loop assembles an `LLMResponse` from the executed tool calls. Both paths use prompt caching — see [Chapter 5 §5.8](./05-prompt-engineering.md).
 
-**Key benefits of structured output:**
-- No custom JSON parsing code — the SDK handles extraction and validation
-- Removed `_extract_json_object()` and `_parse_response()` methods (~55 lines)
-- Removed unused imports: `json`, `re`, `ValidationError`
-- Type-safe: returns `LLMResponse` Pydantic model directly
-- Requires `anthropic>=0.84.0`
+### Error Recovery (`claude.py:_error_response`)
 
-Uses tenacity's `@retry` decorator: 3 attempts with exponential backoff (1s, 2s, 4s delays). Handles transient API errors (rate limits, network timeouts) without crashing the game loop.
-
-### Error Recovery (`claude.py:244-250`)
-
-On any API or parsing failure, `_error_response()` returns a safe fallback:
+On any API or parsing failure (either path), `get_actions()` returns a safe fallback:
 
 ```python
-def _error_response(self, message: str) -> dict[str, Any]:
-    return {
-        "reasoning": message,
-        "observations": {},
-        "actions": [{"type": "wait", "ms": 1000, "intent": "Error recovery"}],
-    }
+def _error_response(self, message: str) -> LLMResult:
+    return LLMResult(
+        reasoning=message,
+        observations={},
+        actions=[{"type": "wait", "ms": 1000, "intent": "Error recovery"}],
+    )
 ```
 
 A 1-second wait action keeps the loop running while the transient error resolves.
+
+<details class="deep-dive">
+<summary>Deep dive — Agentic tool loops, and why composite tools save you a fortune</summary>
+
+**The shape of an agentic loop.** When an LLM is given tools, the API stops being request/response and starts being a state machine. Each turn looks like this:
+
+```
+user message  →  LLM thinks  →  emits tool_call  →  host runs tool  →
+                 tool_result fed back  →  LLM thinks again  →  emits next tool_call  →
+                 ...  →  LLM emits "stop" (text-only response)
+```
+
+Every arrow that says "LLM thinks" is a **full API roundtrip**. You pay the full input cost for the entire conversation so far (including all prior tool calls and results — which is why prompt caching matters so much here), plus output tokens, plus ~2–4 seconds of latency. The `max_tool_iterations = 7` cap in our executor exists because, without it, a confused model can spiral into 20+ iterations and burn through dollars.
+
+**Why composite tools change the math.** A naive "build a house" sequence is four tool calls — `press('q')`, then `press('q')` for the house menu, then `rescan: true` (because pressing a hotkey may have moved the camera), then `click(x, y)`. That's 4 roundtrips × ~3s = ~12 seconds of wall-clock per house. By wrapping that recipe into one composite `build(building_key='q', x, y)` tool that the *host* executes as a sequence, we collapse it back to **one** roundtrip — ~3 seconds and ~one-quarter of the tokens. The model loses no flexibility (it can still fall back to primitives when needed), but the common case is cheap.
+
+**Versus the alternatives.**
+
+- **ReAct** (Yao et al., 2022) interleaves free-form *thought*-tokens between tool calls. More inspectable, but more output tokens and the thoughts are not validated by any schema.
+- **Plan-and-execute** asks the LLM to write a full plan upfront and then executes it without re-prompting. Faster for predictable tasks; brittle when the world changes between plan and execution — exactly our situation.
+- **Single-shot structured output** (what our chapter shows: `messages.parse` returning an `LLMResponse` with a list of actions) sidesteps the loop entirely: one API call, one response, the host runs each action and feeds nothing back to the LLM until the next turn. Cheapest and most predictable, but the model can't react mid-turn to a tool's success or failure.
+
+We actually use a **hybrid that switches per turn**: routine turns take the single-shot path (one `messages.parse`, no roundtrips), while combat/housing turns — the ones that need mid-execution feedback (a rescan whose result changes what to click next) or composite tools — take the agentic tool loop. The router (`_use_single_shot`) keeps the predictable case cheap and reserves the expensive loop for the turns that genuinely need it.
+
+**Mental model for the cost.** A useful rule of thumb: at Claude Sonnet rates, every tool roundtrip on a fully primed conversation costs roughly the same as one second of GPT-running-flat-out — pennies, but they add up. If your agent feels expensive, the lever is almost always "reduce the number of roundtrips," not "switch to a cheaper model."
+
+</details>
 
 ## 4.4 Adding a New Provider
 
@@ -134,8 +167,8 @@ The game loop, memory system, executor, and detection pipeline are provider-agno
 ## Summary
 
 - Abstract `BaseLLMProvider` with two required methods
-- Claude implementation: AsyncAnthropic, retry logic, SDK-native structured output via `messages.parse()`
-- No custom JSON parsing — Pydantic models validated directly by the Anthropic SDK (requires `anthropic>=0.84.0`)
+- Claude implementation: AsyncAnthropic executor on `claude-sonnet-4-6` with a per-turn router (`_use_single_shot`) — single-shot `messages.parse` for routine turns, an agentic `messages.create` tool loop for combat/housing
+- Shared `effort` knob (`config.executor_effort`, default `low`) via `output_config`; structured output via `messages.parse` (requires `anthropic>=0.84.0`)
 - Error recovery returns a safe wait action rather than crashing
 - Provider-agnostic game loop enables model switching
 

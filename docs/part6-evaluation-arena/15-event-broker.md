@@ -4,6 +4,12 @@ The broker is the **single source of truth for live event consumers**. Producers
 
 This chapter is the kept-current reference. For the architectural rationale (why log-first, what bug it fixes, why pluggable), see the frozen design spec at [`docs/design/event-broker-architecture.md`](../design/event-broker-architecture.md), or the one-page summary in [ADR 0001](../adr/0001-broker-first-architecture.md).
 
+<aside class="prereqs">
+
+**New to event brokers?** Read [Appendix B — Event brokers and Redis Streams](../appendix/02-event-brokers-and-redis-streams.md) first — it covers queue/pub-sub/log model differences, why we picked Redis Streams over Kafka, backpressure policies, and the single-loop invariant. Also useful: [ADR 0001](../adr/0001-broker-first-architecture.md) for the one-page decision summary.
+
+</aside>
+
 ## The Protocol
 
 `packages/evaluation/src/event_broker.py:130` defines the `EventBroker` Protocol. Six methods, no inheritance:

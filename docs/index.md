@@ -61,6 +61,19 @@ Dashed lines indicate optional / off-by-default components. The real-game tier r
 
 ---
 
+## Reading paths
+
+Short curated routes through the tutorial — pick one based on what you want to learn, instead of reading all 23 chapters end-to-end.
+
+- **15-minute tour** — [01 System Overview](./part1-architecture/01-system-overview.md) → [07 Detector Architecture](./part3-entity-detection/07-detector-architecture.md) → [14 Arena Overview](./part6-evaluation-arena/14-arena-overview.md).
+- **LLM-agent design** — Parts I, II, and VIII: [01](./part1-architecture/01-system-overview.md), [04](./part2-llm-integration/04-provider-pattern.md), [05](./part2-llm-integration/05-prompt-engineering.md), [06](./part2-llm-integration/06-context-injection.md), [22](./part8-autoresearch/22-autoresearch-overview.md), [23](./part8-autoresearch/23-prompt-mutation-and-memory.md).
+- **Computer vision** — Parts III–V: [07](./part3-entity-detection/07-detector-architecture.md), [08](./part3-entity-detection/08-training-pipeline.md), [09](./part3-entity-detection/09-labeling-and-active-learning.md), [11](./part4-game-knowledge/11-sprite-extraction.md), [13](./part5-operations/13-class-schema-evolution.md).
+- **Arena infra** — Parts VI–VII: [14](./part6-evaluation-arena/14-arena-overview.md), [15](./part6-evaluation-arena/15-event-broker.md), [16](./part6-evaluation-arena/16-duckdb-persister-and-replay.md), [17](./part6-evaluation-arena/17-ranking-pipeline.md), [18](./part6-evaluation-arena/18-synthetic-world-sim.md), [19](./part7-arena-web/19-web-architecture.md), [20](./part7-arena-web/20-fork-and-diff-ui.md).
+
+See also the [Glossary](./glossary.md) for one-line definitions of terms used throughout the tutorial.
+
+---
+
 ## Table of contents
 
 ### Part 1: Real-game architecture

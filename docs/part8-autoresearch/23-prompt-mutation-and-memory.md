@@ -2,6 +2,12 @@
 
 This chapter zooms into the two mechanical pieces of the autoresearch loop: the mutator that proposes prompt edits, and the memory chain that turns game results into reusable rules.
 
+<aside class="prereqs">
+
+[Chapter 22 — Autoresearch Overview](./22-autoresearch-overview.md). This chapter zooms into the two pieces (mutator and memory chain) that chapter 22 introduces.
+
+</aside>
+
 ## The mutator
 
 `apps/autoresearch/src/prompt_mutator.py:50` — `PromptMutator`.
@@ -15,7 +21,9 @@ This chapter zooms into the two mechanical pieces of the autoresearch loop: the 
 - Be **specific** ("always build 2 houses before population reaches 10", not "build more houses"). Vague edits are unmeasurable.
 - Each change targets **one specific weakness**. Bundled edits make accept/reject signal-less.
 
-The output schema is a small JSON object: `{description, old_text, new_text, rationale}`. `old_text` must exist verbatim in the current prompt (the mutator does `.replace(old_text, new_text, 1)` — no regex, no fuzzy match).
+Each edit is a small JSON object: `{description, old_text, new_text, rationale}`, and `old_text` must exist verbatim in the current prompt (the mutator does `.replace(old_text, new_text, 1)` — no regex, no fuzzy match).
+
+`propose_changes(current_prompt, recent_experiments, failure_modes, n)` (`prompt_mutator.py:61`) is the entry point the tournament calls. It requests **N distinct edits as a JSON array**, then `_parse_changes` extracts the array via `extract_json_array` (`json_utils.py`) and drops any element missing the required keys (`_is_valid_change`). There is no separate single-candidate method — a one-edit run is just `n=1`.
 
 ### The protection check
 
@@ -23,19 +31,20 @@ Even with the prompt constraint, the mutator code defensively re-checks (`prompt
 
 ### Revert
 
-`PromptMutator.revert()` (`prompt_mutator.py:142`) is `git checkout -- prompts/system.md`. No diff parsing, no partial undo — atomic file-level revert. This is why every accepted change is its own commit: revert resolution is "go back to the file as of the most recent commit", and the orchestrator commits the revert separately so the timeline reads naturally in `git log`.
+`PromptMutator.revert()` is `git checkout -- prompts/system.md`. No diff parsing, no partial undo — atomic file-level revert. This is why every accepted change is its own commit: revert resolution is "go back to the file as of the most recent commit". In a tournament **every trial game reverts to baseline immediately after it finishes** (in a `finally`, so a crashed game never leaves the prompt dirty), which is what lets candidates be compared against the same starting text instead of stacking. Only the winner is re-applied and committed at the end.
 
 ### Failure modes
 
-The orchestrator handles three:
+The tournament handles these before spending a game:
 
-| Outcome | Logged as | What happens |
-|---|---|---|
-| Mutator API call failed | `mutation_failed` | Skip experiment, run with current prompt (treated as a baseline). |
-| `old_text` not in prompt | `change_not_applicable` | Skip, don't commit. |
-| Change overlaps protected section | `change_in_protected_section` | Skip, don't commit. |
+| Outcome | What happens |
+|---|---|
+| Mutator API call failed / unparseable | `propose_changes` returns `[]` → the tournament logs `tournament_no_candidates` and exits without playing. |
+| Malformed array element (missing keys) | Dropped by `_parse_changes`; the remaining candidates still race. |
+| `old_text` not in prompt | Candidate filtered out by `_candidate_applies` before any game; the rest still race. |
+| Change overlaps protected section | `apply_change` refuses the edit (`change_in_protected_section`) at trial time. |
 
-None of these waste a game run — they short-circuit before `run_game` is called.
+None of these waste a game run — candidate filtering happens before `run_game` is called.
 
 ## The memory chain
 
@@ -94,6 +103,29 @@ Three properties make the memory chain self-correcting rather than self-amplifyi
 - **Title sanitization is greedy.** `re.sub(r"[^a-z0-9_]", "_", ...)` collapses `_` runs in inconvenient ways. Filename uniqueness is preserved (numeric prefix) but readability suffers.
 
 These are explicitly accepted trade-offs — the file-based design is what makes the system tractable and reviewable. A more clever store would also be more opaque.
+
+<details class="deep-dive">
+<summary>Deep dive — Episodic vs semantic memory in agents (and where RAG would slot in)</summary>
+
+Cognitive science distinguishes two memory systems that have direct analogues in LLM-agent design:
+
+- **Episodic memory** — what happened, when, in what order. "On Tuesday I queued villagers and ran out of food by turn 18." Indexed by event, retrievable by time or causal chain. Decays naturally.
+- **Semantic memory** — abstracted rules and facts pulled out of many episodes. "Don't queue villagers when food < 500." Indexed by concept, retrievable by context, durable.
+
+Our memory chain has **both**:
+
+- *Working memory* (`AgentMemory.working_memory`, a 10-turn deque in `apps/agent/src/memory.py`) is the agent's *episodic* memory during a game — the last few turns, available as context for the executor's next decision. Bounded, recency-biased, lossy.
+- *The `memories/*.md` directory* is the agent's *semantic* memory across games — the rules extracted from past episodes, ranked and loaded as context at the start of every new game. Persistent, hand-reviewable, deduplicated by title.
+
+The chapter's `EXTRACTION_SYSTEM` prompt is the **episodic → semantic transformation**: it asks the LLM to summarize a game's turn-by-turn working memory into one or two reusable rules. "Last game on turn 14–18 I queued three villagers and that delayed age-up by 4 turns" becomes "I should stop queueing villagers when food drops below 500 in Dark Age." The episodic detail (turns 14–18, *this* specific game) is preserved in the body for context but doesn't drive retrieval — the `applies_when` trigger does.
+
+**Where RAG would slot in.** Right now retrieval is a sort + token-budget cap. A vector-DB-backed retrieval would replace the sort with a semantic similarity query: "given my current state X, what memories are most relevant?" That's a real upgrade because (a) it handles the *no semantic dedup* gap honestly (two memories saying the same thing in different words would collide in embedding space), and (b) it makes the rules indexed by what they're *about*, not when they were written. The trade-off is opacity — debugging "why did this memory get retrieved?" becomes harder than `cat` and `grep`.
+
+**Where vector embeddings won't help.** The *applies_when* gating is doing most of the work right now. Memories with sharp triggers ("when food < 500 AND age == Dark Age") don't suffer from retrieval noise because they don't fire when irrelevant — embedding similarity wouldn't change that. Where embeddings would help is in the long tail of vaguer memories ("don't expand too early") that *do* over-fire.
+
+**The framework people invoke at this point** is the classic RAG triad: (1) chunk your knowledge, (2) embed and index, (3) at query time, embed the query and pull the top-K chunks. The simpler our memory file is, the more natural that pipeline becomes. We've kept the schema simple (frontmatter + body, one rule per file) explicitly so that bolting on RAG later is a small change — not a memory-store rewrite.
+
+</details>
 
 ## Where this code touches the rest of the system
 

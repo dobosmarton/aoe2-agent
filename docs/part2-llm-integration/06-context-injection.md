@@ -2,6 +2,12 @@
 
 Each API call sends more than just a screenshot. The LLM receives layered context: memory from previous turns, detected entities, and optionally dynamic game knowledge tailored to the current game state.
 
+<aside class="prereqs">
+
+[Chapter 4 — Provider Pattern](./04-provider-pattern.md) (how the API call is shaped) and [Chapter 5 — Prompt Engineering](./05-prompt-engineering.md) (what's in the system prompt). This chapter is what wraps around them at runtime.
+
+</aside>
+
 ## 6.1 Context Assembly
 
 ```mermaid
@@ -175,6 +181,18 @@ enhanced_context = f"{dynamic_context}\n{early_game_tips}\n{context}"
 So the LLM sees: dynamic knowledge > early game tips > detected entities > game state > recent turns.
 
 > **Key Insight**: The dynamic context is resource-aware. If the player has 300 food and 200 wood in Feudal Age, the context lists only units and buildings affordable at those resource levels. This prevents the LLM from trying to build a Castle (650 stone) when it has 0 stone, or training Knights (60 food + 75 gold) when gold is scarce.
+
+<aside class="concept" data-title="Resource-aware context as hallucination control">
+
+The pattern in this section is a generic technique that's worth naming: **scope the context to what's currently possible, not what's theoretically possible.**
+
+Most prompt injection looks like "here's everything about the game; figure out what to do." The model has to do *two* hard jobs at once: filter the catalog down to what applies right now, then pick the best option. Two hard jobs is where hallucinations live — the model picks "Castle: 650 stone" because the option was on the table, and it confidently emits an action that can't possibly execute.
+
+By pre-filtering the context to "units you can afford *right now* at your *current* age," we offload the filtering step to deterministic code (a SQL query) and leave the model with the single, easier job of choosing among feasible options. Wrong choices still happen, but **impossible choices stop showing up.**
+
+The same pattern is used in retrieval-augmented generation (only retrieve documents that are topically relevant), in tool use (only expose tools the model can actually invoke right now), and in agentic frameworks generally (the action space shrinks dynamically with state). When you find yourself writing "the model keeps trying to do X even though it can't" in a postmortem, the answer is usually "remove X from the context until it can."
+
+</aside>
 
 ## 6.5 Full Context Example
 

@@ -2,6 +2,12 @@
 
 The agent's output is a list of actions that must be validated, resolved to screen coordinates, and executed as real mouse/keyboard inputs. Pydantic models enforce structural correctness, and a coordinate resolution system bridges YOLO detection with physical action execution.
 
+<aside class="prereqs">
+
+[Pydantic v2 basics](https://docs.pydantic.dev/) (`BaseModel`, `Field`, validators) and [Chapter 2 — Game Loop Pipeline](./02-game-loop-pipeline.md) for how actions enter and exit the loop.
+
+</aside>
+
 ## 3.1 Action Types
 
 The agent has **seven base action types** (Pydantic-validated in `apps/agent/src/models.py`) and **three composite tools** (defined in `apps/agent/src/providers/claude.py`) that bundle multi-step sequences to eliminate API roundtrips.

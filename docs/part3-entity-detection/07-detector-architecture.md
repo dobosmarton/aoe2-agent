@@ -2,6 +2,12 @@
 
 The entity detection system runs YOLO inference on game screenshots, producing labeled bounding boxes with semantic IDs like `sheep_0` or `town_center_0`. It supports three backends (PyTorch, ONNX, Mock), a 60-class taxonomy, Kalman filter-based object tracking, and adaptive SAHI for efficient high-resolution detection.
 
+<aside class="prereqs">
+
+**New to YOLO?** Read [Appendix A — YOLO and object detection](../appendix/01-yolo-and-object-detection.md) first — it covers anchor boxes, NMS, IoU, mAP, and how the network actually turns pixels into bounding boxes. Also useful: [Chapter 2 — Game Loop Pipeline](../part1-architecture/02-game-loop-pipeline.md) for how this detector fits into the agent's per-turn loop.
+
+</aside>
+
 ## 7.1 DetectedEntity
 
 The core output type (`packages/detection/src/inference/detector.py`):

@@ -2,6 +2,12 @@
 
 YOLO training runs on Lambda Labs GPU instances. A single A100 completes 150 epochs in ~60 minutes for ~$1.30.
 
+<aside class="prereqs">
+
+[Appendix A — YOLO and object detection](../appendix/01-yolo-and-object-detection.md) for what training actually does. Comfort with shell scripting and SSH for the Lambda Labs workflow.
+
+</aside>
+
 ## 12.1 Why Cloud Training
 
 | Platform | GPU | Time (150 epochs) | Cost |

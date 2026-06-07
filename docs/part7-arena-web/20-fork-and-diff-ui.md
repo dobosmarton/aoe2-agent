@@ -9,6 +9,12 @@ The four tabs in `apps/dashboard/src/App.tsx` are the operator's main surface:
 | Diff | `src/panels/diff.tsx` | Side-by-side parent vs child state when viewing a forked run. |
 | Operator | `src/panels/operator.tsx` | Form to POST a `/forks` request: pick `parent_t`, optionally edit a `MutationPatch`, submit. |
 
+<aside class="prereqs">
+
+React hooks (`useState`, `useEffect`, `useMemo`). [Chapter 19 — Web Architecture](./19-web-architecture.md) for the SSE backend this UI consumes.
+
+</aside>
+
 The cross-cutting infrastructure is the **Timeline scrubber** (`src/components/timeline.tsx`) at the bottom of `main` and the **event hook** (`src/hooks/use-events.ts`).
 
 ## Timeline scrubber

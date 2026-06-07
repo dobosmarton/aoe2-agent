@@ -1,6 +1,6 @@
 # AoE2 LLM Agent
 
-An AI agent that plays Age of Empires 2: Definitive Edition using a two-tier LLM architecture: a Sonnet strategist reads screenshots and sets goals, a Haiku executor reads YOLO entity detections and executes actions.
+An AI agent that plays Age of Empires 2: Definitive Edition using a two-tier LLM architecture: a Sonnet strategist reads screenshots and sets goals, a Sonnet executor reads YOLO entity detections and executes actions.
 
 ## Architecture
 
@@ -9,7 +9,7 @@ Screenshot → YOLO Detection → Entity List (text)
                                     ↓
 Screenshot → Strategist (Sonnet) → Goals + Resource Readings
                                     ↓
-Entity List + Goals + Resources → Executor (Haiku) → Actions
+Entity List + Goals + Resources → Executor (Sonnet) → Actions
                                                        ↓
                                                  Mouse/Keyboard
 ```
@@ -19,7 +19,9 @@ Entity List + Goals + Resources → Executor (Haiku) → Actions
 | Role | Model | Input | Output | Frequency |
 |------|-------|-------|--------|-----------|
 | Strategist | `claude-sonnet-4-6` | Screenshot (vision) + game state | Goals + resource readings | Every 10 turns, or on alarm |
-| Executor | `claude-haiku-4-5` | Text only (entities, goals, resources) | Mouse/keyboard actions | Every turn (~1s) |
+| Executor | `claude-sonnet-4-6` | Text only (entities, goals, resources) | Mouse/keyboard actions | Every turn |
+
+The executor runs Sonnet (moved from Haiku for more reliable instruction-following) with a per-call `effort` knob (default `low`) for speed. Routine turns take a single-shot structured call; combat/housing turns take an agentic tool loop.
 
 The executor never sees screenshots. All visual information comes from YOLO entity detection (text list of class/position/confidence) and the strategist's cached resource readings.
 
@@ -100,10 +102,11 @@ export ANTHROPIC_API_KEY=your-key-here
 | Env Var | Default | Purpose |
 |---------|---------|---------|
 | `ANTHROPIC_API_KEY` | — | Claude API authentication (required) |
-| `AOE2_MODEL` | `claude-haiku-4-5` | Executor model |
+| `AOE2_MODEL` | `claude-sonnet-4-6` | Executor model |
+| `AOE2_EXECUTOR_EFFORT` | `low` | Executor effort (`low`/`medium`/`high`) |
 | `AOE2_STRATEGIST_MODEL` | `claude-sonnet-4-6` | Strategist model |
 | `AOE2_STRATEGIST_INTERVAL` | `10` | Run strategist every N turns |
-| `AOE2_LOOP_DELAY` | `1.0` | Seconds between iterations |
+| `AOE2_LOOP_DELAY` | `0.3` | Seconds between iterations |
 | `AOE2_SAVE_SCREENSHOTS` | `true` | Save screenshots to logs/ |
 | `AOE2_DETECTION_HOST` | — | Remote detection server URL (e.g., `http://192.168.64.1:8420`) |
 | `AOE2_TEMPERATURE` | `0.0` | Anthropic Messages API temperature (lowest variance) |

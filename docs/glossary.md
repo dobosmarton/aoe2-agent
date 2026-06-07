@@ -1,0 +1,90 @@
+# Glossary
+
+One-line definitions for every technical term used in the tutorial, with deep links to the deep dive that explains it in context. If you hit an unfamiliar name in a chapter, this is the fastest way to recover.
+
+Entries are organized alphabetically. Most are followed by a short link of the form **→ [Chapter X §Y](path)** that points to the deep dive, sidebar, or appendix where the term is properly introduced.
+
+---
+
+## A
+
+- **Anchor box** — A YOLO-style detector predicts each object's bounding box as an *offset* from a pre-defined anchor of a given aspect ratio, rather than predicting raw coordinates. → [Appendix A — YOLO and object detection](./appendix/01-yolo-and-object-detection.md).
+- **Asyncio** — Python's cooperative-multitasking concurrency primitive. The agent's game loop is built on a single asyncio event loop so the strategist can think in the background while the executor is acting. → [Chapter 1 §Async-first architecture](./part1-architecture/01-system-overview.md).
+
+## B
+
+- **Bradley-Terry** — A statistical model that turns *pairwise win/loss outcomes* into a single skill rating per competitor by maximum likelihood. → [Appendix C — Bradley-Terry MLE and bootstrap CIs](./appendix/03-bradley-terry-and-bootstrap.md).
+- **Backpressure** — When a producer is faster than its consumer, backpressure is the mechanism that slows the producer (or drops events) so memory doesn't blow up. → [Chapter 15 §Backpressure semantics](./part6-evaluation-arena/15-event-broker.md).
+- **Bootstrap (statistical)** — A resampling technique that estimates the uncertainty of a statistic by repeatedly sampling with replacement from the observed data. We use it to put confidence intervals on Bradley-Terry skill estimates. → [Appendix C](./appendix/03-bradley-terry-and-bootstrap.md).
+
+## C
+
+- **Cache hit / cache miss (LLM)** — Whether the provider was able to reuse its internal KV-cache for a prefix of your request. Visible in `usage.cache_read_input_tokens`. → [Chapter 5 — Prompt caching callout](./part2-llm-integration/05-prompt-engineering.md).
+- **`cache_control`** — Anthropic's marker for "this block of the prompt can be cached." → [Chapter 5 — Prompt caching callout](./part2-llm-integration/05-prompt-engineering.md).
+- **COCO format** — A JSON-based bounding-box / segmentation label format with explicit category IDs. The default format CVAT exports. → [Chapter 9 — COCO vs YOLO callout](./part3-entity-detection/09-labeling-and-active-learning.md).
+- **Columnar storage** — Storing tables one *column at a time* instead of one row at a time. Massively faster for analytical scans because you only read the columns you query. The basis of DuckDB, Parquet, and ClickHouse. → [Chapter 16 — DuckDB internals](./part6-evaluation-arena/16-duckdb-persister-and-replay.md).
+- **Composite tool** — In our agent, a tool that internally chains several primitive actions (press, click, rescan) into one API roundtrip. → [Chapter 5 §5.3](./part2-llm-integration/05-prompt-engineering.md).
+- **Confidence interval (CI)** — A range estimate around a statistic that contains the true value with a stated probability under repeated sampling. → [Appendix C](./appendix/03-bradley-terry-and-bootstrap.md).
+
+## D
+
+- **DuckDB** — An embedded analytical (OLAP) database. Like SQLite for analytics: zero-config, file-based, columnar, vectorized. We use it as the cold-path event log. → [Chapter 16](./part6-evaluation-arena/16-duckdb-persister-and-replay.md).
+- **DXT1 / BC1** — A GPU-friendly *block-compression* texture format that encodes every 4×4 pixel block into 8 bytes by storing two endpoint colors plus a 2-bit index per pixel. AoE2's SLD sprite format uses it. → [Chapter 11 — DXT1 deep dive](./part4-game-knowledge/11-sprite-extraction.md).
+- **Determinism (LLM context)** — Whether the same prompt yields the same output. Surprisingly hard with LLMs: even `temperature=0` plus a fixed seed isn't fully deterministic across hardware due to BF16 floating-point order. → [Chapter 18 — Determinism deep dive](./part6-evaluation-arena/18-synthetic-world-sim.md).
+
+## E
+
+- **Event broker** — A piece of infrastructure that decouples event producers from consumers via pub/sub, queues, or streams. → [Appendix B — Event brokers and Redis Streams](./appendix/02-event-brokers-and-redis-streams.md).
+
+## H
+
+- **Hungarian algorithm** — A polynomial-time algorithm for assigning N predicted tracks to N detected entities optimally given a cost matrix (typically IoU or pixel distance). The standard pairing step in multi-object trackers. → [Chapter 2 — Kalman + Hungarian deep dive](./part1-architecture/02-game-loop-pipeline.md).
+
+## I
+
+- **IoU (Intersection over Union)** — A similarity score for two boxes: `area(A ∩ B) / area(A ∪ B)`. Used everywhere in detection — for NMS, for matching tracks to detections, for measuring mAP. → [Appendix A](./appendix/01-yolo-and-object-detection.md).
+
+## K
+
+- **Kalman filter** — A recursive estimator that maintains a state distribution (mean + covariance) over time, predicting forward each step and correcting against noisy observations. We use a constant-velocity Kalman per tracked entity. → [Chapter 2 — Kalman deep dive](./part1-architecture/02-game-loop-pipeline.md).
+
+## M
+
+- **mAP / mAP50 / mAP50-95** — Mean Average Precision: the standard detection metric. *mAP50* averages precision across classes at IoU ≥ 0.5; *mAP50-95* averages across 10 IoU thresholds from 0.5 to 0.95 in 0.05 steps. → [Appendix A](./appendix/01-yolo-and-object-detection.md).
+- **MLE (Maximum Likelihood Estimation)** — Choosing parameter values that make the observed data most probable under the model. Bradley-Terry skills are fit by MLE. → [Appendix C](./appendix/03-bradley-terry-and-bootstrap.md).
+- **MM algorithm (Minorization–Maximization)** — The iterative fitting algorithm we use for Bradley-Terry. Each step bounds the log-likelihood from below by a simpler surrogate, then maximizes the surrogate. Hunter (2004). → [Appendix C](./appendix/03-bradley-terry-and-bootstrap.md).
+
+## N
+
+- **NMS (Non-Maximum Suppression)** — The post-processing step that takes a detector's raw box predictions, sorts by confidence, and greedily drops any box whose IoU with a higher-confidence box exceeds a threshold. → [Appendix A](./appendix/01-yolo-and-object-detection.md).
+
+## O
+
+- **OLAP vs OLTP** — *OLAP* (analytical) workloads read lots of rows and few columns to compute aggregates; *OLTP* (transactional) workloads read/write a few rows touching many columns. DuckDB is OLAP; Postgres/SQLite are primarily OLTP. → [Chapter 16](./part6-evaluation-arena/16-duckdb-persister-and-replay.md).
+- **OPRO** — Optimization by PROmpting: a paper from DeepMind where one LLM proposes new prompts and another LLM scores them, iteratively converging on better prompts. Related to our autoresearch loop. → [Chapter 22 — Prompt optimization landscape](./part8-autoresearch/22-autoresearch-overview.md).
+
+## P
+
+- **Prompt caching** — Provider-side reuse of the KV-cache for a stable prefix of your prompt. → [Chapter 5 — Prompt caching callout](./part2-llm-integration/05-prompt-engineering.md).
+
+## R
+
+- **Redis Streams** — A Redis data structure (`XADD` / `XREAD`) that behaves like a durable, replayable, consumer-group-aware log. Our cross-process broker backend. → [Appendix B](./appendix/02-event-brokers-and-redis-streams.md).
+
+## S
+
+- **SAHI (Slicing Aided Hyper Inference)** — A technique for detecting small objects in large images by tiling the input, running the detector on each tile, and stitching results. We use an *adaptive* variant that only tiles regions where small objects are likely. → [Chapter 2 — Adaptive SAHI deep dive](./part1-architecture/02-game-loop-pipeline.md).
+- **SSE (Server-Sent Events)** — A one-way HTTP streaming protocol where the server pushes `text/event-stream` chunks to the client. Simpler than WebSocket for fan-out telemetry. → [Chapter 19 — SSE callout](./part7-arena-web/19-web-architecture.md).
+- **Structured output** — Constraining an LLM to emit a parseable, schema-validated response (typically JSON). → [Chapter 5 — Structured output callout](./part2-llm-integration/05-prompt-engineering.md).
+
+## T
+
+- **Tool use / function calling** — An API pattern where the LLM is given a set of "tools" with JSON-schema arguments; the model emits a tool call and the host runs it and feeds back the result. → [Chapter 4 — Agentic tool loops deep dive](./part2-llm-integration/04-provider-pattern.md).
+
+## V
+
+- **Vectorized execution** — Processing a batch (vector) of rows at a time through each operator, instead of one row at a time. The reason DuckDB and modern OLAP engines are 10–100× faster than row-at-a-time engines on analytical queries. → [Chapter 16](./part6-evaluation-arena/16-duckdb-persister-and-replay.md).
+
+## Y
+
+- **YOLO** — *You Only Look Once*: a family of single-shot object detectors that predict all boxes in one forward pass. We use YOLO11n. → [Appendix A](./appendix/01-yolo-and-object-detection.md).

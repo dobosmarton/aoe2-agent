@@ -58,7 +58,7 @@ You should see structured logs like:
 
 ```
 detector_initialized   mode=remote server=http://192.168.64.1:8420
-game_loop_start        detection=True executor_model=claude-haiku-4-5
+game_loop_start        detection=True executor_model=claude-sonnet-4-6
 iteration_start        iteration=1
 screenshot_captured    width=1920 height=1080
 detection_complete     entity_count=12
@@ -88,10 +88,11 @@ These are accumulated failure modes from many bring-up attempts:
 
 | Env var | Default | When to change |
 |---|---|---|
-| `AOE2_MODEL` | `claude-haiku-4-5` | Pin to a dated snapshot for reproducibility (autoresearch runs). |
+| `AOE2_MODEL` | `claude-sonnet-4-6` | Pin to a dated snapshot for reproducibility (autoresearch runs). |
+| `AOE2_EXECUTOR_EFFORT` | `low` | `medium`/`high` for deeper executor reasoning at higher latency. |
 | `AOE2_STRATEGIST_MODEL` | `claude-sonnet-4-6` | Same. |
 | `AOE2_STRATEGIST_INTERVAL` | `10` | Lower (e.g. 5) for tighter goal updates; higher (20+) to save Sonnet cost. |
-| `AOE2_LOOP_DELAY` | `1.0` | Slow CPU? Bump to 1.5. Fast CPU and you want more turns/min? 0.5. |
+| `AOE2_LOOP_DELAY` | `0.3` | Slow CPU? Bump to 1.0. Fast CPU and you want more turns/min? 0.1. |
 | `AOE2_SAVE_SCREENSHOTS` | `true` | `false` if disk is filling up. |
 | `AOE2_TEMPERATURE` | `0.0` | Raise for output diversity at reproducibility cost. |
 | `AOE2_SEED` | unset (OS entropy) | Set an int to make `executor.py`'s build-retry jitter deterministic. Doesn't affect the LLM (the SDK doesn't accept `seed=`). |

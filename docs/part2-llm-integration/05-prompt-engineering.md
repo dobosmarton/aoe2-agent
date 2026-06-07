@@ -2,6 +2,12 @@
 
 The system prompt (`prompts/system.md`, ~320 lines + `prompts/hotkeys.md` appended) is the agent's rulebook. It teaches Claude the game mechanics, available composite tools, multi-step action patterns, hotkey reference, and strategic priorities.
 
+<aside class="prereqs">
+
+Comfortable with the basic LLM API loop (system prompt + user message → text response). The two callouts in this chapter introduce [structured output](../glossary.md#s) (§5.5) and [prompt caching](../glossary.md#p) (§5.8) from scratch.
+
+</aside>
+
 ## 5.1 Prompt Structure
 
 The prompt is organized into major sections:
@@ -90,6 +96,20 @@ Lines 43-61 define the JSON contract:
 
 **actions** -- ordered list of actions to execute sequentially. Each has a `type`, parameters, and an `intent` string for logging.
 
+<aside class="concept" data-title="Structured output (why we ask for JSON, not prose)">
+
+When you let an LLM reply in free-form text you have to parse it with regex — which works until the model phrases its answer differently and silently breaks your action loop. **Structured output** flips the contract: the prompt declares an exact JSON schema, the model is constrained (or strongly nudged) to emit only that shape, and your code can `json.loads` the response straight into a Pydantic model.
+
+There are three common ways to get this guarantee, in order of strictness:
+
+1. **Tool use / function calling** (Anthropic, OpenAI) — the strictest. The model emits a tool call with a JSON-Schema-validated argument blob. We use this for our composite tools.
+2. **`response_format: json_object` / `messages.parse(response_model=...)`** — the model is forced into JSON-mode and the SDK validates against a Pydantic model.
+3. **Prompted JSON in plain text** — what you see above in section 5.5. Cheapest and most flexible, but you still need a `try/except json.JSONDecodeError` and a retry path.
+
+We use a mix: tool-use for actions that must execute (no room for malformed output), prompted JSON for the strategist's reasoning blob (where a one-time parse failure is recoverable). The trade-off is **strictness vs. expressiveness**: stricter schemas catch more bugs but cap what the model can say.
+
+</aside>
+
 ## 5.6 Hotkey Reference
 
 A comprehensive hotkey reference is appended from `prompts/hotkeys.md` (~113 lines). Key hotkeys for Dark Age:
@@ -113,23 +133,39 @@ The hotkey file covers navigation, TC commands, villager build menus (economic, 
 
 ## 5.8 Prompt Loading Mechanism
 
-The prompt is loaded from disk in `ClaudeProvider.get_system_prompt()`:
+The prompt is loaded from disk in `ClaudeProvider.get_system_prompt(age)`, which returns a **list of cacheable content blocks** (not a single string):
 
 ```python
-def get_system_prompt(self) -> str:
-    if self._system_prompt is None:
-        prompt_file = PROMPTS_DIR / "system.md"
-        hotkeys_file = PROMPTS_DIR / "hotkeys.md"
-        if prompt_file.exists():
-            self._system_prompt = prompt_file.read_text()
-            if hotkeys_file.exists():
-                self._system_prompt += "\n\n" + hotkeys_file.read_text()
-    return self._system_prompt
+def get_system_prompt(self, age: str = "Dark Age") -> list[dict]:
+    self._load_prompts()
+    age_content = self._age_prompts.get(age.split()[0].lower(), ...)
+    blocks = [
+        {"type": "text", "text": self._core_prompt,          # core + hotkeys + memories
+         "cache_control": {"type": "ephemeral"}},
+    ]
+    if age_content:
+        blocks.append({"type": "text", "text": age_content,  # age-specific guidance
+                       "cache_control": {"type": "ephemeral"}})
+    return blocks
 ```
 
-The system prompt and hotkey reference are concatenated and lazily loaded on first API call, then cached for the session. The system prompt uses Anthropic's `cache_control` for prompt caching, reducing cost on subsequent API calls. Editing prompt files requires restarting the agent.
+Block 1 (core rules + hotkey reference + cross-game memories) is stable for the whole game and is cached on every call. Block 2 (age-specific guidance) changes only on age-ups (≤3 times per game) and is **also** cached, so every turn within an age reads it from cache instead of re-prefilling. Prompts are lazily loaded once and cached for the session; editing prompt files requires restarting the agent.
 
 A fallback inline prompt provides minimal JSON format and action types — enough to run but without strategic depth.
+
+<aside class="concept" data-title="Prompt caching (why the same 320-line prompt isn't billed 100×)">
+
+Every turn we send the same ~320-line system prompt plus a turn-specific user message. Without caching, the provider would tokenize and re-process all 320 lines every call — both billing you for them and adding ~100–300ms of TTFT.
+
+**Prompt caching** marks a prefix of the request as cacheable. On the next call within the TTL (5 minutes on Anthropic, configurable up to 1h), the provider reuses its internal KV-cache for that prefix. You pay **~10% of the normal input price** for cached tokens, and TTFT drops by ~50–80% on long prompts.
+
+The trade-off: writing to the cache costs **~25% extra** the first time, the cache key is the *exact prefix* (a single-character change invalidates it), and only blocks ≥1024 tokens are cacheable. So the pattern is: put stable content (system prompt, tool definitions, hotkey reference) **first** with `cache_control: {"type": "ephemeral"}`, then put turn-volatile content (the turn's entity list, last action result) **after** it. Verify it's working by checking `usage.cache_read_input_tokens` in the response — a value > 0 means you got a hit.
+
+For our agent, this turns a 320-line prompt from a per-turn cost into a once-per-5-min cost, which is the difference between "viable for live play" and "burns a dollar per game."
+
+</aside>
+
+The `cache_control` markers are set in `providers/claude.py`: two on the system blocks (above), plus a **moving breakpoint** on the most recent message in the executor's tool loop (`_apply_moving_cache_breakpoint`) so iterations 2–7 read the growing conversation from cache rather than re-prefilling it. See [Chapter 4: Provider Pattern](./04-provider-pattern.md) for the exact API call shape.
 
 ---
 

@@ -173,7 +173,8 @@ Replace `192.168.64.1` with your Mac's IP from step 1.5.
 
 Optional tuning:
 ```cmd
-set AOE2_LOOP_DELAY=1.0
+set AOE2_LOOP_DELAY=0.3
+set AOE2_EXECUTOR_EFFORT=low
 set AOE2_STRATEGIST_INTERVAL=10
 set AOE2_SAVE_SCREENSHOTS=true
 ```
@@ -216,7 +217,7 @@ python -m gameplay_agent --test
 You should see logs like:
 ```
 detector_initialized         mode=remote server=http://192.168.64.1:8420
-game_loop_start              detection=True executor_model=claude-haiku-4-5
+game_loop_start              detection=True executor_model=claude-sonnet-4-6
 iteration_start              iteration=1
 screenshot_captured           width=1920 height=1080
 detection_complete           entity_count=12
@@ -275,10 +276,11 @@ The remote detector logs `remote_detector_unavailable` and falls back to local O
 |----------|---------|-------|---------|
 | `ANTHROPIC_API_KEY` | — | VM | Claude API key (required) |
 | `AOE2_DETECTION_HOST` | `""` | VM | Detection server URL, e.g. `http://192.168.64.1:8420` |
-| `AOE2_MODEL` | `claude-haiku-4-5` | VM | Executor LLM model |
+| `AOE2_MODEL` | `claude-sonnet-4-6` | VM | Executor LLM model |
+| `AOE2_EXECUTOR_EFFORT` | `low` | VM | Executor effort (`low`/`medium`/`high`) |
 | `AOE2_STRATEGIST_MODEL` | `claude-sonnet-4-6` | VM | Strategist LLM model |
 | `AOE2_STRATEGIST_INTERVAL` | `10` | VM | Run strategist every N turns |
-| `AOE2_LOOP_DELAY` | `1.0` | VM | Seconds between game loop iterations |
+| `AOE2_LOOP_DELAY` | `0.3` | VM | Seconds between game loop iterations |
 | `AOE2_SAVE_SCREENSHOTS` | `true` | VM | Save screenshots to `logs/` |
 
 ### Server CLI Flags
