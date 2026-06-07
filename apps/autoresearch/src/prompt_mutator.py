@@ -58,27 +58,22 @@ class PromptMutator:
         """Read the current system prompt."""
         return PROMPT_FILE.read_text()
 
-    def propose_change(
+    def propose_changes(
         self,
         current_prompt: str,
         recent_experiments: list[dict],
         failure_modes: list[str],
-    ) -> dict | None:
-        """Ask LLM to propose a prompt modification.
+        n: int = 3,
+    ) -> list[dict]:
+        """Ask the LLM for up to N distinct prompt edits (for tournament racing).
 
-        Args:
-            current_prompt: Full text of prompts/system.md
-            recent_experiments: Last 5 experiments from experiment_log
-            failure_modes: Specific failures from most recent game
-
-        Returns:
-            Dict with description, old_text, new_text, rationale. None on failure.
+        Each element is a dict with description/old_text/new_text/rationale.
+        Malformed elements are dropped; returns [] on total failure.
         """
         experiment_summary = self._format_experiments(recent_experiments)
         failure_summary = (
             "\n".join(f"- {f}" for f in failure_modes) if failure_modes else "None identified yet"
         )
-
         user_msg = f"""Current system prompt:
 ```
 {current_prompt}
@@ -90,23 +85,25 @@ Recent experiment results:
 Known failure modes from recent games:
 {failure_summary}
 
-Propose ONE targeted change to improve the agent's game performance."""
+Propose {n} DISTINCT targeted changes, each addressing a different weakness.
+Respond with a JSON array of exactly {n} objects, each with the keys
+description, old_text, new_text, rationale. Output the JSON array only."""
 
         try:
             response = self.client.messages.create(
                 model=self.model,
-                max_tokens=1024,
+                max_tokens=2048,
                 system=MUTATOR_SYSTEM,
                 messages=[{"role": "user", "content": user_msg}],
             )
             block = response.content[0]
             if not isinstance(block, anthropic.types.TextBlock):
                 log.error("prompt_mutator_unexpected_block", block_type=type(block).__name__)
-                return None
-            return self._parse_response(block.text)
+                return []
+            return self._parse_changes(block.text)
         except Exception as e:
             log.error("prompt_mutator_error", error=str(e))
-            return None
+            return []
 
     def apply_change(self, old_text: str, new_text: str) -> bool:
         """Apply the proposed change to prompts/system.md.
@@ -164,8 +161,13 @@ Propose ONE targeted change to improve the agent's game performance."""
             )
         return "\n".join(lines)
 
-    def _parse_response(self, text: str) -> dict | None:
-        """Extract JSON from the LLM response."""
-        from .json_utils import extract_json_object
+    def _parse_changes(self, text: str) -> list[dict]:
+        """Extract a list of well-formed change dicts from the LLM response."""
+        from .json_utils import extract_json_array
 
-        return extract_json_object(text)
+        return [item for item in extract_json_array(text) if self._is_valid_change(item)]
+
+    @staticmethod
+    def _is_valid_change(item: dict) -> bool:
+        """A change must carry the keys the apply step relies on."""
+        return all(key in item for key in ("description", "old_text", "new_text"))

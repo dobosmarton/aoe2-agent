@@ -9,7 +9,9 @@ Usage:
 import argparse
 import asyncio
 import subprocess
+from dataclasses import dataclass, field
 from pathlib import Path
+from statistics import mean
 
 import structlog
 from autoresearch.experiment_log import (
@@ -19,12 +21,33 @@ from autoresearch.experiment_log import (
     log_experiment,
 )
 from autoresearch.game_runner import run_game
+from autoresearch.metrics import GameScore
 from autoresearch.prompt_mutator import PromptMutator
 
 log = structlog.stdlib.get_logger()
 
 REPO_ROOT = Path(__file__).parent.parent
 EPSILON = 0.02  # Accept if score >= best - epsilon
+
+# Successive-halving tournament defaults. Human starts each game, so these are
+# kept small: N=3, 2 rounds, keep half ~= 5 supervised games per accepted change.
+TOURNAMENT_CANDIDATES = 3
+TOURNAMENT_ROUNDS = 2
+TOURNAMENT_KEEP_FRACTION = 0.5
+TOURNAMENT_GAMES_BUDGET = 6  # hard cap on total games per tournament
+
+
+@dataclass
+class _Candidate:
+    """A prompt edit competing in a successive-halving tournament."""
+
+    candidate_id: str
+    change: dict
+    games: list[GameScore] = field(default_factory=list)
+
+    def mean_composite(self) -> float:
+        """Mean composite score across this candidate's games (0.0 if none yet)."""
+        return mean(g.composite for g in self.games) if self.games else 0.0
 
 
 class Orchestrator:
@@ -69,172 +92,193 @@ class Orchestrator:
             capture_output=True,
         )
 
-    async def run_experiment(self, time_budget: float = 1200) -> dict:
-        """Run one full experiment cycle: mutate -> play -> score -> accept/reject.
+    @staticmethod
+    def _candidate_applies(change: dict, current_prompt: str) -> bool:
+        """Whether the change's old_text exists verbatim in the current prompt."""
+        old_text = str(change.get("old_text", ""))
+        return bool(old_text) and old_text in current_prompt
 
-        Returns dict with experiment_id, score, accepted, description, or error.
+    @staticmethod
+    def _keep_top(candidates: list[_Candidate], keep_fraction: float) -> list[_Candidate]:
+        """Sort by mean composite (descending) and keep at least the single best."""
+        ranked = sorted(candidates, key=lambda c: c.mean_composite(), reverse=True)
+        keep = max(1, int(len(ranked) * keep_fraction))
+        return ranked[:keep]
+
+    async def _play_candidate(self, change: dict, time_budget: float) -> GameScore:
+        """Apply a candidate edit, play one game, then revert to baseline.
+
+        Reverting in `finally` guarantees the prompt returns to baseline even if
+        the game errors, so the next candidate applies against the same text.
         """
-        experiment_id = get_next_experiment_id()
+        self.mutator.apply_change(str(change["old_text"]), str(change["new_text"]))
+        self.git_commit(f"[autoresearch] trial: {str(change.get('description', ''))[:50]}")
+        try:
+            result = await run_game(time_budget=time_budget)
+        finally:
+            self.git_revert_prompt()
+        return result["score"]
+
+    async def _run_halving_rounds(
+        self,
+        survivors: list[_Candidate],
+        tournament_id: str,
+        time_budget: float,
+        halving_rounds: int,
+        keep_fraction: float,
+        games_budget: int,
+    ) -> int:
+        """Play successive-halving rounds, returning the total games played.
+
+        Mutates `survivors` in place: after each round it is trimmed to the top
+        fraction. Stops early when the games budget is exhausted.
+        """
+        games_played = 0
+        round_num = 0
+        while round_num < halving_rounds:
+            round_num += 1
+            for game_in_round, cand in enumerate(survivors, start=1):
+                if games_played >= games_budget:
+                    log.info("tournament_games_budget_reached", games=games_played)
+                    return games_played
+                input(
+                    f"\nStart a new game in AoE2 (round {round_num}, {cand.candidate_id}: "
+                    f"{str(cand.change.get('description', ''))[:50]}), then press Enter..."
+                )
+                score = await self._play_candidate(cand.change, time_budget)
+                cand.games.append(score)
+                games_played += 1
+                log_experiment(
+                    experiment_id=get_next_experiment_id(),
+                    loop="prompt",
+                    change_description=str(cand.change.get("description", "?")),
+                    score=score,
+                    accepted=False,
+                    git_sha="(reverted)",
+                    tournament_id=tournament_id,
+                    candidate_id=cand.candidate_id,
+                    round_num=str(round_num),
+                    game_in_round=str(game_in_round),
+                )
+            # Play first, then trim: a lone survivor still gets evaluated.
+            if len(survivors) <= 1:
+                break
+            survivors[:] = self._keep_top(survivors, keep_fraction)
+        return games_played
+
+    async def run_tournament(
+        self,
+        time_budget: float = 1200,
+        n_candidates: int = TOURNAMENT_CANDIDATES,
+        halving_rounds: int = TOURNAMENT_ROUNDS,
+        keep_fraction: float = TOURNAMENT_KEEP_FRACTION,
+        games_budget: int = TOURNAMENT_GAMES_BUDGET,
+    ) -> dict:
+        """Race N candidate prompt edits via successive halving.
+
+        Each round plays the survivors one game each (sequential, human-started),
+        keeps the top fraction by mean composite score, then doubles down on the
+        rest. The single winner is accepted only if its mean beats the baseline
+        by more than epsilon. Trial games always revert; only the winner is kept.
+        """
+        tournament_id = get_next_experiment_id()
         recent = get_recent_experiments(5)
         failure_modes = self._extract_failure_modes(recent)
-
-        # 1. Propose a prompt change
         current_prompt = self.mutator.read_current_prompt()
-        change = self.mutator.propose_change(current_prompt, recent, failure_modes)
+        changes = self.mutator.propose_changes(
+            current_prompt, recent, failure_modes, n=n_candidates
+        )
+        survivors = [
+            _Candidate(candidate_id=f"c{i + 1}", change=c)
+            for i, c in enumerate(changes)
+            if self._candidate_applies(c, current_prompt)
+        ]
+        if not survivors:
+            log.warning("tournament_no_candidates", tournament_id=tournament_id)
+            return {"experiment_id": tournament_id, "error": "no_candidates"}
 
-        if not change:
-            log.warning("mutation_failed", experiment_id=experiment_id)
-            return {"experiment_id": experiment_id, "error": "mutation_failed"}
-
-        description = change.get("description", "unknown change")
-        old_text = change.get("old_text", "")
-        new_text = change.get("new_text", "")
-
-        log.info(
-            "mutation_proposed",
-            experiment_id=experiment_id,
-            description=description,
-            rationale=change.get("rationale", ""),
+        games_played = await self._run_halving_rounds(
+            survivors, tournament_id, time_budget, halving_rounds, keep_fraction, games_budget
         )
 
-        # 2. Apply the change
-        if not self.mutator.apply_change(old_text, new_text):
-            return {"experiment_id": experiment_id, "error": "change_not_applicable"}
+        played = [c for c in survivors if c.games]
+        if not played:
+            return {"experiment_id": tournament_id, "error": "no_games_played"}
 
-        # 3. Commit the change
-        sha = self.git_commit(f"[autoresearch] {experiment_id}: {description}")
-
-        # 4. Run the game
-        print("\n  Playing game with modified prompt...")
-        result = await run_game(time_budget=time_budget)
-        score = result["score"]
-
-        # 5. Accept or reject
-        accepted = score.composite >= self.best_score - self.epsilon
-
+        winner = max(played, key=lambda c: c.mean_composite())
+        winner_mean = winner.mean_composite()
+        accepted = winner_mean >= self.best_score - self.epsilon
+        sha = None
         if accepted:
-            self.best_score = max(self.best_score, score.composite)
-            log.info("experiment_accepted", score=score.composite, best=self.best_score)
-        else:
-            self.git_revert_prompt()
-            log.info("experiment_rejected", score=score.composite, best=self.best_score)
+            self.mutator.apply_change(
+                str(winner.change["old_text"]), str(winner.change["new_text"])
+            )
+            sha = self.git_commit(f"[autoresearch] {tournament_id}: {winner.change['description']}")
+            self.best_score = max(self.best_score, winner_mean)
 
-        # 6. Log result
         log_experiment(
-            experiment_id=experiment_id,
+            experiment_id=tournament_id,
             loop="prompt",
-            change_description=description,
-            score=score,
+            change_description=f"tournament winner: {winner.change.get('description', '?')}",
+            score=winner.games[-1],
             accepted=accepted,
-            git_sha=sha if accepted else None,
+            git_sha=sha,
+            tournament_id=tournament_id,
+            candidate_id=winner.candidate_id,
+            round_num="final",
         )
-
+        log.info(
+            "tournament_complete",
+            tournament_id=tournament_id,
+            winner=winner.candidate_id,
+            winner_mean=round(winner_mean, 4),
+            accepted=accepted,
+            games_played=games_played,
+        )
         return {
-            "experiment_id": experiment_id,
-            "score": score.composite,
+            "experiment_id": tournament_id,
+            "score": winner_mean,
             "accepted": accepted,
-            "description": description,
+            "description": winner.change.get("description", "?"),
+            "candidates": len(changes),
+            "games_played": games_played,
         }
 
-    async def run_baseline(self, time_budget: float = 1200) -> dict:
-        """Run a baseline game with the current prompt (no mutation).
-
-        Use this for the first experiment to establish a starting score.
-        """
-        experiment_id = get_next_experiment_id()
-
-        print("\n  Running baseline game (no prompt changes)...")
-        result = await run_game(time_budget=time_budget)
-        score = result["score"]
-
-        self.best_score = max(self.best_score, score.composite)
-
-        log_experiment(
-            experiment_id=experiment_id,
-            loop="prompt",
-            change_description="baseline — unmodified prompt",
-            score=score,
-            accepted=True,
-        )
-
-        return {
-            "experiment_id": experiment_id,
-            "score": score.composite,
-            "accepted": True,
-            "description": "baseline",
-        }
-
-    async def run_loop(
+    async def run_tournament_loop(
         self,
-        max_experiments: int | None = None,
-        time_budget: float = 1200,
-        run_baseline_first: bool = True,
+        max_experiments: int | None,
+        time_budget: float,
+        n_candidates: int,
+        halving_rounds: int,
+        keep_fraction: float,
+        games_budget: int,
     ) -> None:
-        """Run the autonomous experiment loop.
-
-        Human starts each game manually (Phase 1).
-        Orchestrator mutates prompt between games.
-
-        Args:
-            max_experiments: Stop after N experiments (None = run forever)
-            time_budget: Seconds per game
-            run_baseline_first: Run an unmodified baseline game first
-        """
+        """Run repeated tournaments, each producing at most one accepted change."""
         count = 0
-
-        # Run baseline if no previous experiments
-        if run_baseline_first and self.best_score == 0.0:
-            print("\n" + "=" * 60)
-            print("BASELINE — Playing with unmodified prompt")
-            print("=" * 60)
-            input("Start a new game in AoE2, then press Enter...")
-
-            result = await self.run_baseline(time_budget=time_budget)
-            print(f"\n  Baseline score: {result['score']:.4f}")
-            count += 1
-
-            if max_experiments and count >= max_experiments:
-                return
-
         while max_experiments is None or count < max_experiments:
             print(f"\n{'=' * 60}")
-            print(f"Experiment {count + 1} — Best score: {self.best_score:.4f}")
+            print(f"Tournament {count + 1} — Best score: {self.best_score:.4f}")
             print(f"{'=' * 60}")
 
-            # Propose mutation
-            recent = get_recent_experiments(5)
-            current_prompt = self.mutator.read_current_prompt()
-            change = self.mutator.propose_change(
-                current_prompt, recent, self._extract_failure_modes(recent)
+            result = await self.run_tournament(
+                time_budget=time_budget,
+                n_candidates=n_candidates,
+                halving_rounds=halving_rounds,
+                keep_fraction=keep_fraction,
+                games_budget=games_budget,
             )
-
-            if change:
-                print(f"\n  Proposed: {change.get('description', '?')}")
-                print(f"  Rationale: {change.get('rationale', '?')}")
-            else:
-                print("\n  Mutation failed, will retry with current prompt")
-
-            input("\nStart a new game in AoE2, then press Enter...")
-
-            if change:
-                result = await self.run_experiment(time_budget=time_budget)
-            else:
-                # Run with current prompt if mutation failed
-                result = await self.run_baseline(time_budget=time_budget)
 
             if "error" in result:
                 print(f"\n  Error: {result['error']}")
             else:
                 status = "ACCEPTED" if result["accepted"] else "REJECTED"
                 print(f"\n  {status}: {result.get('description', '?')}")
-                print(f"  Score: {result['score']:.4f} (best: {self.best_score:.4f})")
-
+                print(f"  Winner mean: {result['score']:.4f} (best: {self.best_score:.4f})")
             count += 1
 
         print(f"\n{'=' * 60}")
-        print(f"Done — {count} experiments completed")
+        print(f"Done — {count} tournaments completed")
         print(f"Best score: {self.best_score:.4f}")
-        print("Results saved to experiments/results.tsv")
         print(f"{'=' * 60}")
 
     def _extract_failure_modes(self, recent: list[dict]) -> list[str]:
@@ -284,16 +328,21 @@ class Orchestrator:
 class _OrchestratorArgs(argparse.Namespace):
     max_experiments: int | None
     time_budget: float
-    no_baseline: bool
+    n_candidates: int
+    halving_rounds: int
+    keep_fraction: float
+    games_budget: int
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run autoresearch prompt optimization loop")
+    parser = argparse.ArgumentParser(
+        description="Run autoresearch prompt optimization (successive-halving tournament)"
+    )
     parser.add_argument(
         "--max-experiments",
         type=int,
         default=None,
-        help="Maximum number of experiments (default: run forever)",
+        help="Maximum number of tournaments (default: run forever)",
     )
     parser.add_argument(
         "--time-budget",
@@ -302,22 +351,44 @@ def main() -> None:
         help="Maximum game duration in seconds (default: 1200 = 20 min)",
     )
     parser.add_argument(
-        "--no-baseline",
-        action="store_true",
-        help="Skip baseline game even if no previous experiments",
+        "--n-candidates",
+        type=int,
+        default=TOURNAMENT_CANDIDATES,
+        help=f"Candidate edits per tournament round (default: {TOURNAMENT_CANDIDATES})",
+    )
+    parser.add_argument(
+        "--halving-rounds",
+        type=int,
+        default=TOURNAMENT_ROUNDS,
+        help=f"Number of halving rounds (default: {TOURNAMENT_ROUNDS})",
+    )
+    parser.add_argument(
+        "--keep-fraction",
+        type=float,
+        default=TOURNAMENT_KEEP_FRACTION,
+        help=f"Top fraction kept each round (default: {TOURNAMENT_KEEP_FRACTION})",
+    )
+    parser.add_argument(
+        "--games-budget",
+        type=int,
+        default=TOURNAMENT_GAMES_BUDGET,
+        help=f"Hard cap on games per tournament (default: {TOURNAMENT_GAMES_BUDGET})",
     )
     args = parser.parse_args(namespace=_OrchestratorArgs())
 
-    print("AoE2 Autoresearch — Prompt Optimization Loop")
+    print("AoE2 Autoresearch — Successive-Halving Tournament")
     print(f"Time budget: {args.time_budget}s per game")
-    print(f"Max experiments: {args.max_experiments or 'unlimited'}")
+    print(f"Max tournaments: {args.max_experiments or 'unlimited'}")
     print()
 
     asyncio.run(
-        Orchestrator().run_loop(
+        Orchestrator().run_tournament_loop(
             max_experiments=args.max_experiments,
             time_budget=args.time_budget,
-            run_baseline_first=not args.no_baseline,
+            n_candidates=args.n_candidates,
+            halving_rounds=args.halving_rounds,
+            keep_fraction=args.keep_fraction,
+            games_budget=args.games_budget,
         )
     )
 

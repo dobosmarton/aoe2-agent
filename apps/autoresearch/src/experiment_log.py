@@ -35,6 +35,11 @@ HEADER = [
     # remain aligned when read with csv.DictReader — missing values become None.
     "memories_loaded",
     "memories_used_count",
+    # Tournament (successive-halving) attribution; empty for single-candidate runs.
+    "tournament_id",
+    "candidate_id",
+    "round",
+    "game_in_round",
 ]
 
 
@@ -107,8 +112,17 @@ def log_experiment(
     score: GameScore,
     accepted: bool,
     git_sha: str | None = None,
+    *,
+    tournament_id: str = "",
+    candidate_id: str = "",
+    round_num: str = "",
+    game_in_round: str = "",
 ) -> None:
-    """Append an experiment result to the TSV ledger."""
+    """Append an experiment result to the TSV ledger.
+
+    The keyword-only tournament fields default to empty so single-candidate
+    callers are unchanged; they attribute a row to a successive-halving run.
+    """
     _ensure_results_file()
 
     if git_sha is None:
@@ -135,6 +149,10 @@ def log_experiment(
         git_sha if accepted else "(reverted)",
         str(len(memories_loaded)),
         str(memories_used_count),
+        tournament_id,
+        candidate_id,
+        round_num,
+        game_in_round,
     ]
 
     with RESULTS_FILE.open("a", newline="") as f:
