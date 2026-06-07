@@ -3,6 +3,7 @@ import "../styles/globals.css";
 import Wordmark from "@/components/Wordmark.astro";
 import ThemeToggle from "@/components/ThemeToggle.astro";
 import SearchPalette from "@/components/SearchPalette.tsx";
+import Analytics from "@vercel/analytics/astro";
 
 interface Props {
   title?: string;
@@ -159,5 +160,7 @@ const canonical = new URL(Astro.url.pathname, Astro.site ?? Astro.url).toString(
         </p>
       </div>
     </footer>
+
+    <Analytics />
   </body>
 </html>
