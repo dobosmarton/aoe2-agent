@@ -81,7 +81,7 @@ See also the [Glossary](./glossary.md) for one-line definitions of terms used th
 | # | Chapter | Description | Key files |
 |---|---|---|---|
 | 01 | [System Overview](./part1-architecture/01-system-overview.md) | Two-tier design, graceful degradation, async architecture | `config.py`, `main.py` |
-| 02 | [Game Loop Pipeline](./part1-architecture/02-game-loop-pipeline.md) | Capture-detect-alarm-strategist-execute-verify cycle | `game_loop.py`, `goals.py`, `screen.py` |
+| 02 | [Game Loop Pipeline](./part1-architecture/02-game-loop-pipeline.md) | Capture-detect-alarm-strategist-execute-verify cycle (RTC pipelining, reactive tier) | `game_loop.py`, `reactive.py`, `turn_phases.py`, `goals.py`, `screen.py` |
 | 03 | [Action Model & Execution](./part1-architecture/03-action-model-and-execution.md) | Pydantic action types, target_id/target_class resolution | `models.py`, `executor.py` |
 
 ### Part 2: LLM integration
@@ -136,7 +136,7 @@ See also the [Glossary](./glossary.md) for one-line definitions of terms used th
 
 | # | Chapter | Description | Key files |
 |---|---|---|---|
-| 22 | [Autoresearch Overview](./part8-autoresearch/22-autoresearch-overview.md) | Mutate → run → score → accept/revert loop | `apps/autoresearch/src/orchestrator.py`, `apps/autoresearch/src/config.yaml` |
+| 22 | [Autoresearch Overview](./part8-autoresearch/22-autoresearch-overview.md) | Reflective mutate → run → score → accept/revert loop (Pareto frontier) | `apps/autoresearch/src/orchestrator.py`, `apps/autoresearch/src/pareto.py`, `apps/autoresearch/src/trace.py`, `apps/autoresearch/src/config.yaml` |
 | 23 | [Prompt Mutation and Memory](./part8-autoresearch/23-prompt-mutation-and-memory.md) | Mutator constraints, protected sections, memory chain | `apps/autoresearch/src/prompt_mutator.py`, `apps/autoresearch/src/memory_chain.py` |
 
 ---

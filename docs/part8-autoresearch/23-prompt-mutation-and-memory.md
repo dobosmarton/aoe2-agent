@@ -14,7 +14,7 @@ This chapter zooms into the two mechanical pieces of the autoresearch loop: the 
 
 ### The system prompt
 
-`prompt_mutator.py:20` (`MUTATOR_SYSTEM`) is the load-bearing part. It frames the LLM as "an expert AoE2 strategist optimizing a system prompt", names the five scoring dimensions and their weights, and lays down four constraints:
+`prompt_mutator.py:26` (`MUTATOR_SYSTEM`) is the load-bearing part. It frames the LLM as "an expert AoE2 strategist optimizing a system prompt", names the five scoring dimensions and their weights, and lays down four constraints:
 
 - Change **at most 5 lines** of the prompt.
 - Do **not** modify `## Output Format` or `## Game State Detection`. These are the contract between the agent and the executor; an edit here breaks parsing.
@@ -23,11 +23,13 @@ This chapter zooms into the two mechanical pieces of the autoresearch loop: the 
 
 Each edit is a small JSON object: `{description, old_text, new_text, rationale}`, and `old_text` must exist verbatim in the current prompt (the mutator does `.replace(old_text, new_text, 1)` — no regex, no fuzzy match).
 
-`propose_changes(current_prompt, recent_experiments, failure_modes, n)` (`prompt_mutator.py:61`) is the entry point the tournament calls. It requests **N distinct edits as a JSON array**, then `_parse_changes` extracts the array via `extract_json_array` (`json_utils.py`) and drops any element missing the required keys (`_is_valid_change`). There is no separate single-candidate method — a one-edit run is just `n=1`.
+The proposer actually runs under `REFLECTIVE_MUTATOR_SYSTEM` (`prompt_mutator.py:56`) — `MUTATOR_SYSTEM` plus a short reflection addendum instructing the model to diagnose what failed turn-to-turn and target the weakest component with trace evidence.
+
+`propose_changes(current_prompt, recent_traces, component_breakdown, failure_modes, n)` (`prompt_mutator.py:75`) is the entry point the tournament calls. It builds a reflective user message — turn-by-turn excerpts from the recent `GameTrace`s (via `format_trace_excerpt`) plus the five-component score breakdown — requests **N distinct edits as a JSON array**, then `_parse_changes` extracts the array via `extract_json_array` (`json_utils.py`) and drops any element missing the required keys (`_is_valid_change`). With no prior traces (a first run) it substitutes a placeholder line and still proposes. There is no separate single-candidate method — a one-edit run is just `n=1`.
 
 ### The protection check
 
-Even with the prompt constraint, the mutator code defensively re-checks (`prompt_mutator.py:122`): if `old_text` falls inside a `PROTECTED_SECTIONS` span, the change is rejected as `change_in_protected_section`. The check walks from the section header to the next `\n## `, so it's robust to where the LLM positioned its anchor.
+Even with the prompt constraint, the mutator code defensively re-checks (in `apply_change`, `prompt_mutator.py:135`): if `old_text` falls inside a `PROTECTED_SECTIONS` span, the change is rejected as `change_in_protected_section`. The check walks from the section header to the next `\n## `, so it's robust to where the LLM positioned its anchor.
 
 ### Revert
 

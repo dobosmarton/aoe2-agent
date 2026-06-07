@@ -112,6 +112,7 @@ Configuration uses a Pydantic `BaseModel` with environment variable overrides (`
 | `screenshot_quality` | — | `85` | JPEG quality (1-100) |
 | `loop_delay` | `AOE2_LOOP_DELAY` | `0.3` | Seconds between iterations |
 | `action_delay` | — | `0.05` | Seconds between individual actions |
+| `pipeline_commit_max` | `AOE2_PIPELINE_COMMIT_MAX` | `2` | Actions committed per pipelined (routine) turn; the tail is discarded |
 | `save_screenshots` | `AOE2_SAVE_SCREENSHOTS` | `true` | Log screenshots to disk |
 | `log_dir` | — | `logs` | Screenshot and log output directory |
 
@@ -136,7 +137,7 @@ The agent is built on a single asyncio event loop, not threads or processes. The
 Two patterns recur:
 
 - **`await foo()` for sequential work** — the most common shape. You're waiting on the result before continuing.
-- **`asyncio.create_task(foo())` for fire-and-forget parallelism** — you want the work to run *while* something else proceeds, and you'll await the result later (or never). The strategist call in §2.1 Step 7 is the canonical example: the loop dispatches the strategist into the background and continues with maintenance + executor on the main path, then awaits the strategist result at cleanup.
+- **`asyncio.create_task(foo())` for fire-and-forget parallelism** — you want the work to run *while* something else proceeds, and you'll await the result later (or never). The strategist call in §2.1 Step 7 is the canonical example: the loop dispatches the strategist into the background and continues with the reactive tier + executor on the main path, then awaits the strategist result at cleanup. Routine turns lean on the same pattern for RTC pipelining — the next turn's executor plan computes in the background while the current committed head executes.
 
 The single-loop invariant breaks the moment you call into blocking code (the synchronous `pyautogui.click()` is fast enough that we accept the block; a sync database driver wouldn't be). For genuine background CPU work you'd use `loop.run_in_executor` to dispatch to a thread pool; the broker uses `loop.call_soon_threadsafe` to marshal CLI cross-thread publishes back onto the main loop — see [Appendix B §B.6](../appendix/02-event-brokers-and-redis-streams.md).
 
@@ -146,13 +147,14 @@ The single-loop invariant breaks the moment you call into blocking code (the syn
 
 Structured logging via structlog with colored console output, configured in `apps/agent/src/main.py`.
 
-Key log events: `iteration_start`, `screenshot_captured`, `detection_complete`, `strategist_response`, `strategist_goals_updated`, `llm_response`, `actions_executed`, `action_verification`, `alarm_triggered`, `turn_reward`.
+Key log events: `iteration_start`, `screenshot_captured`, `detection_complete`, `strategist_response`, `strategist_goals_updated`, `llm_response`, `actions_executed`, `routine_executed`, `pipeline_head_committed`, `action_verification`, `alarm_triggered`, `turn_reward`.
 
 ---
 
 ## Summary
 
 - Two-tier architecture: Sonnet strategist (vision, goals) + Sonnet executor (text-only, actions; single-shot routine turns + tool loop for combat)
+- A deterministic reactive tier handles routine villager upkeep every turn with no LLM call; routine turns pipeline (RTC) and entity-affecting actions are verified by re-detection
 - Detection is practically required for useful gameplay; game knowledge and window management are truly optional
 - Pydantic for config and validation, structlog for observability, asyncio for concurrency
 - Goal-driven gameplay with alarm system for emergency defense

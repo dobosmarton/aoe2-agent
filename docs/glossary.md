@@ -8,6 +8,7 @@ Entries are organized alphabetically. Most are followed by a short link of the f
 
 ## A
 
+- **Action-effect verification** — After an entity-affecting action (a build/placement or a camera move), the agent re-detects and confirms the expected change, recording `CONFIRMED …` or the exact phrase `no visible change`; repeated misses feed the stuck-loop detector. → [Chapter 2 §2.1 Step 11](./part1-architecture/02-game-loop-pipeline.md).
 - **Anchor box** — A YOLO-style detector predicts each object's bounding box as an *offset* from a pre-defined anchor of a given aspect ratio, rather than predicting raw coordinates. → [Appendix A — YOLO and object detection](./appendix/01-yolo-and-object-detection.md).
 - **Asyncio** — Python's cooperative-multitasking concurrency primitive. The agent's game loop is built on a single asyncio event loop so the strategist can think in the background while the executor is acting. → [Chapter 1 §Async-first architecture](./part1-architecture/01-system-overview.md).
 
@@ -65,11 +66,15 @@ Entries are organized alphabetically. Most are followed by a short link of the f
 
 ## P
 
+- **Pareto frontier** — The set of candidates that are *non-dominated*: none is beaten on every score component at once. The autoresearch tournament keeps a frontier over the five score components so a candidate strong on a single axis isn't culled for a weak composite. → [Chapter 22 — How a tournament runs](./part8-autoresearch/22-autoresearch-overview.md).
 - **Prompt caching** — Provider-side reuse of the KV-cache for a stable prefix of your prompt. → [Chapter 5 — Prompt caching callout](./part2-llm-integration/05-prompt-engineering.md).
 
 ## R
 
+- **Reactive tier** — A deterministic, no-LLM layer that runs routine economy upkeep every turn (queue villagers below the age cap, reassign idle villagers to the nearest resource); it cedes combat to the LLM by returning nothing on alarm. → [Chapter 2 §2.1 Step 9](./part1-architecture/02-game-loop-pipeline.md).
 - **Redis Streams** — A Redis data structure (`XADD` / `XREAD`) that behaves like a durable, replayable, consumer-group-aware log. Our cross-process broker backend. → [Appendix B](./appendix/02-event-brokers-and-redis-streams.md).
+- **Reflective prompt mutation** — Proposing prompt edits by reasoning over full game *traces* (turn-by-turn reasoning, actions, verification) plus the per-component score breakdown, rather than over summary metrics alone. → [Chapter 23 — The mutator](./part8-autoresearch/23-prompt-mutation-and-memory.md).
+- **RTC (turn pipelining)** — Request-to-completion overlap: a routine turn launches the *next* executor plan as a background task and executes the previous turn's committed head while it computes, hiding the LLM roundtrip. → [Chapter 2 §2.1 Step 9](./part1-architecture/02-game-loop-pipeline.md).
 
 ## S
 

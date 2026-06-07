@@ -41,11 +41,13 @@ sequenceDiagram
             GL->>GM: set_goals(goals)
         end
         GL->>M: get_context_for_llm()
+        GL->>E: reactive upkeep (queue / reassign villagers)
         GL->>C: get_actions(context, w, h)
+        Note over GL,C: routine turns pipeline — this turn's plan<br/>computes while last turn's committed head executes
         C-->>GL: {reasoning, observations, actions}
         GL->>M: create_turn(reasoning, actions, observations)
         GL->>GM: evaluate_progress(game_state)
-        GL->>E: execute_actions(actions)
+        GL->>E: execute committed head, then verify effects
     end
 ```
 
@@ -106,14 +108,15 @@ Assembles text context from multiple sources, layered in this order:
 5. **Recent decisions** — last 3 turns with action feedback
 6. **Dynamic game knowledge** — affordable units/buildings based on current resources (optional)
 
-### Step 9: Get actions from executor (parallelized)
+### Step 9: Get actions from executor (pipelined)
 
-The executor LLM call is launched as a background task via `asyncio.create_task(provider.get_actions(...))`. While the LLM is thinking (~10s), the agent executes:
+Routine turns are **pipelined** RTC-style (request-to-completion overlap): the executor call for *this* turn is launched as a background task via `asyncio.create_task(provider.get_actions(...))`, and while it computes the agent does useful work in that window:
 
 1. **Ground commands** (turn 1 only) — zoom in, select scout, enable auto-scout
-2. **Maintenance actions** — safe hotkey presses (h → q to queue villagers) if population is below cap
+2. **Reactive tier** (`reactive.decide`) — deterministic, no-LLM upkeep run every turn: queue a villager when population is below the age cap, and send an idle villager to the nearest resource. It returns nothing on alarm, ceding combat to the LLM.
+3. **Previous turn's committed head** — the plan launched last turn is drained and executed now (Step 11), against freshly re-detected entities.
 
-After these complete, the agent awaits the LLM task result.
+The freshly-launched plan is held as a `_PendingPlan` and executed on the *next* iteration. Whether a turn pipelines is decided by `_should_pipeline` (= `provider._use_single_shot(context)`): combat/housing turns can't pipeline because the tool loop executes its own actions mid-call, so they run **synchronously** — any pending routine plan is discarded (its frame is stale) and the turn's actions execute the same turn.
 
 The executor is 100% text-based — no screenshot. `get_actions()` picks one of two paths per turn (`_use_single_shot`): routine turns take a **single-shot** structured call (`_call_single_shot` — one roundtrip; the returned actions are executed by the game loop), while combat/housing turns take an **agentic tool loop** (`_call_api`) where Claude calls tools one at a time (up to `max_tool_iterations = 7`), each executed locally via `execute_action()` with the result fed back. Composite tools (`build`, `send_villager`, `queue_villager`) execute multi-step sequences within a single tool call, eliminating intermediate API roundtrips.
 
@@ -124,11 +127,13 @@ Creates a `Turn` record, updates `GameState` from the executor's observations. E
 ### Step 11: Execute actions — `_execute_turn_actions()`
 
 If the agentic tool loop already executed actions (indicated by `actions_already_executed` flag), this step just records the results. Otherwise, it executes LLM actions:
+- For a **pipelined** turn, only the **committed head** runs — the first `pipeline_commit_max` (2) actions, after `_revalidate_against_fresh` drops any whose `target_id`/`target_class` no longer resolves against the current frame. The tail is discarded: next turn's plan supersedes it from fresher perception.
 - Resolves `target_id` or `target_class` to coordinates from cached entity positions
 - Translates coordinates from screenshot-relative to screen-absolute
 - Executes via pyautogui with `action_delay` (50ms) between actions
 - Tracks success/failure via `ActionResult` — failed actions are recorded in memory as feedback for the next turn
-- Falls back to TC hotkey + villager queue + idle villager select if no actions were returned
+- **Verifies effects (R1).** After entity-affecting actions (a `build`/placement, or a camera move), it re-detects and records a verification line — `CONFIRMED built: <class>` on success, or the exact phrase `no visible change` on a miss. That line feeds the stuck-loop detector in `memory.get_context_for_llm`, so repeated no-ops escalate to a warning the LLM sees. Routine economy turns with no entity expectation skip the extra rescan.
+- If no actions were returned, logs `no_actions_fallback` (the reactive tier already handled routine upkeep this turn).
 - On `rescan: true`, runs the rescan pipeline:
   1. **Tracker prediction check** — if tracker confidence > 80%, extrapolate positions via Kalman predict (~0ms, no screenshot or inference needed)
   2. **Screenshot capture** — if prediction not used
@@ -221,7 +226,7 @@ Captures a screenshot, runs detection, builds context, gets actions from Claude 
 | Rescan: fast detection | ~50ms | Single-pass YOLO at imgsz=1280 |
 | Loop delay | 0.3s | `config.loop_delay` |
 
-Cycle time depends on the path: **routine turns single-shot in ~one roundtrip** (~2-4s of API + 0.3s loop delay), while combat/housing turns run the agentic tool loop and can reach ~20-30s when they use all 7 iterations. Composite tools cut the loop path further (~9s saved per building placement). The strategist runs in the background and does not add to cycle time.
+Cycle time depends on the path: **routine turns single-shot in ~one roundtrip** (~2-4s of API + 0.3s loop delay), and because routine turns pipeline, the previous turn's committed head plus the reactive tier execute *during* that roundtrip rather than adding to it. Combat/housing turns run the agentic tool loop synchronously and can reach ~20-30s when they use all 7 iterations. Composite tools cut the loop path further (~9s saved per building placement). The strategist runs in the background and does not add to cycle time.
 
 ## 2.4 Error Handling
 
@@ -244,9 +249,10 @@ The game loop supports a `time_budget` parameter (seconds). When elapsed time ex
 
 ## Summary
 
-- 12-step iteration cycle: check → focus → capture → detect → classify → alarm → strategist → context → executor → memory → execute → wait
+- 12-step iteration cycle: check → focus → capture → detect → classify → alarm → strategist → context → executor → memory → execute+verify → wait
 - Cycle time depends on the path: routine turns single-shot in ~2-4s; combat/housing turns run the agentic tool loop and can reach ~30s
-- Executor LLM call parallelized with maintenance actions (villager queuing) via `asyncio.create_task()`
+- Routine turns are pipelined (RTC): the executor call overlaps the previous turn's committed head plus the deterministic reactive tier (villager queue/reassign) via `asyncio.create_task()`; combat turns run synchronously
+- Action-effect verification (R1): entity-affecting actions are confirmed by re-detection, and misses emit `no visible change` into the stuck-loop detector
 - Strategist runs asynchronously in the background; executor runs every turn
 - Composite tools (build, send_villager, queue_villager) eliminate multiple API roundtrips per sequence
 - Detection uses adaptive SAHI by default (~100-200ms), falling back to full SAHI periodically
