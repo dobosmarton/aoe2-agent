@@ -47,6 +47,7 @@ CLI commands inside `asyncio.run`, fork tasks).
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime
@@ -56,7 +57,9 @@ from evaluation.event_broker import (
     BrokerMetricsSnapshot,
     BrokerOverflowError,
     EventEnvelope,
+    LiveRun,
     RunId,
+    RunMeta,
     Seq,
 )
 from evaluation.event_log import Event, EventRow
@@ -99,6 +102,45 @@ def _keys_for(prefix: str, run_id: RunId) -> _Keys:
         events=f"{base}:events".encode(),
         seq=f"{base}:seq".encode(),
         open=f"{base}:open".encode(),
+    )
+
+
+def _run_id_from_open_key(prefix: str, key: bytes) -> RunId:
+    """Inverse of `_keys_for(...).open` — recover the run_id from an `:open`
+    key. Slice the fixed `…:run:` head and `:open` tail rather than
+    `split(":")`, so a future run_id containing a colon wouldn't mis-parse."""
+    text = key.decode()
+    head = f"{prefix}:run:"
+    tail = ":open"
+    return RunId(text[len(head) : -len(tail)])
+
+
+def _encode_sentinel(meta: RunMeta | None) -> bytes:
+    """The `:open` sentinel's *value*. `is_open_remote` only checks EXISTS, so
+    the value is free real estate for run identity — JSON when we have meta,
+    the legacy `b"1"` when we don't (keeps old readers and tests happy)."""
+    if meta is None:
+        return b"1"
+    return json.dumps({"label": meta.label, "started_at": meta.started_at}).encode()
+
+
+def _decode_sentinel(raw: bytes | None) -> RunMeta:
+    """Parse a sentinel value into `RunMeta`. Tolerant by design: a legacy
+    `b"1"`, a missing key, or any non-JSON content yields empty identity
+    rather than raising mid-`live_runs` during a rolling deploy."""
+    if raw is None:
+        return RunMeta()
+    try:
+        data = cast("object", json.loads(raw))
+    except (ValueError, TypeError):
+        return RunMeta()
+    if not isinstance(data, dict):
+        return RunMeta()
+    label = data.get("label")
+    started_at = data.get("started_at")
+    return RunMeta(
+        label=label if isinstance(label, str) else None,
+        started_at=started_at if isinstance(started_at, str) else None,
     )
 
 
@@ -247,17 +289,23 @@ class RedisStreamsBroker:
 
     # ---- Lifecycle ----------------------------------------------------
 
-    def open_run(self, run_id: RunId) -> None:
+    def open_run(self, run_id: RunId, meta: RunMeta | None = None) -> None:
         if run_id in self._open_locally:
             raise ValueError(f"run {run_id!r} is already open")
         self._open_locally.add(run_id)
         keys = _keys_for(self._key_prefix, run_id)
+        # The sentinel's *value* carries run identity (label, started_at) for
+        # the cross-process `live_runs` reader; `is_open_remote` only checks
+        # existence, so this is transparent to liveness.
+        sentinel = _encode_sentinel(meta)
         # `ex` gives the sentinel a finite life so an abandoned producer
         # eventually self-cleans. First writer wins for the cross-process
         # case; a re-open from the same process is already blocked by the
         # local check above, and cross-process re-opens are a deployment
         # bug we won't paper over.
-        self._enqueue_admin(lambda: self._client.set(keys.open, b"1", ex=self._open_ttl_seconds))
+        self._enqueue_admin(
+            lambda: self._client.set(keys.open, sentinel, ex=self._open_ttl_seconds)
+        )
 
     def close_run(self, run_id: RunId) -> None:
         self._open_locally.discard(run_id)
@@ -282,11 +330,47 @@ class RedisStreamsBroker:
 
     async def is_open_remote(self, run_id: RunId) -> bool:
         """Cross-process truth: does the `:open` sentinel exist in Redis?"""
+        # Flush first so this process observes its own queued open/close before
+        # answering — `open_run`/`close_run` only enqueue the SET/DEL admin op
+        # (sync Protocol, async Redis). Same discipline as `publish`/`stream`.
+        await self.flush()
         keys = _keys_for(self._key_prefix, run_id)
         # `exists` returns an int (count of existing keys); cast keeps
         # basedpyright's reportAny strictness happy through the SDK boundary.
         count = cast("int", await self._client.exists(keys.open))
         return count > 0
+
+    async def live_runs(self) -> list[LiveRun]:
+        """Every open run in Redis, with identity from the sentinel value and a
+        live event count from `XLEN`. Cross-process: surfaces runs opened by
+        any process — this is what lets the web backend list a running CLI run.
+
+        `flush()` first so a just-opened run in *this* process (its queued SET)
+        is visible before the SCAN — matters for single-process tests; a no-op
+        for a pure consumer like the web backend that opens nothing itself.
+        """
+        await self.flush()
+        pattern = f"{self._key_prefix}:run:*:open"
+        runs: list[LiveRun] = []
+        async for key in self._client.scan_iter(match=pattern):
+            key_bytes = cast("bytes", key)
+            run_id = _run_id_from_open_key(self._key_prefix, key_bytes)
+            keys = _keys_for(self._key_prefix, run_id)
+            raw = cast("bytes | None", await self._client.get(keys.open))
+            if raw is None:
+                # Sentinel expired between SCAN and GET — no longer live, skip.
+                continue
+            meta = _decode_sentinel(raw)
+            n_events = cast("int", await self._client.xlen(keys.events))
+            runs.append(
+                LiveRun(
+                    run_id=run_id,
+                    label=meta.label,
+                    started_at=meta.started_at,
+                    n_events=n_events,
+                )
+            )
+        return runs
 
     # ---- Publish ------------------------------------------------------
 

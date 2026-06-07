@@ -1,18 +1,18 @@
 # `arena-web/` — Arena Replay Backend
 
 FastAPI + SSE backend for inspecting arena event logs and creating
-operator-driven forks. The Vite/React/Tailwind SPA frontend lives at the
-top-level `ui/` directory (separate Bun workspace, deployed independently).
+operator-driven forks. The Vite/React/Tailwind SPA frontend lives at
+`apps/dashboard/` (separate Bun workspace, deployed independently).
 
 ## What's here
 
 ```
-packages/arena-web/src/
+apps/api/src/
 ├── __main__.py     # CLI: aoe2-arena-web --port 8000
 ├── server.py       # FastAPI app: /runs, /events, /forks, /metrics, /health
 └── forks.py        # /forks handler + create_fork + background replay
 
-ui/                                         # ← top-level, separate workspace
+apps/dashboard/                             # ← separate Bun workspace
 ├── package.json
 ├── vite.config.ts                          # dev proxy for /runs, /events, /forks, /health
 ├── .env.example                            # VITE_API_BASE_URL for cross-host dev
@@ -41,8 +41,8 @@ Browse <http://localhost:5173>, pick a run.
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/health` | Liveness. |
-| `GET` | `/runs` | List runs from every DuckDB under `ARENA_LOGS_ROOT`. |
-| `GET` | `/events?run_id=X&from_seq=N` | SSE — live broker for active runs, cold DuckDB scan for finalized. |
+| `GET` | `/runs` | Live runs from the broker (`status: "running"`) merged over finalized runs from every DuckDB under `ARENA_LOGS_ROOT` (`status: "complete"`). |
+| `GET` | `/events?run_id=X&from_seq=N` | SSE — live broker for active runs (`is_open_remote`), cold DuckDB scan for finalized. |
 | `POST` | `/forks` | Snapshot + optionally mutate + schedule N-turn async replay. |
 | `GET` | `/metrics` | Broker counters (`events_published`, `events_streamed`, `streams_dropped`, `runs_open`). |
 

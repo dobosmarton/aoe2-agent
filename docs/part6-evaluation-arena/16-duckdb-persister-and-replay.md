@@ -170,7 +170,7 @@ The HTTP wrapper around `fork()` plus the `n_turn` async replay is in `apps/api/
 
 Reframing DuckDB as a broker consumer (rather than the source of truth) buys three properties that the original Phase 9 design didn't have:
 
-1. **No file-mode collisions.** Only the persister opens the writer's file. SSE reads from the broker for live runs; the cold path opens read-only only for finalized runs.
+1. **No file-mode collisions.** Only the persister opens the writer's file. SSE reads from the broker for live runs; the cold path opens read-only only for finalized runs. The one reader-side exception — the web `/runs` listing and `_resolve_run` cold-scanning a *separate-process* live run's still-locked file (DuckDB is single-writer) — is handled by skipping locked files (Chapter 19). A live run is served from the broker anyway, so skipping costs nothing.
 2. **N consumers, same wire.** Adding a Langfuse mirror or an OLAP store is a new `async for envelope in broker.stream(...)` coroutine — no producer changes, no DuckDB churn.
 3. **Cold and live look the same to readers.** Same `EventEnvelope` shape, same `Seq` semantics, swap is transparent in `apps/api/src/server.py:events()`.
 

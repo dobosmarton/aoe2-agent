@@ -28,6 +28,19 @@ Browse to <http://localhost:5173>. Pick a run from the left sidebar.
 
 `just arena-web-dev` resolves to `python -m arena_web --port 8000` (`apps/api/src/__main__.py`). `just arena-ui-dev` runs `bun install` (idempotent) then `bun run dev`. Both recipes are in `justfile:138` and `:165`.
 
+## Watching a run live (cross-process)
+
+The recipe above replays *finalized* runs. To watch a run **as it happens**, the producer (the arena CLI) and the consumer (the web backend) must share a Redis broker — an in-process broker is private to each process, so the only thing they'd otherwise share is the writer-locked DuckDB file. The `*-redis` recipes set `ARENA_BROKER_BACKEND=redis` for you (`set dotenv-load` puts `REDIS_PASSWORD` in scope, and `make_broker()` builds the AUTH'd URL):
+
+```bash
+just arena-infra-up          # 1. Redis (+ compose stack) up
+just arena-web-dev-redis     # 2. backend on :8000, redis mode
+just arena-ui-dev            # 3. dashboard on :5173
+just arena-rank-redis        # 4. a run, in another shell (or arena-race-redis)
+```
+
+No API key? `ARENA_BROKER_BACKEND=redis just arena-smoke` does a mock-LLM run with the same wiring (it's fast, so the live window is short). The run shows in the sidebar with a pulsing **live** badge while in progress (`status: "running"` from `/runs`) and the World panel fills in as turns arrive. The list is fetched once per page load, so reload to pick up newly-started runs; when the run finishes it becomes a normal finalized run (`status: "complete"`), readable from its DuckDB file even after Redis reaps the stream. See [Runbook: switching-broker-backend](../runbooks/switching-broker-backend.md).
+
 ## Configuration knobs
 
 ### Backend

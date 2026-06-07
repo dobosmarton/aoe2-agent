@@ -33,7 +33,7 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Final, Literal, cast
 
 import duckdb
 from arena_web.forks import ForkRequest, ForkResponse, create_fork
@@ -42,6 +42,7 @@ from evaluation.event_broker import (
     BrokerOverflowError,
     EventBroker,
     InProcessEventBroker,
+    LiveRun,
     RunId,
     Seq,
 )
@@ -52,13 +53,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Iterator
+    from collections.abc import AsyncIterator, Iterator, Sequence
 
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_LOGS_ROOT = Path("logs") / "arena"
 _DEFAULT_CORS_ORIGINS = ("http://localhost:5173", "http://localhost:8000")
+# Shown as a live run's label when the broker recorded no identity (e.g. a
+# legacy `b"1"` sentinel). In practice every arena run supplies a real label.
+_UNKNOWN_LABEL: Final = "?"
 
 
 # ---------------------------------------------------------------------------
@@ -66,9 +70,20 @@ _DEFAULT_CORS_ORIGINS = ("http://localhost:5173", "http://localhost:8000")
 # ---------------------------------------------------------------------------
 
 
+RunStatus = Literal["running", "complete"]
+"""A run is either live on the broker ("running") or a finalized DuckDB file
+("complete"). Mirrors the frontend's `status` union in `lib/events.ts`."""
+
+
 @dataclass(frozen=True, slots=True)
 class RunSummary:
-    """One row in the /runs response — describes a single run within a log file."""
+    """One row in the /runs response.
+
+    `status` is "running" for a live run discovered via the broker (the source
+    of truth for in-progress runs) or "complete" for a finalized run read from
+    a cold DuckDB file. Live rows carry an empty `db_path` — the frontend keys
+    and selects by `run_id`, never the path.
+    """
 
     run_id: str
     db_path: str
@@ -76,6 +91,7 @@ class RunSummary:
     n_events: int
     first_ts: str
     last_ts: str
+    status: RunStatus
 
 
 # ---------------------------------------------------------------------------
@@ -164,8 +180,27 @@ def _label_from_filename(db_path: Path) -> str:
     return stem.split("-", 1)[0] if "-" in stem else stem
 
 
+def _connect_read_only(db_path: Path) -> duckdb.DuckDBPyConnection | None:
+    """Open `db_path` read-only, or return None if a live writer holds it.
+
+    DuckDB's single-writer file format refuses a read-only connection while
+    another process has the database open for writing (a concurrent
+    `arena rank` run writing its own log file). Callers skip such files
+    rather than failing the whole request — the file becomes readable again
+    once the writer finalizes and releases the lock. Active runs remain
+    observable in the meantime via the /events broker (see module docstring).
+    """
+    try:
+        return duckdb.connect(str(db_path), read_only=True)
+    except duckdb.IOException as exc:
+        logger.warning("skipping locked/unreadable DuckDB %s: %s", db_path, exc)
+        return None
+
+
 def _runs_in_file(db_path: Path) -> list[RunSummary]:
-    conn = duckdb.connect(str(db_path), read_only=True)
+    conn = _connect_read_only(db_path)
+    if conn is None:
+        return []
     try:
         rows = cast(
             "list[tuple[object, ...]]",
@@ -185,6 +220,7 @@ def _runs_in_file(db_path: Path) -> list[RunSummary]:
             n_events=int(cast("int", row[1])),
             first_ts=_ts_to_str(row[2]),
             last_ts=_ts_to_str(row[3]),
+            status="complete",
         )
         for row in rows
     ]
@@ -204,14 +240,33 @@ def _list_runs(root: Path) -> list[RunSummary]:
 
 
 def _resolve_run(run_id: str, root: Path) -> Path:
+    # This scans every log file to find the one holding `run_id`. A single
+    # file locked by a live writer must not fail the lookup of an unrelated,
+    # readable run — skip locked files and keep searching, but remember we
+    # did so to pick the right "not found" status below.
+    locked = False
     for db_path in _all_duckdb_files(root):
-        conn = duckdb.connect(str(db_path), read_only=True)
+        conn = _connect_read_only(db_path)
+        if conn is None:
+            locked = True
+            continue
         try:
             row = conn.execute("SELECT 1 FROM events WHERE run_id=? LIMIT 1", [run_id]).fetchone()
         finally:
             conn.close()
         if row is not None:
             return db_path
+    if locked:
+        # The run is in none of the *readable* logs, but a writer-locked log
+        # might hold it. Surface 503 (transient — retry once the writer
+        # finalizes) rather than 404 (permanent). Live runs normally stream
+        # via the broker before reaching this path; this covers cross-process
+        # writers the in-memory broker can't see.
+        raise HTTPException(
+            status_code=503,
+            detail=f"run_id {run_id!r} not in readable logs; a log file is "
+            "locked by an active writer — retry shortly",
+        )
     raise HTTPException(status_code=404, detail=f"run_id {run_id!r} not found")
 
 
@@ -286,10 +341,40 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def _live_summaries(live: Sequence[LiveRun]) -> list[RunSummary]:
+    """Map the broker's `LiveRun`s to `/runs` rows. `db_path` is empty (a live
+    run has no finalized file yet); `started_at` doubles as `first_ts`/`last_ts`
+    — the UI renders `first_ts`, and a real tail timestamp isn't worth a Redis
+    round-trip on every list."""
+    return [
+        RunSummary(
+            run_id=lr.run_id,
+            db_path="",
+            label=lr.label or _UNKNOWN_LABEL,
+            n_events=lr.n_events,
+            first_ts=lr.started_at or "",
+            last_ts=lr.started_at or "",
+            status="running",
+        )
+        for lr in live
+    ]
+
+
+def _merge_runs(live: list[RunSummary], cold: list[RunSummary]) -> list[RunSummary]:
+    """Live runs (the broker's authoritative view of in-progress runs) come
+    first and shadow any cold DuckDB row for the same run_id — the brief
+    close→file-unlock window is the only time both could list the same run."""
+    live_ids = {r.run_id for r in live}
+    return [*live, *(c for c in cold if c.run_id not in live_ids)]
+
+
 @app.get("/runs")
-async def runs() -> list[dict[str, object]]:
-    summaries = await asyncio.to_thread(_list_runs, _logs_root())
-    return [asdict(s) for s in summaries]
+async def runs(broker: EventBroker = Depends(get_broker)) -> list[dict[str, object]]:
+    # Symmetric with /events: the broker is the source of truth for live runs,
+    # the cold DuckDB scan covers finalized ones.
+    cold = await asyncio.to_thread(_list_runs, _logs_root())
+    live = _live_summaries(await broker.live_runs())
+    return [asdict(s) for s in _merge_runs(live, cold)]
 
 
 async def _stream_from_broker(
@@ -345,7 +430,11 @@ async def events(
     extra complexity.
     """
     typed_run = RunId(run_id)
-    if broker.is_open(typed_run):
+    # `is_open_remote` (not `is_open`) is the cross-process liveness signal: the
+    # web process never opened this run — a separate CLI process did — so the
+    # process-local `is_open` would be False and we'd wrongly fall to the
+    # writer-locked DuckDB. For the in-process broker the two coincide.
+    if await broker.is_open_remote(typed_run):
         return StreamingResponse(
             _stream_from_broker(broker, typed_run, Seq(from_seq)),
             media_type="text/event-stream",

@@ -42,7 +42,9 @@ from evaluation.event_broker import (
     EventBroker,
     EventEnvelope,
     InProcessEventBroker,
+    LiveRun,
     RunId,
+    RunMeta,
     Seq,
 )
 
@@ -133,6 +135,79 @@ def test_lifecycle_open_publish_stream_close(
     assert [e.seq for e in envs] == [Seq(1), Seq(2), Seq(3), Seq(4), Seq(5)]
     assert [e.event.t for e in envs] == [0, 1, 2, 3, 4]
     assert all(e.run_id == RunId("r1") for e in envs)
+
+
+# ---------------------------------------------------------------------------
+# Live-run directory — the cross-process discovery surface the web `/runs` and
+# `/events` endpoints depend on. Parametrized, so both impls are covered.
+# ---------------------------------------------------------------------------
+
+
+def test_is_open_remote_tracks_open_state(broker: EventBroker) -> None:
+    async def scenario() -> tuple[bool, bool]:
+        run = RunId("r1")
+        broker.open_run(run)
+        while_open = await broker.is_open_remote(run)
+        broker.close_run(run)
+        after_close = await broker.is_open_remote(run)
+        return while_open, after_close
+
+    while_open, after_close = asyncio.run(scenario())
+    assert while_open is True
+    assert after_close is False
+
+
+def test_live_runs_lists_open_run_with_meta(broker: EventBroker) -> None:
+    async def scenario() -> list[LiveRun]:
+        run = RunId("r1")
+        broker.open_run(run, RunMeta(label="rank", started_at="2026-06-07T12:00:00+00:00"))
+        return list(await broker.live_runs())
+
+    live = asyncio.run(scenario())
+    assert len(live) == 1
+    (lr,) = live
+    assert lr.run_id == RunId("r1")
+    assert lr.label == "rank"
+    assert lr.started_at == "2026-06-07T12:00:00+00:00"
+
+
+def test_live_runs_counts_published_events(
+    broker: EventBroker, build_event: Callable[..., Event]
+) -> None:
+    async def scenario() -> list[LiveRun]:
+        run = RunId("r1")
+        broker.open_run(run, RunMeta(label="race"))
+        for i in range(3):
+            await broker.publish(run, build_event(run, t=i))
+        return list(await broker.live_runs())
+
+    live = asyncio.run(scenario())
+    assert len(live) == 1
+    assert live[0].n_events == 3
+
+
+def test_live_runs_excludes_closed_run(broker: EventBroker) -> None:
+    async def scenario() -> list[LiveRun]:
+        run = RunId("r1")
+        broker.open_run(run, RunMeta(label="rank"))
+        broker.close_run(run)
+        return list(await broker.live_runs())
+
+    assert asyncio.run(scenario()) == []
+
+
+def test_open_run_without_meta_still_lists_live(broker: EventBroker) -> None:
+    # Fork/test producers open runs without metadata; the run is still live,
+    # just with empty identity.
+    async def scenario() -> list[LiveRun]:
+        run = RunId("r1")
+        broker.open_run(run)
+        return list(await broker.live_runs())
+
+    live = asyncio.run(scenario())
+    assert len(live) == 1
+    assert live[0].run_id == RunId("r1")
+    assert live[0].label is None
 
 
 def test_open_twice_raises_value_error(broker: EventBroker) -> None:

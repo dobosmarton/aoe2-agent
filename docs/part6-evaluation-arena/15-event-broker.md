@@ -12,19 +12,23 @@ This chapter is the kept-current reference. For the architectural rationale (why
 
 ## The Protocol
 
-`packages/evaluation/src/event_broker.py:130` defines the `EventBroker` Protocol. Six methods, no inheritance:
+`packages/evaluation/src/event_broker.py:159` defines the `EventBroker` Protocol. Eight methods, no inheritance:
 
 ```python
 class EventBroker(Protocol):
-    def open_run(self, run_id: RunId) -> None
+    def open_run(self, run_id: RunId, meta: RunMeta | None = None) -> None
     def close_run(self, run_id: RunId) -> None
     def reap(self, run_id: RunId) -> None
     def is_open(self, run_id: RunId) -> bool
+    async def is_open_remote(self, run_id: RunId) -> bool
+    async def live_runs(self) -> Sequence[LiveRun]
     async def publish(self, run_id: RunId, event: Event) -> Seq
     def stream(self, run_id: RunId, from_seq: Seq = Seq(0)) -> AsyncIterator[EventEnvelope]
 ```
 
 Lifecycle is `open_run → publish * N → close_run → reap`. Consumers call `stream(run_id, from_seq)` once — one call covers both replay (events with `seq >= from_seq`) and live tail.
+
+`open_run` takes optional `RunMeta(label, started_at)` — producer-supplied run identity (the CLI label, start time) that the live-discovery surface below exposes. The broker stays time-agnostic: the producer stamps `started_at`, the broker just stores it. Forks and tests open runs without meta.
 
 Two new types make illegal states unrepresentable at the type checker:
 
@@ -41,6 +45,15 @@ Two new types make illegal states unrepresentable at the type checker:
 | `RedisStreamsBroker` (`packages/evaluation/src/redis_broker.py:178`) | Phase C and beyond. Cross-process replay — e.g. FastAPI live-tailing a CLI race. | `redis` (install via `broker-redis` extra) | Yes |
 
 Both implement the same Protocol and pass the same parametrized contract test suite in `tests/test_event_broker.py` byte-for-byte at the envelope level. That's the design's strongest guarantee: a publisher does not know which backend is in play, and a subscriber sees identical `Seq` values, ordering, drain-on-close, and overflow semantics either way.
+
+## Live-run discovery
+
+If the broker is the source of truth for live *events*, it is also the source of truth for *which runs are live*. Two Protocol methods expose that, and the web `/runs` and `/events` endpoints consume them (Chapter 19):
+
+- `is_open_remote(run_id) -> bool` — is the run open *anywhere*, across processes? This is the cross-process liveness signal a consumer uses to choose the live broker path over the cold DuckDB store. Distinct from `is_open`, which is **process-local** (a publisher's "did *I* open this" guard): a web backend live-tailing a separate CLI run never opened the run itself, so `is_open` would be `False` for it. For `InProcessEventBroker` the two coincide (single process); `RedisStreamsBroker` answers from the shared `:open` sentinel (`redis_broker.py:331`).
+- `live_runs() -> Sequence[LiveRun]` — every currently-open run with its identity and a live event count. `InProcessEventBroker` reads its `_open` set + stored `RunMeta` + buffer length; `RedisStreamsBroker` (`redis_broker.py:343`) `SCAN`s the `:open` sentinels, decodes each value, and `XLEN`s the stream.
+
+`RunMeta(label, started_at)` and `LiveRun(run_id, label, started_at, n_events)` (`event_broker.py:82`, `:91`) are the small frozen value objects these carry. The Redis impl stores `RunMeta` as JSON in the `:open` sentinel *value* — `is_open_remote` only checks key existence, so the value is free real estate for run identity, and a legacy bare `b"1"` sentinel decodes to empty identity rather than raising.
 
 ## Switching backends
 
@@ -76,7 +89,7 @@ Redis broker (`redis_broker.py:178`):
 
 The Redis impl resolves a tricky impedance mismatch: the Protocol's `open_run` / `close_run` / `reap` are synchronous, but Redis admin needs network I/O for the side effect to be visible to other processes. The fix is a `_pending_admin` queue of zero-arg thunks (`redis_broker.py:214`) drained at the top of every `publish` / `stream` call via `flush()`. Callers who need the open/close sentinel observable cross-process *before* the next broker method runs can call `await broker.flush()` explicitly — chiefly: just before a publisher process exits.
 
-The `:open` sentinel uses `SET ... EX <grace>` (`redis_broker.py:260`) so an abandoned producer eventually self-cleans. `is_open()` is process-local per Protocol; cross-process truth is `is_open_remote()` which reads the Redis sentinel directly (`redis_broker.py:283`).
+The `:open` sentinel uses `SET ... EX <grace>` (`redis_broker.py:292`) so an abandoned producer eventually self-cleans; its value carries the run's `RunMeta` as JSON (see [Live-run discovery](#live-run-discovery) above). `is_open()` is process-local per Protocol; cross-process truth is `is_open_remote()` (`redis_broker.py:331`), which the web `/events` dispatch uses to choose the live path over the cold store.
 
 There is one known SDK gotcha hardened against in code: `XREAD BLOCK` cancellation can leave the redis-py connection in an indeterminate state (upstream issue #2624). The `stream()` method catches `CancelledError` / `GeneratorExit` and force-evicts idle connections from the pool (`redis_broker.py:340–379`). Without this, a subsequent `publish` reads the stale XREAD response off the wire and sees `None` where it expected an INCR result.
 

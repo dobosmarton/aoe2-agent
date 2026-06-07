@@ -32,8 +32,8 @@ The HTTP contract is frozen so the frontend can evolve independently:
 | Method | Path | Returns | Purpose |
 |---|---|---|---|
 | `GET` | `/health` | `{"status": "ok"}` | Liveness ping. |
-| `GET` | `/runs` | `list[RunSummary]`, newest first | Index every run in every DuckDB file under `ARENA_LOGS_ROOT` (default `logs/arena/`). |
-| `GET` | `/events?run_id=X&from_seq=N` | `text/event-stream` | Replay + live-tail. Switches to live broker mode when `broker.is_open(run_id)`, falls back to cold DuckDB scan otherwise. |
+| `GET` | `/runs` | `list[RunSummary]`, newest first | Live runs from the broker (`status: "running"`) merged over finalized runs read from every DuckDB file under `ARENA_LOGS_ROOT` (`status: "complete"`). |
+| `GET` | `/events?run_id=X&from_seq=N` | `text/event-stream` | Replay + live-tail. Switches to live broker mode when `broker.is_open_remote(run_id)`, falls back to cold DuckDB scan otherwise. |
 | `POST` | `/forks` | `ForkResponse` | Snapshot the parent at `parent_t`, optionally mutate, schedule an N-turn async replay. |
 | `GET` | `/metrics` | `BrokerMetricsSnapshot` JSON | Operational counters (see Chapter 15). Backend-agnostic via `isinstance` dispatch. |
 
@@ -52,21 +52,27 @@ On shutdown: cancel the reaper *before* the fork tasks (otherwise the reaper cou
 
 `app.state.broker`, `app.state.reaper`, `app.state.fork_tasks` are exposed via three FastAPI dependencies (`get_broker`, `get_reaper`, `get_fork_tasks`). The dependency boundary uses `cast` rather than `isinstance` because the lifespan is the single writer of these slots — a runtime `isinstance` check would be hostile to the multi-backend broker design.
 
+## `/runs` — live + cold
+
+`server.py:372` (`runs`) is symmetric with `/events`: the broker is the source of truth for in-progress runs, the cold DuckDB scan for finalized ones. It calls `broker.live_runs()` (mapped to `RunSummary(status="running", db_path="", …)` by `_live_summaries`, `server.py:344`), `_list_runs` for the cold DuckDB rows (`status="complete"`), and `_merge_runs` (`server.py:363`) concatenates them — **live wins** on a run_id collision, which only happens during the brief window after a run closes but before its writer process releases the DuckDB lock. A live run's `db_path` is empty; the frontend keys and selects by `run_id`, never the path (Chapter 15's [live-run discovery](../part6-evaluation-arena/15-event-broker.md#live-run-discovery)).
+
 ## `/events` — live vs cold
 
-`server.py:330` (`events`) is the load-bearing dispatch:
+`server.py:415` (`events`) is the load-bearing dispatch:
 
 ```python
 typed_run = RunId(run_id)
-if broker.is_open(typed_run):
+if await broker.is_open_remote(typed_run):
     return StreamingResponse(_stream_from_broker(broker, typed_run, Seq(from_seq)), ...)
 db_path = await asyncio.to_thread(_resolve_run, run_id, _logs_root())
 return StreamingResponse(_stream_from_cold(db_path, typed_run), ...)
 ```
 
+It dispatches on `is_open_remote`, **not** `is_open` — the web process never opened the run (a separate CLI process did), so the process-local `is_open` would be `False` and we'd wrongly fall through to the writer-locked DuckDB. `is_open_remote` is the cross-process liveness signal; for the in-process broker the two coincide, so single-process forks and the test suite are unaffected.
+
 The frontend doesn't need to know which path it's getting. The byte-equivalence guarantee (broker path emits `payload.model_dump_json()`; cold path emits the same via `stream_cold`, guarded by `test_payload_roundtrip_is_byte_stable`) is what makes this transparent.
 
-`_resolve_run` (`server.py:207`) is a newest-first scan over `logs/arena/*/*.duckdb`. It opens each file read-only (which is safe because the producer rule from Chapter 16 says only the persister opens files RW for the run's lifetime). Throws 404 if no file contains the run.
+`_resolve_run` (`server.py:242`) is a newest-first scan over `logs/arena/*/*.duckdb`. It opens each file read-only via `_connect_read_only` (`server.py:183`), which **skips a file a writer holds locked** rather than erroring — a separate-process live run holds its own DuckDB RW, and DuckDB is single-writer. Such runs are served from the broker (above), not cold; if the requested run is in none of the *readable* files but a locked one might hold it, the handler returns 503 (transient) instead of 404 (permanent). Throws 404 if no file contains the run and none are locked.
 
 `_stream_from_broker` (`server.py:296`) catches `BrokerOverflowError` and emits the overflow SSE line. Cold path (`_stream_from_cold` at `server.py:317`) is synchronous because DuckDB iteration is blocking — Starlette drives it on its thread pool, which is honest about the cost instead of hiding it behind `to_thread`.
 

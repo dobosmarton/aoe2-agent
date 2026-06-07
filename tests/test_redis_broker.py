@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -36,6 +37,7 @@ pytest.importorskip("fakeredis.aioredis")
 from evaluation.event_broker import (
     BrokerOverflowError,
     RunId,
+    RunMeta,
     Seq,
 )
 from evaluation.redis_broker import RedisStreamsBroker
@@ -399,3 +401,46 @@ def test_cancelled_stream_leaves_same_broker_usable(
 
     seen = asyncio.run(scenario())
     assert seen == [0, 1]
+
+
+# ---------------------------------------------------------------------------
+# Sentinel-value codec — run identity rides in the `:open` value as JSON, but
+# `is_open_remote` (EXISTS) and legacy `b"1"` readers must keep working.
+# ---------------------------------------------------------------------------
+
+
+def test_open_run_stores_json_meta_in_sentinel() -> None:
+    """`open_run(meta=...)` writes the label/started_at as JSON in the `:open`
+    value, so the cross-process `live_runs` reader can recover run identity."""
+
+    async def scenario() -> bytes | None:
+        harness = _make_harness()
+        run = RunId("r1")
+        harness.broker.open_run(run, RunMeta(label="rank", started_at="2026-06-07T12:00:00+00:00"))
+        # is_open_remote flushes the queued SET, making the value readable.
+        assert await harness.broker.is_open_remote(run) is True
+        return await harness.client.get(f"{harness.key_prefix}:run:r1:open".encode())
+
+    raw = asyncio.run(scenario())
+    assert raw is not None
+    assert json.loads(raw) == {"label": "rank", "started_at": "2026-06-07T12:00:00+00:00"}
+
+
+def test_live_runs_tolerates_legacy_b1_sentinel() -> None:
+    """A sentinel written by older code is the bare `b"1"`. `live_runs` must
+    surface the run with empty identity rather than crashing on JSON parse —
+    matters during a rolling deploy where both encodings coexist."""
+
+    async def scenario() -> list[object]:
+        harness = _make_harness()
+        # Plant a legacy sentinel directly, as pre-meta code would have.
+        await harness.client.set(f"{harness.key_prefix}:run:legacy1:open".encode(), b"1")
+        return list(await harness.broker.live_runs())
+
+    live = asyncio.run(scenario())
+    assert len(live) == 1
+    lr = live[0]
+    assert lr.run_id == RunId("legacy1")
+    assert lr.label is None
+    assert lr.started_at is None
+    assert lr.n_events == 0

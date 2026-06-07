@@ -32,7 +32,7 @@ from itertools import count
 from typing import TYPE_CHECKING, NewType, Protocol
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Sequence
 
     from evaluation.event_log import Event
 
@@ -68,6 +68,35 @@ class EventEnvelope:
     run_id: RunId
     seq: Seq
     event: Event
+
+
+# ---------------------------------------------------------------------------
+# Run-level metadata — the broker is the live source of truth for *which*
+# runs are open, so it also carries the small identity bits the `/runs`
+# endpoint needs (label, start time). Producer-supplied so the broker stays
+# time-agnostic (wall-clock policy lives in the web server's reaper, not here).
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class RunMeta:
+    """Identity attached to a run at `open_run`. Both fields optional so the
+    fork/test paths can open a run without supplying any."""
+
+    label: str | None = None
+    started_at: str | None = None  # ISO-8601, producer's wall clock
+
+
+@dataclass(frozen=True, slots=True)
+class LiveRun:
+    """One currently-open run, as the `/runs` live source needs it: identity
+    from `RunMeta` plus a live event count. `started_at` doubles as the
+    summary's `first_ts` — a cheap stand-in that avoids reading the stream."""
+
+    run_id: RunId
+    label: str | None
+    started_at: str | None
+    n_events: int
 
 
 # ---------------------------------------------------------------------------
@@ -134,8 +163,13 @@ class EventBroker(Protocol):
     Consumers call `stream(run_id, from_seq)` — one call covers replay+tail.
     """
 
-    def open_run(self, run_id: RunId) -> None:
-        """Begin a new run. Raises if already open."""
+    def open_run(self, run_id: RunId, meta: RunMeta | None = None) -> None:
+        """Begin a new run. Raises if already open.
+
+        `meta` is optional run identity (label, start time) that the live
+        `/runs` source surfaces. Callers that don't care (forks, tests) omit
+        it; the broker never requires it to function.
+        """
         ...
 
     def close_run(self, run_id: RunId) -> None:
@@ -152,7 +186,31 @@ class EventBroker(Protocol):
         ...
 
     def is_open(self, run_id: RunId) -> bool:
-        """True iff the run is currently accepting publishes."""
+        """True iff *this process* opened the run and is accepting publishes.
+
+        Process-local: a publisher uses it to guard `publish`. Cross-process
+        consumers (a web backend live-tailing a CLI run) must use
+        `is_open_remote` — the local set is empty in a process that never
+        opened the run. For the in-process impl the two coincide.
+        """
+        ...
+
+    async def is_open_remote(self, run_id: RunId) -> bool:
+        """True iff the run is open *anywhere* — the cross-process liveness
+        signal a consumer uses to choose the live path over the cold store.
+
+        For `InProcessEventBroker` this is the same as `is_open`; for a
+        distributed impl it queries the shared backend (e.g. Redis sentinel).
+        """
+        ...
+
+    async def live_runs(self) -> Sequence[LiveRun]:
+        """Every currently-open run with its identity + live event count.
+
+        The live source of truth for run discovery — symmetric with how
+        `stream`/`is_open_remote` serve live *events*. Finalized runs are the
+        cold store's job, not the broker's.
+        """
         ...
 
     async def publish(self, run_id: RunId, event: Event) -> Seq:
@@ -222,18 +280,21 @@ class InProcessEventBroker:
         self._head_seq: dict[RunId, int] = {}
         self._seq: dict[RunId, count[int]] = {}
         self._open: set[RunId] = set()
+        self._meta: dict[RunId, RunMeta] = {}
         self._waiters: dict[RunId, list[asyncio.Event]] = defaultdict(list)
         self._metrics_events_published = 0
         self._metrics_events_streamed = 0
         self._metrics_streams_dropped = 0
 
-    def open_run(self, run_id: RunId) -> None:
+    def open_run(self, run_id: RunId, meta: RunMeta | None = None) -> None:
         if run_id in self._open:
             raise ValueError(f"run {run_id!r} is already open")
         self._buffers.setdefault(run_id, deque(maxlen=self._max_buffer_size))
         self._head_seq.setdefault(run_id, 1)
         self._seq[run_id] = count(1)
         self._open.add(run_id)
+        if meta is not None:
+            self._meta[run_id] = meta
 
     def close_run(self, run_id: RunId) -> None:
         self._open.discard(run_id)
@@ -247,9 +308,34 @@ class InProcessEventBroker:
         self._buffers.pop(run_id, None)
         self._head_seq.pop(run_id, None)
         self._seq.pop(run_id, None)
+        self._meta.pop(run_id, None)
 
     def is_open(self, run_id: RunId) -> bool:
         return run_id in self._open
+
+    async def is_open_remote(self, run_id: RunId) -> bool:
+        # Single-process broker: "open anywhere" collapses to "open here".
+        return self.is_open(run_id)
+
+    async def live_runs(self) -> list[LiveRun]:
+        # Read `_open` (not `_buffers`, which lingers after close until reap),
+        # so a finalized run drops out of the live source immediately.
+        runs: list[LiveRun] = []
+        for rid in self._open:
+            # `or RunMeta()` collapses the "opened without metadata" case to an
+            # empty identity (a frozen dataclass is always truthy), so each
+            # field reads off `meta` without a per-field None check.
+            meta = self._meta.get(rid) or RunMeta()
+            buf = self._buffers.get(rid)
+            runs.append(
+                LiveRun(
+                    run_id=rid,
+                    label=meta.label,
+                    started_at=meta.started_at,
+                    n_events=len(buf) if buf is not None else 0,
+                )
+            )
+        return runs
 
     async def publish(self, run_id: RunId, event: Event) -> Seq:
         if run_id not in self._open:
@@ -371,6 +457,8 @@ __all__ = [
     "EventBroker",
     "EventEnvelope",
     "InProcessEventBroker",
+    "LiveRun",
     "RunId",
+    "RunMeta",
     "Seq",
 ]

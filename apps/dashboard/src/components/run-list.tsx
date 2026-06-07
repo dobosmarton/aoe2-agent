@@ -72,7 +72,22 @@ export function RunList({
                     <span className="truncate" title={run.run_id}>
                       {run.run_id.slice(0, 8)}…
                     </span>
-                    <Badge variant={labelVariant(run.label)}>{run.label}</Badge>
+                    <span className="flex shrink-0 items-center gap-1">
+                      {run.status === "running" && (
+                        <Badge
+                          variant="outline"
+                          className="gap-1 border-emerald-500/40 text-emerald-600 dark:text-emerald-400"
+                          title="Run in progress — reload to refresh"
+                        >
+                          <span className="relative flex size-1.5">
+                            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-75" />
+                            <span className="relative inline-flex size-1.5 rounded-full bg-emerald-500" />
+                          </span>
+                          live
+                        </Badge>
+                      )}
+                      <Badge variant={labelVariant(run.label)}>{run.label}</Badge>
+                    </span>
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="text-muted-foreground space-y-1 text-xs">

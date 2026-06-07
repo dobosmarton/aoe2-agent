@@ -76,9 +76,13 @@ async def _run_through_broker(
     guarantees the file is consistent on disk by the time we return.
     """
     broker = make_broker()
+    # `<label>-<HHMMSS>.duckdb` per `_new_db_path` — the label the live `/runs`
+    # source shows for this run. Deriving it from the path keeps the filename
+    # the single source of truth (matches the cold path's `_label_from_filename`).
+    label = db_path.stem.split("-", 1)[0]
     with duckdb.connect(str(db_path)) as conn:
         db_sink = DuckDBEventSink(conn)
-        sink = MultiRunBrokerSink(broker, db_sink, asyncio.get_running_loop())
+        sink = MultiRunBrokerSink(broker, db_sink, asyncio.get_running_loop(), label=label)
         try:
             return await producer(sink)
         finally:

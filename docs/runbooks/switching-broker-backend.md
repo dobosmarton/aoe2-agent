@@ -48,15 +48,16 @@ The strongest verification is a live round-trip: start the web server in one she
 ```bash
 # Terminal 1
 export ARENA_BROKER_BACKEND=redis
-just arena-web-dev
+just arena-web-dev          # or `just arena-web-dev-redis` (sets the env var for you)
 
 # Terminal 2 (same export)
 export ARENA_BROKER_BACKEND=redis
-just arena-smoke
+just arena-smoke            # or `just arena-rank-redis` / `just arena-race-redis`
 
 # Terminal 3
 curl -s http://localhost:8000/runs | jq '.[0]'
-# Should show a run with first_ts within the last few seconds
+# Should show {"status": "running", ...} while the run is in flight (surfaced
+# from the broker via live_runs), flipping to "complete" once it finalizes.
 
 curl -sN "http://localhost:8000/events?run_id=$(curl -s http://localhost:8000/runs | jq -r '.[0].run_id')" | head -5
 # Should stream events from t=0 onwards

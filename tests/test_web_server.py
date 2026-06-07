@@ -102,6 +102,59 @@ def test_runs_reports_label_from_filename(client: TestClient, logs_root: Path) -
     assert client.get("/runs").json()[0]["label"] == "smoke"
 
 
+def test_runs_marks_cold_runs_complete(client: TestClient, logs_root: Path) -> None:
+    _make_log(logs_root / "2026-05-20" / "race-120000.duckdb", run_id="alpha")
+    (row,) = client.get("/runs").json()
+    assert row["status"] == "complete"
+
+
+def test_runs_includes_live_run_from_broker(client: TestClient) -> None:
+    """A run open on the app's broker is listed as `status:"running"` with the
+    broker-supplied identity and an empty db_path — the live source of truth."""
+    from arena_web import server as server_module
+    from evaluation.event_broker import InProcessEventBroker, RunId, RunMeta
+
+    broker = server_module.app.state.broker
+    assert isinstance(broker, InProcessEventBroker)
+    run = RunId("live-1")
+    broker.open_run(run, RunMeta(label="rank", started_at="2026-06-07T12:00:00+00:00"))
+    try:
+        payload = client.get("/runs").json()
+    finally:
+        broker.close_run(run)
+        broker.reap(run)
+
+    live_rows = [r for r in payload if r["status"] == "running"]
+    assert len(live_rows) == 1
+    row = live_rows[0]
+    assert row["run_id"] == "live-1"
+    assert row["label"] == "rank"
+    assert row["db_path"] == ""
+    assert row["first_ts"] == "2026-06-07T12:00:00+00:00"
+
+
+def test_runs_dedups_live_over_cold(client: TestClient, logs_root: Path) -> None:
+    """During the close→file-unlock window a run can be both broker-open and on
+    disk; it must list once, with the live row winning."""
+    from arena_web import server as server_module
+    from evaluation.event_broker import InProcessEventBroker, RunId, RunMeta
+
+    _make_log(logs_root / "2026-05-20" / "rank-100000.duckdb", run_id="dup")
+    broker = server_module.app.state.broker
+    assert isinstance(broker, InProcessEventBroker)
+    run = RunId("dup")
+    broker.open_run(run, RunMeta(label="rank"))
+    try:
+        payload = client.get("/runs").json()
+    finally:
+        broker.close_run(run)
+        broker.reap(run)
+
+    dup_rows = [r for r in payload if r["run_id"] == "dup"]
+    assert len(dup_rows) == 1
+    assert dup_rows[0]["status"] == "running"  # live shadows the cold row
+
+
 # ---------------------------------------------------------------------------
 # /events
 # ---------------------------------------------------------------------------
@@ -141,6 +194,91 @@ def test_events_payload_is_valid_json(client: TestClient, logs_root: Path) -> No
     ]
     # If any payload isn't valid JSON, this raises.
     assert all(isinstance(json.loads(p), dict) for p in payloads)
+
+
+# ---------------------------------------------------------------------------
+# Concurrent-writer lock tolerance
+#
+# Regression: a live `arena rank` run holds an exclusive lock on its own
+# DuckDB log. A read-only open from the web backend then gets an IOException,
+# which must NOT 500 /runs or /events for *other*, readable runs — the locked
+# file is skipped, not fatal. (Originally `_resolve_run`'s full-scan lookup
+# crossed the locked file and 500'd /events for every run.)
+# ---------------------------------------------------------------------------
+
+
+def _simulate_writer_lock(monkeypatch: pytest.MonkeyPatch, locked_path: Path) -> None:
+    """Make read-only opens of `locked_path` raise the IOException a real
+    cross-process writer lock produces.
+
+    A same-process read-write connection raises ConnectionException, not the
+    cross-process IOException we actually hit in production, so reproducing the
+    real lock would need a subprocess. Instead patch the single `duckdb.connect`
+    the server makes for read-only access.
+    """
+    from arena_web import server as server_module
+
+    real_connect = duckdb.connect
+
+    def fake_connect(
+        database: str, *args: object, read_only: bool = False, **kwargs: object
+    ) -> duckdb.DuckDBPyConnection:
+        if read_only and str(database) == str(locked_path):
+            raise duckdb.IOException(
+                f'Could not set lock on file "{locked_path}": Conflicting lock is held'
+            )
+        return real_connect(database, *args, read_only=read_only, **kwargs)
+
+    monkeypatch.setattr(server_module.duckdb, "connect", fake_connect)
+
+
+def test_runs_skips_locked_db(
+    client: TestClient, logs_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    readable = logs_root / "2026-05-20" / "race-100000.duckdb"
+    locked = logs_root / "2026-05-20" / "rank-110000.duckdb"
+    _make_log(readable, run_id="readable")
+    time.sleep(0.05)  # make `locked` newer, so it is iterated first
+    _make_log(locked, run_id="locked-run")
+    _simulate_writer_lock(monkeypatch, locked)
+
+    run_ids = [r["run_id"] for r in client.get("/runs").json()]
+
+    assert run_ids == ["readable"]  # locked file skipped, not a 500
+
+
+def test_events_streams_readable_run_despite_locked_db(
+    client: TestClient, logs_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    readable = logs_root / "2026-05-20" / "race-100000.duckdb"
+    locked = logs_root / "2026-05-20" / "rank-110000.duckdb"
+    _make_log(readable, run_id="readable")
+    time.sleep(0.05)  # `locked` is newer => searched before `readable`
+    _make_log(locked, run_id="locked-run")
+    _simulate_writer_lock(monkeypatch, locked)
+
+    response = client.get("/events", params={"run_id": "readable"})
+
+    # The resolve scan crosses the locked file first, skips it, finds
+    # `readable`, and streams — instead of 500-ing on the lock.
+    assert response.status_code == 200
+    assert response.text.startswith("data: {")
+
+
+def test_events_503_when_run_only_possibly_in_locked_db(
+    client: TestClient, logs_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    readable = logs_root / "2026-05-20" / "race-100000.duckdb"
+    locked = logs_root / "2026-05-20" / "rank-110000.duckdb"
+    _make_log(readable, run_id="readable")
+    _make_log(locked, run_id="locked-run")
+    _simulate_writer_lock(monkeypatch, locked)
+
+    # The run is in none of the *readable* logs, but a locked log exists and
+    # might hold it -> transient 503 (retry), not permanent 404.
+    response = client.get("/events", params={"run_id": "ghost"})
+
+    assert response.status_code == 503
 
 
 def test_cors_allows_localhost_5173(client: TestClient) -> None:

@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 if TYPE_CHECKING:
-    from evaluation.event_broker import EventEnvelope
+    from evaluation.event_broker import EventEnvelope, LiveRun
 
 
 _REDIS_URL_ENV: str = "REDIS_URL"
@@ -180,3 +180,92 @@ def test_cross_process_publisher_to_consumer_preserves_order() -> None:
     assert len(envelopes) == n_events
     assert [int(e.seq) for e in envelopes] == list(range(1, n_events + 1))
     assert [e.event.t for e in envelopes] == list(range(n_events))
+
+
+# ---------------------------------------------------------------------------
+# Cross-process live-run discovery — the web `/runs` endpoint's reason for
+# existing: list a run that a *different* process opened and is still writing.
+# ---------------------------------------------------------------------------
+
+
+def _open_with_meta_main(redis_url: str, key_prefix: str, run_id_str: str, label: str) -> None:
+    """Open a run with metadata + publish 2 events, then exit WITHOUT closing.
+
+    Leaves the run "open" in Redis (sentinel present, stream populated) — the
+    exact state the web backend sees while a CLI run is in progress. Runs in a
+    spawned child, so it must be a module-level function.
+    """
+    import asyncio
+
+    from evaluation.event_broker import RunId, RunMeta
+    from evaluation.event_log import Event, TurnStartPayload
+    from evaluation.redis_broker import RedisStreamsBroker
+    from redis.asyncio import Redis
+
+    async def run() -> None:
+        client = Redis.from_url(redis_url)
+        try:
+            broker = RedisStreamsBroker(client, key_prefix=key_prefix)
+            run_id = RunId(run_id_str)
+            broker.open_run(run_id, RunMeta(label=label, started_at="2026-05-23T12:00:00+00:00"))
+            for i in range(2):
+                await broker.publish(
+                    run_id,
+                    Event(
+                        run_id=run_id_str,
+                        agent_id="publisher",
+                        t=i,
+                        payload=TurnStartPayload(turn_num=i),
+                        ts=datetime(2026, 5, 23, 12, 0, 0, tzinfo=UTC),
+                    ),
+                )
+            # Flush so the sentinel + stream are cross-process visible, then
+            # exit without close_run — the run stays "live" for the consumer.
+            await broker.flush()
+        finally:
+            await client.aclose()
+
+    asyncio.run(run())
+
+
+def test_cross_process_live_runs_sees_open_run() -> None:
+    """A run opened (with metadata) in process A is listed by `live_runs` in
+    process B. This is what lets the web `/runs` endpoint surface an in-progress
+    CLI run — the cross-process half of the live-dashboard feature.
+    """
+    import asyncio
+
+    from evaluation.event_broker import RunId
+    from evaluation.redis_broker import RedisStreamsBroker
+    from redis.asyncio import Redis
+
+    key_prefix = f"xprocess:{uuid.uuid4().hex[:8]}"
+    run_id_str = f"r-{uuid.uuid4().hex[:8]}"
+
+    ctx = mp.get_context("spawn")
+    publisher = ctx.Process(
+        target=_open_with_meta_main,
+        args=(_REDIS_URL, key_prefix, run_id_str, "rank"),
+    )
+    publisher.start()
+    publisher.join(timeout=10)
+    assert publisher.exitcode == 0, "publisher subprocess failed"
+
+    async def consumer() -> list[LiveRun]:
+        client = Redis.from_url(_REDIS_URL)
+        try:
+            broker = RedisStreamsBroker(client, key_prefix=key_prefix)
+            live = list(await broker.live_runs())
+            # The publisher intentionally left the run open; clean up its keys.
+            broker.reap(RunId(run_id_str))
+            await broker.flush()
+            return live
+        finally:
+            await client.aclose()
+
+    live = asyncio.run(consumer())
+    assert len(live) == 1
+    lr = live[0]
+    assert lr.run_id == RunId(run_id_str)
+    assert lr.label == "rank"
+    assert lr.n_events == 2

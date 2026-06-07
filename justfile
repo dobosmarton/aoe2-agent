@@ -129,6 +129,26 @@ arena-broker-redis-env:
         echo "# REDIS_PASSWORD is already in scope from .env; make_broker()"; \
         echo "# auto-builds redis://:\$REDIS_PASSWORD@localhost:6379/0"
 
+# ── Live dashboard (redis broker shared by arena run + web backend) ────────
+#
+# To watch a run live in the dashboard, both the producer (arena) and the
+# consumer (web backend) must share the compose-stack Redis. `set dotenv-load`
+# already puts REDIS_PASSWORD in scope, so make_broker() builds the AUTH'd URL.
+# Workflow:
+#     just arena-infra-up          # 1. Redis (+ stack) up
+#     just arena-web-dev-redis      # 2. web backend on :8000 (redis mode)
+#     just arena-ui-dev             # 3. dashboard on :5173
+#     just arena-rank-redis         # 4. a run — appears live in the UI
+
+arena-web-dev-redis port="8000":
+    ARENA_BROKER_BACKEND=redis uv run --package arena-web aoe2-arena-web --port {{port}}
+
+arena-rank-redis profile="apps/arena/src/profiles/ranking-v1.yaml":
+    ARENA_BROKER_BACKEND=redis uv run --package arena aoe2-arena rank {{profile}}
+
+arena-race-redis profile="apps/arena/src/profiles/v1.yaml":
+    ARENA_BROKER_BACKEND=redis uv run --package arena aoe2-arena race {{profile}}
+
 # ── Dashboard (apps/dashboard — Vite + React + Tailwind) ──────────────────
 #
 # JS install is workspace-wide from repo root: `bun install` populates the

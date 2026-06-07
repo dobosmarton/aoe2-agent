@@ -42,10 +42,11 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import duckdb
-from evaluation.event_broker import RunId, Seq
+from evaluation.event_broker import RunId, RunMeta, Seq
 from evaluation.event_log import DuckDBEventSink
 
 if TYPE_CHECKING:
@@ -126,6 +127,12 @@ class MultiRunBrokerSink:
     broker: EventBroker
     db_sink: DuckDBEventSink
     loop: asyncio.AbstractEventLoop
+    # Run identity surfaced by the broker's live `/runs` source. `label` is the
+    # CLI command ("race"/"rank"/"smoke"); `started_at` defaults to sink
+    # construction time (≈ run start). Defaulted so fork/test construction is
+    # unaffected.
+    label: str = ""
+    started_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     _persisters: dict[RunId, asyncio.Task[None]] = field(default_factory=dict)
     _pending_publishes: set[asyncio.Task[Seq]] = field(default_factory=set)
 
@@ -139,7 +146,7 @@ class MultiRunBrokerSink:
     def _handle_emit(self, event: Event) -> None:
         rid = RunId(event.run_id)
         if rid not in self._persisters:
-            self.broker.open_run(rid)
+            self.broker.open_run(rid, RunMeta(label=self.label, started_at=self.started_at))
             self._persisters[rid] = asyncio.create_task(
                 persist_to_duckdb_via_sink(self.broker, rid, self.db_sink)
             )

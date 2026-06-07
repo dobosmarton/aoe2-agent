@@ -55,4 +55,6 @@ export interface RunSummary {
   n_events: number;
   first_ts: string;
   last_ts: string;
+  // "running" = a live run from the broker; "complete" = a finalized DuckDB run.
+  status: "running" | "complete";
 }
