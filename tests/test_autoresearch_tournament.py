@@ -183,3 +183,46 @@ def test_tournament_logs_each_trial(monkeypatch: pytest.MonkeyPatch) -> None:
     assert len(trial_rows) == 3
     assert all(r["accepted"] is False for r in trial_rows)
     assert {r["candidate_id"] for r in trial_rows} == {"c1", "c2", "c3"}
+
+
+# ---------------------------------------------------------------------------
+# A2 — Pareto retention in _keep_top
+# ---------------------------------------------------------------------------
+
+
+def _game(
+    composite: float,
+    survival: float = 0.0,
+    population: float = 0.0,
+    age: float = 0.0,
+    economy: float = 0.0,
+    action_success: float = 0.0,
+) -> GameScore:
+    return GameScore(
+        composite=composite,
+        survival=survival,
+        population=population,
+        age=age,
+        economy=economy,
+        action_success=action_success,
+        raw_metrics={},
+    )
+
+
+def _cand(cid: str, game: GameScore) -> orch_module._Candidate:
+    return orch_module._Candidate(
+        candidate_id=cid,
+        change={"description": cid, "old_text": "o", "new_text": "n"},
+        games=[game],
+    )
+
+
+def test_keep_top_retains_non_dominated() -> None:
+    best = _cand("c_best", _game(0.8, 0.8, 0.8, 0.8, 0.8, 0.8))
+    offaxis = _cand("c_offaxis", _game(0.3, age=1.0))  # weak composite, best on one axis
+    weak = _cand("c_weak", _game(0.4, 0.5, 0.5, 0.5, 0.5, 0.5))  # dominated by c_best
+    kept = orch_module.Orchestrator._keep_top([best, offaxis, weak], keep_fraction=0.5)
+    ids = {c.candidate_id for c in kept}
+    assert "c_best" in ids  # top by composite
+    assert "c_offaxis" in ids  # non-dominated off-axis survivor retained
+    assert "c_weak" not in ids  # dominated → dropped

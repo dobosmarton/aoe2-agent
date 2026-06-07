@@ -10,6 +10,7 @@ import asyncio
 import structlog
 from autoresearch.experiment_log import get_next_experiment_id, log_experiment
 from autoresearch.metrics import compute_score
+from autoresearch.trace import build_game_trace, save_trace
 from gameplay_agent.config import config
 from gameplay_agent.game_loop import game_loop
 from gameplay_agent.memory import AgentMemory
@@ -92,10 +93,19 @@ async def run_game(
         except Exception as e:
             log.warning("memory_extraction_error", error=str(e))
 
+    # Capture a reflective trace (A2) for later tournaments to learn from.
+    trace = build_game_trace(memory, score)
+    if metrics["turn_count"] > 0:
+        try:
+            save_trace(trace, game_id)
+        except OSError as e:
+            log.warning("trace_save_error", error=str(e))
+
     return {
         "metrics": metrics,
         "score": score,
         "memory_files": memory_files,
+        "trace": trace,
     }
 
 

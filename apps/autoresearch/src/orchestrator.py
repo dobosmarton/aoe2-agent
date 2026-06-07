@@ -22,7 +22,15 @@ from autoresearch.experiment_log import (
 )
 from autoresearch.game_runner import run_game
 from autoresearch.metrics import GameScore
+from autoresearch.pareto import (
+    ParetoEntry,
+    dominates,
+    load_frontier,
+    save_frontier,
+    update_frontier,
+)
 from autoresearch.prompt_mutator import PromptMutator
+from autoresearch.trace import load_recent_traces
 
 log = structlog.stdlib.get_logger()
 
@@ -35,6 +43,7 @@ TOURNAMENT_CANDIDATES = 3
 TOURNAMENT_ROUNDS = 2
 TOURNAMENT_KEEP_FRACTION = 0.5
 TOURNAMENT_GAMES_BUDGET = 6  # hard cap on total games per tournament
+_MAX_PARETO_EXTRAS = 1  # extra non-dominated survivors kept per halving round (A2)
 
 
 @dataclass
@@ -48,6 +57,32 @@ class _Candidate:
     def mean_composite(self) -> float:
         """Mean composite score across this candidate's games (0.0 if none yet)."""
         return mean(g.composite for g in self.games) if self.games else 0.0
+
+    def vector(self) -> tuple[float, float, float, float, float]:
+        """Mean per-component score vector across this candidate's games."""
+        if not self.games:
+            return (0.0, 0.0, 0.0, 0.0, 0.0)
+        return (
+            mean(g.survival for g in self.games),
+            mean(g.population for g in self.games),
+            mean(g.age for g in self.games),
+            mean(g.economy for g in self.games),
+            mean(g.action_success for g in self.games),
+        )
+
+
+def _latest_breakdown(recent: list[dict]) -> dict[str, float]:
+    """Extract the 5 component scores from the most recent experiment row."""
+    if not recent:
+        return {}
+    latest = recent[-1]
+    out: dict[str, float] = {}
+    for axis in ("survival", "population", "age", "economy", "action_success"):
+        try:
+            out[axis] = float(latest.get(axis, 0.0))
+        except (TypeError, ValueError):
+            out[axis] = 0.0
+    return out
 
 
 class Orchestrator:
@@ -100,10 +135,30 @@ class Orchestrator:
 
     @staticmethod
     def _keep_top(candidates: list[_Candidate], keep_fraction: float) -> list[_Candidate]:
-        """Sort by mean composite (descending) and keep at least the single best."""
+        """Keep the top fraction by mean composite, plus up to one non-dominated
+        off-axis candidate so a single-axis strength isn't discarded (A2)."""
         ranked = sorted(candidates, key=lambda c: c.mean_composite(), reverse=True)
         keep = max(1, int(len(ranked) * keep_fraction))
-        return ranked[:keep]
+        top = ranked[:keep]
+        extras = 0
+        for c in ranked[keep:]:
+            if extras >= _MAX_PARETO_EXTRAS:
+                break
+            if not any(dominates(o.vector(), c.vector()) for o in candidates if o is not c):
+                top.append(c)
+                extras += 1
+        return top
+
+    @staticmethod
+    def _record_frontier(winner: _Candidate) -> None:
+        """Persist the accepted winner onto the Pareto frontier (A2)."""
+        entry = ParetoEntry(
+            candidate_id=winner.candidate_id,
+            description=str(winner.change.get("description", "")),
+            change={str(k): str(v) for k, v in winner.change.items()},
+            vector=winner.vector(),
+        )
+        save_frontier(update_frontier(load_frontier(), entry))
 
     async def _play_candidate(self, change: dict, time_budget: float) -> GameScore:
         """Apply a candidate edit, play one game, then revert to baseline.
@@ -186,7 +241,11 @@ class Orchestrator:
         failure_modes = self._extract_failure_modes(recent)
         current_prompt = self.mutator.read_current_prompt()
         changes = self.mutator.propose_changes(
-            current_prompt, recent, failure_modes, n=n_candidates
+            current_prompt,
+            load_recent_traces(3),
+            _latest_breakdown(recent),
+            failure_modes,
+            n=n_candidates,
         )
         survivors = [
             _Candidate(candidate_id=f"c{i + 1}", change=c)
@@ -215,6 +274,7 @@ class Orchestrator:
             )
             sha = self.git_commit(f"[autoresearch] {tournament_id}: {winner.change['description']}")
             self.best_score = max(self.best_score, winner_mean)
+            self._record_frontier(winner)
 
         log_experiment(
             experiment_id=tournament_id,

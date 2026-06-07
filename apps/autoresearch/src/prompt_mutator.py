@@ -4,11 +4,17 @@ Uses a cheap model (Haiku) to propose targeted changes to prompts/system.md,
 apply them, and revert on failure.
 """
 
+from __future__ import annotations
+
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import anthropic
 import structlog
+
+if TYPE_CHECKING:
+    from .trace import GameTrace
 
 log = structlog.stdlib.get_logger()
 
@@ -47,6 +53,14 @@ If proposing to ADD new text (not replace), set old_text to a line that exists i
 and set new_text to that same line PLUS your addition after it."""
 
 
+REFLECTIVE_MUTATOR_SYSTEM = (
+    MUTATOR_SYSTEM + "\n\nYou are also given turn-by-turn traces (reasoning, actions, and "
+    "post-action verification) from recent games plus the per-component score "
+    "breakdown. Diagnose what SPECIFICALLY failed turn to turn, then target the "
+    "weakest component with edits justified by the trace evidence."
+)
+
+
 class PromptMutator:
     """Proposes, applies, and reverts changes to the system prompt."""
 
@@ -61,16 +75,26 @@ class PromptMutator:
     def propose_changes(
         self,
         current_prompt: str,
-        recent_experiments: list[dict],
+        recent_traces: list[GameTrace],
+        component_breakdown: dict[str, float],
         failure_modes: list[str],
         n: int = 3,
     ) -> list[dict]:
         """Ask the LLM for up to N distinct prompt edits (for tournament racing).
 
-        Each element is a dict with description/old_text/new_text/rationale.
-        Malformed elements are dropped; returns [] on total failure.
+        Reflects on turn-by-turn traces + the 5-component score breakdown so the
+        mutator targets the weakest component with evidence from what actually
+        happened. Each element is a dict with description/old_text/new_text/
+        rationale; malformed elements are dropped; returns [] on total failure.
         """
-        experiment_summary = self._format_experiments(recent_experiments)
+        from .trace import format_trace_excerpt
+
+        excerpts = (
+            "\n\n".join(format_trace_excerpt(t) for t in recent_traces[-2:])
+            if recent_traces
+            else "No prior game traces yet (first run)."
+        )
+        breakdown = ", ".join(f"{k}={v:.2f}" for k, v in component_breakdown.items()) or "n/a"
         failure_summary = (
             "\n".join(f"- {f}" for f in failure_modes) if failure_modes else "None identified yet"
         )
@@ -79,21 +103,24 @@ class PromptMutator:
 {current_prompt}
 ```
 
-Recent experiment results:
-{experiment_summary}
+Recent game traces (turn-by-turn reasoning, actions, verification):
+{excerpts}
 
-Known failure modes from recent games:
+Score components (0-1, lowest = best opportunity): {breakdown}
+
+Known failure modes:
 {failure_summary}
 
-Propose {n} DISTINCT targeted changes, each addressing a different weakness.
-Respond with a JSON array of exactly {n} objects, each with the keys
+Reflect on what SPECIFICALLY went wrong turn to turn, then propose {n} DISTINCT
+targeted edits — each justified by the traces and aimed at the weakest component.
+Respond with a JSON array of exactly {n} objects with keys
 description, old_text, new_text, rationale. Output the JSON array only."""
 
         try:
             response = self.client.messages.create(
                 model=self.model,
                 max_tokens=2048,
-                system=MUTATOR_SYSTEM,
+                system=REFLECTIVE_MUTATOR_SYSTEM,
                 messages=[{"role": "user", "content": user_msg}],
             )
             block = response.content[0]
@@ -147,19 +174,6 @@ description, old_text, new_text, rationale. Output the JSON array only."""
             log.info("prompt_reverted")
         except Exception as e:
             log.error("prompt_revert_failed", error=str(e))
-
-    def _format_experiments(self, experiments: list[dict]) -> str:
-        if not experiments:
-            return "No previous experiments — this is the first run (baseline)."
-
-        lines = []
-        for exp in experiments:
-            status = "KEPT" if exp.get("accepted") == "true" else "REVERTED"
-            lines.append(
-                f"  {exp.get('experiment_id', '?')}: score={exp.get('composite_score', '?')} "
-                f"[{status}] — {exp.get('change_description', '?')}"
-            )
-        return "\n".join(lines)
 
     def _parse_changes(self, text: str) -> list[dict]:
         """Extract a list of well-formed change dicts from the LLM response."""
