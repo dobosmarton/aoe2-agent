@@ -2,8 +2,11 @@
 
 import os
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel
+
+EffortLevel = Literal["low", "medium", "high"]  # Sonnet 4.6 rejects xhigh/max
 
 
 def _parse_optional_int(value: str | None) -> int | None:
@@ -11,6 +14,13 @@ def _parse_optional_int(value: str | None) -> int | None:
     if value is None or value == "":
         return None
     return int(value)
+
+
+def _parse_effort(value: str | None) -> EffortLevel:
+    """Parse the executor effort env var. Unknown or missing falls back to "low"."""
+    if value in ("low", "medium", "high"):
+        return value
+    return "low"
 
 
 class Config(BaseModel):
@@ -24,6 +34,7 @@ class Config(BaseModel):
     model: str = "claude-sonnet-4-6"  # Executor: better instruction following
     max_tokens: int = 1536
     max_tool_iterations: int = 7  # Max tool calls per game turn in agentic loop
+    executor_effort: EffortLevel = "low"  # output_config effort for the executor tool loop
     strategist_model: str = "claude-sonnet-4-6"  # Strategist: deeper reasoning
     strategist_interval: int = 10  # Run strategist every N turns
 
@@ -55,6 +66,7 @@ class Config(BaseModel):
         return cls(
             anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
             model=os.environ.get("AOE2_MODEL", "claude-sonnet-4-6"),
+            executor_effort=_parse_effort(os.environ.get("AOE2_EXECUTOR_EFFORT")),
             strategist_model=os.environ.get("AOE2_STRATEGIST_MODEL", "claude-sonnet-4-6"),
             strategist_interval=int(os.environ.get("AOE2_STRATEGIST_INTERVAL", "10")),
             loop_delay=float(os.environ.get("AOE2_LOOP_DELAY", "0.3")),

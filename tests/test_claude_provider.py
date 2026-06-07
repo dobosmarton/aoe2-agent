@@ -1,0 +1,194 @@
+"""Unit tests for gameplay_agent/providers/claude.py — the executor provider.
+
+The Anthropic client is replaced with a recorder so tests run offline: no
+network, no API key. Async methods are driven via `asyncio.run` (the repo does
+not use pytest-asyncio). Prompt loading is stubbed by pre-setting `_core_prompt`,
+which short-circuits `_load_prompts()` so no disk/memory I/O happens.
+
+Sections:
+  S1 — executor `effort` forwarded to the API call.
+  S3 — cache_control breakpoints on the system age block and the tool loop.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from types import SimpleNamespace
+from typing import TYPE_CHECKING
+from unittest.mock import AsyncMock
+
+import pytest
+from gameplay_agent.providers.claude import ClaudeProvider
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable
+
+
+def _run(coro: Awaitable[object]) -> object:
+    """Drive a coroutine to completion in a fresh event loop."""
+    return asyncio.run(coro)
+
+
+def _usage(cache_read: int = 0) -> SimpleNamespace:
+    """A minimal Anthropic `usage` stand-in with the fields _call_api reads."""
+    return SimpleNamespace(
+        input_tokens=1,
+        output_tokens=1,
+        cache_read_input_tokens=cache_read,
+        cache_creation_input_tokens=0,
+    )
+
+
+def _end_turn_response(cache_read: int = 0) -> SimpleNamespace:
+    """A response that ends the tool loop immediately (no tool_use)."""
+    return SimpleNamespace(content=[], stop_reason="end_turn", usage=_usage(cache_read))
+
+
+def _install_create(provider: ClaudeProvider, *responses: object) -> AsyncMock:
+    """Point the client's messages.create at an AsyncMock yielding `responses`."""
+    create = AsyncMock(side_effect=list(responses))
+    provider.client = SimpleNamespace(messages=SimpleNamespace(create=create))
+    return create
+
+
+@pytest.fixture
+def provider() -> ClaudeProvider:
+    """A ClaudeProvider with stubbed prompts and no game-knowledge DB."""
+    p = ClaudeProvider(api_key="test", use_dynamic_context=False)
+    # Non-None _core_prompt short-circuits _load_prompts() → no I/O.
+    p._core_prompt = "SYSTEM"
+    p._age_prompts = {"dark": "DARK", "feudal": "FEUDAL"}
+    return p
+
+
+# ---------------------------------------------------------------------------
+# S1 — effort forwarded to the executor API call
+# ---------------------------------------------------------------------------
+
+
+def test_call_api_forwards_default_effort(provider: ClaudeProvider) -> None:
+    create = _install_create(provider, _end_turn_response())
+    _run(provider._call_api([{"type": "text", "text": "hi"}]))
+    assert create.call_args.kwargs["output_config"] == {"effort": "low"}
+
+
+def test_call_api_forwards_configured_effort(
+    provider: ClaudeProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from gameplay_agent.providers import claude
+
+    monkeypatch.setattr(claude.config, "executor_effort", "medium")
+    create = _install_create(provider, _end_turn_response())
+    _run(provider._call_api([{"type": "text", "text": "hi"}]))
+    assert create.call_args.kwargs["output_config"] == {"effort": "medium"}
+
+
+# ---------------------------------------------------------------------------
+# S3 — prompt caching across the tool loop
+# ---------------------------------------------------------------------------
+
+
+def test_age_block_is_cached(provider: ClaudeProvider) -> None:
+    blocks = provider.get_system_prompt("Feudal Age")
+    assert blocks[0]["cache_control"] == {"type": "ephemeral"}  # core block
+    assert blocks[1]["text"] == "FEUDAL"
+    assert blocks[1]["cache_control"] == {"type": "ephemeral"}  # age block
+
+
+def test_moving_breakpoint_marks_last_and_strips_previous() -> None:
+    messages: list[dict] = [
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "a", "cache_control": {"type": "ephemeral"}}],
+        },
+        {"role": "user", "content": [{"type": "text", "text": "b"}]},
+    ]
+    ClaudeProvider._apply_moving_cache_breakpoint(messages)
+    assert "cache_control" not in messages[0]["content"][0]
+    assert messages[1]["content"][0]["cache_control"] == {"type": "ephemeral"}
+
+
+def test_moving_breakpoint_ignores_non_dict_blocks() -> None:
+    # Assistant turns hold SDK content objects, not dicts — must not crash.
+    messages: list[dict] = [
+        {"role": "assistant", "content": [SimpleNamespace(type="tool_use")]},
+        {"role": "user", "content": [{"type": "text", "text": "b"}]},
+    ]
+    ClaudeProvider._apply_moving_cache_breakpoint(messages)
+    assert messages[1]["content"][0]["cache_control"] == {"type": "ephemeral"}
+
+
+def test_create_call_caches_last_user_block(provider: ClaudeProvider) -> None:
+    create = _install_create(provider, _end_turn_response())
+    _run(provider._call_api([{"type": "text", "text": "hi"}]))
+    sent = create.call_args.kwargs["messages"]
+    assert sent[-1]["content"][-1]["cache_control"] == {"type": "ephemeral"}
+
+
+def test_cache_read_tokens_accumulate(
+    provider: ClaudeProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Round 1 asks for a tool, round 2 ends the turn; cache reads sum across both.
+    tool_block = SimpleNamespace(type="tool_use", id="t1", name="press", input={})
+    first = SimpleNamespace(content=[tool_block], stop_reason="tool_use", usage=_usage(40))
+    _install_create(provider, first, _end_turn_response(60))
+
+    async def _fake_exec(_block: object) -> tuple[dict, dict]:
+        return ({"type": "press"}, {"tool_use_id": "t1", "content": '{"success": true}'})
+
+    monkeypatch.setattr(provider, "_execute_tool_call", _fake_exec)
+    _run(provider._call_api([{"type": "text", "text": "hi"}]))
+    assert provider._total_cache_read_tokens == 100
+
+
+# ---------------------------------------------------------------------------
+# S4 — two-mode executor routing + single-shot serialization
+# ---------------------------------------------------------------------------
+
+
+def test_routine_turn_routes_to_single_shot(
+    provider: ClaudeProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    single = AsyncMock(return_value={"actions": [], "actions_already_executed": False})
+    tool = AsyncMock()
+    monkeypatch.setattr(provider, "_call_single_shot", single)
+    monkeypatch.setattr(provider, "_call_api", tool)
+
+    out = _run(provider.get_actions("Food=200, Wood=150. TC Idle: True"))
+
+    single.assert_awaited_once()
+    tool.assert_not_awaited()
+    assert out["actions_already_executed"] is False
+
+
+def test_under_attack_routes_to_tool_loop(
+    provider: ClaudeProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    single = AsyncMock()
+    tool = AsyncMock(return_value=SimpleNamespace(reasoning="ok"))
+    monkeypatch.setattr(provider, "_call_single_shot", single)
+    monkeypatch.setattr(provider, "_call_api", tool)
+    monkeypatch.setattr(provider, "_serialize_response", lambda _r: {"path": "tool_loop"})
+
+    out = _run(provider.get_actions("Under Attack: True"))
+
+    tool.assert_awaited_once()
+    single.assert_not_awaited()
+    assert out == {"path": "tool_loop"}
+
+
+def test_serialize_single_shot_is_not_pre_executed() -> None:
+    from gameplay_agent.models import LLMResponse
+
+    resp = LLMResponse(actions=[{"type": "press", "key": "h"}])
+    out = ClaudeProvider._serialize_single_shot(resp)
+    assert out["actions_already_executed"] is False
+    assert len(out["actions"]) == 1
+
+
+def test_serialize_response_is_pre_executed() -> None:
+    from gameplay_agent.models import LLMResponse
+
+    resp = LLMResponse(actions=[{"type": "press", "key": "h"}])
+    out = ClaudeProvider._serialize_response(resp)
+    assert out["actions_already_executed"] is True

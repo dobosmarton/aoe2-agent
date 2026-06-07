@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, ClassVar, cast
 
 import anthropic
 import structlog
-from anthropic.types import ToolUseBlock
+from anthropic.types import OutputConfigParam, ToolUseBlock
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
@@ -159,7 +159,15 @@ class ClaudeProvider(BaseLLMProvider):
             },
         ]
         if age_content:
-            blocks.append({"type": "text", "text": age_content})
+            # Cache the age block too: it changes only on age-ups (<=3 per game),
+            # so every turn within an age reads it from cache instead of re-prefilling.
+            blocks.append(
+                {
+                    "type": "text",
+                    "text": age_content,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            )
 
         return blocks
 
@@ -280,11 +288,11 @@ class ClaudeProvider(BaseLLMProvider):
         }
 
     @staticmethod
-    def _serialize_response(result: LLMResponse) -> LLMResult:
-        """Convert LLMResponse to a plain dict without Pydantic serialization warnings.
+    def _dump_actions(result: LLMResponse) -> list[dict[str, object]]:
+        """Serialize each action individually.
 
-        Composite action dicts don't match the Action union type, so we
-        serialize each action individually to avoid PydanticSerializationUnexpectedValue.
+        Composite action dicts don't match the Action union type, so we serialize
+        per-action to avoid PydanticSerializationUnexpectedValue warnings.
         """
         actions: list[dict[str, object]] = []
         for a in result.actions:
@@ -292,14 +300,45 @@ class ClaudeProvider(BaseLLMProvider):
                 actions.append(a.model_dump())
             elif isinstance(a, dict):
                 actions.append(a)
+        return actions
+
+    @staticmethod
+    def _observations_dict(result: LLMResponse) -> dict[str, object]:
+        """Dump observations, tolerating a non-model placeholder."""
+        if hasattr(result.observations, "model_dump"):
+            return result.observations.model_dump()
+        return {}
+
+    @staticmethod
+    def _serialize_response(result: LLMResponse) -> LLMResult:
+        """Serialize a tool-loop response.
+
+        The loop already executed the actions, so actions_already_executed is
+        True and the game loop only records them.
+        """
+        actions = ClaudeProvider._dump_actions(result)
         return LLMResult(
             reasoning=result.reasoning,
-            observations=result.observations.model_dump()
-            if hasattr(result.observations, "model_dump")
-            else {},
+            observations=ClaudeProvider._observations_dict(result),
             actions=actions,
             actions_already_executed=True,
             success_count=result._success_count if result._success_count else len(actions),
+        )
+
+    @staticmethod
+    def _serialize_single_shot(result: LLMResponse) -> LLMResult:
+        """Serialize a single-shot response.
+
+        The actions have NOT run yet, so actions_already_executed is False and the
+        game loop executes them via the standard executor path. Deliberately not
+        _serialize_response, which marks actions already-executed and would
+        silently no-op this path.
+        """
+        return LLMResult(
+            reasoning=result.reasoning,
+            observations=ClaudeProvider._observations_dict(result),
+            actions=ClaudeProvider._dump_actions(result),
+            actions_already_executed=False,
         )
 
     async def _run_steps(self, composite_name: str, steps: list[dict]) -> tuple[bool, str]:
@@ -421,6 +460,26 @@ class ClaudeProvider(BaseLLMProvider):
         )
         return action_dict, tool_result
 
+    @staticmethod
+    def _apply_moving_cache_breakpoint(messages: list[dict]) -> None:
+        """Mark the latest message so the conversation prefix hits the cache.
+
+        Strips any prior message-level breakpoint, then caches the last content
+        block of the most recent message. Only dict blocks are touched —
+        assistant turns are appended as SDK content objects, which must not be
+        mutated. One moving breakpoint keeps the total at three (two system
+        blocks plus this), within the four-breakpoint API limit.
+        """
+        for msg in messages:
+            content = msg["content"]
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict):
+                        block.pop("cache_control", None)
+        last_content = messages[-1]["content"]
+        if isinstance(last_content, list) and last_content and isinstance(last_content[-1], dict):
+            last_content[-1]["cache_control"] = {"type": "ephemeral"}
+
     async def _call_api(self, content: list[dict], age: str = "Dark Age") -> LLMResponse:
         """Call Claude API in an agentic tool loop.
 
@@ -434,8 +493,12 @@ class ClaudeProvider(BaseLLMProvider):
         success_count = 0
         reasoning_parts: list[str] = []
         system_prompt = self.get_system_prompt(age)
+        output_config: OutputConfigParam = {"effort": config.executor_effort}
 
         for _ in range(config.max_tool_iterations):
+            # Cache the conversation prefix so iterations 2..N read it back
+            # instead of re-prefilling the whole growing message list each call.
+            self._apply_moving_cache_breakpoint(messages)
             # The anthropic SDK types these args with strict TypedDicts
             # (MessageParam, ToolUnionParam, etc.). Our dicts are runtime-
             # equivalent; matching the TypedDicts everywhere upstream is more
@@ -448,6 +511,7 @@ class ClaudeProvider(BaseLLMProvider):
                 system=system_prompt,  # pyright: ignore[reportArgumentType]
                 messages=messages,  # pyright: ignore[reportArgumentType]
                 tools=_ACTION_TOOLS,  # pyright: ignore[reportArgumentType]
+                output_config=output_config,
             )
 
             # Accumulate token usage (cache fields may be None when caching is off)
@@ -495,6 +559,35 @@ class ClaudeProvider(BaseLLMProvider):
         result._success_count = success_count
         return result
 
+    async def _call_single_shot(self, content: list[dict], age: str = "Dark Age") -> LLMResult:
+        """Fast path for routine turns: one structured-output call, no tool loop.
+
+        Returns actions for the game loop to execute (actions_already_executed is
+        False), keeping coordinate resolution and failure tracking on the existing
+        executor path. Composite tools and mid-turn rescans are unavailable here;
+        turns that need them route to the tool loop via _use_single_shot.
+        """
+        system_prompt = self.get_system_prompt(age)
+        # parse() merges output_format into output_config.format, so we get
+        # structured output and the effort knob in a single call.
+        output_config: OutputConfigParam = {"effort": config.executor_effort}
+        response = await self.client.messages.parse(  # pyright: ignore[reportAttributeAccessIssue]
+            model=self.model,
+            max_tokens=config.max_tokens,
+            temperature=config.temperature,
+            system=system_prompt,  # pyright: ignore[reportArgumentType]
+            messages=[{"role": "user", "content": content}],  # pyright: ignore[reportArgumentType]
+            output_format=LLMResponse,
+            output_config=output_config,
+        )
+        usage = response.usage
+        self._total_input_tokens += usage.input_tokens
+        self._total_output_tokens += usage.output_tokens
+        self._total_cache_read_tokens += getattr(usage, "cache_read_input_tokens", 0) or 0
+        self._total_cache_write_tokens += getattr(usage, "cache_creation_input_tokens", 0) or 0
+        parsed = cast("LLMResponse", response.parsed_output)
+        return self._serialize_single_shot(parsed)
+
     def _cumulative_cost_usd(self) -> float:
         """Calculate cumulative API cost across all calls."""
         return (
@@ -503,6 +596,37 @@ class ClaudeProvider(BaseLLMProvider):
             + self._total_cache_read_tokens * _PRICE_CACHE_READ / 1_000_000
             + self._total_cache_write_tokens * _PRICE_CACHE_WRITE / 1_000_000
         )
+
+    def _log_api_cost(self) -> None:
+        """Emit running token and cost totals (shared by both executor paths)."""
+        log.info(
+            "api_cost",
+            input_tokens=self._total_input_tokens,
+            output_tokens=self._total_output_tokens,
+            cache_read_tokens=self._total_cache_read_tokens,
+            cache_write_tokens=self._total_cache_write_tokens,
+            cumulative_cost_usd=round(self._cumulative_cost_usd(), 4),
+        )
+
+    # Context phrases that force the tool loop: combat needs mid-turn rescans and
+    # composite tools, which the single-shot Action union can't express.
+    _INTERACTIVE_SIGNALS: ClassVar[tuple[str, ...]] = (
+        "under attack: true",
+        "under_attack: true",
+        "defend",
+        "housed (cannot",
+    )
+
+    def _use_single_shot(self, context: str) -> bool:
+        """Whether this turn can skip the tool loop for one structured call.
+
+        Routine turns take the fast single-shot path; combat and housing
+        emergencies stay on the tool loop (see _INTERACTIVE_SIGNALS) because
+        they need mid-turn rescans and composite tools the single-shot Action
+        union can't express.
+        """
+        lowered = context.lower()
+        return not any(signal in lowered for signal in self._INTERACTIVE_SIGNALS)
 
     async def get_actions(
         self,
@@ -528,19 +652,14 @@ class ClaudeProvider(BaseLLMProvider):
         age = self._extract_age(context)
 
         try:
-            result = await self._call_api(content, age=age)
-            log.debug("claude_response", age=age, reasoning=result.reasoning[:200])
-
-            log.info(
-                "api_cost",
-                input_tokens=self._total_input_tokens,
-                output_tokens=self._total_output_tokens,
-                cache_read_tokens=self._total_cache_read_tokens,
-                cache_write_tokens=self._total_cache_write_tokens,
-                cumulative_cost_usd=round(self._cumulative_cost_usd(), 4),
-            )
-
-            return self._serialize_response(result)
+            if self._use_single_shot(context):
+                payload = await self._call_single_shot(content, age=age)
+            else:
+                result = await self._call_api(content, age=age)
+                log.debug("claude_response", age=age, reasoning=result.reasoning[:200])
+                payload = self._serialize_response(result)
+            self._log_api_cost()
+            return payload
 
         except anthropic.APIError as e:
             log.error("claude_api_error", error=str(e))
