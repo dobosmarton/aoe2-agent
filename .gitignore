@@ -59,6 +59,10 @@ apps/landing/dist/
 apps/landing/.astro/
 apps/landing/node_modules/
 
+# Vercel CLI local state — `.vercel/project.json` holds org/project IDs, and CI
+# assembles `.vercel/output/` (Build Output API) at deploy time. Never committed.
+.vercel/
+
 # Detection: training images, screenshots, label outputs — large, regenerated.
 packages/detection/src/**/training_data*/
 packages/detection/src/real_screenshots/

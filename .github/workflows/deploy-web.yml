@@ -1,4 +1,4 @@
-name: Deploy public docs site
+name: Deploy landing to Vercel
 
 on:
   push:
@@ -19,7 +19,6 @@ on:
 
 permissions:
   contents: read
-  deployments: write
 
 jobs:
   build:
@@ -44,15 +43,26 @@ jobs:
       - name: Build site (Astro + Pagefind)
         working-directory: apps/landing
         env:
-          SITE_URL: ${{ vars.SITE_URL || 'https://aoe2-llm-arena.example.com' }}
+          SITE_URL: ${{ vars.SITE_URL || 'https://aoe2.martondobos.com' }}
         run: bun run build
 
-      - name: Deploy to Cloudflare Pages
+      # Assemble Vercel's Build Output API folder from the already-built dist/.
+      # A pure-static site needs only static/ + a minimal config.json — Vercel
+      # never runs a build, so the headless-Chromium mermaid step (which only
+      # works on this Ubuntu runner) never has to run in Vercel's sandbox.
+      - name: Assemble Vercel prebuilt output (Build Output API)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: cloudflare/pages-action@v1
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          projectName: aoe2-llm-arena
-          directory: apps/landing/dist
-          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+        working-directory: apps/landing
+        run: |
+          mkdir -p .vercel/output
+          mv dist .vercel/output/static
+          echo '{"version":3}' > .vercel/output/config.json
+
+      - name: Deploy prebuilt to Vercel (production)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        working-directory: apps/landing
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: npx vercel@latest deploy --prebuilt --prod --yes --token "$VERCEL_TOKEN"
