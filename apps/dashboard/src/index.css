@@ -23,6 +23,25 @@
   --input: oklch(0.929 0.013 255.508);
   --ring: oklch(0.704 0.04 256.788);
   --radius: 0.625rem;
+
+  /* Resource accents (game-telemetry identity). Shared across light/dark;
+     the dark theme is the live one (index.html forces `class="dark"`). */
+  --food: oklch(0.72 0.17 142); /* green */
+  --wood: oklch(0.62 0.1 60); /* brown */
+  --gold: oklch(0.8 0.16 85); /* amber */
+  --stone: oklch(0.7 0.02 250); /* cool grey */
+  --population: oklch(0.7 0.13 230); /* steel blue */
+
+  /* Per-event-kind accents for the Trace view. */
+  --event-turn-start: oklch(0.65 0.02 250); /* slate */
+  --event-observation: oklch(0.7 0.1 195); /* teal */
+  --event-llm-prompt: oklch(0.68 0.16 290); /* violet */
+  --event-llm-response: oklch(0.66 0.17 300); /* purple */
+  --event-action: oklch(0.72 0.13 200); /* cyan */
+  --event-action-result: oklch(0.7 0.12 165); /* green-teal */
+  --event-world-mutation: oklch(0.75 0.15 70); /* amber */
+  --event-fork: oklch(0.7 0.18 350); /* magenta */
+  --event-metric: oklch(0.68 0.14 235); /* blue */
 }
 
 .dark {
@@ -65,6 +84,20 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-food: var(--food);
+  --color-wood: var(--wood);
+  --color-gold: var(--gold);
+  --color-stone: var(--stone);
+  --color-population: var(--population);
+  --color-event-turn-start: var(--event-turn-start);
+  --color-event-observation: var(--event-observation);
+  --color-event-llm-prompt: var(--event-llm-prompt);
+  --color-event-llm-response: var(--event-llm-response);
+  --color-event-action: var(--event-action);
+  --color-event-action-result: var(--event-action-result);
+  --color-event-world-mutation: var(--event-world-mutation);
+  --color-event-fork: var(--event-fork);
+  --color-event-metric: var(--event-metric);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);

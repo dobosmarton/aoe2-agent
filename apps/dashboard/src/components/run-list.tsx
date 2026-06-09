@@ -1,9 +1,13 @@
+import { useMemo, useState } from "react";
+
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { EmptyState } from "@/components/empty-state";
+import { GroupHeader } from "@/components/group-header";
+import { RunCard } from "@/components/run-card";
+import { groupRuns } from "@/lib/run-grouping";
+import { labelVariant } from "@/lib/run-format";
 import type { RunsStatus } from "@/hooks/use-runs";
-import { cn } from "@/lib/utils";
 import type { RunSummary } from "@/lib/events";
 
 interface RunListProps {
@@ -12,21 +16,10 @@ interface RunListProps {
   readonly error: string | null;
   readonly selected: string | null;
   readonly onSelect: (runId: string) => void;
-}
-
-const _LABEL_VARIANT: Record<string, "default" | "secondary" | "outline"> = {
-  race: "default",
-  rank: "secondary",
-  smoke: "outline",
-};
-
-function labelVariant(label: string): "default" | "secondary" | "outline" {
-  return _LABEL_VARIANT[label] ?? "outline";
-}
-
-function formatTs(iso: string): string {
-  // Strip seconds and timezone for compactness; the full ISO is in the tooltip.
-  return iso.length >= 16 ? iso.slice(0, 16).replace("T", " ") : iso;
+  /** Open the experiment overview for a multi-run operation (group key). */
+  readonly onOpenOperation: (key: string) => void;
+  /** Group key whose overview is currently open, for header highlighting. */
+  readonly selectedOperation: string | null;
 }
 
 export function RunList({
@@ -35,7 +28,26 @@ export function RunList({
   error,
   selected,
   onSelect,
+  onOpenOperation,
+  selectedOperation,
 }: RunListProps): React.ReactElement {
+  const groups = useMemo(() => groupRuns(runs), [runs]);
+  // Keys present here are collapsed; groups default to expanded so the parallel
+  // runs are visible — that's the whole point of grouping them.
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
+
+  const toggle = (key: string): void => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
   if (status === "loading") {
     return <EmptyState title="Loading runs…" />;
   }
@@ -55,46 +67,48 @@ export function RunList({
 
   return (
     <ScrollArea className="h-full">
-      <ol className="flex flex-col gap-2 p-3">
-        {runs.map((run) => {
-          const isSelected = run.run_id === selected;
+      <ol className="flex flex-col gap-1.5 p-2">
+        {groups.map((group) => {
+          // A lone run (e.g. a smoke run) needs no header — render it plainly.
+          const [soleRun] = group.runs;
+          if (group.runs.length === 1 && soleRun !== undefined) {
+            const run = soleRun;
+            return (
+              <li key={group.key}>
+                <RunCard
+                  run={run}
+                  selected={run.run_id === selected}
+                  labelSlot={
+                    <Badge variant={labelVariant(run.label)}>{run.label}</Badge>
+                  }
+                  onSelect={onSelect}
+                />
+              </li>
+            );
+          }
+          const expanded = !collapsed.has(group.key);
           return (
-            <li key={`${run.db_path}::${run.run_id}`}>
-              <Card
-                onClick={() => onSelect(run.run_id)}
-                className={cn(
-                  "cursor-pointer transition-colors hover:bg-accent",
-                  isSelected && "ring-2 ring-ring",
-                )}
-              >
-                <CardHeader className="pb-2">
-                  <CardTitle className="flex items-center justify-between text-xs font-mono">
-                    <span className="truncate" title={run.run_id}>
-                      {run.run_id.slice(0, 8)}…
-                    </span>
-                    <span className="flex shrink-0 items-center gap-1">
-                      {run.status === "running" && (
-                        <Badge
-                          variant="outline"
-                          className="gap-1 border-emerald-500/40 text-emerald-600 dark:text-emerald-400"
-                          title="Run in progress — reload to refresh"
-                        >
-                          <span className="relative flex size-1.5">
-                            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-75" />
-                            <span className="relative inline-flex size-1.5 rounded-full bg-emerald-500" />
-                          </span>
-                          live
-                        </Badge>
-                      )}
-                      <Badge variant={labelVariant(run.label)}>{run.label}</Badge>
-                    </span>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="text-muted-foreground space-y-1 text-xs">
-                  <div title={run.first_ts}>{formatTs(run.first_ts)}</div>
-                  <div>{run.n_events} events</div>
-                </CardContent>
-              </Card>
+            <li key={group.key} className="flex flex-col gap-1">
+              <GroupHeader
+                group={group}
+                expanded={expanded}
+                active={group.key === selectedOperation}
+                onToggle={toggle}
+                onOpen={onOpenOperation}
+              />
+              {expanded ? (
+                <ol className="border-border/60 ml-3 flex flex-col gap-1 border-l pl-2">
+                  {group.runs.map((run) => (
+                    <li key={`${group.key}::${run.run_id}`}>
+                      <RunCard
+                        run={run}
+                        selected={run.run_id === selected}
+                        onSelect={onSelect}
+                      />
+                    </li>
+                  ))}
+                </ol>
+              ) : null}
             </li>
           );
         })}

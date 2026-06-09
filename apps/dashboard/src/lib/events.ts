@@ -16,7 +16,13 @@ export interface WorldStateSnapshot {
 }
 
 export type ArenaEvent =
-  | { kind: "turn_start"; turn_num: number; state: WorldStateSnapshot | null }
+  | {
+      kind: "turn_start";
+      turn_num: number;
+      state: WorldStateSnapshot | null;
+      // Racing config that produced this run; null for forks / pre-labeling runs.
+      profile_name?: string | null;
+    }
   | { kind: "observation"; entity_count: number; classes: readonly string[] }
   | { kind: "llm_prompt"; state_summary: string }
   | {
@@ -57,4 +63,37 @@ export interface RunSummary {
   last_ts: string;
   // "running" = a live run from the broker; "complete" = a finalized DuckDB run.
   status: "running" | "complete";
+}
+
+// Mirrors `RunMetrics` in apps/api/src/server.py — end-of-run comparable
+// metrics for the experiment overview. `final_age_index` is the rank of
+// `final_age` in the backend's AGE_SEQUENCE, so we sort by the same
+// lexicographic score (age → population → economy) without duplicating the
+// age order here. Fields are null for runs missing a final snapshot/profile.
+export interface RunMetrics {
+  run_id: string;
+  profile_name: string | null;
+  total_cost_usd: number;
+  n_turns: number;
+  final_age: string | null;
+  final_age_index: number | null;
+  final_population: number | null;
+  final_economy: number | null;
+}
+
+// Mirrors `RunSeriesPoint` / `RunSeries` in apps/api/src/server.py — per-turn
+// resource trajectories for the overview's per-resource curves.
+export interface RunSeriesPoint {
+  turn: number;
+  food: number;
+  wood: number;
+  gold: number;
+  stone: number;
+  population: number;
+}
+
+export interface RunSeries {
+  run_id: string;
+  profile_name: string | null;
+  points: RunSeriesPoint[];
 }

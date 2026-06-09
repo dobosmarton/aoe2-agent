@@ -34,6 +34,40 @@ export function statesByTurn(
 }
 
 /**
+ * Flat per-turn row for charting. One entry per turn that carries a snapshot,
+ * sorted ascending by turn so recharts renders a left-to-right timeline.
+ */
+export interface TurnSeriesRow {
+  readonly turn: number;
+  readonly food: number;
+  readonly wood: number;
+  readonly gold: number;
+  readonly stone: number;
+  readonly population: number;
+  readonly pop_cap: number;
+}
+
+/**
+ * Projects the `statesByTurn` map into an ordered array of flat rows the
+ * chart components can consume directly.
+ */
+export function seriesFromStates(
+  states: ReadonlyMap<number, WorldStateSnapshot>,
+): readonly TurnSeriesRow[] {
+  return [...states.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([turn, s]) => ({
+      turn,
+      food: Math.round(s.food),
+      wood: Math.round(s.wood),
+      gold: Math.round(s.gold),
+      stone: Math.round(s.stone),
+      population: s.population,
+      pop_cap: s.pop_cap,
+    }));
+}
+
+/**
  * Returns the highest turn_num seen on any `turn_start` event.
  * Used by the Timeline to bound the slider; returns null if no turns yet.
  */

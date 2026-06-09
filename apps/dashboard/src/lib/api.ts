@@ -1,4 +1,4 @@
-import type { RunSummary } from "@/lib/events";
+import type { RunMetrics, RunSeries, RunSummary } from "@/lib/events";
 
 // Backend origin. Empty string = same-origin (prod build served by FastAPI,
 // or dev with Vite proxy). Set VITE_API_BASE_URL=http://host:port to point
@@ -16,6 +16,36 @@ export async function fetchRuns(signal?: AbortSignal): Promise<readonly RunSumma
     throw new Error(`GET /runs failed: ${response.status} ${response.statusText}`);
   }
   return (await response.json()) as readonly RunSummary[];
+}
+
+export async function fetchRunSummaries(
+  signal?: AbortSignal,
+): Promise<readonly RunMetrics[]> {
+  const init = signal === undefined ? {} : { signal };
+  const response = await fetch(apiUrl("/runs/summaries"), init);
+  if (!response.ok) {
+    throw new Error(
+      `GET /runs/summaries failed: ${response.status} ${response.statusText}`,
+    );
+  }
+  return (await response.json()) as readonly RunMetrics[];
+}
+
+export async function fetchRunSeries(
+  dbPath: string,
+  signal?: AbortSignal,
+): Promise<readonly RunSeries[]> {
+  const init = signal === undefined ? {} : { signal };
+  const response = await fetch(
+    apiUrl(`/runs/series?db_path=${encodeURIComponent(dbPath)}`),
+    init,
+  );
+  if (!response.ok) {
+    throw new Error(
+      `GET /runs/series failed: ${response.status} ${response.statusText}`,
+    );
+  }
+  return (await response.json()) as readonly RunSeries[];
 }
 
 export function eventsUrl(runId: string): string {
