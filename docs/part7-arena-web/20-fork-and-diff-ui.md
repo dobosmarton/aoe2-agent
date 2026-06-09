@@ -1,6 +1,6 @@
 # Chapter 20 — Fork and Diff UI
 
-The four tabs in `apps/dashboard/src/App.tsx` are the operator's main surface:
+The four tabs in `apps/dashboard/src/App.tsx` are the operator's surface for a **single run** (picked from the sidebar). Selecting a multi-run *operation* (a group header) opens the experiment overview instead — see the [frontend topology in Chapter 19](./19-web-architecture.md). The tabs:
 
 | Tab | Component | Purpose |
 |---|---|---|

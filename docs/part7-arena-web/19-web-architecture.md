@@ -3,7 +3,7 @@
 `apps/api/src/` is the operator-facing surface for inspecting and steering arena runs. It has two halves:
 
 - **Backend** (`apps/api/src/server.py`) — FastAPI + SSE. Reads from the event broker for live runs, falls back to a read-only DuckDB scan for finalized ones. Hosts the `/forks` endpoint that branches a parent run into a child replay.
-- **Frontend** (`apps/dashboard/`) — Vite + React 19 + Tailwind v4 + Radix UI primitives. Connects to the backend over SSE, renders a Timeline scrubber, a World/Trace/Diff/Operator tab layout, and posts mutation patches to `/forks`.
+- **Frontend** (`apps/dashboard/`) — Vite + React 19 + Tailwind v4 + Radix UI primitives. Connects to the backend over SSE, renders a Timeline scrubber and a World/Trace/Diff/Operator tab layout for a single run, an experiment overview for comparing the parallel runs of one `rank`/`race` operation, and posts mutation patches to `/forks`.
 
 Both are optional. They sit on top of the broker and the DuckDB log — the agent and arena CLIs work without them.
 
@@ -33,6 +33,8 @@ The HTTP contract is frozen so the frontend can evolve independently:
 |---|---|---|---|
 | `GET` | `/health` | `{"status": "ok"}` | Liveness ping. |
 | `GET` | `/runs` | `list[RunSummary]`, newest first | Live runs from the broker (`status: "running"`) merged over finalized runs read from every DuckDB file under `ARENA_LOGS_ROOT` (`status: "complete"`). |
+| `GET` | `/runs/summaries` | `list[RunMetrics]` | Per-run end-of-run metrics (`profile_name`, final age/population/economy, cost, turns) for the experiment overview. Finalized runs only — a live operation's file is writer-locked until it finalizes. |
+| `GET` | `/runs/series?db_path=X` | `list[RunSeries]` | Per-turn resource trajectories for every run in one operation's DuckDB file (the overview's per-resource charts). `db_path` is validated to resolve under `ARENA_LOGS_ROOT` (path-traversal guard). |
 | `GET` | `/events?run_id=X&from_seq=N` | `text/event-stream` | Replay + live-tail. Switches to live broker mode when `broker.is_open_remote(run_id)`, falls back to cold DuckDB scan otherwise. |
 | `POST` | `/forks` | `ForkResponse` | Snapshot the parent at `parent_t`, optionally mutate, schedule an N-turn async replay. |
 | `GET` | `/metrics` | `BrokerMetricsSnapshot` JSON | Operational counters (see Chapter 15). Backend-agnostic via `isinstance` dispatch. |
@@ -116,13 +118,17 @@ Fork tasks are tracked in `app.state.fork_tasks` (a strong-reference set). Witho
 └──────────────────┴───────────────────────────────────────────────┘
 ```
 
-Three hooks own all state:
+State lives in `App.tsx` plus a handful of fetch-on-mount hooks:
 
 - `useRuns()` (`hooks/use-runs.ts`) — GETs `/runs` once, returns `{runs, status, error}`.
-- `useEvents(selectedRunId)` (`hooks/use-events.ts`) — opens an EventSource against `/events?run_id=...`, accumulates events, exposes SSE status (`idle | connecting | open | closed | error`).
-- A local `selectedTurn` state in `App.tsx` — the scrubber position. Auto-advances as new turns stream in *only* if the user is pinned to the latest turn; if they scrubbed back, new turns don't yank them forward (`App.tsx:42–53`).
+- `useEvents(selectedRunId)` (`hooks/use-events.ts`) — opens an EventSource against `/events?run_id=...`, accumulates events, exposes SSE status (`idle | connecting | open | closed | error`). Active only in the run-detail view.
+- `useRunSummaries()` and `useOperationSeries(dbPath)` (`hooks/`) — GET `/runs/summaries` and `/runs/series` for the experiment overview.
+- A local `selection` discriminated union (`{kind: "run"} | {kind: "operation"}`) plus a `selectedTurn` scrubber position in `App.tsx`. The scrubber auto-advances as new turns stream in *only* while pinned to the latest turn; if the user scrubbed back, new turns don't yank them forward.
 
-Tab contents are four panels under `src/panels/` — see [Chapter 20](./20-fork-and-diff-ui.md) for the World/Trace/Diff/Operator semantics. The Timeline component (`src/components/timeline.tsx`) is shared across tabs because the scrubber position is owned at `App.tsx` level.
+The sidebar (`components/run-list.tsx`) groups runs into operations via `lib/run-grouping.ts` — all runs of a `rank`/`race` share one DuckDB file, hence one `db_path`. Two destinations:
+
+- **Run-detail view** (click a run) — the four World/Trace/Diff/Operator panels under `src/panels/` (see [Chapter 20](./20-fork-and-diff-ui.md)), plus a sibling strip to jump between the operation's parallel runs. The Timeline (`src/components/timeline.tsx`) is shared across these tabs because the scrubber position is owned at `App.tsx` level.
+- **Experiment overview** (click a group header) — `panels/experiment-overview.tsx`: a leaderboard sorted by the same lexicographic composite as `arena.ranking.composite_score`, per-run comparison bars (final population, total cost), and per-resource trajectory charts averaged per profile. Lets you pick the best/worst run, then drill into any row.
 
 ## Backend / frontend wiring
 

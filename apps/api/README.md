@@ -9,7 +9,7 @@ operator-driven forks. The Vite/React/Tailwind SPA frontend lives at
 ```
 apps/api/src/
 ├── __main__.py     # CLI: aoe2-arena-web --port 8000
-├── server.py       # FastAPI app: /runs, /events, /forks, /metrics, /health
+├── server.py       # FastAPI app: /runs(+/summaries,/series), /events, /forks, /metrics, /health
 └── forks.py        # /forks handler + create_fork + background replay
 
 apps/dashboard/                             # ← separate Bun workspace
@@ -17,11 +17,11 @@ apps/dashboard/                             # ← separate Bun workspace
 ├── vite.config.ts                          # dev proxy for /runs, /events, /forks, /health
 ├── .env.example                            # VITE_API_BASE_URL for cross-host dev
 └── src/
-    ├── App.tsx                             # 2-column layout: sidebar + Tabs + Timeline
-    ├── components/                         # ui/, run-list, timeline, state-summary
-    ├── hooks/                              # use-runs, use-events
-    ├── lib/                                # api, event-utils, events, utils
-    └── panels/                             # world, trace, diff, operator
+    ├── App.tsx                             # sidebar + run-detail (Tabs) / experiment-overview view
+    ├── components/                         # ui/, charts/, trace/, run-list, sibling-strip, status-badge, …
+    ├── hooks/                              # use-runs, use-events, use-run-summaries, use-operation-series
+    ├── lib/                                # api, events, event-utils, run-grouping, run-format, series-aggregate
+    └── panels/                             # world, trace, diff, operator, experiment-overview
 ```
 
 ## Two-terminal dev
@@ -42,6 +42,8 @@ Browse <http://localhost:5173>, pick a run.
 |---|---|---|
 | `GET` | `/health` | Liveness. |
 | `GET` | `/runs` | Live runs from the broker (`status: "running"`) merged over finalized runs from every DuckDB under `ARENA_LOGS_ROOT` (`status: "complete"`). |
+| `GET` | `/runs/summaries` | Per-run end-of-run metrics (`profile_name`, final age/population/economy, cost, turns) for the experiment overview. Finalized runs only. |
+| `GET` | `/runs/series?db_path=X` | Per-turn resource trajectories for every run in one operation's DuckDB file — the overview's per-resource charts. Path validated under `ARENA_LOGS_ROOT`. |
 | `GET` | `/events?run_id=X&from_seq=N` | SSE — live broker for active runs (`is_open_remote`), cold DuckDB scan for finalized. |
 | `POST` | `/forks` | Snapshot + optionally mutate + schedule N-turn async replay. |
 | `GET` | `/metrics` | Broker counters (`events_published`, `events_streamed`, `streams_dropped`, `runs_open`). |

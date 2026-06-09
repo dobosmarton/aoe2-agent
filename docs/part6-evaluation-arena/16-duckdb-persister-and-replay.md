@@ -66,7 +66,7 @@ Each `kind` maps to a frozen Pydantic model defined in `packages/evaluation/src/
 
 | Kind | Purpose | Carries |
 |---|---|---|
-| `turn_start` | Begin a turn (and snapshot the world for fork) | `turn_num`, optional `WorldStateSnapshot` |
+| `turn_start` | Begin a turn (and snapshot the world for fork) | `turn_num`, optional `WorldStateSnapshot`, optional `profile_name` (the racing config that produced the run) |
 | `observation` | What the agent perceived | `entity_count`, sorted unique `classes` |
 | `llm_prompt` | What the LLM saw | human-readable `state_summary` |
 | `llm_response` | What the LLM said | `actions`, `reasoning`, `cost_usd` |
