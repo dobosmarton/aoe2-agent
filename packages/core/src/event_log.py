@@ -104,6 +104,10 @@ class TurnStartPayload(_PayloadBase):
     kind: Literal["turn_start"] = "turn_start"
     turn_num: int
     state: WorldStateSnapshot | None = None  # Phase 5: snapshot for fork()
+    # Which racing profile/config produced this run. Set on every turn so the
+    # last turn_start carries both the final `state` and the config label in a
+    # single row. None for runs with no profile (forks, ad-hoc loops).
+    profile_name: str | None = None
 
 
 class ObservationPayload(_PayloadBase):

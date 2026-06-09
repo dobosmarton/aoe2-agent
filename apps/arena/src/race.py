@@ -52,6 +52,7 @@ async def _race_with_factory(
             initial_state=initial_state,
             max_iterations=config.turns,
             sink=sink,
+            profile_name=p.name,
         )
         for p in config.profiles
     ]

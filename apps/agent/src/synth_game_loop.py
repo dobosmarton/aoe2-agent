@@ -104,6 +104,7 @@ async def synth_game_loop(
     max_iterations: int,
     sink: EventSink = _NULL_SINK,
     run_id: str | None = None,
+    profile_name: str | None = None,
 ) -> SynthLoopResult:
     """Run `max_iterations` synthetic turns and return the audit trail.
 
@@ -116,6 +117,10 @@ async def synth_game_loop(
 
     Pass `run_id` to continue an existing run (e.g. after fork()); if None,
     a fresh UUID is generated.
+
+    `profile_name` labels which racing config produced this run; it rides on
+    every `turn_start` so the dashboard's experiment overview can attribute
+    each parallel run to its profile. None for callers without a profile.
     """
     actual_run_id = run_id if run_id is not None else uuid.uuid4().hex
     agent_id = uuid.uuid4().hex
@@ -133,6 +138,7 @@ async def synth_game_loop(
             TurnStartPayload(
                 turn_num=turn_num,
                 state=WorldStateSnapshot.from_world_state(state_before),
+                profile_name=profile_name,
             ),
         )
         _emit(
