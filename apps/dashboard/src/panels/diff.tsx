@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
+import { ExternalLink, GitBranch } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -10,10 +10,13 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
-import { StateSummary } from "@/components/state-summary";
-import { useEvents } from "@/hooks/use-events";
-import { forksIn, statesByTurn } from "@/lib/event-utils";
+import { ForkComparison } from "@/panels/fork-comparison";
+import { forksIn } from "@/lib/event-utils";
+import { cn } from "@/lib/utils";
 import type { ArenaEvent } from "@/lib/events";
+
+const SECTION_TITLE =
+  "text-muted-foreground text-xs font-semibold uppercase tracking-wide";
 
 interface DiffPanelProps {
   readonly events: readonly ArenaEvent[];
@@ -62,23 +65,33 @@ export function DiffPanel({
               key={`${fork.parent_run_id}-${String(fork.parent_t)}`}
               variant={index === safeIndex ? "default" : "outline"}
               size="sm"
-              onClick={() => setSelectedForkIndex(index)}
+              onClick={() => {
+                setSelectedForkIndex(index);
+              }}
+              className={cn(
+                index === safeIndex &&
+                  "bg-event-fork/15 border-event-fork/50 text-foreground hover:bg-event-fork/25",
+              )}
             >
+              <GitBranch className="text-event-fork size-3.5" />
               fork {index + 1} ← {fork.parent_run_id.slice(0, 6)}@{fork.parent_t}
             </Button>
           ))}
         </div>
       ) : null}
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Fork metadata</CardTitle>
+      <Card className="gap-3 py-4">
+        <CardHeader className="px-4">
+          <CardTitle className={`${SECTION_TITLE} flex items-center gap-1.5`}>
+            <GitBranch className="text-event-fork size-3.5" />
+            Fork metadata
+          </CardTitle>
           <CardDescription className="font-mono text-xs">
             parent {selectedFork.parent_run_id.slice(0, 12)}… @ turn{" "}
             {selectedFork.parent_t}
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-2 text-xs">
+        <CardContent className="space-y-3 px-4 text-xs">
           <div className="flex items-baseline justify-between gap-2">
             <span className="text-muted-foreground">mutation</span>
             <span className="font-mono">
@@ -90,8 +103,11 @@ export function DiffPanel({
           <Button
             variant="outline"
             size="sm"
-            onClick={() => onOpenRun(selectedFork.parent_run_id)}
+            onClick={() => {
+              onOpenRun(selectedFork.parent_run_id);
+            }}
           >
+            <ExternalLink className="size-3.5" />
             Open parent run
           </Button>
         </CardContent>
@@ -102,55 +118,6 @@ export function DiffPanel({
         currentRunId={currentRunId}
         fork={selectedFork}
       />
-    </div>
-  );
-}
-
-interface ForkComparisonProps {
-  readonly currentEvents: readonly ArenaEvent[];
-  readonly currentRunId: string;
-  readonly fork: ReturnType<typeof forksIn>[number];
-}
-
-function ForkComparison({
-  currentEvents,
-  currentRunId,
-  fork,
-}: ForkComparisonProps): React.ReactElement {
-  // Subscribe to the parent run's events in parallel with the current run's
-  // stream. The browser handles two concurrent EventSources fine; the
-  // backend's read-only DuckDB connection is per-request.
-  const { events: parentEvents, status: parentStatus } = useEvents(fork.parent_run_id);
-
-  const parentStates = useMemo(() => statesByTurn(parentEvents), [parentEvents]);
-  const currentStates = useMemo(() => statesByTurn(currentEvents), [currentEvents]);
-
-  const parentState = parentStates.get(fork.parent_t) ?? null;
-  // The child's first turn_start after fork is turn 1 (synth_game_loop resets
-  // the turn counter); fall back to the lowest turn we have for safety.
-  const childFirstTurn = [...currentStates.keys()].sort((a, b) => a - b)[0] ?? null;
-  const childState = childFirstTurn === null ? null : (currentStates.get(childFirstTurn) ?? null);
-
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="text-muted-foreground flex items-baseline justify-between text-xs">
-        <span>Side-by-side state comparison</span>
-        <Badge variant="outline">parent stream: {parentStatus}</Badge>
-      </div>
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-        <StateSummary
-          state={parentState}
-          label="Parent"
-          sublabel={`${fork.parent_run_id.slice(0, 8)}… @ turn ${fork.parent_t}`}
-        />
-        <StateSummary
-          state={childState}
-          label="Child"
-          sublabel={`${currentRunId.slice(0, 8)}… @ turn ${
-            childFirstTurn ?? "?"
-          }`}
-        />
-      </div>
     </div>
   );
 }

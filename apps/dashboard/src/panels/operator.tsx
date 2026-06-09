@@ -1,17 +1,22 @@
 import { useEffect, useReducer, useState } from "react";
+import { GitBranch, Loader2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { EmptyState } from "@/components/empty-state";
+import { AgeField } from "@/panels/age-field";
+import { MutationSummary } from "@/panels/mutation-summary";
+import { NumberField } from "@/panels/number-field";
+import { OptionalNumberField } from "@/panels/optional-number-field";
+import { RESOURCE_COLORS } from "@/panels/operator-fields";
 import { createFork } from "@/lib/api";
 import type { Age, MutationPatch } from "@/lib/api";
 
@@ -19,22 +24,8 @@ import type { Age, MutationPatch } from "@/lib/api";
 // Form state machine
 // ---------------------------------------------------------------------------
 
-const _AGES: readonly Age[] = [
-  "Dark Age",
-  "Feudal Age",
-  "Castle Age",
-  "Imperial Age",
-] as const;
-
-const _MUTATION_FIELDS: ReadonlyArray<keyof MutationPatch> = [
-  "food",
-  "wood",
-  "gold",
-  "stone",
-  "population",
-  "pop_cap",
-  "age",
-] as const;
+const SECTION_TITLE =
+  "text-muted-foreground text-xs font-semibold uppercase tracking-wide";
 
 type NumericField = Exclude<keyof MutationPatch, "age">;
 
@@ -152,15 +143,20 @@ export function OperatorPanel({
   }
 
   return (
-    <div className="flex h-full flex-col gap-3 overflow-auto p-4">
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Fork target</CardTitle>
-          <CardDescription className="font-mono text-xs">
-            {currentRunId}
-          </CardDescription>
+    <div className="mx-auto flex h-full w-full max-w-3xl flex-col gap-3 overflow-auto p-4">
+      <div className="flex items-center gap-2">
+        <GitBranch className="text-event-fork size-4" />
+        <h2 className="text-sm font-semibold">Spawn a fork</h2>
+        <Badge variant="outline" className="ml-auto max-w-[60%] truncate font-mono text-xs">
+          {currentRunId}
+        </Badge>
+      </div>
+
+      <Card className="gap-3 py-4">
+        <CardHeader className="px-4">
+          <CardTitle className={SECTION_TITLE}>Fork point</CardTitle>
         </CardHeader>
-        <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <CardContent className="grid grid-cols-1 gap-3 px-4 sm:grid-cols-2">
           <NumberField
             label="Fork at turn"
             value={form.parent_t}
@@ -188,28 +184,40 @@ export function OperatorPanel({
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Mutation patch</CardTitle>
-          <CardDescription className="text-xs">
+      <Card className="gap-3 py-4">
+        <CardHeader className="px-4">
+          <CardTitle className={SECTION_TITLE}>Mutation patch</CardTitle>
+          <p className="text-muted-foreground text-xs">
             Leave a field blank to inherit the parent's value.
-          </CardDescription>
+          </p>
         </CardHeader>
-        <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {_MUTATION_FIELDS.filter((field) => field !== "age").map((field) => (
-            <OptionalNumberField
-              key={field}
-              label={field}
-              value={form.mutation[field as NumericField] ?? null}
-              onChange={(value) =>
-                dispatch({ type: "set_numeric", field: field as NumericField, value })
-              }
-            />
-          ))}
+        <CardContent className="grid grid-cols-1 gap-3 px-4 sm:grid-cols-2">
+          {(["food", "wood", "gold", "stone", "population", "pop_cap"] as const).map(
+            (field) => (
+              <OptionalNumberField
+                key={field}
+                label={field}
+                colorVar={RESOURCE_COLORS[field]}
+                value={form.mutation[field] ?? null}
+                onChange={(value) =>
+                  dispatch({ type: "set_numeric", field, value })
+                }
+              />
+            ),
+          )}
           <AgeField
             value={form.mutation.age ?? null}
             onChange={(value) => dispatch({ type: "set_age", value })}
           />
+        </CardContent>
+      </Card>
+
+      <Card className="gap-3 py-4">
+        <CardHeader className="px-4">
+          <CardTitle className={SECTION_TITLE}>Mutation summary</CardTitle>
+        </CardHeader>
+        <CardContent className="px-4">
+          <MutationSummary mutation={form.mutation} />
         </CardContent>
       </Card>
 
@@ -220,7 +228,17 @@ export function OperatorPanel({
             void onSubmit();
           }}
         >
-          {submit.kind === "submitting" ? "Spawning…" : "Spawn fork"}
+          {submit.kind === "submitting" ? (
+            <>
+              <Loader2 className="size-4 animate-spin" />
+              Spawning…
+            </>
+          ) : (
+            <>
+              <GitBranch className="size-4" />
+              Spawn fork
+            </>
+          )}
         </Button>
         {submit.kind === "error" ? (
           <Badge variant="destructive" className="text-xs">
@@ -228,106 +246,6 @@ export function OperatorPanel({
           </Badge>
         ) : null}
       </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Field components
-// ---------------------------------------------------------------------------
-
-interface NumberFieldProps {
-  readonly label: string;
-  readonly value: number;
-  readonly min?: number;
-  readonly max?: number;
-  readonly onChange: (value: number) => void;
-}
-
-function NumberField({
-  label,
-  value,
-  min,
-  max,
-  onChange,
-}: NumberFieldProps): React.ReactElement {
-  return (
-    <div>
-      <Label className="text-muted-foreground text-xs">{label}</Label>
-      <Input
-        type="number"
-        value={value}
-        min={min}
-        max={max}
-        onChange={(e) => {
-          const parsed = Number(e.target.value);
-          if (Number.isFinite(parsed)) {
-            onChange(parsed);
-          }
-        }}
-      />
-    </div>
-  );
-}
-
-interface OptionalNumberFieldProps {
-  readonly label: string;
-  readonly value: number | null;
-  readonly onChange: (value: number | null) => void;
-}
-
-function OptionalNumberField({
-  label,
-  value,
-  onChange,
-}: OptionalNumberFieldProps): React.ReactElement {
-  return (
-    <div>
-      <Label className="text-muted-foreground text-xs capitalize">{label}</Label>
-      <Input
-        type="number"
-        value={value ?? ""}
-        placeholder="inherit"
-        onChange={(e) => {
-          const raw = e.target.value;
-          if (raw === "") {
-            onChange(null);
-            return;
-          }
-          const parsed = Number(raw);
-          if (Number.isFinite(parsed)) {
-            onChange(parsed);
-          }
-        }}
-      />
-    </div>
-  );
-}
-
-interface AgeFieldProps {
-  readonly value: Age | null;
-  readonly onChange: (value: Age | null) => void;
-}
-
-function AgeField({ value, onChange }: AgeFieldProps): React.ReactElement {
-  return (
-    <div>
-      <Label className="text-muted-foreground text-xs">age</Label>
-      <select
-        className="border-input bg-background text-foreground h-9 w-full rounded-md border px-3 text-sm shadow-xs focus-visible:outline-none"
-        value={value ?? ""}
-        onChange={(e) => {
-          const raw = e.target.value;
-          onChange(raw === "" ? null : (raw as Age));
-        }}
-      >
-        <option value="">inherit</option>
-        {_AGES.map((a) => (
-          <option key={a} value={a}>
-            {a}
-          </option>
-        ))}
-      </select>
     </div>
   );
 }
