@@ -3,6 +3,12 @@
 URL contract (frozen for future-frontend compatibility):
   GET  /health            -> {"status": "ok"}
   GET  /runs              -> list[RunSummary], newest first
+  GET  /runs/summaries    -> list[RunMetrics] — per-run end-of-run metrics
+                             (profile, final state, cost, turns) for the
+                             experiment overview. Finalized runs only.
+  GET  /runs/series?db_path=X -> list[RunSeries] — per-turn resource
+                             trajectories for every run in one operation's
+                             DuckDB file (the overview's per-resource charts).
   GET  /events?run_id=X   -> text/event-stream, one event per line.
                              Switches to live-tail mode for in-flight runs.
   POST /forks             -> create a child run with mutation patch + N-turn
@@ -46,8 +52,9 @@ from evaluation.event_broker import (
     RunId,
     Seq,
 )
-from evaluation.event_log import stream_cold
+from evaluation.event_log import TurnStartPayload, stream_cold
 from evaluation.fork import ForkError
+from evaluation.world_sim import AGE_SEQUENCE
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -92,6 +99,50 @@ class RunSummary:
     first_ts: str
     last_ts: str
     status: RunStatus
+
+
+@dataclass(frozen=True, slots=True)
+class RunMetrics:
+    """Comparable end-of-run metrics for the dashboard's experiment overview.
+
+    Recomputed from a finalized DuckDB file: the final `WorldStateSnapshot`
+    (last `turn_start`), summed LLM cost, and turn count. `profile_name` is the
+    racing config that produced the run (None for runs logged before profile
+    persistence, or forks). `final_age_index` is the rank of `final_age` in
+    `AGE_SEQUENCE` so the frontend can sort by the same lexicographic score as
+    `arena.ranking.composite_score` without duplicating the age order.
+    """
+
+    run_id: str
+    profile_name: str | None
+    total_cost_usd: float
+    n_turns: int
+    final_age: str | None
+    final_age_index: int | None
+    final_population: int | None
+    final_economy: float | None  # food + wood
+
+
+@dataclass(frozen=True, slots=True)
+class RunSeriesPoint:
+    """One turn's resource snapshot for the overview's per-resource curves."""
+
+    turn: int
+    food: float
+    wood: float
+    gold: float
+    stone: float
+    population: int
+
+
+@dataclass(frozen=True, slots=True)
+class RunSeries:
+    """Per-turn resource trajectory for one run, labelled by its profile so the
+    overview can aggregate runs of the same config into a characteristic curve."""
+
+    run_id: str
+    profile_name: str | None
+    points: list[RunSeriesPoint]
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +290,163 @@ def _list_runs(root: Path) -> list[RunSummary]:
     return runs
 
 
+# Decimal places kept when rounding a run's summed LLM cost for display —
+# sub-cent precision without surfacing float noise.
+_COST_USD_PRECISION = 6
+
+
+def _parse_turn_start(payload_json: str) -> TurnStartPayload:
+    """Validate a `turn_start` `payload_json` back into the Pydantic model it was
+    serialized from. Gives strongly-typed `profile_name` / `state` access with
+    no hand-rolled dict narrowing — validation at the boundary the JSON came
+    from. Shared by the summary and series readers."""
+    return TurnStartPayload.model_validate_json(payload_json)
+
+
+def _metrics_from_last_turn(
+    run_id: str, n_turns: int, cost: float, last_turn_json: str | None
+) -> RunMetrics:
+    """Build a `RunMetrics` from precomputed aggregates + the last turn_start
+    payload (JSON string, or None when a run has no snapshot)."""
+    profile_name: str | None = None
+    final_age: str | None = None
+    final_age_index: int | None = None
+    final_population: int | None = None
+    final_economy: float | None = None
+    if last_turn_json is not None:
+        payload = _parse_turn_start(last_turn_json)
+        profile_name = payload.profile_name
+        state = payload.state
+        if state is not None:
+            final_age = state.age
+            final_age_index = AGE_SEQUENCE.index(state.age) if state.age in AGE_SEQUENCE else None
+            final_population = state.population
+            final_economy = state.food + state.wood
+    return RunMetrics(
+        run_id=run_id,
+        profile_name=profile_name,
+        total_cost_usd=round(cost, _COST_USD_PRECISION),
+        n_turns=n_turns,
+        final_age=final_age,
+        final_age_index=final_age_index,
+        final_population=final_population,
+        final_economy=final_economy,
+    )
+
+
+def _run_metrics_in_file(db_path: Path) -> list[RunMetrics]:
+    """Per-run comparable metrics for one DuckDB file.
+
+    Two queries: an aggregate (turn count + summed LLM cost) over every run,
+    and a window pick of each run's last `turn_start` payload for the final
+    state + profile label. Joined in Python by run_id. Files locked by a live
+    writer are skipped — their runs become readable once finalized.
+    """
+    conn = _connect_read_only(db_path)
+    if conn is None:
+        return []
+    try:
+        agg_rows = cast(
+            "list[tuple[object, ...]]",
+            conn.execute(
+                "SELECT run_id, MAX(t) AS n_turns, "
+                "SUM(CASE WHEN kind='llm_response' "
+                "THEN CAST(json_extract(payload_json, '$.cost_usd') AS DOUBLE) "
+                "ELSE 0 END) AS cost "
+                "FROM events GROUP BY run_id"
+            ).fetchall(),
+        )
+        last_turn_rows = cast(
+            "list[tuple[object, ...]]",
+            conn.execute(
+                "SELECT run_id, payload_json FROM ("
+                "  SELECT run_id, payload_json, "
+                "  ROW_NUMBER() OVER (PARTITION BY run_id ORDER BY t DESC, ts DESC) AS rn "
+                "  FROM events WHERE kind='turn_start'"
+                ") WHERE rn = 1"
+            ).fetchall(),
+        )
+    finally:
+        conn.close()
+    last_payload: dict[str, str] = {str(row[0]): str(row[1]) for row in last_turn_rows}
+    metrics: list[RunMetrics] = []
+    for row in agg_rows:
+        run_id = str(row[0])
+        n_turns = int(cast("int", row[1])) if row[1] is not None else 0
+        cost = float(cast("float", row[2])) if row[2] is not None else 0.0
+        metrics.append(_metrics_from_last_turn(run_id, n_turns, cost, last_payload.get(run_id)))
+    return metrics
+
+
+def _list_run_metrics(root: Path) -> list[RunMetrics]:
+    metrics: list[RunMetrics] = []
+    for db_path in _all_duckdb_files(root):
+        metrics.extend(_run_metrics_in_file(db_path))
+    return metrics
+
+
+def _resolve_logs_path(db_path: str) -> Path | None:
+    """Resolve a client-supplied DuckDB path, but only if it lives under the
+    logs root and exists. Guards the `/runs/series` query against path
+    traversal — the client echoes a `db_path` we handed it via `/runs`, and we
+    refuse anything outside the sandbox."""
+    root = _logs_root().resolve()
+    try:
+        candidate = Path(db_path).resolve()
+    except (OSError, ValueError):
+        return None
+    if root not in candidate.parents or not candidate.is_file():
+        return None
+    return candidate
+
+
+def _series_in_file(db_path: Path) -> list[RunSeries]:
+    """Per-turn resource trajectories for every run in one DuckDB file.
+
+    Reads each run's `turn_start` rows (which carry the full WorldState
+    snapshot) in turn order and projects out the resource fields. One query;
+    grouping + JSON parse happen in Python.
+    """
+    conn = _connect_read_only(db_path)
+    if conn is None:
+        return []
+    try:
+        rows = cast(
+            "list[tuple[object, ...]]",
+            conn.execute(
+                "SELECT run_id, t, payload_json FROM events "
+                "WHERE kind='turn_start' ORDER BY run_id, t"
+            ).fetchall(),
+        )
+    finally:
+        conn.close()
+
+    points_by_run: dict[str, list[RunSeriesPoint]] = {}
+    profile_by_run: dict[str, str | None] = {}
+    for run_id_obj, t_obj, payload_obj in rows:
+        run_id = str(run_id_obj)
+        payload = _parse_turn_start(str(payload_obj))
+        if run_id not in profile_by_run:
+            profile_by_run[run_id] = payload.profile_name
+        state = payload.state
+        if state is None:
+            continue
+        points_by_run.setdefault(run_id, []).append(
+            RunSeriesPoint(
+                turn=int(t_obj) if isinstance(t_obj, int) else 0,
+                food=state.food,
+                wood=state.wood,
+                gold=state.gold,
+                stone=state.stone,
+                population=state.population,
+            )
+        )
+    return [
+        RunSeries(run_id=rid, profile_name=profile_by_run.get(rid), points=pts)
+        for rid, pts in points_by_run.items()
+    ]
+
+
 def _resolve_run(run_id: str, root: Path) -> Path:
     # This scans every log file to find the one holding `run_id`. A single
     # file locked by a live writer must not fail the lookup of an unrelated,
@@ -375,6 +583,33 @@ async def runs(broker: EventBroker = Depends(get_broker)) -> list[dict[str, obje
     cold = await asyncio.to_thread(_list_runs, _logs_root())
     live = _live_summaries(await broker.live_runs())
     return [asdict(s) for s in _merge_runs(live, cold)]
+
+
+@app.get("/runs/summaries")
+async def run_summaries() -> list[dict[str, object]]:
+    """Per-run comparable metrics for the dashboard's experiment overview.
+
+    Finalized (cold) runs only — a live operation's DuckDB file is held by its
+    writer, so its rows appear once it finalizes. Scans every log file once per
+    call; the dashboard fetches this on mount, like /runs.
+    """
+    metrics = await asyncio.to_thread(_list_run_metrics, _logs_root())
+    return [asdict(m) for m in metrics]
+
+
+@app.get("/runs/series")
+async def run_series(db_path: str = Query(..., min_length=1)) -> list[dict[str, object]]:
+    """Per-turn resource trajectories for every run in one operation's file.
+
+    Scoped to a single DuckDB file (one operation) — the overview passes the
+    `db_path` it received from /runs. Returns the unaggregated per-run series so
+    the frontend can aggregate by profile however it likes.
+    """
+    resolved = _resolve_logs_path(db_path)
+    if resolved is None:
+        raise HTTPException(status_code=404, detail=f"no readable log at {db_path!r}")
+    series = await asyncio.to_thread(_series_in_file, resolved)
+    return [asdict(s) for s in series]
 
 
 async def _stream_from_broker(
