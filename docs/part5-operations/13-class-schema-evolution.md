@@ -1,6 +1,6 @@
 # Chapter 13: Class Schema Evolution
 
-The detection system uses a single class schema defined in `classes.yaml` with 60 classes. This chapter explains the schema history, the current unified approach, and where legacy mapping still exists.
+The detection system uses a single class schema defined in `classes.yaml` with 60 classes. This chapter explains the schema history and the current unified approach. (The legacy v1→v2 mapping code has been removed — the pipeline is single-schema now.)
 
 <aside class="prereqs">
 
@@ -28,7 +28,7 @@ As of v5, all data sources use `classes.yaml` IDs directly:
 
 - **Synthetic training data** — `generate_training_data.py` SPRITE_CONFIGS use classes.yaml IDs (e.g., sheep=8, town_center=9)
 - **CVAT annotations** — labeled with classes.yaml names, converted by name-matching
-- **Pre-labels** — `prelabel.py` maps model output to classes.yaml IDs before writing CVAT-compatible labels
+- **Pre-labels** — `prelabel.py` writes classes.yaml IDs directly (the model is trained on classes.yaml IDs)
 - **Merged datasets** — `prepare_training.py` copies synthetic labels directly (no remapping needed)
 
 This eliminates the v1/v2 ID mismatch that previously required remapping during dataset merges.
@@ -41,15 +41,11 @@ This eliminates the v1/v2 ID mismatch that previously required remapping during 
 
 **`load_classes_yaml()`** — loads the 60-class schema. Returns `{id: name}` dict.
 
-**`load_dataset_yaml()`** — loads the legacy v1 46-class schema. Returns `{id: name}` dict.
-
-**`build_v1_to_v2_mapping()`** — builds mapping from legacy model class IDs to classes.yaml IDs. Used only by `prelabel.py` when running inference with older models (v1-v4) that output v1-era class IDs. Maps by matching class names between schemas.
-
-**`convert_label_file()`** — rewrites a YOLO `.txt` label file, replacing class IDs per a mapping. Lines with unmappable classes are skipped.
+> The legacy v1 mapping helpers (`load_dataset_yaml`, `build_v1_to_v2_mapping`, `convert_label_file`) were **removed** once the pipeline went single-schema: YOLO26/v6 emits classes.yaml IDs natively, so there is only one scheme and nothing to map between.
 
 ### CVAT Support
 
-**`get_classes_for_cvat(schema)`** — generates an ordered class name list for CVAT project import.
+**`get_classes_for_cvat()`** — generates an ordered class name list for CVAT project import.
 
 **`write_classes_txt()`** — writes the `classes.txt` file that CVAT needs when importing YOLO labels.
 
@@ -76,7 +72,7 @@ During the hybrid merge, synthetic labels are copied directly (no remapping need
 
 ### In prelabel.py
 
-When pre-labeling screenshots with older models (v1-v4), the model outputs legacy class IDs. `build_v1_to_v2_mapping()` maps these to classes.yaml IDs before writing CVAT-compatible labels. For v5+ models trained on classes.yaml IDs directly, this mapping is an identity operation.
+The model (YOLO26/v6) emits classes.yaml IDs directly, so `prelabel.py` writes them straight to CVAT-compatible labels with no remapping. Detections whose class ID falls outside the 60-class range are dropped.
 
 ### In COCO conversion
 
@@ -109,8 +105,8 @@ Any class additions, removals, or renamings must update `classes.yaml` first. Al
 
 ## Summary
 
-- Single schema: 60 classes defined in `classes.yaml`, used directly by all data sources
-- Legacy v1 mapping exists only for running inference with older models in `prelabel.py`
+- Single schema: 60 classes defined in `classes.yaml`, used directly by all data sources — no runtime remapping
+- The legacy v1 (46-class) mapping utilities were removed once the pipeline went single-schema
 - Unique units grouped by combat type: unique_archer, unique_cavalry, unique_infantry, unique_siege, unique_ship
 - `classes.yaml` is the single source of truth for the taxonomy
 

@@ -65,22 +65,16 @@ Defined at `packages/detection/src/inference/detector.py`. Key initialization pa
 
 ### Model Loading
 
-The detector supports two model formats:
+The trained artifact is **YOLO26n** (NMS-free), shipped as `aoe2_yolo_v6.onnx` / `aoe2_yolo_v6.pt`. The detector supports two model formats:
 
 - **PyTorch (.pt)** -- loaded via ultralytics YOLO library. Requires `torch` and `ultralytics` packages. At load time, `_load_pytorch()` reads `model.names` from the model file to set `self.class_names` — this is authoritative and overrides the YAML-loaded defaults.
 - **ONNX (.onnx)** -- loaded via `onnxruntime`. Cross-platform, works on ARM64 Windows where PyTorch may not be available. Uses `DEFAULT_CLASSES` loaded from `classes.yaml`. Session options: `ORT_ENABLE_ALL` graph optimization, 4 intra-op threads, auto-detected execution provider (DML or CPU).
 
-If `model_path` is not specified, `get_detector()` auto-detects using a priority chain:
+If `model_path` is not specified, `get_detector()` resolves the model in this order (there is no multi-version fallback ladder — old model files were dropped, so there's no backward compatibility to maintain):
 
-1. `models/aoe2_yolo_v6.onnx` -- v6 ONNX (YOLO26, NMS-free, fastest)
-2. `models/aoe2_yolo_v6.pt` -- v6 PyTorch
-3. `models/aoe2_yolo_v5.onnx` -- v5 ONNX (batched SAHI support)
-4. `models/aoe2_yolo_v5.pt` -- v5 PyTorch
-5. `models/aoe2_yolo_v2.onnx` -- v2 ONNX (hybrid trained, fallback)
-6. `models/aoe2_yolo_v2.pt` -- v2 PyTorch
-7. `models/aoe2_yolo26.onnx` -- v1 ONNX (last resort)
-8. `models/aoe2_yolo26.pt` -- v1 PyTorch
-9. Mock mode -- if no model file found
+1. `models/aoe2_yolo_v6.onnx` -- preferred; this is the ARM64 deploy path (YOLO26, NMS-free)
+2. `models/aoe2_yolo_v6.pt` -- used only if the ONNX export is absent
+3. Mock mode -- if neither model file is found
 
 ### Detection Modes
 
@@ -122,21 +116,20 @@ The `imgsz` parameter (default 1280, configurable via `config.detection_imgsz`) 
 
 ## 7.5 Backend: ONNX
 
-The ONNX backend handles two different output formats because ultralytics exports vary by version:
+YOLO26 is an end-to-end, **NMS-free** model: the ONNX graph already decodes and filters its own predictions, so it emits a single, fully-decoded layout. There is no longer a raw, pre-NMS output to post-process.
 
-**Format 1 (post-NMS)**: Output shape `(batch, N, 6)` where each detection is `[x1, y1, x2, y2, confidence, class_id]`. These are ready to use after coordinate scaling.
+**Output layout**: shape `(num_boxes, 6)`, where each row is `[x1, y1, x2, y2, conf, class]` — corner (xyxy) coordinates in model-input pixels. The only work the backend does is scale those coordinates from the model input resolution back to the original screenshot dimensions.
 
-**Format 2 (raw predictions)**: Output shape `(batch, 4+num_classes, N)`. Requires:
-1. Transpose to `(N, 4+num_classes)`
-2. Extract bbox `[x_center, y_center, width, height]` from first 4 columns
-3. Class scores from remaining columns -- `argmax` for class ID, `max` for confidence
-4. Filter by confidence threshold
-5. Convert from center format to corner format `(x1, y1, x2, y2)`
-6. Apply per-class NMS (IoU-based suppression)
+Parsing lives in one shared module, **`packages/detection/src/inference/onnx_layout.py`**. Its `decode_example()` reads the raw ONNX output and returns a list of typed `DetectionRow`s. Both detection paths call into it:
 
-Both formats require scaling coordinates from the model input resolution back to the original screenshot dimensions.
+- the single-image path, `detector._onnx_detect`, and
+- the batched-SAHI path, `sahi.parse_onnx_tile`,
 
-> **Key Insight**: The ONNX backend auto-detects which output format it receives by checking `output.shape[2]`. If shape[2] == 6, it's post-NMS. If shape[1] == 4+num_classes, it's raw predictions. This makes the detector resilient to ultralytics version changes without requiring model re-export.
+so the two can't drift apart in how they interpret model output.
+
+`decode_example()` accepts **only** the `(num_boxes, 6)` layout. Any other shape raises **`UnknownOnnxLayoutError`** — it does not silently guess or auto-detect alternative formats. (The old dual-format handling, which sniffed `output.shape` to tell a post-NMS `(N, 6)` tensor apart from a raw `(4+num_classes, N)` tensor and ran `argmax` + thresholding + NMS to decode the latter, has been removed entirely along with the model's NMS head.)
+
+> **Key Insight**: This is a deliberate trade of flexibility for correctness — a *single source of truth* for ONNX parsing plus *fail-loud* behavior on unexpected exports. If a future export changes shape, the detector throws immediately instead of silently mis-decoding boxes.
 
 ### ONNX Batched SAHI
 
@@ -146,7 +139,7 @@ When using the ONNX backend with SAHI, all tiles are batched into a single infer
 2. Pads edge tiles to 640×640 with black pixels
 3. Stacks all tiles into a single `(N, 3, 640, 640)` batch tensor
 4. Runs **one** `session.run()` call for all tiles
-5. Parses results per tile via `_parse_onnx_tile()` and offsets coordinates
+5. Parses results per tile via `sahi.parse_onnx_tile` (which delegates to the shared `onnx_layout.decode_example()`) and offsets coordinates
 
 This provides ~3-5x speedup over sequential PyTorch SAHI. The ONNX model must be exported with `dynamic=True` to support variable batch sizes (see `packages/detection/src/training/export_onnx.py`).
 
@@ -282,7 +275,7 @@ _instance: Optional[EntityDetector] = None
 def get_detector(model_path=None, use_mock=False, imgsz=1280) -> EntityDetector:
     global _instance
     if _instance is None:
-        # Auto-detect model file in priority order (v6 > v5 > v2 > v1)...
+        # Resolve model file: aoe2_yolo_v6.onnx, else aoe2_yolo_v6.pt, else mock...
         _instance = EntityDetector(model_path=path, use_mock=use_mock, imgsz=imgsz)
     return _instance
 ```
@@ -389,7 +382,7 @@ Used in the game loop's rescan callback, after the tracker prediction check and 
 
 - 60-class taxonomy organized by category (resources, buildings, units, siege, naval, animals)
 - Three backends: PyTorch (ultralytics), ONNX Runtime, Mock
-- Auto-detects model with fallback chain: v6 (YOLO26) > v5 (YOLO11) > v2 > v1
+- Resolves the model as `aoe2_yolo_v6.onnx` (preferred, ARM64 deploy path), else `aoe2_yolo_v6.pt`, else mock — YOLO26n, NMS-free, no legacy version fallback
 - **Adaptive SAHI** (default): fast scan + targeted SAHI on entity clusters (~3-8 tiles vs ~18)
 - **ONNX batched SAHI**: all tiles in one inference call (~3-5x faster than sequential)
 - **Kalman filter tracking**: 6D state with Hungarian algorithm matching for stable entity IDs

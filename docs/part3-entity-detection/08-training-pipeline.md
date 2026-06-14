@@ -17,9 +17,9 @@ flowchart LR
     PNG -->|generate_training_data.py| GEN["Synthetic Dataset<br/>(2400 train / 600 val)"]
     CVAT["CVAT Labeled<br/>Real Screenshots"] -->|prepare_training.py| MERGE["Hybrid Dataset<br/>(classes.yaml IDs)"]
     GEN -->|"copy (same IDs)"| MERGE
-    MERGE -->|train_yolo.py| MODEL["YOLO Model<br/>(60 classes)"]
-    MODEL -->|export| ONNX["aoe2_yolo.onnx"]
-    MODEL -->|copy| PT["aoe2_yolo.pt"]
+    MERGE -->|train_yolo.py| MODEL["YOLO26n Model<br/>(60 classes)"]
+    MODEL -->|export| ONNX["aoe2_yolo_v6.onnx"]
+    MODEL -->|copy| PT["aoe2_yolo_v6.pt"]
 ```
 
 ## 8.2 Synthetic Data Generation
@@ -67,6 +67,23 @@ For each image generation:
 5. Generate YOLO-format label: `class_id x_center y_center width height` (all normalized 0-1)
 
 > **v5 improvement**: Z-order-aware overlap thresholds replaced the flat 40% IoU threshold from earlier versions. Buildings overlap less (10%) since they're large and static, while units tolerate more overlap (35%) since they cluster in groups. Sprites that can't find a valid position are skipped entirely rather than force-placed, reducing label noise.
+
+### Dataset-Level Class Rebalancing
+
+ultralytics exposes no per-class loss weighting, so we balance the **data** instead of the loss. Each sprite config carries an `oversample_weight` that multiplies its per-image instance count: rare and confusable classes simply appear more often across the dataset.
+
+Two groups get boosted:
+
+- **Rare unique units** — `unique_archer`..`unique_ship` (class IDs 50–54). These civ-specific units show up in only a handful of real screenshots, so synthetic oversampling keeps them from being starved.
+- **Confusable cavalry** — `camel_line` (35), `cavalry_archer` (39), and `battle_elephant` (36). These are visually close to the scout/knight lines and need more examples to separate cleanly.
+
+The helper `effective_count_range()` applies the weight to the config's base `count_range` at generation time, so a class with `oversample_weight=3` and `count_range=(1, 2)` contributes roughly three times the instances per image.
+
+### Distant-Unit Augmentation
+
+YOLO's small-object struggles aren't only an architecture problem — if the training set never shows a ~20px sheep, the model can't learn to find one. A per-config `distant_fraction` renders that fraction of mobile-unit instances small (around 20px) using a dedicated "distant" scale band. `scale_bounds()` picks the band (normal vs. distant) and the generator draws a concrete scale within it (`random.uniform(*scale_bounds(...))`), so a slice of villagers, sheep, and cavalry are composited at genuine distant-camera sizes.
+
+This is the dataset-level complement to YOLO26's small-object STAL head: STAL improves the detector's *capacity* for tiny objects, while `distant_fraction` guarantees the *data* actually contains them.
 
 ### Background Sources
 
@@ -134,11 +151,11 @@ Game-realistic effects that simulate actual screenshot conditions:
 
 ## 8.4 YOLO Training
 
-`packages/detection/src/training/train_yolo.py` trains a YOLO11 nano model:
+`packages/detection/src/training/train_yolo.py` trains a YOLO26 nano model (defaults: `--model yolo26n.pt --name aoe2_yolo_v6`):
 
 ### Model
 
-Base model: `yolo11n.pt` (YOLO11 nano) -- ~6MB, optimized for real-time inference on consumer hardware. The nano variant was chosen for speed; each detection call needs to complete within the 2-second loop cycle.
+Base model: `yolo26n.pt` (YOLO26 nano) -- ~6MB, optimized for real-time inference on consumer hardware. The nano variant was chosen for speed; each detection call needs to complete within the 2-second loop cycle. YOLO26 is **NMS-free**: it drops the non-maximum-suppression head and emits final boxes directly, which simplifies the export path. (NMS-style dedup still happens where it's *our* logic — e.g. merging overlapping SAHI tile detections.) YOLO26 also ships a small-object STAL head, which the distant-unit augmentation above is designed to feed.
 
 ### Hyperparameters
 
@@ -161,6 +178,12 @@ Tuned for isometric game graphics:
 | `mosaic` | 1.0 | Full mosaic augmentation |
 | `mixup` | 0.1 | Light MixUp for regularization |
 
+### Loss-Gain Knobs
+
+`train_yolo.py` exposes three optional overrides for ultralytics' loss-component weights: `--cls-gain`, `--box-gain`, and `--dfl-gain`. They default to the model's built-in values and only take effect when passed.
+
+The classification gain is the lever for the confusable cavalry lines: raising `--cls-gain` biases the optimizer toward classification accuracy (telling camel from scout from knight) at the margin, trading off a little localization sharpness. This is the one *native* ultralytics control for class confusion — the dataset-level rebalancing above does the rest.
+
 ### Dataset Structure
 
 ```
@@ -177,16 +200,18 @@ training_data/
 ### Output
 
 Training produces:
-- `runs/aoe2_yolo_v2/weights/best.pt` -- best validation mAP checkpoint
+- `runs/aoe2_yolo_v6/weights/best.pt` -- best validation mAP checkpoint
 - Optionally exported to ONNX with `--export-onnx` flag
-- Copied to `packages/detection/src/inference/models/aoe2_yolo_v2.pt` and `.onnx`
+- Copied to `packages/detection/src/inference/models/aoe2_yolo_v6.pt` and `.onnx`
 
 ### Results
 
-**v5 model (latest):** **92.2% mAP50**, **85.4% mAP50-95** on validation data, 60 classes.
+> **No v6 model is trained yet.** The numbers below are the **last measured (v5, YOLO11n)** results. The switch to `yolo26n.pt`, the dataset-level rebalancing, and the distant-unit augmentation all land in v6 — **v6/YOLO26 retraining is pending** and will be the first run to exercise the new rebalancing. Expect these figures to be re-measured (and re-labeled v6/YOLO26) once that run completes.
 
-| Metric | v5 | v4 (previous) |
-|--------|-----|---------------|
+**Last measured (v5, YOLO11n):** **92.2% mAP50**, **85.4% mAP50-95** on validation data, 60 classes.
+
+| Metric | v5 (YOLO11n) | v4 (previous) |
+|--------|--------------|---------------|
 | mAP50 | **92.2%** | 86.8% |
 | mAP50-95 | **85.4%** | 72.3% |
 | Precision | **94.8%** | 87.1% |
@@ -198,16 +223,29 @@ Training produces:
 
 See [Chapter 12](../part5-operations/12-cloud-training.md) for cloud training details.
 
+## 8.5 Targeted Data Improvement
+
+Once a model exists, the cheapest way to improve it is to feed it *the data it's bad at*, rather than more random data. Two tools close that loop.
+
+**Hard-negative mining.** `python -m detection.labeling.hard_negatives --max-conf 0.5` (in `packages/detection/src/labeling/hard_negatives.py`) reuses the active-learning triage machinery to surface low-confidence detections on the confusable cavalry lines — scout, knight, camel, battle_elephant, and cavalry_archer. Any detection below the `--max-conf` threshold is pulled out for targeted human re-labeling in CVAT, so correction effort lands exactly where the model is weakest.
+
+**Open-vocabulary auto-labeling.** For unlabeled screenshots, `prelabel.py --open-vocab {yoloe,dinox}` bootstraps a first draft of labels using an open-vocabulary detector — YOLOE (local) or DINO-X (hosted) — mapping its outputs onto `classes.yaml` IDs. Those pre-labels feed the existing CVAT → human correction → `prepare_training()` loop, so a fresh batch of screenshots starts most of the way labeled instead of from scratch. This requires the new `autolabel` optional extra. See [Chapter 9](./09-labeling-and-active-learning.md) for the full labeling and active-learning workflow.
+
+> **Note on the generator.** The legacy duplicate `training/synthetic_data.py` has been **deleted**; `generate_training_data.py` is now the single canonical synthetic-data generator.
+
 ---
 
 ## Summary
 
 - Synthetic data: sprite compositing with z-order, z-order-aware overlap thresholds (buildings 10%, resources 15%, units 35%)
-- 53 sprite configs using classes.yaml IDs directly (no remapping needed)
+- 53 sprite configs using classes.yaml IDs directly (no remapping needed); `generate_training_data.py` is the single canonical generator
+- Dataset-level rebalancing (`oversample_weight` / `effective_count_range()`) boosts rare unique units (50–54) and confusable cavalry (35, 36, 39), since ultralytics has no per-class loss weighting
+- Distant-unit augmentation (`distant_fraction` / `scale_bounds()`) puts genuine ~20px units in the data, complementing YOLO26's small-object STAL head
 - 17+ architecture styles per building via wildcard patterns
 - 6 enhanced augmentations simulating real game conditions (fog, UI, compression, zoom, temperature, vignette)
-- YOLO11 nano model: 150 epochs, isometric-tuned hyperparameters
-- v5 model: 92.2% mAP50 on 18,520-image hybrid dataset (8k synthetic + 7.1k real train, 2k synthetic + 1.4k real val)
+- YOLO26 nano model (`yolo26n.pt`, NMS-free): 150 epochs, isometric-tuned hyperparameters, optional `--cls-gain/--box-gain/--dfl-gain` loss-weight overrides
+- Targeted data improvement: hard-negative mining (`labeling/hard_negatives.py`) and open-vocab auto-labeling (`prelabel.py --open-vocab`)
+- Last measured (v5, YOLO11n): 92.2% mAP50 on 18,520-image hybrid dataset; **v6/YOLO26 retraining is pending**
 
 ## Related Topics
 

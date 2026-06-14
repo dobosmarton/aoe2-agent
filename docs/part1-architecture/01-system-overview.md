@@ -45,9 +45,9 @@ agent/
 │   │   ├── ownership.py       # Blue-dominance ownership classifier
 │   │   ├── thresholds.py      # Per-class confidence thresholds
 │   │   ├── frame_diff.py      # Frame differencing for rescan optimization
-│   │   └── models/            # YOLO v5 model weights (.pt)
+│   │   └── models/            # YOLO26 (v6) model weights (.pt/.onnx)
 │   ├── training/              # Synthetic data gen + YOLO training
-│   ├── labeling/              # CVAT integration + class remapping
+│   ├── labeling/              # CVAT integration + class definitions
 │   └── extraction/            # SLD sprite extraction from game files
 ├── data/                      # Game knowledge (optional)
 │   ├── game_knowledge.py      # SQLite database wrapper

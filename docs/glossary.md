@@ -92,4 +92,4 @@ Entries are organized alphabetically. Most are followed by a short link of the f
 
 ## Y
 
-- **YOLO** — *You Only Look Once*: a family of single-shot object detectors that predict all boxes in one forward pass. We use YOLO11n. → [Appendix A](./appendix/01-yolo-and-object-detection.md).
+- **YOLO** — *You Only Look Once*: a family of single-shot object detectors that predict all boxes in one forward pass. We use YOLO26n (NMS-free). → [Appendix A](./appendix/01-yolo-and-object-detection.md).

@@ -88,7 +88,7 @@ Training script template at `tmp/train_v2_lambda.sh`:
 cd /home/ubuntu
 python -c "
 from ultralytics import YOLO
-model = YOLO('yolo11n.pt')
+model = YOLO('yolo26n.pt')
 model.train(
     data='/home/ubuntu/training_data_v2/dataset.yaml',
     epochs=150,
@@ -120,13 +120,13 @@ After training completes:
 # Download best weights
 scp -i ~/Downloads/lambda-aoe2-training.pem \
     ubuntu@<instance-ip>:~/runs/detect/aoe2_v2/weights/best.pt \
-    agent/detection/inference/models/aoe2_yolo_v2.pt
+    agent/detection/inference/models/aoe2_yolo_v6.pt
 
 # Optional: export and download ONNX
 ssh ... 'python -c "from ultralytics import YOLO; YOLO(\"runs/detect/aoe2_v2/weights/best.pt\").export(format=\"onnx\")"'
 scp -i ~/Downloads/lambda-aoe2-training.pem \
     ubuntu@<instance-ip>:~/runs/detect/aoe2_v2/weights/best.onnx \
-    agent/detection/inference/models/aoe2_yolo_v2.onnx
+    agent/detection/inference/models/aoe2_yolo_v6.onnx
 ```
 
 ## 12.6 Cost Management

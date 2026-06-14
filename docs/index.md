@@ -16,7 +16,7 @@ graph TD
         LOOP --> PROV[providers/claude.py]
         LOOP --> STRAT[providers/strategist.py]
         LOOP -.->|optional| DET[detector.py]
-        DET --> YOLO[YOLO v5]
+        DET --> YOLO[YOLO26n]
     end
 
     subgraph "Detection (macOS host, optional)"
@@ -97,8 +97,8 @@ See also the [Glossary](./glossary.md) for one-line definitions of terms used th
 | # | Chapter | Description | Key files |
 |---|---|---|---|
 | 07 | [Detector Architecture](./part3-entity-detection/07-detector-architecture.md) | EntityDetector, PyTorch/ONNX/Mock backends, 60-class taxonomy | `packages/detection/src/inference/detector.py` |
-| 08 | [Training Pipeline](./part3-entity-detection/08-training-pipeline.md) | Synthetic data, augmentations, YOLO11n training | `training/generate_training_data.py`, `training/train_yolo.py` |
-| 09 | [Labeling & Active Learning](./part3-entity-detection/09-labeling-and-active-learning.md) | CVAT workflow, COCO/YOLO conversion, class remapping | `labeling/prepare_training.py`, `labeling/class_mapping.py` |
+| 08 | [Training Pipeline](./part3-entity-detection/08-training-pipeline.md) | Synthetic data, augmentations, YOLO26n training | `training/generate_training_data.py`, `training/train_yolo.py` |
+| 09 | [Labeling & Active Learning](./part3-entity-detection/09-labeling-and-active-learning.md) | CVAT workflow, COCO/YOLO conversion, class definitions | `labeling/prepare_training.py`, `labeling/class_mapping.py` |
 
 ### Part 4: Game knowledge
 
@@ -161,6 +161,7 @@ Short (~1 page) decisions that shaped the current architecture. Read these to un
 - [Switching the broker backend](./runbooks/switching-broker-backend.md) — in-process ↔ Redis switching, verification.
 - [Debugging a stuck fork or replay](./runbooks/debug-stuck-fork.md) — what to check, in what order.
 - [Windows VM agent bring-up](./runbooks/windows-vm-agent-bringup.md) — fast path + symptom matrix. Full first-time setup is in [deployment-guide.md](./deployment-guide.md).
+- [Retrain the detection model (v6 / YOLO26n)](./runbooks/retrain-detection-v6.md) — end-to-end retraining loop: sprite extraction, real-terrain backgrounds, synthetic generation, cvat.ai annotation, Lambda training, deploy.
 
 ---
 

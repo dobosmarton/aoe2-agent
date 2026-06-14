@@ -2,7 +2,7 @@
 
 This appendix is the reference behind every chapter that talks about the detector — [Chapter 7 (Detector Architecture)](../part3-entity-detection/07-detector-architecture.md), [Chapter 8 (Training Pipeline)](../part3-entity-detection/08-training-pipeline.md), [Chapter 12 (Cloud Training)](../part5-operations/12-cloud-training.md). If you understand how a YOLO-family detector actually works end-to-end, those chapters become operational walkthroughs of a system you already understand. If you don't, this appendix builds the mental model from the ground up: what the network outputs, how raw predictions become a final list of boxes, how training pushes the network toward better predictions, and how we know when it's improving.
 
-We use **YOLO11n** (Ultralytics) — `n` for nano, the smallest variant in the family. This appendix is written for the YOLOv5/8/11 generation; the broad strokes apply to the whole lineage.
+We use **YOLO26n** (Ultralytics) — `n` for nano, the smallest variant in the family. This appendix is written for the YOLOv5/8/11 generation; the broad strokes apply to the whole lineage, with one modern twist: YOLO26 is end-to-end / NMS-free (see A.2).
 
 ---
 
@@ -18,7 +18,9 @@ Modern YOLO is just that idea, refined for a decade: a better backbone, multi-sc
 
 ## A.2 What the network outputs
 
-A single forward pass through YOLO11n on a 640×640 image produces a tensor of shape roughly `(num_predictions, 4 + num_classes)`. Each row is one candidate prediction:
+A single forward pass through YOLO26n on a 640×640 image produces a tensor of shape roughly `(num_predictions, 4 + num_classes)`. Each row is one candidate prediction:
+
+> **YOLO26 is end-to-end / NMS-free.** Unlike the YOLOv5/8/11 generation, YOLO26 has no NMS head — its (ONNX) output is already-decoded `(num_boxes, 6)` boxes, so the NMS step described in A.3 below isn't part of the model's forward pass. We keep that section because it's the right mental model *and* it still runs in practice: our detector applies its own dedup NMS across overlapping detections and SAHI tiles after the model returns.
 
 - **4 box parameters** — `(x_center, y_center, width, height)` in pixels.
 - **`num_classes` class scores** — one logit per class. After a sigmoid (or in some YOLOs, a softmax), each becomes a probability.
@@ -29,7 +31,7 @@ There are *thousands* of candidates per image — modern YOLOs predict at multip
 
 Older YOLOs (v3–v5) used **anchor boxes**: each grid cell predicted offsets relative to a small set of pre-defined box shapes (tall, square, wide). The anchors were chosen by k-means clustering of the training set's ground-truth boxes. This worked but required you to pick good anchors for each dataset.
 
-YOLO11 is **anchor-free**: each cell directly predicts box parameters relative to its own location. Simpler, no per-dataset tuning, and competitive accuracy. You'll still see anchor-box language in older tutorials and the YOLOv5 codebase.
+YOLO11/26 is **anchor-free**: each cell directly predicts box parameters relative to its own location. Simpler, no per-dataset tuning, and competitive accuracy. You'll still see anchor-box language in older tutorials and the YOLOv5 codebase.
 
 ---
 
@@ -126,7 +128,7 @@ YOLO is *single-shot*: one network produces everything in one pass. Faster, slig
 
 ## A.7 What we glossed over
 
-- **The backbone** — the CNN that extracts features before the detection head. YOLO11n uses a custom C3k2 backbone, but you can swap in MobileNet, EfficientNet, etc. The detection head is largely backbone-agnostic.
+- **The backbone** — the CNN that extracts features before the detection head. YOLO11/26n uses a custom C3k2 backbone, but you can swap in MobileNet, EfficientNet, etc. The detection head is largely backbone-agnostic.
 - **Multi-scale prediction (FPN)** — the detection head outputs at three resolutions so the network can handle objects of very different sizes. The feature-pyramid architecture is why YOLO works on both villagers (small) and town centers (huge) in the same model.
 - **Quantization and ONNX export** — for deployment we sometimes export to ONNX and run on CPU via onnxruntime or CoreML. See [Chapter 7](../part3-entity-detection/07-detector-architecture.md) for our backend abstraction.
 
@@ -135,7 +137,7 @@ YOLO is *single-shot*: one network produces everything in one pass. Faster, slig
 ## Further reading
 
 - Redmon et al., *You Only Look Once: Unified, Real-Time Object Detection* (2016) — the original paper. Worth reading for the framing even though the architecture is dated.
-- Ultralytics, [*YOLO11 documentation*](https://docs.ultralytics.com/) — current reference for the model and training CLI we use.
+- Ultralytics, [*YOLO26 documentation*](https://docs.ultralytics.com/) — current reference for the model and training CLI we use.
 - Glenn Jocher et al., *YOLOv5 docs* — still the most accessible writeup of the modern recipe (mosaic, anchor-free head, NMS variants).
 
 ---

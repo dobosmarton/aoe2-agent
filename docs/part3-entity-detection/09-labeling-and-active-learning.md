@@ -94,11 +94,7 @@ The code handles multiple CVAT export directory layouts:
 
 All data sources now use `classes.yaml` IDs directly (60 classes). See [Chapter 13](../part5-operations/13-class-schema-evolution.md) for schema history.
 
-`packages/detection/src/labeling/class_mapping.py` provides utilities:
-
-**`build_v1_to_v2_mapping()`** -- maps legacy model class IDs to classes.yaml IDs. Only needed when running inference with older models (v1-v4) in `prelabel.py`.
-
-**`convert_label_file()`** -- rewrites a YOLO `.txt` file replacing each class ID with its mapped counterpart. Lines with unmappable classes are dropped with a warning.
+`packages/detection/src/labeling/class_mapping.py` provides the loader (`load_classes_yaml()`) and the CVAT helpers (`get_classes_for_cvat()`, `write_classes_txt()`). The model (YOLO26/v6) emits classes.yaml IDs natively, so there is no class remapping — `prelabel.py` and `prepare_training.py` write classes.yaml IDs directly. (The legacy v1→v2 mapping helpers were removed.)
 
 ## 9.5 Hybrid Dataset Merge
 
