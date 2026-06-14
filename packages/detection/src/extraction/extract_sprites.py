@@ -245,6 +245,15 @@ SPRITE_CONFIG = [
         2,
         "Trebuchet",
     ),
+    (
+        "siege_tower",
+        [
+            "u_sie_siege_tower_idle*_x1.sld",
+            "u_sie_ant_siege_tower_idle*_x1.sld",
+        ],
+        2,
+        "Siege Tower",
+    ),
     # =========================================================================
     # SPECIAL UNITS
     # =========================================================================
@@ -265,6 +274,28 @@ SPRITE_CONFIG = [
         ],
         1,
         "King (regicide)",
+    ),
+    # =========================================================================
+    # NAVAL UNITS (warships; fishing_ship lives under Economic Units)
+    # =========================================================================
+    (
+        "galley",
+        [
+            "u_shp_galley_x1.sld",
+            "u_shp_war_galley_x1.sld",
+            "u_shp_galleon_x1.sld",
+        ],
+        3,
+        "Galley line (Galley, War Galley, Galleon)",
+    ),
+    (
+        "fire_galley",
+        [
+            "u_shp_fire_galley_x1.sld",
+            "u_shp_*fire*_x1.sld",
+        ],
+        2,
+        "Fire ship line",
     ),
     # =========================================================================
     # UNIQUE UNITS - Grouped by type (matching classes.yaml ids 50-54)
@@ -534,6 +565,14 @@ SPRITE_CONFIG = [
         12,
         "Wonder (all civs)",
     ),
+    (
+        "krepost",
+        [
+            "b_*krepost_x1.sld",
+        ],
+        2,
+        "Krepost (Bulgarian unique building; destruction/foundation auto-excluded)",
+    ),
     # =========================================================================
     # RESOURCES & NATURE
     # =========================================================================
@@ -572,6 +611,27 @@ SPRITE_CONFIG = [
         ],
         2,
         "Wolves (danger)",
+    ),
+    (
+        "goose",
+        [
+            "a_herd_goose_idle*_x1.sld",
+        ],
+        1,
+        "Goose (huntable herdable)",
+    ),
+    (
+        "fish",
+        [
+            "a_fish_snapper_x1.sld",
+            "a_fish_tuna_x1.sld",
+            "a_fish_marlin1_x1.sld",
+            "a_fish_perch_x1.sld",
+            "a_fish_salmon_x1.sld",
+            "a_fish_dorado_x1.sld",
+        ],
+        6,
+        "Fish (shore/deep water resource; underwater variants excluded by explicit names)",
     ),
     (
         "gold_mine",
@@ -723,6 +783,9 @@ def extract_sprites(
         "unique_infantry",
         "unique_siege",
         "unique_ship",
+        "siege_tower",
+        "galley",
+        "fire_galley",
     }
 
     stats = {
@@ -842,7 +905,8 @@ def print_config() -> None:
         "Cavalry": ["scout_line", "knight_line", "camel_line", "battle_elephant"],
         "Archers": ["archer_line", "skirmisher_line", "cavalry_archer", "hand_cannoneer"],
         "Infantry": ["militia_line", "spearman_line", "eagle_line"],
-        "Siege": ["ram", "mangonel_line", "scorpion", "trebuchet"],
+        "Siege": ["ram", "mangonel_line", "scorpion", "trebuchet", "siege_tower"],
+        "Naval": ["galley", "fire_galley"],
         "Special": ["monk", "king"],
         "Unique Units": [
             "unique_archer",
@@ -868,6 +932,7 @@ def print_config() -> None:
             "siege_workshop",
             "monastery",
             "castle",
+            "krepost",
         ],
         "Defense": ["tower", "wall", "gate"],
         "Resources": [
@@ -875,6 +940,8 @@ def print_config() -> None:
             "deer",
             "boar",
             "wolf",
+            "goose",
+            "fish",
             "gold_mine",
             "stone_mine",
             "berry_bush",

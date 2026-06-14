@@ -26,6 +26,7 @@ logs[0-9]*.txt
 logs_*.txt
 
 game_graphics/
+game_terrain/
 tmp/
 .superset/
 

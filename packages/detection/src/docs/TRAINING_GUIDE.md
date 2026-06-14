@@ -37,7 +37,7 @@ The detection system enables an AI agent to identify game entities (units, build
 │  └──────────────┘                                               │
 │        │                                                        │
 │        ▼                                                        │
-│  Trained Model (inference/models/aoe2_yolo26.pt)                │
+│  Trained Model (inference/models/aoe2_yolo_v6.pt)              │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -46,9 +46,13 @@ The detection system enables an AI agent to identify game entities (units, build
 
 ## Training Results
 
-### v5 (Latest)
+> **Target model:** The pipeline now targets **YOLO26n** (Ultralytics, NMS-free), replacing YOLO11n. The base pretrained weights are `yolo26n.pt`, and the trained artifact is `aoe2_yolo_v6.{pt,onnx}`.
+>
+> **No v6 model is trained yet.** The metrics below are the **last measured (v5, YOLO11n)** results. **v6/YOLO26 retraining is pending** — these numbers will be re-measured once v6 is trained.
 
-**Model:** YOLO11n (nano)
+### v5 (Last measured)
+
+**Model:** YOLO11n (nano) — superseded by the YOLO26n target (retraining pending)
 
 **Training Configuration:**
 - Dataset: 18,520 images (8,000 synthetic train + 7,120 real train + 2,000 synthetic val + 1,400 real val)
@@ -57,7 +61,7 @@ The detection system enables an AI agent to identify game entities (units, build
 - Batch size: 32
 - Classes: 60 (see `training/config/classes.yaml`)
 
-**Final Metrics (v5):**
+**Final Metrics (v5, YOLO11n — last measured; v6/YOLO26 retraining pending):**
 
 | Metric | v5 | v4 (previous) |
 |--------|-----|---------------|
@@ -101,13 +105,13 @@ python -m detection.training.generate_training_data --num-images 3000 --output d
 ```
 
 ### 3. Train Model (Cloud)
-See [Cloud Training](#cloud-training-lambda-labs) section below.
+`train_yolo.py` now defaults to `--model yolo26n.pt --name aoe2_yolo_v6` (YOLO26n base weights → `aoe2_yolo_v6` artifact). See [Cloud Training](#cloud-training-lambda-labs) section below.
 
 ### 4. Use Model
 ```python
 from ultralytics import YOLO
 
-model = YOLO("detection/inference/models/aoe2_yolo26.pt")
+model = YOLO("detection/inference/models/aoe2_yolo_v6.pt")
 results = model("screenshot.png", conf=0.5)
 ```
 
@@ -188,6 +192,17 @@ Synthetic data works well for AoE2 because:
 - Z-order-aware overlap thresholds: buildings 10%, resources 15%, units 35% (skip placement when exceeded)
 - Data augmentation (brightness, contrast, saturation, blur)
 - Automatic YOLO-format label generation
+
+### Class-Level Rebalancing
+
+`generate_training_data.py` rebalances the dataset at the data level so rare and confusable classes are not starved:
+
+- **Oversampling**: rare unique units and the confusable cavalry classes (`camel_line`, `cavalry_archer`, `battle_elephant`) are placed more often via a per-class oversample weight, so they appear with adequate frequency.
+- **Distant (small) units**: a fraction of mobile-unit instances are rendered small (~20px, "distant") so that units far from the camera are represented in training, not just close-up sprites.
+
+These changes pair with the `train_yolo.py` loss-gain knobs (see below) and the hard-negative mining loop to reduce cavalry-line confusions.
+
+> **Note:** The legacy duplicate `training/synthetic_data.py` has been **deleted** — `generate_training_data.py` is the canonical generator.
 
 ### Usage
 ```bash
@@ -348,17 +363,21 @@ model.train(
     device=0,
     workers=8,
     project='runs',
-    name='aoe2_yolo26',
+    name='aoe2_yolo_v6',
     exist_ok=True
 )
 "
 ```
 
+> **Loss-gain knobs:** `train_yolo.py` exposes optional `--cls-gain` / `--box-gain` / `--dfl-gain` flags that map to the corresponding Ultralytics loss gains. Raising the cls gain helps the model separate confusable cavalry classes (`camel_line`, `cavalry_archer`, `battle_elephant`).
+>
+> **NMS-free head:** YOLO26 has no NMS head — its ONNX export emits already-decoded `(N, 6)` boxes. The detector still runs its own dedup NMS to merge overlapping detections across SAHI tiles (see [SAHI](#sahi-for-high-resolution-prelabeling)); only the model head is NMS-free.
+
 ### Step 4: Download Model & Terminate
 
 ```bash
 # From your local machine:
-scp -i ~/.ssh/your-key.pem ubuntu@<IP>:/home/ubuntu/runs/aoe2_yolo26/weights/best.pt ./detection/inference/models/aoe2_yolo26.pt
+scp -i ~/.ssh/your-key.pem ubuntu@<IP>:/home/ubuntu/runs/aoe2_yolo_v6/weights/best.pt ./detection/inference/models/aoe2_yolo_v6.pt
 
 # IMPORTANT: Terminate the instance in Lambda dashboard to stop billing!
 ```
@@ -380,7 +399,7 @@ scp -i ~/.ssh/your-key.pem ubuntu@<IP>:/home/ubuntu/runs/aoe2_yolo26/weights/bes
 from ultralytics import YOLO
 
 class EntityDetector:
-    def __init__(self, model_path="detection/inference/models/aoe2_yolo26.pt"):
+    def __init__(self, model_path="detection/inference/models/aoe2_yolo_v6.pt"):
         self.model = YOLO(model_path)
         # Class names loaded from classes.yaml (60 classes)
         # See detection/training/config/classes.yaml for the full list
@@ -423,14 +442,40 @@ pyautogui.click(x, y)
 For prelabeling high-resolution screenshots (e.g., 3024x1964 retina), direct inference even at imgsz=1280 misses many objects because the image is still downscaled ~2.4x. SAHI (Slicing Aided Hyper Inference) solves this:
 
 ```bash
-python -m detection.labeling.prelabel --model aoe2_yolo_v5.pt --sahi --conf 0.15
+python -m detection.labeling.prelabel --model aoe2_yolo_v6.pt --sahi --conf 0.15
 ```
 
-SAHI cuts the image into overlapping 640x640 tiles, runs inference on each, and merges results with NMS. Benchmarked on 3024x1964 retina screenshots:
+SAHI cuts the image into overlapping 640x640 tiles, runs inference on each, and merges results with a dedup NMS pass across tiles. (This tile-merge NMS is run by the detector itself and is unrelated to the model head — YOLO26 is NMS-free, but overlapping tiles still produce duplicate boxes that need merging.) Benchmarked on 3024x1964 retina screenshots:
 - Without SAHI: 475 total detections (0 town centers)
 - With SAHI: 8,108 total detections across 104 images
 
 SAHI is used for **offline prelabeling only** — it takes ~978ms/image, too slow for real-time gameplay. Real-time detection uses `imgsz=1280` directly (~234ms, negligible vs 1-3s LLM call).
+
+### Open-Vocabulary Auto-Labeling (bootstrap)
+
+Unlabeled screenshots can be bootstrapped with an open-vocabulary detector instead of (or in addition to) the trained model. This is useful before a v6 model exists, or to surface classes the current model misses:
+
+```bash
+python -m detection.labeling.prelabel --open-vocab yoloe   # local YOLOE backend
+python -m detection.labeling.prelabel --open-vocab dinox    # hosted DINO-X backend
+```
+
+The backend's free-text detections are mapped to `classes.yaml` IDs and emitted as prelabels, feeding the same **CVAT → correct → `prepare_training()`** loop as the model-based prelabeler. Backends:
+
+- `yoloe` — local YOLOE weights (runs offline).
+- `dinox` — hosted DINO-X.
+
+Requires the new `autolabel` optional extra. Open-vocab auto-labeling runs **offline only** (label bootstrapping, never real-time gameplay).
+
+### Hard-Negative Mining (active learning)
+
+`detection/labeling/hard_negatives.py` surfaces low-confidence cavalry-line confusions (e.g. `camel_line` vs `cavalry_archer` vs `battle_elephant`) so they can be re-labeled and fed back into training:
+
+```bash
+python -m detection.labeling.hard_negatives
+```
+
+The surfaced examples enter the **active-learning / CVAT re-labeling loop**, closing the loop with the class-level rebalancing (oversampling + distant units) and the `--cls-gain` loss knob described above.
 
 ---
 
@@ -442,13 +487,16 @@ detection/
 ├── inference/                   # Runtime detection
 │   ├── detector.py              # EntityDetector class
 │   └── models/
-│       └── aoe2_yolo26.pt       # Trained model
+│       └── aoe2_yolo_v6.pt      # Trained model (also .onnx)
 ├── training/                    # Training pipeline
-│   ├── train_yolo.py            # YOLO training script
-│   ├── generate_training_data.py # Synthetic data generator
-│   ├── synthetic_data.py        # Data generation utilities
+│   ├── train_yolo.py            # YOLO training script (defaults: yolo26n.pt → aoe2_yolo_v6)
+│   ├── generate_training_data.py # Synthetic data generator (canonical)
 │   └── config/
 │       └── classes.yaml         # Class definitions (60 classes)
+├── labeling/                    # Prelabeling & active learning
+│   ├── prelabel.py              # Model + open-vocab (yoloe/dinox) prelabeling
+│   ├── hard_negatives.py        # Surfaces low-confidence cavalry confusions
+│   └── prepare_training.py      # CVAT corrections → training data
 ├── extraction/                  # Sprite extraction
 │   ├── sld_extractor.py         # SLD format parser
 │   ├── extract_sprites.py       # Batch sprite extraction

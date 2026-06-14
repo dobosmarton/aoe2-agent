@@ -6,9 +6,8 @@ Trains YOLO models for AoE2 entity detection. Supports any ultralytics
 base model (YOLO11, YOLO26, etc.).
 
 Usage:
-    python train_yolo.py                                    # Train with defaults (YOLO11n)
-    python train_yolo.py --model yolo11s.pt --epochs 200    # Larger model
-    python train_yolo.py --model yolo26n.pt --name aoe2_yolo_v6 --export-onnx  # YOLO26
+    python train_yolo.py                                    # Train with defaults (YOLO26n)
+    python train_yolo.py --model yolo26s.pt --epochs 200    # Larger model
     python train_yolo.py --resume                           # Resume training
 
 Lambda Labs Training:
@@ -39,6 +38,9 @@ class _TrainYoloArgs(argparse.Namespace):
     name: str
     resume: bool
     export_onnx: bool
+    cls_gain: float | None
+    box_gain: float | None
+    dfl_gain: float | None
 
 
 def main() -> int:
@@ -52,8 +54,9 @@ def main() -> int:
     parser.add_argument(
         "--model",
         "-m",
-        default="yolo11n.pt",
-        help="Base pretrained model (e.g., yolo11n.pt, yolo26n.pt)",
+        default="yolo26n.pt",
+        help="Base pretrained model (e.g., yolo26n.pt, yolo11n.pt). YOLO26 is NMS-free "
+        "and ships STAL/ProgLoss for small objects — no extra train kwargs needed.",
     )
     parser.add_argument(
         "--epochs", "-e", type=int, default=150, help="Number of training epochs (default: 150)"
@@ -78,13 +81,18 @@ def main() -> int:
     )
     parser.add_argument(
         "--name",
-        default="aoe2_yolo_v5",
-        help="Run name and output model name (default: aoe2_yolo_v5)",
+        default="aoe2_yolo_v6",
+        help="Run name and output model name (default: aoe2_yolo_v6, the YOLO26 model)",
     )
     parser.add_argument(
         "--resume", action="store_true", help="Resume training from last checkpoint"
     )
     parser.add_argument("--export-onnx", action="store_true", help="Export to ONNX after training")
+    # Loss-gain overrides (ultralytics defaults when omitted). Raising --cls-gain
+    # biases toward classification accuracy on confusable cavalry lines (D2).
+    parser.add_argument("--cls-gain", type=float, default=None, help="Classification loss gain")
+    parser.add_argument("--box-gain", type=float, default=None, help="Box regression loss gain")
+    parser.add_argument("--dfl-gain", type=float, default=None, help="Distribution focal loss gain")
 
     args = parser.parse_args(namespace=_TrainYoloArgs())
 
@@ -129,6 +137,19 @@ def main() -> int:
     else:
         model = YOLO(args.model)
 
+    # Optional loss-gain overrides; omitted gains keep the ultralytics defaults.
+    loss_gains: dict[str, float] = {
+        name: value
+        for name, value in (
+            ("cls", args.cls_gain),
+            ("box", args.box_gain),
+            ("dfl", args.dfl_gain),
+        )
+        if value is not None
+    }
+    if loss_gains:
+        print(f"Loss-gain overrides: {loss_gains}")
+
     # Train with optimized hyperparameters for AoE2
     model.train(
         data=str(data_path),
@@ -138,6 +159,7 @@ def main() -> int:
         device=args.device,
         workers=args.workers,
         patience=args.patience,
+        **loss_gains,
         # Augmentation settings optimized for isometric game graphics
         hsv_h=0.015,  # Hue augmentation (slight)
         hsv_s=0.7,  # Saturation augmentation

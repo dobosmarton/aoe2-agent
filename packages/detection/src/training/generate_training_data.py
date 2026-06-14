@@ -16,7 +16,7 @@ import argparse
 import io
 import math
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import cast
 
@@ -26,8 +26,15 @@ except ImportError:
     print("Error: Pillow required. Install with: pip install Pillow")
     exit(1)
 
+# `detection.labeling.*` is the correct, runtime-valid path, but basedpyright can't
+# resolve it: the editable install's top_level.txt registers subpackages as top-level
+# (see packages/detection/pyproject.toml), so the static check looks for `labeling.*`.
+from detection.labeling.class_mapping import (  # pyright: ignore[reportMissingImports]
+    load_classes_yaml,
+)
 
-@dataclass
+
+@dataclass(frozen=True, slots=True)
 class SpriteConfig:
     """Configuration for a sprite class."""
 
@@ -40,6 +47,27 @@ class SpriteConfig:
     # Placement constraints
     avoid_edges: bool = True
     min_spacing: int = 20  # Minimum pixels between same-class sprites
+    # D2 dataset-level rebalancing (set per class by `_rebalanced`):
+    oversample_weight: float = 1.0  # >1 multiplies per-image instance count
+    distant_fraction: float = 0.0  # probability of drawing a small "distant" instance
+    distant_scale_range: tuple[float, float] = (0.18, 0.30)  # scale band when distant
+
+
+def effective_count_range(config: SpriteConfig) -> tuple[int, int]:
+    """Per-image instance count range, scaled by the class's oversample weight.
+
+    Raising rare classes' per-image instance count is the only reliable lever to
+    grow their share of the training signal without a custom (version-fragile)
+    trainer, since ultralytics exposes no per-class loss weighting.
+    """
+    low, high = config.count_range
+    weight = config.oversample_weight
+    return (round(low * weight), round(high * weight))
+
+
+def scale_bounds(config: SpriteConfig, distant: bool) -> tuple[float, float]:
+    """Scale band to draw from: the distant (small-object) band or the normal one."""
+    return config.distant_scale_range if distant else config.scale_range
 
 
 # Biome terrain color palettes for diverse synthetic backgrounds
@@ -96,8 +124,9 @@ BIOME_PALETTES = {
 
 
 # Sprite configurations using classes.yaml IDs directly (60 classes)
-# Organized by category with appropriate z-order and spawn rates
-SPRITE_CONFIGS = [
+# Organized by category with appropriate z-order and spawn rates.
+# `SPRITE_CONFIGS` below applies the D2 rebalancing policy to these base configs.
+_BASE_SPRITE_CONFIGS = [
     # =========================================================================
     # RESOURCES & NATURE (rendered first, bottom layer)
     # =========================================================================
@@ -340,6 +369,14 @@ SPRITE_CONFIGS = [
         count_range=(0, 1),
         z_order=1,
     ),
+    SpriteConfig(
+        class_id=29,
+        class_name="krepost",
+        sprite_patterns=["krepost_*.png"],
+        scale_range=(0.9, 1.1),
+        count_range=(0, 1),
+        z_order=1,
+    ),
     # =========================================================================
     # CIVILIAN UNITS (z_order 3 - top layer)
     # =========================================================================
@@ -561,7 +598,83 @@ SPRITE_CONFIGS = [
         count_range=(0, 1),
         z_order=3,
     ),
+    # =========================================================================
+    # NAVAL, SIEGE & GAIA — added for v6 (sprites extracted into sprites_v6)
+    # =========================================================================
+    SpriteConfig(
+        class_id=55,
+        class_name="fish",
+        sprite_patterns=["fish_*.png"],
+        scale_range=(0.9, 1.1),
+        count_range=(0, 4),
+        z_order=0,
+    ),
+    SpriteConfig(
+        class_id=56,
+        class_name="galley",
+        sprite_patterns=["galley_*.png"],
+        scale_range=(0.9, 1.1),
+        count_range=(0, 2),
+        z_order=3,
+    ),
+    SpriteConfig(
+        class_id=57,
+        class_name="fire_galley",
+        sprite_patterns=["fire_galley_*.png"],
+        scale_range=(0.9, 1.1),
+        count_range=(0, 2),
+        z_order=3,
+    ),
+    SpriteConfig(
+        class_id=58,
+        class_name="siege_tower",
+        sprite_patterns=["siege_tower_*.png"],
+        scale_range=(0.9, 1.1),
+        count_range=(0, 2),
+        z_order=3,
+    ),
+    SpriteConfig(
+        class_id=59,
+        class_name="goose",
+        sprite_patterns=["goose_*.png"],
+        scale_range=(0.9, 1.1),
+        count_range=(0, 4),
+        z_order=0,
+    ),
 ]
+
+
+# --- D2 rebalancing policy ---------------------------------------------------
+# ultralytics exposes no per-class loss weighting, so rare and confusable classes
+# are rebalanced at the *data* level: rare uniques (and the confusable cavalry
+# lines) appear in more images, and a fraction of every mobile-unit instance is
+# rendered small to cover distant (~20px) units the model misses.
+_OVERSAMPLE_WEIGHTS: dict[int, float] = {
+    35: 2.0,  # camel_line
+    36: 2.0,  # battle_elephant
+    39: 2.0,  # cavalry_archer
+    50: 2.5,  # unique_archer
+    51: 2.5,  # unique_cavalry
+    52: 2.5,  # unique_infantry
+    53: 2.5,  # unique_siege
+    54: 2.5,  # unique_ship
+}
+# Mobile units (civilian + military) benefit from distant examples — ids 30-54
+# plus the v6-added naval/siege units (galley 56, fire_galley 57, siege_tower 58).
+_DISTANT_UNIT_IDS: frozenset[int] = frozenset(range(30, 55)) | {56, 57, 58}
+_DISTANT_FRACTION = 0.25
+
+
+def _rebalanced(config: SpriteConfig) -> SpriteConfig:
+    """Apply the dataset-level rebalancing policy to a base sprite config."""
+    return replace(
+        config,
+        oversample_weight=_OVERSAMPLE_WEIGHTS.get(config.class_id, 1.0),
+        distant_fraction=_DISTANT_FRACTION if config.class_id in _DISTANT_UNIT_IDS else 0.0,
+    )
+
+
+SPRITE_CONFIGS = [_rebalanced(config) for config in _BASE_SPRITE_CONFIGS]
 
 
 class TrainingDataGenerator:
@@ -750,13 +863,15 @@ class TrainingDataGenerator:
             if not sprites:
                 continue
 
-            count = random.randint(*config.count_range)
+            count = random.randint(*effective_count_range(config))
 
             for _ in range(count):
                 sprite = random.choice(sprites).copy()
 
-                # Apply random scale
-                scale = random.uniform(*config.scale_range)
+                # Draw a scale; a fraction of unit instances use the distant band
+                # so the dataset contains genuine ~20px crops of mobile units.
+                is_distant = random.random() < config.distant_fraction
+                scale = random.uniform(*scale_bounds(config, is_distant))
                 new_w = max(10, int(sprite.width * scale))
                 new_h = max(10, int(sprite.height * scale))
                 sprite = sprite.resize((new_w, new_h), Image.Resampling.LANCZOS)
@@ -1157,11 +1272,11 @@ class TrainingDataGenerator:
 
     def _create_yaml(self) -> Path:
         """Create YOLO dataset configuration file."""
-        # Get classes that have sprites
-        active_classes = []
-        for config in sorted(self.configs, key=lambda c: c.class_id):
-            if self.sprites.get(config.class_name):
-                active_classes.append(config)
+        # Names MUST cover the full classes.yaml taxonomy (all 60, contiguous ids) —
+        # not just the synthesized classes. Dropping an unsynthesized id (e.g.
+        # farm=16, which has no sprite) leaves a gap in the names dict that makes
+        # ultralytics reject labels (class id >= nc) or mismap every later class.
+        id_to_name = load_classes_yaml()
 
         yaml_content = f"""# AoE2 Object Detection Dataset
 # Generated by generate_training_data.py
@@ -1173,8 +1288,8 @@ val: val/images
 # Classes
 names:
 """
-        for config in active_classes:
-            yaml_content += f"  {config.class_id}: {config.class_name}\n"
+        for class_id in sorted(id_to_name):
+            yaml_content += f"  {class_id}: {id_to_name[class_id]}\n"
 
         yaml_path = self.output_dir / "dataset.yaml"
         yaml_path.write_text(yaml_content)
