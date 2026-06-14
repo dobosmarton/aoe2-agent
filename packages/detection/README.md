@@ -4,7 +4,7 @@ YOLO-based object detection for identifying game entities (units, buildings, res
 
 ## Overview
 
-The detection system enables the AI agent to understand game state by detecting and localizing entities with bounding boxes. It uses a custom-trained YOLO model on synthetic training data generated from extracted game sprites.
+The detection system enables the AI agent to understand game state by detecting and localizing entities with bounding boxes. It targets a custom-trained YOLO26n model (Ultralytics, NMS-free) on synthetic training data generated from extracted game sprites.
 
 ```
 Screenshot → YOLO Model → Detected Entities (class, bbox, confidence)
@@ -13,13 +13,13 @@ Screenshot → YOLO Model → Detected Entities (class, bbox, confidence)
 **Key Features:**
 - 60 entity classes (units, buildings, resources, animals)
 - Real-time inference at 1280px resolution (~234ms full SAHI, ~100-200ms adaptive)
-- 92.2% mAP50 accuracy (v5 model, 18,520-image hybrid dataset)
+- 92.2% mAP50 — last measured (v5, YOLO11n, 18,520-image hybrid dataset); v6/YOLO26 retraining is pending
 - **Adaptive SAHI** — smart tiling that only runs SAHI on regions with entities (~3-8 tiles vs ~18)
 - **Kalman filter object tracking** — 6D state vector with Hungarian algorithm assignment for persistent entity IDs
 - **Tracker prediction mode** — extrapolate entity positions without inference (~0ms) when confidence is high
 - **Frame differencing** — skip redundant rescans when the screen hasn't changed
 - **ONNX batched SAHI** — all tiles in a single batched inference call (~3-5x faster than sequential)
-- NMS applied to all backends (PyTorch, ONNX, Mock)
+- Dedup NMS across detections/SAHI tiles (the YOLO26 model head is itself NMS-free, but the detector still dedupes overlapping detections across detections and tiles on all backends — PyTorch, ONNX, Mock)
 - SAHI sliced inference for large screenshots (640x640 tiles, 64px overlap)
 
 ## Quick Start
@@ -79,23 +79,28 @@ detection/
 ├── __init__.py                  # Package exports (EntityDetector, get_detector)
 │
 ├── inference/                   # Runtime detection
-│   ├── detector.py              # EntityDetector (SAHI, adaptive SAHI, NMS, tracking)
+│   ├── detector.py              # EntityDetector (SAHI, adaptive SAHI, dedup NMS, tracking)
+│   ├── onnx_layout.py           # Shared YOLO26 (N,6) ONNX decoder (decode_example, DetectionRow)
 │   ├── tracker.py               # Kalman filter multi-object tracker
 │   ├── frame_diff.py            # Frame differencing (skip unchanged frames)
 │   ├── ownership.py             # Blue-dominance ownership classifier (own vs enemy)
 │   └── models/
-│       ├── aoe2_yolo_v5.pt      # PyTorch model weights (v5, preferred)
-│       ├── aoe2_yolo_v5.onnx    # ONNX model (v5, batched SAHI)
-│       ├── aoe2_yolo_v2.onnx    # ONNX model (v2 fallback)
-│       └── aoe2_yolo26.pt       # v1 model (last resort)
+│       ├── aoe2_yolo_v6.onnx    # ONNX model (v6, preferred — batched SAHI)
+│       └── aoe2_yolo_v6.pt      # PyTorch model weights (v6)
 │
 ├── training/                    # Training pipeline
-│   ├── train_yolo.py            # YOLO training script (supports YOLO11 & YOLO26)
+│   ├── train_yolo.py            # YOLO training script (defaults to YOLO26n; --cls-gain/--box-gain/--dfl-gain knobs)
 │   ├── export_onnx.py           # Export trained model to ONNX format
-│   ├── generate_training_data.py # Synthetic image generator
-│   ├── synthetic_data.py        # Data generation utilities
+│   ├── generate_training_data.py # Synthetic image generator (rare-unit/cavalry rebalancing, distant-unit rendering)
+│   ├── spike_yolo26_onnx.py     # YOLO26 ONNX output-shape + ARM64 latency spike (v6 go/no-go gate)
 │   └── config/
 │       └── classes.yaml         # Class definitions (single source of truth)
+│
+├── labeling/                    # Auto-labeling & re-labeling
+│   ├── prelabel.py              # Auto-labeler (--open-vocab {yoloe,dinox})
+│   ├── open_vocab.py            # Open-vocab backends (YOLOE local default / DINO-X hosted)
+│   ├── open_vocab_mapping.py    # Open-vocab prompt → class mapping
+│   └── hard_negatives.py        # Surface low-confidence cavalry confusions for re-labeling
 │
 ├── extraction/                  # Sprite & screenshot extraction
 │   ├── sld_extractor.py         # AoE2 SLD sprite format parser
@@ -185,7 +190,9 @@ python -m detection.extraction.capture_replay --count 200 --interval 5
 3. Run the capture script
 4. Move camera around during capture for diverse angles
 
-## Model Performance (v5 — latest)
+## Model Performance (last measured: v5, YOLO11n)
+
+> **v6/YOLO26 retraining is pending** — no v6 model has been trained yet, so no v6 numbers exist. The figures below are the last measured results from v5 (YOLO11n) and are retained as the current baseline. They will be re-measured once v6 is trained.
 
 | Metric | v5 | v4 (previous) |
 |--------|-----|---------------|
@@ -230,6 +237,11 @@ pyyaml>=6.0           # Class config parsing
 Install with:
 ```bash
 pip install ultralytics onnxruntime scipy Pillow numpy pyyaml
+```
+
+Open-vocabulary auto-labeling (D3, `prelabel.py --open-vocab`) needs the optional `autolabel` extra and runs offline only:
+```bash
+pip install -e '.[autolabel]'
 ```
 
 ## Ownership Classification

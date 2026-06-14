@@ -21,6 +21,7 @@ from core import DetectedEntity
 
 from ._ultralytics_results import yolo_boxes_to_lists
 from .mock import mock_detect
+from .onnx_layout import UnknownOnnxLayoutError, decode_example
 from .postprocess import iou, nms
 from .sahi import (
     compute_sahi_rois,
@@ -690,130 +691,56 @@ class EntityDetector:
         input_name = cast("str", self.onnx_session.get_inputs()[0].name)
         outputs = cast("list[np.ndarray]", self.onnx_session.run(None, {input_name: img_array}))
 
-        # Debug: print output shape to understand format
         raw_output = outputs[0]
         logger.debug("ONNX output shape: %s", raw_output.shape)
 
-        # Handle different ONNX output formats from ultralytics
-        # Format 1: Post-NMS (1, num_detections, 6) = x1, y1, x2, y2, conf, class_id
-        # Format 2: Raw predictions (1, 4+num_classes, num_boxes) = needs transposing and NMS
-
-        # numpy stubs return Any from indexing/slicing/ufuncs; cast at the
-        # boundary then .tolist() to a typed list[list[float]] before iteration.
-        if len(raw_output.shape) == 3 and raw_output.shape[2] == 6:
-            # Post-NMS format: (1, num_detections, 6)
-            predictions = cast("np.ndarray", raw_output[0])
-            logger.debug("Post-NMS format, %d detection slots", len(predictions))
-
-            if logger.isEnabledFor(logging.DEBUG):
-                confidences = cast("np.ndarray", predictions[:, 4])
-                non_zero = cast("np.ndarray", confidences[confidences > 0.01])
-                logger.debug("Confidences > 0.01: %d", len(non_zero))
-                if len(non_zero) > 0:
-                    logger.debug(
-                        "Max conf: %.4f, Min conf: %.4f",
-                        float(cast("float", non_zero.max())),
-                        float(cast("float", non_zero.min())),
-                    )
-        elif len(raw_output.shape) == 3 and raw_output.shape[1] == (4 + len(self.class_names)):
-            # Raw format: (1, 4+num_classes, num_boxes) - needs transposing
-            predictions_raw = cast("np.ndarray", cast("np.ndarray", raw_output[0]).T)
-            logger.debug("Raw format, %d boxes, processing...", len(predictions_raw))
-
-            boxes = cast("np.ndarray", predictions_raw[:, :4])
-            class_scores = cast("np.ndarray", predictions_raw[:, 4:])
-
-            best_class_idx = cast("np.ndarray", np.argmax(class_scores, axis=1))
-            best_confidence = cast("np.ndarray", np.max(class_scores, axis=1))
-
-            min_thresh = (
-                min(self.class_thresholds.values())
-                if self.class_thresholds
-                else self.confidence_threshold
+        min_confidence = (
+            min(self.class_thresholds.values())
+            if self.class_thresholds
+            else self.confidence_threshold
+        )
+        try:
+            rows = decode_example(cast("np.ndarray", raw_output[0]), min_confidence)
+        except UnknownOnnxLayoutError:
+            logger.warning(
+                "Unrecognised ONNX output shape %s; returning no detections", raw_output.shape
             )
-            mask = cast("np.ndarray", best_confidence >= min_thresh)
-            boxes = cast("np.ndarray", boxes[mask])
-            best_class_idx = cast("np.ndarray", best_class_idx[mask])
-            best_confidence = cast("np.ndarray", best_confidence[mask])
+            return []
 
-            logger.debug("%d boxes after confidence filter (%.2f)", len(boxes), min_thresh)
-
-            # Build typed python lists once at the numpy boundary
-            box_list = cast("list[list[float]]", boxes.tolist())
-            cls_list = cast("list[float]", best_class_idx.tolist())
-            conf_list = cast("list[float]", best_confidence.tolist())
-            pred_list: list[list[float]] = []
-            for box, cls_id, conf in zip(box_list, cls_list, conf_list, strict=True):
-                x_c, y_c, w, h = box[0], box[1], box[2], box[3]
-                pred_list.append([x_c - w / 2, y_c - h / 2, x_c + w / 2, y_c + h / 2, conf, cls_id])
-            predictions = np.array(pred_list) if pred_list else np.array([]).reshape(0, 6)
-        else:
-            logger.debug("Unknown format shape %s, trying as post-NMS", raw_output.shape)
-            predictions = cast(
-                "np.ndarray", raw_output[0] if len(raw_output.shape) == 3 else raw_output
-            )
-
-        # Scale factors for converting from 640x640 to original size
+        # Scale model-input coordinates back to the original screenshot size.
         scale_x = orig_width / self.input_size
         scale_y = orig_height / self.input_size
 
-        entities = []
-        for pred in cast("list[list[float]]", predictions.tolist()):
-            x1, y1, x2, y2, confidence, class_id = (
-                pred[0],
-                pred[1],
-                pred[2],
-                pred[3],
-                pred[4],
-                pred[5],
-            )
-
-            # Per-class confidence threshold
-            class_idx = int(class_id)
+        entities: list[DetectedEntity] = []
+        for row in rows:
             class_name = (
-                self.class_names[class_idx]
-                if class_idx < len(self.class_names)
-                else f"unknown_{class_idx}"
+                self.class_names[row.class_id]
+                if row.class_id < len(self.class_names)
+                else f"unknown_{row.class_id}"
             )
-            if confidence < self._get_threshold(class_name):
+            if row.confidence < self._get_threshold(class_name):
                 continue
 
-            # Scale coordinates back to original image size
-            x1 = x1 * scale_x
-            y1 = y1 * scale_y
-            x2 = x2 * scale_x
-            y2 = y2 * scale_y
-
-            # Clamp to image bounds
-            x1 = max(0, min(x1, orig_width))
-            y1 = max(0, min(y1, orig_height))
-            x2 = max(0, min(x2, orig_width))
-            y2 = max(0, min(y2, orig_height))
-
-            # Skip invalid boxes
+            x1 = max(0.0, min(row.x1 * scale_x, orig_width))
+            y1 = max(0.0, min(row.y1 * scale_y, orig_height))
+            x2 = max(0.0, min(row.x2 * scale_x, orig_width))
+            y2 = max(0.0, min(row.y2 * scale_y, orig_height))
             if x2 <= x1 or y2 <= y1:
                 continue
 
-            # Calculate center and area
-            center_x = (x1 + x2) / 2
-            center_y = (y1 + y2) / 2
-            area = (x2 - x1) * (y2 - y1)
-
-            entity = DetectedEntity(
-                id=self._generate_id(class_name),
-                class_name=class_name,
-                bbox=(float(x1), float(y1), float(x2), float(y2)),
-                center=(float(center_x), float(center_y)),
-                confidence=float(confidence),
-                area=float(area),
+            entities.append(
+                DetectedEntity(
+                    id=self._generate_id(class_name),
+                    class_name=class_name,
+                    bbox=(x1, y1, x2, y2),
+                    center=((x1 + x2) / 2, (y1 + y2) / 2),
+                    confidence=row.confidence,
+                    area=(x2 - x1) * (y2 - y1),
+                )
             )
-            entities.append(entity)
 
-        # Sort by class name, then by confidence (highest first)
         entities.sort(key=lambda e: (e.class_name, -e.confidence))
-
         logger.debug("Final entity count: %d", len(entities))
-
         return entities
 
     def detect_to_dict_list(self, screenshot: bytes | Image.Image) -> list[dict]:
@@ -898,53 +825,16 @@ def get_detector(
 ) -> EntityDetector:
     """Get or create the singleton detector instance.
 
-    Model priority (from highest to lowest):
-    1. Explicitly provided model_path
-    2. v6 ONNX/PT (aoe2_yolo_v6) - YOLO26, NMS-free
-    3. v5 ONNX/PT (aoe2_yolo_v5) - YOLO11, batched SAHI
-    4. v2 model (aoe2_yolo_v2) - hybrid trained
-    5. v1 model (aoe2_yolo26) - synthetic only, fallback
+    Resolves the YOLO26 model (`aoe2_yolo_v6`) unless an explicit `model_path` is
+    given. ONNX is preferred over PyTorch (the ARM64 deploy path).
     """
     global _instance
     if _instance is None:
         if model_path is None:
             models_dir = Path(__file__).parent / "models"
-
-            # v6 model (YOLO26 - NMS-free, fastest)
-            v6_onnx_path = models_dir / "aoe2_yolo_v6.onnx"
-            v6_pt_path = models_dir / "aoe2_yolo_v6.pt"
-
-            # v5 model (YOLO11 - current production)
-            v5_onnx_path = models_dir / "aoe2_yolo_v5.onnx"
-            v5_pt_path = models_dir / "aoe2_yolo_v5.pt"
-
-            # v2 model (hybrid training - fallback)
-            v2_onnx_path = models_dir / "aoe2_yolo_v2.onnx"
-            v2_pt_path = models_dir / "aoe2_yolo_v2.pt"
-
-            # v1 model (synthetic only - last resort)
-            v1_onnx_path = models_dir / "aoe2_yolo26.onnx"
-            v1_pt_path = models_dir / "aoe2_yolo26.pt"
-
-            # Priority: v6 > v5 > v2 > v1 (ONNX preferred over PT)
-            if v6_onnx_path.exists():
-                model_path = str(v6_onnx_path)
-            elif v6_pt_path.exists():
-                model_path = str(v6_pt_path)
-            elif v5_onnx_path.exists():
-                model_path = str(v5_onnx_path)
-            elif v5_pt_path.exists():
-                model_path = str(v5_pt_path)
-            elif v2_onnx_path.exists():
-                model_path = str(v2_onnx_path)
-            elif v2_pt_path.exists():
-                model_path = str(v2_pt_path)
-            elif v1_onnx_path.exists():
-                model_path = str(v1_onnx_path)
-            elif v1_pt_path.exists():
-                model_path = str(v1_pt_path)
-            else:
-                model_path = str(v5_pt_path)  # Will fail gracefully
+            onnx_path = models_dir / "aoe2_yolo_v6.onnx"
+            pt_path = models_dir / "aoe2_yolo_v6.pt"
+            model_path = str(onnx_path if onnx_path.exists() else pt_path)
 
         _instance = EntityDetector(model_path=model_path, use_mock=use_mock, imgsz=imgsz)
     return _instance

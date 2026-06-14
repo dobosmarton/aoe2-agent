@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, cast
 import numpy as np
 
 from ._ultralytics_results import yolo_boxes_to_lists
+from .onnx_layout import UnknownOnnxLayoutError, decode_example
 from .postprocess import iou
 
 if TYPE_CHECKING:
@@ -211,14 +212,12 @@ def sahi_detect_rois(
         input_name = cast("str", det.onnx_session.get_inputs()[0].name)
         outputs = cast("list[np.ndarray]", det.onnx_session.run(None, {input_name: batch}))
         raw_output = outputs[0]
-        num_classes = len(det.class_names)
         for tile_idx in range(len(tiles)):
             x_off, y_off, tw, th = offsets[tile_idx]
             tile_entities = parse_onnx_tile(
                 det,
                 raw_output,
                 tile_idx,
-                num_classes,
                 scale_x=1.0,
                 scale_y=1.0,
                 x_offset=x_off,
@@ -386,7 +385,6 @@ def onnx_sahi_detect(det: EntityDetector, image: Image.Image) -> list[DetectedEn
     logger.debug("ONNX SAHI batch shape: %s, tiles: %d", raw_output.shape, len(tiles))
 
     all_entities = []
-    num_classes = len(det.class_names)
 
     for tile_idx in range(len(tiles)):
         x_start, y_start, tile_w, tile_h = offsets[tile_idx]
@@ -394,7 +392,6 @@ def onnx_sahi_detect(det: EntityDetector, image: Image.Image) -> list[DetectedEn
             det,
             raw_output,
             tile_idx,
-            num_classes,
             scale_x=1.0,
             scale_y=1.0,
             x_offset=x_start,
@@ -412,7 +409,6 @@ def parse_onnx_tile(
     det: EntityDetector,
     raw_output: np.ndarray,
     tile_idx: int,
-    num_classes: int,
     scale_x: float,
     scale_y: float,
     x_offset: float = 0,
@@ -422,67 +418,33 @@ def parse_onnx_tile(
 ) -> list[DetectedEntity]:
     """Parse ONNX output for a single tile from a batched result.
 
-    Handles both output formats:
-      - Post-NMS: (batch, num_detections, 6) → [x1, y1, x2, y2, conf, cls]
-      - Raw: (batch, 4+num_classes, num_boxes) → needs argmax + threshold
+    Decoding is shared with the single-image path via `decode_example`; this
+    function only adds the per-tile coordinate scale, offset, and clip.
     """
     from .detector import DetectedEntity
 
-    entities = []
-
-    # numpy stubs return Any from indexing/slicing/ufuncs; cast at the
-    # boundary then .tolist() before iteration so the loop body is typed.
-    if len(raw_output.shape) == 3 and raw_output.shape[2] == 6:
-        predictions = cast("np.ndarray", raw_output[tile_idx])
-    elif len(raw_output.shape) == 3 and raw_output.shape[1] == (4 + num_classes):
-        preds_raw = cast("np.ndarray", cast("np.ndarray", raw_output[tile_idx]).T)
-        boxes = cast("np.ndarray", preds_raw[:, :4])
-        class_scores = cast("np.ndarray", preds_raw[:, 4:])
-        best_cls = cast("np.ndarray", np.argmax(class_scores, axis=1))
-        best_conf = cast("np.ndarray", np.max(class_scores, axis=1))
-        min_thresh = (
-            min(det.class_thresholds.values()) if det.class_thresholds else det.confidence_threshold
-        )
-        mask = cast("np.ndarray", best_conf >= min_thresh)
-        boxes = cast("np.ndarray", boxes[mask])
-        best_cls = cast("np.ndarray", best_cls[mask])
-        best_conf = cast("np.ndarray", best_conf[mask])
-        box_list = cast("list[list[float]]", boxes.tolist())
-        cls_list = cast("list[float]", best_cls.tolist())
-        conf_list = cast("list[float]", best_conf.tolist())
-        pred_list: list[list[float]] = []
-        for box, cls_id, conf in zip(box_list, cls_list, conf_list, strict=True):
-            xc, yc, w, h = box[0], box[1], box[2], box[3]
-            pred_list.append([xc - w / 2, yc - h / 2, xc + w / 2, yc + h / 2, conf, cls_id])
-        predictions = np.array(pred_list) if pred_list else np.array([]).reshape(0, 6)
-    else:
+    min_confidence = (
+        min(det.class_thresholds.values()) if det.class_thresholds else det.confidence_threshold
+    )
+    try:
+        rows = decode_example(cast("np.ndarray", raw_output[tile_idx]), min_confidence)
+    except UnknownOnnxLayoutError:
         return []
 
-    for pred in cast("list[list[float]]", predictions.tolist()):
-        x1, y1, x2, y2, confidence, class_id = (
-            pred[0],
-            pred[1],
-            pred[2],
-            pred[3],
-            pred[4],
-            pred[5],
-        )
-        class_idx = int(class_id)
+    entities: list[DetectedEntity] = []
+    for row in rows:
         class_name = (
-            det.class_names[class_idx]
-            if class_idx < len(det.class_names)
-            else f"unknown_{class_idx}"
+            det.class_names[row.class_id]
+            if row.class_id < len(det.class_names)
+            else f"unknown_{row.class_id}"
         )
-        if confidence < det._get_threshold(class_name):
+        if row.confidence < det._get_threshold(class_name):
             continue
 
-        abs_x1 = x1 * scale_x + x_offset
-        abs_y1 = y1 * scale_y + y_offset
-        abs_x2 = x2 * scale_x + x_offset
-        abs_y2 = y2 * scale_y + y_offset
-
-        abs_x2 = min(abs_x2, x_offset + clip_w)
-        abs_y2 = min(abs_y2, y_offset + clip_h)
+        abs_x1 = row.x1 * scale_x + x_offset
+        abs_y1 = row.y1 * scale_y + y_offset
+        abs_x2 = min(row.x2 * scale_x + x_offset, x_offset + clip_w)
+        abs_y2 = min(row.y2 * scale_y + y_offset, y_offset + clip_h)
 
         if abs_x2 <= abs_x1 or abs_y2 <= abs_y1:
             continue
@@ -493,7 +455,7 @@ def parse_onnx_tile(
                 class_name=class_name,
                 bbox=(abs_x1, abs_y1, abs_x2, abs_y2),
                 center=((abs_x1 + abs_x2) / 2, (abs_y1 + abs_y2) / 2),
-                confidence=confidence,
+                confidence=row.confidence,
                 area=(abs_x2 - abs_x1) * (abs_y2 - abs_y1),
             )
         )
