@@ -27,6 +27,7 @@ import argparse
 import json
 import shutil
 import sys
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
@@ -37,19 +38,40 @@ except ImportError:
     print("ERROR: Pillow is required. Install with: pip install Pillow")
     sys.exit(1)
 
-from .class_mapping import (
-    build_v1_to_v2_mapping,
-    load_classes_yaml,
-    load_dataset_yaml,
-    write_classes_txt,
-)
+from detection.inference._ultralytics_results import yolo_boxes_to_lists
+
+from .class_mapping import load_classes_yaml, write_classes_txt
 
 # Paths
 _DETECTION_DIR = Path(__file__).parent.parent
-_DEFAULT_MODEL = _DETECTION_DIR / "inference" / "models" / "aoe2_yolo_v2.pt"
+_DEFAULT_MODEL = _DETECTION_DIR / "inference" / "models" / "aoe2_yolo_v6.pt"
 _DEFAULT_RAW_DIR = _DETECTION_DIR / "real_screenshots" / "raw"
 _DEFAULT_OUTPUT_DIR = _DETECTION_DIR / "labeling" / "output" / "active_learning"
 _TRAINING_DATA_DIR = _DETECTION_DIR / "training_data"
+
+
+@dataclass(frozen=True, slots=True)
+class DetectionRecord:
+    """One raw detection from the triage pass (model class-name space)."""
+
+    class_name: str
+    confidence: float
+    bbox: tuple[float, float, float, float]
+
+
+@dataclass(frozen=True, slots=True)
+class TriageItem:
+    """An image's informativeness score plus the raw detections behind it."""
+
+    path: str
+    name: str
+    score: int
+    n_detections: int
+    n_uncertain: int
+    n_low: int
+    n_high: int = 0
+    reason: str = ""
+    detections: tuple[DetectionRecord, ...] = ()
 
 
 def triage(
@@ -58,7 +80,7 @@ def triage(
     output_dir: Path = _DEFAULT_OUTPUT_DIR,
     conf_low: float = 0.15,
     conf_high: float = 0.7,
-) -> list[dict[str, str | int]]:
+) -> list[TriageItem]:
     """Score all images by informativeness for active learning.
 
     Images with many uncertain or missing detections are most valuable
@@ -71,7 +93,8 @@ def triage(
         - Fewer total detections than expected: +5 (probably missing objects)
 
     Returns:
-        Sorted list of {path, score, n_detections, n_uncertain, n_low} dicts.
+        Items sorted by score (most informative first). Each carries its raw
+        detections so downstream tools (e.g. hard-negative mining) can reuse them.
     """
     try:
         from detection._ultralytics_compat import YOLO
@@ -88,76 +111,92 @@ def triage(
 
     print(f"Triaging {len(images)} images...")
 
-    scored = []
+    scored: list[TriageItem] = []
     for i, img_path in enumerate(images):
         results = model(str(img_path), conf=0.05, verbose=False)
+        boxes = results[0].boxes
 
-        if results[0].boxes is None or len(results[0].boxes) == 0:
-            scored.append(
-                {
-                    "path": str(img_path),
-                    "name": img_path.name,
-                    "score": 15,
-                    "n_detections": 0,
-                    "n_uncertain": 0,
-                    "n_low": 0,
-                    "reason": "no_detections",
-                }
-            )
+        if boxes is None or len(boxes) == 0:
+            scored.append(_empty_triage_item(img_path))
             continue
 
-        confs = results[0].boxes.conf.cpu().numpy()
-        n_total = len(confs)
-        n_low = int(sum(1 for c in confs if c < conf_low))
-        n_uncertain = int(sum(1 for c in confs if conf_low <= c < conf_high))
-        n_high = int(sum(1 for c in confs if c >= conf_high))
+        detections = _to_detection_records(boxes, results[0].names)
+        confs = [d.confidence for d in detections]
+        n_low = sum(1 for c in confs if c < conf_low)
+        n_uncertain = sum(1 for c in confs if conf_low <= c < conf_high)
+        n_high = sum(1 for c in confs if c >= conf_high)
 
-        # Score: uncertain and low-confidence detections are most informative
+        # Uncertain and low-confidence detections are most informative; a sparse
+        # image probably hides objects the model missed entirely.
         score = n_low * 3 + n_uncertain * 2
-
-        # Bonus if very few detections (probably missing many objects)
-        if n_total < 5:
+        if len(confs) < 5:
             score += 5
 
         scored.append(
-            {
-                "path": str(img_path),
-                "name": img_path.name,
-                "score": score,
-                "n_detections": n_total,
-                "n_uncertain": n_uncertain,
-                "n_low": n_low,
-                "n_high": n_high,
-            }
+            TriageItem(
+                path=str(img_path),
+                name=img_path.name,
+                score=score,
+                n_detections=len(confs),
+                n_uncertain=n_uncertain,
+                n_low=n_low,
+                n_high=n_high,
+                detections=detections,
+            )
         )
 
         if (i + 1) % 20 == 0:
             print(f"  [{i + 1}/{len(images)}] processed")
 
-    # Sort by score descending (most informative first)
-    scored.sort(key=lambda x: -x["score"])
+    scored.sort(key=lambda item: -item.score)
 
-    # Save triage results
     output_dir.mkdir(parents=True, exist_ok=True)
     triage_path = output_dir / "triage_results.json"
-    triage_path.write_text(json.dumps(scored, indent=2) + "\n")
+    triage_path.write_text(json.dumps([asdict(item) for item in scored], indent=2) + "\n")
 
     print(f"\nTriage complete. Results saved to {triage_path}")
     print("\nTop 10 most informative images:")
     for item in scored[:10]:
         print(
-            f"  Score {item['score']:3d} | {item['n_detections']:3d} det "
-            f"({item['n_uncertain']} uncertain, {item['n_low']} low) | {item['name']}"
+            f"  Score {item.score:3d} | {item.n_detections:3d} det "
+            f"({item.n_uncertain} uncertain, {item.n_low} low) | {item.name}"
         )
 
     print("\nBottom 5 (least informative):")
     for item in scored[-5:]:
         print(
-            f"  Score {item['score']:3d} | {item['n_detections']:3d} det "
-            f"({item.get('n_high', 0)} high-conf) | {item['name']}"
+            f"  Score {item.score:3d} | {item.n_detections:3d} det "
+            f"({item.n_high} high-conf) | {item.name}"
         )
 
     return scored
+
+
+def _empty_triage_item(img_path: Path) -> TriageItem:
+    """A maximally-informative item for an image the model found nothing in."""
+    return TriageItem(
+        path=str(img_path),
+        name=img_path.name,
+        score=15,
+        n_detections=0,
+        n_uncertain=0,
+        n_low=0,
+        reason="no_detections",
+    )
+
+
+def _to_detection_records(boxes: object, names: object) -> tuple[DetectionRecord, ...]:
+    """Convert an ultralytics `Boxes` object into typed detection records."""
+    bboxes, class_ids, confidences = yolo_boxes_to_lists(boxes)
+    class_names = cast("dict[int, str]", names)
+    return tuple(
+        DetectionRecord(
+            class_name=class_names[int(class_id)],
+            confidence=confidence,
+            bbox=(bbox[0], bbox[1], bbox[2], bbox[3]),
+        )
+        for bbox, class_id, confidence in zip(bboxes, class_ids, confidences, strict=True)
+    )
 
 
 def prepare_batch(
@@ -166,7 +205,6 @@ def prepare_batch(
     output_dir: Path = _DEFAULT_OUTPUT_DIR,
     batch_size: int = 20,
     conf_threshold: float = 0.25,
-    schema: str = "v2",
 ) -> Path:
     """Prepare the next batch of most-informative images for CVAT labeling.
 
@@ -184,18 +222,19 @@ def prepare_batch(
 
     output_dir = Path(output_dir)
 
-    # Check for existing triage results
+    # Resolve the top-N image paths from cached triage or a fresh run. Only the
+    # ordering matters here; pre-labels are regenerated below by the model.
     triage_path = output_dir / "triage_results.json"
     if triage_path.exists():
         print("Loading existing triage results...")
-        scored = cast("list[dict[str, str | int]]", json.loads(triage_path.read_text()))
+        cached = cast("list[dict[str, object]]", json.loads(triage_path.read_text()))
+        batch_paths = [Path(str(item["path"])) for item in cached[:batch_size]]
     else:
         print("No triage results found, running triage...")
-        scored = triage(model_path, raw_dir, output_dir)
+        fresh = triage(model_path, raw_dir, output_dir)
+        batch_paths = [Path(item.path) for item in fresh[:batch_size]]
 
-    # Select top-N images
-    batch = scored[:batch_size]
-    print(f"\nPreparing batch of {len(batch)} images...")
+    print(f"\nPreparing batch of {len(batch_paths)} images...")
 
     # Create batch directory
     timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M")
@@ -208,20 +247,14 @@ def prepare_batch(
     # Load model for pre-labeling
     model = YOLO(str(model_path))
 
-    # Build class mapping
-    v1_classes = load_dataset_yaml()
-    v2_classes = load_classes_yaml()
-    if schema == "v2":
-        id_mapping = build_v1_to_v2_mapping(v1_classes, v2_classes)
-    else:
-        id_mapping = {i: i for i in v1_classes}
+    # Output classes (classes.yaml; the model emits these IDs natively)
+    output_classes = load_classes_yaml()
 
     # Write classes.txt
-    write_classes_txt(batch_dir / "classes.txt", schema)
+    write_classes_txt(batch_dir / "classes.txt")
 
     # Process each image
-    for item in batch:
-        img_path = Path(str(item["path"]))
+    for img_path in batch_paths:
         if not img_path.exists():
             continue
 
@@ -242,10 +275,9 @@ def prepare_batch(
                 results[0].boxes.conf,
                 strict=True,
             ):
-                v1_id = int(cls_id.item())
-                if v1_id not in id_mapping:
+                class_id = int(cls_id.item())
+                if class_id not in output_classes:
                     continue
-                mapped_id = id_mapping[v1_id]
 
                 x1, y1, x2, y2 = box.tolist()
                 x_center = ((x1 + x2) / 2) / img_w
@@ -253,7 +285,7 @@ def prepare_batch(
                 w = (x2 - x1) / img_w
                 h = (y2 - y1) / img_h
 
-                labels.append(f"{mapped_id} {x_center:.6f} {y_center:.6f} {w:.6f} {h:.6f}")
+                labels.append(f"{class_id} {x_center:.6f} {y_center:.6f} {w:.6f} {h:.6f}")
 
         # Write label file
         label_name = img_path.stem + ".txt"
@@ -262,15 +294,14 @@ def prepare_batch(
     # Save batch metadata
     meta = {
         "created": timestamp,
-        "batch_size": len(batch),
-        "schema": schema,
+        "batch_size": len(batch_paths),
         "conf_threshold": conf_threshold,
-        "images": [item["name"] for item in batch],
+        "images": [p.name for p in batch_paths],
     }
     (batch_dir / "batch_meta.json").write_text(json.dumps(meta, indent=2) + "\n")
 
     print(f"\nBatch ready at: {batch_dir}")
-    print(f"  {len(batch)} images with pre-labels")
+    print(f"  {len(batch_paths)} images with pre-labels")
     print("  Import into CVAT:")
     print(f"    1. Create project with labels from {batch_dir}/classes.txt")
     print(f"    2. Upload images from {batch_dir}/images/")
@@ -359,7 +390,6 @@ class _ActiveLearningArgs(argparse.Namespace):
     output: str
     batch_size: int
     conf: float
-    schema: str
     cvat_export: str
     training_data: str
 
@@ -383,7 +413,6 @@ def main() -> None:
     prepare_parser.add_argument("--output", type=str, default=str(_DEFAULT_OUTPUT_DIR))
     prepare_parser.add_argument("--batch-size", type=int, default=20)
     prepare_parser.add_argument("--conf", type=float, default=0.25)
-    prepare_parser.add_argument("--schema", choices=["v1", "v2"], default="v2")
 
     # Integrate
     integrate_parser = subparsers.add_parser("integrate", help="Integrate CVAT export")
@@ -403,7 +432,6 @@ def main() -> None:
             Path(args.output),
             args.batch_size,
             args.conf,
-            args.schema,
         )
     elif args.command == "integrate":
         integrate(Path(args.cvat_export), Path(args.training_data))

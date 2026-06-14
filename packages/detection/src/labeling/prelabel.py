@@ -13,9 +13,6 @@ Usage:
     # Custom confidence threshold (lower = more boxes to review)
     python -m detection.labeling.prelabel --conf 0.15
 
-    # Use v1 class IDs (skip mapping to classes.yaml)
-    python -m detection.labeling.prelabel --schema v1
-
 CVAT Import Workflow:
     1. Create a CVAT project with labels from output/prelabeled/classes.txt
     2. Create a task, upload images from output/prelabeled/images/
@@ -24,17 +21,21 @@ CVAT Import Workflow:
     5. Export corrected annotations as "YOLO 1.1" for training
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import shutil
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, TypedDict, cast
 
 from detection.inference._ultralytics_results import yolo_boxes_to_lists
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from .open_vocab import OpenVocabBackend
 
 try:
     from PIL import Image, ImageDraw
@@ -42,16 +43,40 @@ except ImportError:
     print("ERROR: Pillow is required. Install with: pip install Pillow")
     sys.exit(1)
 
-from .class_mapping import (
-    build_v1_to_v2_mapping,
-    load_classes_yaml,
-    load_dataset_yaml,
-    write_classes_txt,
-)
+from .class_mapping import load_classes_yaml, write_classes_txt
+from .open_vocab_mapping import build_class_prompts, map_open_vocab_label
+
+
+class RawDetection(TypedDict):
+    """A single detection from any backend, before mapping to the output schema."""
+
+    bbox: tuple[float, float, float, float]
+    class_id: int
+    confidence: float
+    img_size: tuple[int, int]
+
+
+class PreviewDetection(TypedDict):
+    """A mapped detection carrying its class name, for preview rendering."""
+
+    bbox: tuple[float, float, float, float]
+    class_name: str
+    confidence: float
+
+
+class PrelabelSummary(TypedDict):
+    """Run summary written to summary.json and returned by `prelabel`."""
+
+    total_images: int
+    total_detections: int
+    avg_detections_per_image: float
+    confidence_threshold: float
+    per_class: dict[str, int]
+
 
 # Paths
 _DETECTION_DIR = Path(__file__).parent.parent
-_DEFAULT_MODEL = _DETECTION_DIR / "inference" / "models" / "aoe2_yolo_v2.pt"
+_DEFAULT_MODEL = _DETECTION_DIR / "inference" / "models" / "aoe2_yolo_v6.pt"
 _DEFAULT_RAW_DIR = _DETECTION_DIR / "real_screenshots" / "raw"
 _DEFAULT_OUTPUT_DIR = _DETECTION_DIR / "labeling" / "output" / "prelabeled"
 
@@ -134,7 +159,7 @@ def _run_standard_detection(
     model: object,
     img_path: Path,
     conf_threshold: float,
-) -> list[dict]:
+) -> list[RawDetection]:
     """Run standard YOLO inference on a single image."""
     results = cast(
         "list[object]",
@@ -165,7 +190,7 @@ def _run_sahi_detection(
     sahi_model: object,
     img_path: Path,
     conf_threshold: float,
-) -> list[dict]:
+) -> list[RawDetection]:
     """Run SAHI sliced inference on a single image."""
     from sahi.predict import get_sliced_prediction
 
@@ -185,7 +210,7 @@ def _run_sahi_detection(
     img = Image.open(img_path)
     img_w, img_h = img.size
 
-    detections = []
+    detections: list[RawDetection] = []
     for pred in result.object_prediction_list:
         bbox = pred.bbox
         detections.append(
@@ -199,16 +224,42 @@ def _run_sahi_detection(
     return detections
 
 
+def _run_open_vocab_detection(
+    backend: OpenVocabBackend,
+    img_path: Path,
+    prompts: dict[int, tuple[str, ...]],
+    conf_threshold: float,
+) -> list[RawDetection]:
+    """Run an open-vocab backend and map its labels to classes.yaml IDs."""
+    all_prompts = [phrase for phrases in prompts.values() for phrase in phrases]
+    detections: list[RawDetection] = []
+    for det in backend.detect(img_path, all_prompts):
+        if det.confidence < conf_threshold:
+            continue
+        class_id = map_open_vocab_label(det.label)
+        if class_id is None:
+            continue
+        detections.append(
+            {
+                "bbox": det.bbox,
+                "class_id": class_id,
+                "confidence": det.confidence,
+                "img_size": det.img_size,
+            }
+        )
+    return detections
+
+
 def prelabel(
     model_path: str | Path = _DEFAULT_MODEL,
     screenshots_dir: str | Path = _DEFAULT_RAW_DIR,
     output_dir: str | Path = _DEFAULT_OUTPUT_DIR,
     conf_threshold: float = 0.25,
-    schema: str = "v2",
     save_preview: bool = True,
     skip_labeled: bool = False,
     use_sahi: bool = False,
-) -> dict:
+    open_vocab_backend: OpenVocabBackend | None = None,
+) -> PrelabelSummary:
     """Run YOLO model on screenshots and export YOLO-format labels.
 
     Args:
@@ -216,7 +267,6 @@ def prelabel(
         screenshots_dir: Directory with raw screenshots.
         output_dir: Where to write labels, images, previews.
         conf_threshold: Minimum confidence for detections.
-        schema: "v1" to keep model IDs, "v2" to map to classes.yaml.
         save_preview: Whether to save annotated preview images.
         skip_labeled: Skip images that already have manual annotations.
         use_sahi: Use SAHI sliced inference for better small object detection.
@@ -224,66 +274,53 @@ def prelabel(
     Returns:
         Summary dict with per-class detection counts.
     """
-    try:
-        from detection._ultralytics_compat import YOLO
-    except ImportError:
-        print("ERROR: ultralytics is required. Install with: pip install ultralytics")
-        sys.exit(1)
-
-    sahi_model = None
-    if use_sahi:
-        try:
-            from sahi import AutoDetectionModel
-
-            sahi_model = AutoDetectionModel.from_pretrained(
-                model_type="yolov8",
-                model_path=str(model_path),
-                confidence_threshold=conf_threshold,
-                device="cpu",
-            )
-            print("SAHI sliced inference enabled (640x640 tiles, 20% overlap)")
-        except ImportError:
-            print("WARNING: sahi not installed. Install with: pip install sahi")
-            print("Falling back to standard inference.")
-            use_sahi = False
-
     model_path = Path(model_path)
     screenshots_dir = Path(screenshots_dir)
     output_dir = Path(output_dir)
-
-    if not model_path.exists():
-        print(f"ERROR: Model not found: {model_path}")
-        sys.exit(1)
 
     if not screenshots_dir.exists():
         print(f"ERROR: Screenshots directory not found: {screenshots_dir}")
         sys.exit(1)
 
-    # Load model
-    print(f"Loading model: {model_path}")
-    model = YOLO(str(model_path))
+    output_classes = load_classes_yaml()
+    prompts: dict[int, tuple[str, ...]] = {}
+    model = None
+    sahi_model = None
 
-    # Build class mapping
-    v2_classes = load_classes_yaml()
-
-    if schema == "v2":
-        # Check if the model is already v2 (59 classes) or v1 (46 classes)
-        model_nc = getattr(model.model, "nc", None) or len(getattr(model, "names", {}))
-        if model_nc == len(v2_classes):
-            # v2 model outputs v2 IDs natively - identity mapping
-            id_mapping = {i: i for i in v2_classes}
-            print(f"Using v2 model ({model_nc} classes), no remapping needed")
-        else:
-            # v1 model needs remapping
-            v1_classes = load_dataset_yaml()
-            id_mapping = build_v1_to_v2_mapping(v1_classes, v2_classes)
-            print(f"Using v1 model ({model_nc} classes), mapped {len(id_mapping)} to v2 schema")
-        output_classes = v2_classes
+    if open_vocab_backend is not None:
+        # Open-vocab backends emit classes.yaml IDs directly; no YOLO model.
+        use_sahi = False
+        prompts = build_class_prompts()
+        print(f"Open-vocab pre-labeling with prompts for {len(prompts)} classes")
     else:
-        v1_classes = load_dataset_yaml()
-        id_mapping = {i: i for i in v1_classes}  # identity
-        output_classes = v1_classes
-        print(f"Using v1 schema ({len(v1_classes)} classes)")
+        try:
+            from detection._ultralytics_compat import YOLO
+        except ImportError:
+            print("ERROR: ultralytics is required. Install with: pip install ultralytics")
+            sys.exit(1)
+
+        if not model_path.exists():
+            print(f"ERROR: Model not found: {model_path}")
+            sys.exit(1)
+
+        if use_sahi:
+            try:
+                from sahi import AutoDetectionModel
+
+                sahi_model = AutoDetectionModel.from_pretrained(
+                    model_type="yolov8",
+                    model_path=str(model_path),
+                    confidence_threshold=conf_threshold,
+                    device="cpu",
+                )
+                print("SAHI sliced inference enabled (640x640 tiles, 20% overlap)")
+            except ImportError:
+                print("WARNING: sahi not installed. Install with: pip install sahi")
+                print("Falling back to standard inference.")
+                use_sahi = False
+
+        print(f"Loading model: {model_path}")
+        model = YOLO(str(model_path))
 
     # Create output directories
     images_dir = output_dir / "images"
@@ -296,8 +333,8 @@ def prelabel(
         preview_dir.mkdir(parents=True, exist_ok=True)
 
     # Write classes.txt for CVAT
-    write_classes_txt(output_dir / "classes.txt", schema)
-    print(f"Wrote classes.txt ({schema} schema)")
+    write_classes_txt(output_dir / "classes.txt")
+    print("Wrote classes.txt")
 
     # Find all screenshots
     image_extensions = {".png", ".jpg", ".jpeg", ".bmp"}
@@ -316,19 +353,15 @@ def prelabel(
     total_detections = 0
 
     for i, img_path in enumerate(images):
-        # Run detection (SAHI or standard)
-        if use_sahi and sahi_model is not None:
-            raw_detections = _run_sahi_detection(
-                sahi_model,
-                img_path,
-                conf_threshold,
+        # Run detection (open-vocab, SAHI, or standard)
+        if open_vocab_backend is not None:
+            raw_detections = _run_open_vocab_detection(
+                open_vocab_backend, img_path, prompts, conf_threshold
             )
+        elif use_sahi and sahi_model is not None:
+            raw_detections = _run_sahi_detection(sahi_model, img_path, conf_threshold)
         else:
-            raw_detections = _run_standard_detection(
-                model,
-                img_path,
-                conf_threshold,
-            )
+            raw_detections = _run_standard_detection(model, img_path, conf_threshold)
 
         if not raw_detections:
             # No detections - write empty label file
@@ -341,17 +374,14 @@ def prelabel(
         img_w, img_h = raw_detections[0]["img_size"]
 
         # Convert to YOLO labels
-        labels = []
-        detections_for_preview = []
+        labels: list[str] = []
+        detections_for_preview: list[PreviewDetection] = []
 
         for det in raw_detections:
-            v1_id = det["class_id"]
-
-            # Map class ID
-            if v1_id not in id_mapping:
+            class_id = det["class_id"]
+            if class_id not in output_classes:
                 continue
-            mapped_id = id_mapping[v1_id]
-            class_name = output_classes.get(mapped_id, f"class_{mapped_id}")
+            class_name = output_classes[class_id]
 
             # Convert to YOLO normalized format
             x1, y1, x2, y2 = det["bbox"]
@@ -360,7 +390,7 @@ def prelabel(
             w = (x2 - x1) / img_w
             h = (y2 - y1) / img_h
 
-            labels.append(f"{mapped_id} {x_center:.6f} {y_center:.6f} {w:.6f} {h:.6f}")
+            labels.append(f"{class_id} {x_center:.6f} {y_center:.6f} {w:.6f} {h:.6f}")
 
             # Track for preview and summary
             detections_for_preview.append(
@@ -388,12 +418,11 @@ def prelabel(
         print(f"  [{i + 1}/{len(images)}] {img_path.name}: {len(labels)} detections")
 
     # Write summary
-    summary_data = {
+    summary_data: PrelabelSummary = {
         "total_images": len(images),
         "total_detections": total_detections,
         "avg_detections_per_image": round(total_detections / max(len(images), 1), 1),
         "confidence_threshold": conf_threshold,
-        "schema": schema,
         "per_class": dict(sorted(summary.items(), key=lambda x: -x[1])),
     }
 
@@ -423,7 +452,7 @@ def _link_image(src: Path, dest_dir: Path) -> None:
 
 def _save_preview(
     img_path: Path,
-    detections: list[dict],
+    detections: list[PreviewDetection],
     preview_dir: Path,
 ) -> None:
     """Save an annotated preview image with bounding boxes."""
@@ -462,10 +491,19 @@ class _PrelabelArgs(argparse.Namespace):
     input: str
     output: str
     conf: float
-    schema: str
     no_preview: bool
     skip_labeled: bool
     sahi: bool
+    open_vocab: str | None
+
+
+def _build_open_vocab_backend(choice: str) -> OpenVocabBackend:
+    """Construct the requested open-vocab backend (imports its deps lazily)."""
+    from .open_vocab import DinoXBackend, YoloeBackend
+
+    if choice == "dinox":
+        return DinoXBackend()
+    return YoloeBackend()
 
 
 def main() -> None:
@@ -499,12 +537,6 @@ def main() -> None:
         help="Confidence threshold (default: 0.25, lower catches more)",
     )
     parser.add_argument(
-        "--schema",
-        choices=["v1", "v2"],
-        default="v2",
-        help="Class ID schema: v1 (46-class model) or v2 (55-class target)",
-    )
-    parser.add_argument(
         "--no-preview",
         action="store_true",
         help="Skip generating preview images",
@@ -519,17 +551,24 @@ def main() -> None:
         action="store_true",
         help="Use SAHI sliced inference (640x640 tiles) for better small object detection",
     )
+    parser.add_argument(
+        "--open-vocab",
+        choices=["yoloe", "dinox"],
+        default=None,
+        help="Auto-label with an open-vocab backend (yoloe local / dinox hosted) instead of YOLO",
+    )
     args = parser.parse_args(namespace=_PrelabelArgs())
 
+    backend = _build_open_vocab_backend(args.open_vocab) if args.open_vocab else None
     prelabel(
         model_path=args.model,
         screenshots_dir=args.input,
         output_dir=args.output,
         conf_threshold=args.conf,
-        schema=args.schema,
         save_preview=not args.no_preview,
         skip_labeled=args.skip_labeled,
         use_sahi=args.sahi,
+        open_vocab_backend=backend,
     )
 
 

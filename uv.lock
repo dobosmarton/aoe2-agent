@@ -652,6 +652,11 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+autolabel = [
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "ultralytics" },
+]
 coreml = [
     { name = "coremltools" },
 ]
@@ -667,17 +672,20 @@ training = [
 requires-dist = [
     { name = "core", editable = "packages/core" },
     { name = "coremltools", marker = "extra == 'coreml'", specifier = ">=8.0" },
+    { name = "httpx", marker = "extra == 'autolabel'", specifier = ">=0.27" },
     { name = "numpy", specifier = ">=1.24.0" },
     { name = "onnxruntime", specifier = ">=1.17.0" },
     { name = "pillow", specifier = ">=10.0.0" },
+    { name = "pydantic", marker = "extra == 'autolabel'", specifier = ">=2.7" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "sahi", marker = "extra == 'labeling'", specifier = ">=0.11" },
     { name = "scipy", specifier = ">=1.11.0" },
     { name = "structlog", specifier = ">=24.1.0" },
+    { name = "ultralytics", marker = "extra == 'autolabel'", specifier = ">=8.4" },
     { name = "ultralytics", marker = "extra == 'labeling'", specifier = ">=8.4" },
     { name = "ultralytics", marker = "extra == 'training'", specifier = ">=8.4" },
 ]
-provides-extras = ["training", "labeling", "coreml"]
+provides-extras = ["training", "labeling", "coreml", "autolabel"]
 
 [[package]]
 name = "detection-server"
@@ -2128,7 +2136,7 @@ name = "pyobjc-framework-cocoa"
 version = "12.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pyobjc-core", marker = "sys_platform != 'win32'" },
+    { name = "pyobjc-core", marker = "sys_platform == 'darwin'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/02/a3/16ca9a15e77c061a9250afbae2eae26f2e1579eb8ca9462ae2d2c71e1169/pyobjc_framework_cocoa-12.1.tar.gz", hash = "sha256:5556c87db95711b985d5efdaaf01c917ddd41d148b1e52a0c66b1a2e2c5c1640", size = 2772191, upload-time = "2025-11-14T10:13:02.069Z" }
 wheels = [
@@ -2145,8 +2153,8 @@ name = "pyobjc-framework-quartz"
 version = "12.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pyobjc-core", marker = "sys_platform != 'win32'" },
-    { name = "pyobjc-framework-cocoa", marker = "sys_platform != 'win32'" },
+    { name = "pyobjc-core", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/94/18/cc59f3d4355c9456fc945eae7fe8797003c4da99212dd531ad1b0de8a0c6/pyobjc_framework_quartz-12.1.tar.gz", hash = "sha256:27f782f3513ac88ec9b6c82d9767eef95a5cf4175ce88a1e5a65875fee799608", size = 3159099, upload-time = "2025-11-14T10:21:24.31Z" }
 wheels = [

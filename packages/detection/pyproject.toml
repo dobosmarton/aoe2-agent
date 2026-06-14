@@ -17,6 +17,8 @@ dependencies = [
 training = ["ultralytics>=8.4"]
 labeling = ["sahi>=0.11", "ultralytics>=8.4"]
 coreml = ["coremltools>=8.0"]
+# Open-vocabulary auto-labeling (D3): YOLOE ships in ultralytics; DINO-X is HTTP.
+autolabel = ["ultralytics>=8.4", "httpx>=0.27", "pydantic>=2.7"]
 
 [build-system]
 requires = ["setuptools>=68.0"]

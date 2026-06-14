@@ -19,12 +19,15 @@ rather than at the next test run.
 
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 
 class ClassEntry(TypedDict):
     id: int
     name: str
+    # Civ-specific unit names (e.g. unique_cavalry -> Cataphract, Boyar, ...),
+    # used to build open-vocabulary detection prompts.
+    examples: NotRequired[list[str]]
 
 
 class ClassesYaml(TypedDict):
