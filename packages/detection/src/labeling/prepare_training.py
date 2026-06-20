@@ -20,6 +20,9 @@ Usage:
     # Custom output directory
     python -m detection.labeling.prepare_training --cvat-export /path/to/export --output /path/to/output
 
+    # Oversample real training pairs 10x so the loss isn't synthetic-dominated
+    python -m detection.labeling.prepare_training --cvat-export /path/to/export --oversample-real 10
+
 CVAT Export Instructions:
     1. In CVAT, select your task/project
     2. Click "Export task dataset"
@@ -34,9 +37,9 @@ import json
 import random
 import shutil
 import sys
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import cast
+from typing import NotRequired, TypedDict, cast
 
 import yaml
 
@@ -46,6 +49,32 @@ from .class_mapping import load_classes_yaml
 _DETECTION_DIR = Path(__file__).parent.parent
 _SYNTHETIC_DIR = _DETECTION_DIR / "training_data"
 _DEFAULT_OUTPUT = _DETECTION_DIR / "training_data_v2"
+
+
+class PerClassCounts(TypedDict):
+    """Per-class instance counts, split by source (real vs synthetic)."""
+
+    real_train: int
+    real_val: int
+    synth_train: int
+    synth_val: int
+
+
+class MergeSummary(TypedDict):
+    """Dataset merge summary written to merge_summary.json."""
+
+    real_train: int
+    real_val: int
+    synthetic_train: int
+    synthetic_val: int
+    total_train: int
+    total_val: int
+    # Duplication factor applied to real TRAIN pairs on disk (1 = none). Counts
+    # above stay unique so the per-class scarcity signal is oversample-independent.
+    oversample_real: int
+    # Added after the file copy (absent on a dry run):
+    per_class: NotRequired[dict[str, PerClassCounts]]
+    zero_real_classes: NotRequired[list[str]]
 
 
 def detect_export_format(cvat_dir: Path) -> str:
@@ -358,8 +387,9 @@ def prepare_training(
     images_dir: str | Path | None = None,
     val_split: float = 0.15,
     include_synthetic: bool = True,
+    oversample_real: int = 1,
     dry_run: bool = False,
-) -> dict:
+) -> MergeSummary:
     """Merge CVAT real labels with synthetic data into a training dataset.
 
     Supports labels-only CVAT exports by matching label filenames against
@@ -373,11 +403,17 @@ def prepare_training(
                     real_screenshots/raw/ as default.
         val_split: Fraction of real images to use for validation.
         include_synthetic: Whether to include synthetic data in the merge.
+        oversample_real: Duplicate each real TRAIN pair this many times so the
+                         loss is not dominated by the synthetic majority. The
+                         validation split is never duplicated. Must be >= 1.
         dry_run: If True, just report what would happen.
 
     Returns:
         Summary dict with counts.
     """
+    if oversample_real < 1:
+        raise ValueError(f"oversample_real must be >= 1, got {oversample_real}")
+
     output_dir = Path(output_dir)
     synthetic_dir = Path(synthetic_dir)
     if images_dir is None:
@@ -445,18 +481,24 @@ def prepare_training(
     total_train = len(real_train) + synth_train_count
     total_val = len(real_val) + synth_val_count
 
-    summary = {
+    summary: MergeSummary = {
         "real_train": len(real_train),
         "real_val": len(real_val),
         "synthetic_train": synth_train_count,
         "synthetic_val": synth_val_count,
         "total_train": total_train,
         "total_val": total_val,
+        "oversample_real": oversample_real,
     }
 
     print("\nMerged dataset will contain:")
     print(f"  Train: {total_train} ({len(real_train)} real + {synth_train_count} synthetic)")
     print(f"  Val:   {total_val} ({len(real_val)} real + {synth_val_count} synthetic)")
+    if oversample_real > 1:
+        print(
+            f"  Real train oversampled {oversample_real}x -> "
+            f"{len(real_train) * oversample_real} real images on disk"
+        )
 
     if dry_run:
         print("\n[DRY RUN] No files copied.")
@@ -480,17 +522,21 @@ def prepare_training(
         _copy_dir_contents(synthetic_dir / "val" / "images", val_images)
         _copy_dir_contents(synthetic_dir / "val" / "labels", val_labels)
 
-    # Copy real training data
+    # Copy real training data, duplicating each pair oversample_real x so the
+    # real signal is not drowned out by the synthetic majority. Duplicates keep
+    # the ``real_`` prefix (so they still count as real) but get a unique stem.
     print("Copying real training data...")
     for img_path, label_path, _ in real_train:
-        new_name = f"real_{img_path.stem}"
-        _copy_pair(img_path, label_path, train_images, train_labels, new_name)
+        for copy_index in range(oversample_real):
+            suffix = "" if copy_index == 0 else f"__dup{copy_index}"
+            _copy_pair(
+                img_path, label_path, train_images, train_labels, f"real_{img_path.stem}{suffix}"
+            )
 
-    # Copy real validation data
+    # Copy real validation data (never oversampled — duplicates would distort metrics)
     print("Copying real validation data...")
     for img_path, label_path, _ in real_val:
-        new_name = f"real_{img_path.stem}"
-        _copy_pair(img_path, label_path, val_images, val_labels, new_name)
+        _copy_pair(img_path, label_path, val_images, val_labels, f"real_{img_path.stem}")
 
     # Generate dataset.yaml
     classes = load_classes_yaml()
@@ -511,13 +557,47 @@ def prepare_training(
     print(f"  Val:   {total_val} images")
     print(f"  Classes: {len(classes)}")
 
-    # Clean up temp COCO labels if created
-    for tmp_dir in output_dir.glob("_tmp_coco_labels*"):
-        shutil.rmtree(tmp_dir)
+    # Per-class instance counts. Surfaces classes starved of real data — the
+    # dominant failure mode — before a GPU hour is spent. See evaluate_real.py.
+    # Real counts come from the UNIQUE source pairs (not the oversampled copies
+    # on disk) so the scarcity signal is independent of --oversample-real.
+    id2name = {int(k): v for k, v in classes.items()}
+    synth_included = include_synthetic and synthetic_dir.exists()
+    real_train_counts = _tally_label_files((lp for _, lp, _ in real_train), id2name)
+    real_val_counts = _tally_label_files((lp for _, lp, _ in real_val), id2name)
+    synth_train_counts = (
+        _tally_label_files((synthetic_dir / "train" / "labels").glob("*.txt"), id2name)
+        if synth_included
+        else {}
+    )
+    synth_val_counts = (
+        _tally_label_files((synthetic_dir / "val" / "labels").glob("*.txt"), id2name)
+        if synth_included
+        else {}
+    )
+    per_class: dict[str, PerClassCounts] = {
+        name: {
+            "real_train": real_train_counts.get(name, 0),
+            "real_val": real_val_counts.get(name, 0),
+            "synth_train": synth_train_counts.get(name, 0),
+            "synth_val": synth_val_counts.get(name, 0),
+        }
+        for name in id2name.values()
+    }
+    summary["per_class"] = per_class
+    zero_real = sorted(n for n, c in per_class.items() if c["real_train"] + c["real_val"] == 0)
+    summary["zero_real_classes"] = zero_real
+    if zero_real:
+        print(f"\n⚠️  {len(zero_real)} classes have ZERO real instances: {', '.join(zero_real)}")
 
     # Save summary
     summary_path = output_dir / "merge_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2) + "\n")
+
+    # Clean up temp COCO labels (kept until now so the real tally above could
+    # read the converted label files that real_train/real_val point into).
+    for tmp_dir in output_dir.glob("_tmp_coco_labels*"):
+        shutil.rmtree(tmp_dir)
 
     print("\nNext step: Upload to Lambda Labs and train:")
     print(f"  tar -czf {output_dir.name}.tar.gz -C {output_dir.parent} {output_dir.name}")
@@ -552,6 +632,23 @@ def _copy_pair(
     shutil.copy2(label_path, label_dest)
 
 
+def _tally_label_files(label_paths: Iterable[Path], id2name: dict[int, str]) -> dict[str, int]:
+    """Count YOLO instances per class name across the given label files."""
+    counts: dict[str, int] = {}
+    for path in label_paths:
+        for line in path.read_text().splitlines():
+            parts = line.split()
+            if not parts:
+                continue
+            try:
+                class_id = int(float(parts[0]))
+            except ValueError:
+                continue
+            name = id2name.get(class_id, str(class_id))
+            counts[name] = counts.get(name, 0) + 1
+    return counts
+
+
 class _PrepareTrainingArgs(argparse.Namespace):
     cvat_export: list[str]
     output: str
@@ -559,6 +656,7 @@ class _PrepareTrainingArgs(argparse.Namespace):
     synthetic: str
     val_split: float
     no_synthetic: bool
+    oversample_real: int
     dry_run: bool
 
 
@@ -606,6 +704,13 @@ def main() -> None:
         help="Exclude synthetic data (real images only)",
     )
     parser.add_argument(
+        "--oversample-real",
+        type=int,
+        default=1,
+        help="Duplicate each real TRAIN pair Nx to counter synthetic dominance "
+        "in the loss (default: 1 = no duplication; validation is untouched)",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Show what would happen without copying files",
@@ -619,6 +724,7 @@ def main() -> None:
         images_dir=args.images_dir,
         val_split=args.val_split,
         include_synthetic=not args.no_synthetic,
+        oversample_real=args.oversample_real,
         dry_run=args.dry_run,
     )
 

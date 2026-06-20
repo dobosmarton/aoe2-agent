@@ -26,9 +26,13 @@ except ImportError:
     print("Error: Pillow required. Install with: pip install Pillow")
     exit(1)
 
-# `detection.labeling.*` is the correct, runtime-valid path, but basedpyright can't
-# resolve it: the editable install's top_level.txt registers subpackages as top-level
-# (see packages/detection/pyproject.toml), so the static check looks for `labeling.*`.
+# `detection.labeling.*` / `detection.extraction.*` are the correct, runtime-valid
+# paths, but basedpyright can't resolve them: the editable install's top_level.txt
+# registers subpackages as top-level (see packages/detection/pyproject.toml), so the
+# static check looks for `labeling.*` / `extraction.*`.
+from detection.extraction.sld_extractor import (  # pyright: ignore[reportMissingImports]
+    PLAYER_COLORS,
+)
 from detection.labeling.class_mapping import (  # pyright: ignore[reportMissingImports]
     load_classes_yaml,
 )
@@ -676,6 +680,89 @@ def _rebalanced(config: SpriteConfig) -> SpriteConfig:
 
 SPRITE_CONFIGS = [_rebalanced(config) for config in _BASE_SPRITE_CONFIGS]
 
+# Classes that only make sense on water (boats + fish): placed only in water scenes
+# (water background), never on land. fishing_ship, unique_ship, fish, galley, fire_galley.
+_WATER_CLASS_IDS: frozenset[int] = frozenset({32, 54, 55, 56, 57})
+
+
+# --- Per-entity UI overlays -------------------------------------------------
+# Real screenshots layer selection rings, health bars, and garrison badges ON TOP
+# of entities; a clean-sprite-only dataset leaves the model brittle to them. A
+# fraction of placed entities therefore receive an overlay. Overlays are visual
+# noise only — they never change the YOLO box, because the entity is unchanged.
+PixelBox = tuple[int, int, int, int]
+
+# The 8 AoE2 team colours, reused from the sprite extractor so overlays match the
+# player-colour recolouring applied to the sprites themselves.
+_PLAYER_COLOR_RGB: tuple[tuple[int, int, int], ...] = tuple(PLAYER_COLORS.values())
+
+# z_order encodes the entity category in _BASE_SPRITE_CONFIGS (0 = resource/nature,
+# 1 = building, 3 = unit); overlays branch on it rather than re-deriving category.
+_Z_ORDER_BUILDING = 1
+_Z_ORDER_UNIT = 3
+
+_SELECTION_OUTLINE_PROB = 0.15  # units drawn as currently selected
+_HEALTH_BAR_PROB = 0.20  # units showing a health bar
+_GARRISON_BADGE_PROB = 0.12  # buildings showing a garrison-count badge
+
+
+def _draw_selection_outline(
+    draw: ImageDraw.ImageDraw, box: PixelBox, color: tuple[int, int, int]
+) -> None:
+    """Draw an AoE2-style selection ellipse across the entity's base."""
+    x1, y1, x2, y2 = box
+    pad = max(2, (x2 - x1) // 8)
+    ellipse_h = max(4, (y2 - y1) // 4)
+    draw.ellipse([x1 - pad, y2 - ellipse_h, x2 + pad, y2 + ellipse_h // 2], outline=color, width=2)
+
+
+def _draw_health_bar(draw: ImageDraw.ImageDraw, box: PixelBox, color: tuple[int, int, int]) -> None:
+    """Draw a health bar (coloured fill on a dark track) just above the entity."""
+    x1, y1, x2, y2 = box
+    width = x2 - x1
+    bar_w = max(10, int(width * 0.8))
+    bar_h = max(3, (y2 - y1) // 12)
+    track_top = y1 - 2 - bar_h
+    if track_top < 0:
+        return  # no room above the entity for the bar
+    left = x1 + (width - bar_w) // 2
+    draw.rectangle([left, track_top, left + bar_w, track_top + bar_h], fill=(20, 20, 20))
+    remaining = random.uniform(0.2, 1.0)
+    draw.rectangle([left, track_top, left + int(bar_w * remaining), track_top + bar_h], fill=color)
+
+
+def _draw_garrison_badge(
+    draw: ImageDraw.ImageDraw, box: PixelBox, color: tuple[int, int, int]
+) -> None:
+    """Draw a small garrison-count badge in the building's lower-left corner."""
+    x1, y1, x2, y2 = box
+    radius = max(5, min(x2 - x1, y2 - y1) // 8)
+    cx = x1 + radius + 2
+    cy = y2 - radius - 2
+    draw.ellipse(
+        [cx - radius, cy - radius, cx + radius, cy + radius], fill=color, outline=(245, 245, 245)
+    )
+
+
+def _draw_entity_overlays(
+    image: Image.Image, placed_items: list[tuple[PixelBox, int, str]]
+) -> None:
+    """Layer in-game UI over placed entities (selection / health / garrison).
+
+    Drawn after placement so the UI sits above the sprites, mirroring real
+    screenshots. Labels are never touched — each entity stays where it was.
+    """
+    draw = ImageDraw.Draw(image)
+    for box, z_order, _label in placed_items:
+        color = random.choice(_PLAYER_COLOR_RGB)
+        if z_order >= _Z_ORDER_UNIT:
+            if random.random() < _SELECTION_OUTLINE_PROB:
+                _draw_selection_outline(draw, box, color)
+            if random.random() < _HEALTH_BAR_PROB:
+                _draw_health_bar(draw, box, color)
+        elif z_order >= _Z_ORDER_BUILDING and random.random() < _GARRISON_BADGE_PROB:
+            _draw_garrison_badge(draw, box, color)
+
 
 class TrainingDataGenerator:
     """Generates synthetic training images with YOLO labels."""
@@ -686,6 +773,8 @@ class TrainingDataGenerator:
         output_dir: Path,
         backgrounds_dir: Path | None = None,
         real_screenshots_dir: Path | None = None,
+        water_backgrounds_dir: Path | None = None,
+        water_fraction: float = 0.0,
         image_size: tuple[int, int] = (1280, 720),
         configs: list[SpriteConfig] | None = None,
         real_background_ratio: float = 0.5,  # 50% real backgrounds
@@ -695,8 +784,11 @@ class TrainingDataGenerator:
         self.output_dir = Path(output_dir)
         self.backgrounds_dir = Path(backgrounds_dir) if backgrounds_dir else None
         self.real_screenshots_dir = Path(real_screenshots_dir) if real_screenshots_dir else None
+        self.water_backgrounds_dir = Path(water_backgrounds_dir) if water_backgrounds_dir else None
+        self.water_fraction = water_fraction
         self.image_size = image_size
         self.configs = configs or SPRITE_CONFIGS
+        self._land_class_ids = frozenset(c.class_id for c in self.configs) - _WATER_CLASS_IDS
         self.real_background_ratio = real_background_ratio
         self.enable_enhanced_augmentations = enable_enhanced_augmentations
 
@@ -707,9 +799,11 @@ class TrainingDataGenerator:
         self.sprites: dict[str, list[Image.Image]] = {}
         self.backgrounds: list[Image.Image] = []
         self.real_backgrounds: list[Image.Image] = []
+        self.water_backgrounds: list[Image.Image] = []
         self._load_sprites()
         self._load_backgrounds()
         self._load_real_backgrounds()
+        self._load_water_backgrounds()
 
     def _load_sprites(self) -> None:
         """Load sprite images for each class."""
@@ -757,6 +851,17 @@ class TrainingDataGenerator:
 
         print(f"Loaded {len(self.real_backgrounds)} real game screenshots as backgrounds")
 
+    def _load_water_backgrounds(self) -> None:
+        """Load water-only backgrounds (for naval/fish water scenes)."""
+        if self.water_backgrounds_dir and self.water_backgrounds_dir.exists():
+            for ext in ["*.jpg", "*.jpeg", "*.png"]:
+                for path in self.water_backgrounds_dir.glob(ext):
+                    try:
+                        self.water_backgrounds.append(Image.open(path).convert("RGB"))
+                    except Exception as e:
+                        print(f"Warning: Failed to load water background {path}: {e}")
+        print(f"Loaded {len(self.water_backgrounds)} water backgrounds")
+
     def _create_background(self) -> Image.Image:
         """Create or select a background image.
 
@@ -777,6 +882,25 @@ class TrainingDataGenerator:
             bg = self._generate_terrain_background()
 
         return bg
+
+    def _pick_scene(self) -> tuple[Image.Image, frozenset[int] | None]:
+        """Choose a scene type and its allowed classes.
+
+        A `water_fraction` of images are water scenes (water background + only naval/
+        fish classes); the rest are land scenes (land background, all non-water classes).
+        Returns `None` for allowed-ids when water scenes are disabled — meaning no
+        restriction (legacy behaviour: every class can appear on the land background).
+        """
+        if self.water_backgrounds and self.water_fraction > 0:
+            if random.random() < self.water_fraction:
+                bg = (
+                    random.choice(self.water_backgrounds)
+                    .copy()
+                    .resize(self.image_size, Image.Resampling.LANCZOS)
+                )
+                return bg, _WATER_CLASS_IDS
+            return self._create_background(), self._land_class_ids
+        return self._create_background(), None
 
     def _select_biome(self) -> str:
         """Select a biome weighted by probability."""
@@ -850,15 +974,19 @@ class TrainingDataGenerator:
         Returns:
             Tuple of (image, list of YOLO format labels)
         """
-        bg = self._create_background()
+        bg, allowed_ids = self._pick_scene()
         placed_boxes = []
         # Track (box, z_order, label) for post-rendering occlusion filtering
-        placed_items: list[tuple[tuple[int, int, int, int], int, str]] = []
+        placed_items: list[tuple[PixelBox, int, str]] = []
 
         # Sort configs by z_order
         sorted_configs = sorted(self.configs, key=lambda c: c.z_order)
 
         for config in sorted_configs:
+            # Scene gating: water scenes place only naval/fish, land scenes only land
+            # classes (allowed_ids is None when water scenes are disabled = no gating).
+            if allowed_ids is not None and config.class_id not in allowed_ids:
+                continue
             sprites = self.sprites.get(config.class_name, [])
             if not sprites:
                 continue
@@ -933,6 +1061,12 @@ class TrainingDataGenerator:
 
             if total_occluded / box_area < 0.5:
                 labels.append(label_i)
+
+        # Layer in-game UI (selection rings, health bars, garrison badges) on top
+        # of the placed entities so the model is robust to these real-screenshot
+        # artifacts. Visual only — labels are untouched.
+        if self.enable_enhanced_augmentations:
+            _draw_entity_overlays(bg, placed_items)
 
         # Apply augmentations (non-spatial, but may occlude regions)
         bg, occluded = self._augment(bg)
@@ -1054,6 +1188,16 @@ class TrainingDataGenerator:
                 bar_height = random.randint(25, 40)
                 draw.rectangle([0, 0, image.width, bar_height], fill=(20, 20, 20))
                 occluded_rects.append((0, 0, image.width, bar_height))
+
+            # Simulate the bottom command panel (the main AoE2 HUD) — a large
+            # occluder; entities mostly hidden beneath it get their labels dropped.
+            if random.random() < 0.5:
+                panel_height = random.randint(90, 150)
+                panel_rect = (0, image.height - panel_height, image.width, image.height)
+                draw.rectangle(
+                    [panel_rect[0], panel_rect[1], panel_rect[2], panel_rect[3]], fill=(15, 15, 18)
+                )
+                occluded_rects.append(panel_rect)
 
         # 3. Compression artifacts (simulate JPEG compression)
         if random.random() < 0.3:
@@ -1301,6 +1445,8 @@ class _GenerateTrainingDataArgs(argparse.Namespace):
     sprites: str
     backgrounds: str | None
     real_screenshots: str | None
+    water_backgrounds: str | None
+    water_fraction: float
     output: str
     num_images: int
     image_size: list[int]
@@ -1331,6 +1477,17 @@ def main() -> int:
         "-r",
         default=None,
         help="Directory containing real game screenshots for backgrounds (v2 feature)",
+    )
+    parser.add_argument(
+        "--water-backgrounds",
+        default=None,
+        help="Directory of water backgrounds; enables water scenes for naval/fish classes",
+    )
+    parser.add_argument(
+        "--water-fraction",
+        type=float,
+        default=0.15,
+        help="Fraction of water scenes (default: 0.15; only active with --water-backgrounds)",
     )
     parser.add_argument(
         "--output",
@@ -1376,6 +1533,7 @@ def main() -> int:
     output_dir = script_dir / args.output
     backgrounds_dir = Path(args.backgrounds) if args.backgrounds else None
     real_screenshots_dir = Path(args.real_screenshots) if args.real_screenshots else None
+    water_backgrounds_dir = Path(args.water_backgrounds) if args.water_backgrounds else None
 
     print("AoE2 YOLO Training Data Generator v2")
     print("=" * 50)
@@ -1399,6 +1557,8 @@ def main() -> int:
         output_dir=output_dir,
         backgrounds_dir=backgrounds_dir,
         real_screenshots_dir=real_screenshots_dir,
+        water_backgrounds_dir=water_backgrounds_dir,
+        water_fraction=args.water_fraction,
         image_size=(args.image_size[0], args.image_size[1]),
         real_background_ratio=args.real_bg_ratio,
         enable_enhanced_augmentations=not args.no_enhanced_aug,
