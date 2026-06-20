@@ -372,34 +372,57 @@ def onnx_sahi_detect(det: EntityDetector, image: Image.Image) -> list[DetectedEn
     if not tiles:
         return []
 
-    batch = np.stack(
-        [np.transpose(np.array(t).astype(np.float32) / 255.0, (2, 0, 1)) for t in tiles], axis=0
-    )
-
     if det.onnx_session is None:
         raise RuntimeError("det.onnx_session not initialised")
     input_name = cast("str", det.onnx_session.get_inputs()[0].name)
-    outputs = cast("list[np.ndarray]", det.onnx_session.run(None, {input_name: batch}))
-    raw_output = outputs[0]
 
-    logger.debug("ONNX SAHI batch shape: %s, tiles: %d", raw_output.shape, len(tiles))
+    def _chw(tile: Image.Image) -> np.ndarray:
+        return np.transpose(np.array(tile).astype(np.float32) / 255.0, (2, 0, 1))
 
     all_entities = []
 
-    for tile_idx in range(len(tiles)):
-        x_start, y_start, tile_w, tile_h = offsets[tile_idx]
-        tile_entities = parse_onnx_tile(
-            det,
-            raw_output,
-            tile_idx,
-            scale_x=1.0,
-            scale_y=1.0,
-            x_offset=x_start,
-            y_offset=y_start,
-            clip_w=tile_w,
-            clip_h=tile_h,
-        )
-        all_entities.extend(tile_entities)
+    if det.onnx_batch_dynamic:
+        # Dynamic-batch export: one inference call over all tiles (~3-5x faster).
+        batch = np.stack([_chw(t) for t in tiles], axis=0)
+        outputs = cast("list[np.ndarray]", det.onnx_session.run(None, {input_name: batch}))
+        raw_output = outputs[0]
+        logger.debug("ONNX SAHI batch shape: %s, tiles: %d", raw_output.shape, len(tiles))
+        for tile_idx in range(len(tiles)):
+            x_start, y_start, tile_w, tile_h = offsets[tile_idx]
+            all_entities.extend(
+                parse_onnx_tile(
+                    det,
+                    raw_output,
+                    tile_idx,
+                    scale_x=1.0,
+                    scale_y=1.0,
+                    x_offset=x_start,
+                    y_offset=y_start,
+                    clip_w=tile_w,
+                    clip_h=tile_h,
+                )
+            )
+    else:
+        # Static batch=1 export: run tiles one at a time so the input shape
+        # stays [1,3,640,640]. Slower, but the only thing such a model accepts.
+        logger.debug("ONNX SAHI per-tile (static batch=1), tiles: %d", len(tiles))
+        for tile_idx, tile in enumerate(tiles):
+            x_start, y_start, tile_w, tile_h = offsets[tile_idx]
+            single = np.expand_dims(_chw(tile), axis=0)
+            outputs = cast("list[np.ndarray]", det.onnx_session.run(None, {input_name: single}))
+            all_entities.extend(
+                parse_onnx_tile(
+                    det,
+                    outputs[0],
+                    0,
+                    scale_x=1.0,
+                    scale_y=1.0,
+                    x_offset=x_start,
+                    y_offset=y_start,
+                    clip_w=tile_w,
+                    clip_h=tile_h,
+                )
+            )
 
     all_entities.sort(key=lambda e: (e.class_name, -e.confidence))
     return all_entities

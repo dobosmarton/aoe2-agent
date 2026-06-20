@@ -92,14 +92,23 @@ def _weight_for(stem: str) -> float:
     return _DEFAULT_WEIGHT
 
 
-def load_textures(terrain_dir: Path, *, include_water: bool) -> list[WeightedTexture]:
-    """Load ground-terrain DDS as weighted RGB textures, skipping void/near-black tiles."""
+def load_textures(
+    terrain_dir: Path, *, include_water: bool, only_water: bool = False
+) -> list[WeightedTexture]:
+    """Load ground-terrain DDS as weighted RGB textures, skipping void/near-black tiles.
+
+    `only_water` flips the selection to load ONLY the water tiles (`g_wt*`) — used to
+    build dedicated water backgrounds for naval/fish scenes.
+    """
     textures: list[WeightedTexture] = []
     for path in sorted(terrain_dir.rglob("*.dds")):
         stem = path.stem.lower()
         if stem.startswith(_EXCLUDE_PREFIXES):
             continue
-        if not include_water and stem.startswith(_WATER_PREFIXES):
+        is_water = stem.startswith(_WATER_PREFIXES)
+        if only_water and not is_water:
+            continue
+        if not only_water and not include_water and is_water:
             continue
         try:
             image = Image.open(path).convert("RGB")
@@ -203,6 +212,7 @@ class _BuildBackgroundsArgs(argparse.Namespace):
     blur: float
     soft_blur: float
     include_water: bool
+    only_water: bool
     seed: int
 
 
@@ -253,6 +263,11 @@ def main() -> int:
     parser.add_argument(
         "--include-water", action="store_true", help="Include pure-water textures (g_wt*)"
     )
+    parser.add_argument(
+        "--only-water",
+        action="store_true",
+        help="Build ONLY water backgrounds (g_wt*) — for naval/fish water scenes",
+    )
     parser.add_argument("--seed", type=int, default=42, help="Random seed (default: 42)")
     args = parser.parse_args(namespace=_BuildBackgroundsArgs())
 
@@ -269,7 +284,9 @@ def main() -> int:
     )
 
     print(f"Terrain source: {terrain_dir}")
-    textures = load_textures(terrain_dir, include_water=args.include_water)
+    textures = load_textures(
+        terrain_dir, include_water=args.include_water, only_water=args.only_water
+    )
     if not textures:
         print("Error: no usable terrain textures found.")
         return 1

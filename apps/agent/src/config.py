@@ -45,9 +45,15 @@ class Config(BaseModel):
     seed: int | None = None  # Local RNG seed; None = OS entropy (today's behavior)
 
     # Detection settings
-    detection_imgsz: int = 1280  # YOLO inference resolution (higher = more detections, slower)
-    adaptive_sahi: bool = True  # Use adaptive SAHI (fast scan + targeted SAHI on entity clusters)
-    full_sahi_interval: int = 5  # Force full SAHI scan every N turns
+    # v6 (YOLO26n) was trained at imgsz=640; inference must match that resolution.
+    # Measured on real held-out frames (conf 0.25 / IoU 0.5): single-pass @640
+    # → F1 0.42, @1280 → 0.21, adaptive/full SAHI → 0.04 (SAHI tiles the native
+    # 3024px screenshot into 640 crops, so objects appear ~2.4x larger than
+    # training and the model hallucinates). Keep SAHI off until the model is
+    # retrained at a SAHI-consistent / native scale. See testing/evaluate_real.py.
+    detection_imgsz: int = 640  # YOLO inference resolution (match training res!)
+    adaptive_sahi: bool = False  # SAHI hurts v6 at retina res (scale mismatch); single-pass wins
+    full_sahi_interval: int = 5  # Force full SAHI scan every N turns (only if adaptive_sahi=True)
     detection_host: str = ""  # Remote CoreML server URL (e.g., "http://192.168.64.1:8420")
 
     # Timing settings

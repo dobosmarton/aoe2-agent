@@ -161,6 +161,11 @@ class EntityDetector:
         self.onnx_session = None
         self.backend = None  # 'pytorch', 'onnx', or None
         self.input_size = imgsz  # YOLO input size
+        # Populated from the ONNX graph in _load_onnx(). A static-shape export
+        # (e.g. [1,3,640,640]) pins these; a dynamic re-export leaves them at
+        # the permissive defaults so the configured imgsz / batched SAHI is used.
+        self.onnx_batch_dynamic = True
+        self.onnx_input_hw: int | None = None
         self._class_counters: dict[str, int] = {}
         # Persistent entity tracking across frames (fallback when tracker is None)
         self._previous_entities: list[DetectedEntity] = []
@@ -247,7 +252,30 @@ class EntityDetector:
             self.onnx_session = ort.InferenceSession(model_path, sess_options, providers=providers)
             self.backend = "onnx"
             self.use_mock = False
-            print(f"Loaded ONNX model: {model_path} (providers={providers})")
+            # Inspect the declared input shape so inference adapts to a
+            # static-shape export instead of assuming a dynamic batch / the
+            # configured imgsz. onnxruntime reports symbolic dims as strings.
+            try:
+                # onnxruntime types this loosely; absorb into object + narrow below.
+                shape: list[object] = self.onnx_session.get_inputs()[0].shape
+                if len(shape) == 4:
+                    b, _c, h, w = shape
+                    self.onnx_batch_dynamic = not (isinstance(b, int) and b > 0)
+                    if isinstance(h, int) and h > 0 and isinstance(w, int) and w > 0:
+                        self.onnx_input_hw = int(min(h, w))
+                        if self.onnx_input_hw != self.input_size:
+                            logger.info(
+                                "ONNX has static input %sx%s; using it for inference (imgsz=%d ignored)",
+                                h,
+                                w,
+                                self.input_size,
+                            )
+            except Exception:
+                logger.debug("Could not read ONNX input shape; assuming dynamic", exc_info=True)
+            print(
+                f"Loaded ONNX model: {model_path} (providers={providers}, "
+                f"static_hw={self.onnx_input_hw}, batch_dynamic={self.onnx_batch_dynamic})"
+            )
         except ImportError:
             print("WARNING: onnxruntime not installed. Using mock detection.")
             self.use_mock = True
@@ -677,8 +705,12 @@ class EntityDetector:
         # Store original size for scaling boxes back
         orig_width, orig_height = image.size
 
+        # A static-shape ONNX export only accepts its declared input size; fall
+        # back to the configured imgsz for a dynamic export.
+        infer_size = self.onnx_input_hw or self.input_size
+
         # Preprocess: resize and normalize for YOLO
-        image_resized = image.resize((self.input_size, self.input_size))
+        image_resized = image.resize((infer_size, infer_size))
         img_array = np.array(image_resized).astype(np.float32) / 255.0
 
         # Convert from HWC to CHW format and add batch dimension
@@ -708,8 +740,8 @@ class EntityDetector:
             return []
 
         # Scale model-input coordinates back to the original screenshot size.
-        scale_x = orig_width / self.input_size
-        scale_y = orig_height / self.input_size
+        scale_x = orig_width / infer_size
+        scale_y = orig_height / infer_size
 
         entities: list[DetectedEntity] = []
         for row in rows:
@@ -822,11 +854,16 @@ def get_detector(
     model_path: str | None = None,
     use_mock: bool = False,
     imgsz: int = 1280,
+    use_sahi: bool = True,
 ) -> EntityDetector:
     """Get or create the singleton detector instance.
 
     Resolves the YOLO26 model (`aoe2_yolo_v6`) unless an explicit `model_path` is
     given. ONNX is preferred over PyTorch (the ARM64 deploy path).
+
+    `use_sahi=False` makes `detect()` run a single full-image pass instead of
+    SAHI tiling — required for models whose training resolution doesn't match
+    the SAHI tile scale (see EntityDetector docstring / testing/evaluate_real.py).
     """
     global _instance
     if _instance is None:
@@ -836,5 +873,7 @@ def get_detector(
             pt_path = models_dir / "aoe2_yolo_v6.pt"
             model_path = str(onnx_path if onnx_path.exists() else pt_path)
 
-        _instance = EntityDetector(model_path=model_path, use_mock=use_mock, imgsz=imgsz)
+        _instance = EntityDetector(
+            model_path=model_path, use_mock=use_mock, imgsz=imgsz, use_sahi=use_sahi
+        )
     return _instance

@@ -91,7 +91,11 @@ def _init_detector() -> Detector | None:
             detector = get_remote_detector(config.detection_host, imgsz=config.detection_imgsz)
             log.info("detector_initialized", mode="remote", server=config.detection_host)
             return detector
-        detector = get_detector(use_mock=False, imgsz=config.detection_imgsz)
+        # adaptive_sahi gates SAHI everywhere: it picks detect_adaptive vs the
+        # single-pass detect() below, and use_sahi keeps detect() from tiling.
+        detector = get_detector(
+            use_mock=False, imgsz=config.detection_imgsz, use_sahi=config.adaptive_sahi
+        )
         backend = "mock" if detector.use_mock else detector.backend or "yolo"
         log.info(
             "detector_initialized", mode=backend, confidence_threshold=detector.confidence_threshold
