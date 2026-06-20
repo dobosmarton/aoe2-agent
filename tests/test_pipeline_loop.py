@@ -70,13 +70,6 @@ def test_should_pipeline_false_for_combat():
     assert gl._should_pipeline("enemy spotted — under attack: true", provider) is False
 
 
-def test_should_pipeline_false_for_non_claude_provider():
-    class _Other:
-        pass
-
-    assert gl._should_pipeline("routine", _Other()) is False
-
-
 # ---------------------------------------------------------------------------
 # _execute_or_record
 # ---------------------------------------------------------------------------

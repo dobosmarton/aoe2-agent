@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 from ..config import config
 from ..executor import execute_action, get_detected_entities
 from ..models import LLMResponse, Observations, validate_actions
-from .base import BaseLLMProvider, LLMResult
+from .base import LLMResult
 from .claude_tools import _ACTION_TOOLS
 
 # Pricing per million tokens (claude-sonnet-4-6)
@@ -41,7 +41,7 @@ except ImportError:
     log.debug("game_knowledge_not_available", message="Running without dynamic context injection")
 
 
-class ClaudeProvider(BaseLLMProvider):
+class ClaudeProvider:
     """Anthropic Claude provider implementation."""
 
     def __init__(
@@ -92,13 +92,10 @@ class ClaudeProvider(BaseLLMProvider):
             return
 
         core_file = PROMPTS_DIR / "core.md"
-        legacy_file = PROMPTS_DIR / "system.md"
         hotkeys_file = PROMPTS_DIR / "hotkeys.md"
 
         if core_file.exists():
             self._core_prompt = core_file.read_text()
-        elif legacy_file.exists():
-            self._core_prompt = legacy_file.read_text()
         else:
             self._core_prompt = self._FALLBACK_PROMPT
 

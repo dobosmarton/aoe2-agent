@@ -12,7 +12,8 @@ from typing import TYPE_CHECKING
 import structlog
 
 if TYPE_CHECKING:
-    from .providers.base import BaseLLMProvider, LLMResult
+    from .providers.base import LLMResult
+    from .providers.claude import ClaudeProvider
 
 from . import reactive
 from .config import config
@@ -37,7 +38,6 @@ from .goal_logger import GoalLogger
 from .goals import GoalManager
 from .memory import AgentMemory
 from .models import validate_actions
-from .providers.claude import ClaudeProvider
 from .providers.strategist import StrategistProvider, get_default_goals
 from .screen import capture_screenshot, save_screenshot
 from .strategist_phase import _maybe_launch_strategist
@@ -65,16 +65,14 @@ class _PendingPlan:
     iteration: int
 
 
-def _should_pipeline(context: str, provider: BaseLLMProvider) -> bool:
+def _should_pipeline(context: str, provider: ClaudeProvider) -> bool:
     """Whether this turn is routine (single-shot) and can pipeline.
 
     Only single-shot (routine) turns pipeline: the tool loop executes its
     actions during its own run, so pre-launching it would double-act. Combat
     and housing emergencies return False and run synchronously.
     """
-    if isinstance(provider, ClaudeProvider):
-        return provider._use_single_shot(context)
-    return False
+    return provider._use_single_shot(context)
 
 
 def _commit_head(actions: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -169,7 +167,7 @@ async def _cancel_pending(plan: _PendingPlan | None) -> None:
 
 
 async def game_loop(
-    provider: BaseLLMProvider,
+    provider: ClaudeProvider,
     max_iterations: int | None = None,
     memory: AgentMemory | None = None,
     use_detection: bool = True,
@@ -346,7 +344,7 @@ async def game_loop(
 
 
 async def run_single_iteration(
-    provider: BaseLLMProvider,
+    provider: ClaudeProvider,
     memory: AgentMemory | None = None,
     execute: bool = False,
     use_detection: bool = True,

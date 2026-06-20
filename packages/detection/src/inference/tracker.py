@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import cast
 
 import numpy as np
+from scipy.optimize import linear_sum_assignment
 
 from .detector import DetectedEntity
 
@@ -269,38 +270,6 @@ def _iou(box1: tuple, box2: tuple) -> float:
 
 
 def _solve_assignment(cost_matrix: np.ndarray) -> tuple[list[int], list[int]]:
-    """Solve the assignment problem (Hungarian algorithm with greedy fallback)."""
-    try:
-        from scipy.optimize import linear_sum_assignment
-
-        row_ind, col_ind = linear_sum_assignment(cost_matrix)
-        return list(row_ind), list(col_ind)
-    except ImportError:
-        return _greedy_match(cost_matrix)
-
-
-def _greedy_match(cost_matrix: np.ndarray) -> tuple[list[int], list[int]]:
-    """Greedy matching fallback when scipy is not installed."""
-    n_rows = int(cast("int", cost_matrix.shape[0]))
-    n_cols = int(cast("int", cost_matrix.shape[1]))
-    row_indices: list[int] = []
-    col_indices: list[int] = []
-    used_rows: set[int] = set()
-    used_cols: set[int] = set()
-
-    # Flatten and sort by cost
-    costs: list[tuple[float, int, int]] = []
-    for i in range(n_rows):
-        for j in range(n_cols):
-            costs.append((float(cast("float", cost_matrix[i, j])), i, j))
-    costs.sort()
-
-    for _, r, c in costs:
-        if r in used_rows or c in used_cols:
-            continue
-        row_indices.append(r)
-        col_indices.append(c)
-        used_rows.add(r)
-        used_cols.add(c)
-
-    return row_indices, col_indices
+    """Solve the assignment problem (Hungarian algorithm)."""
+    row_ind, col_ind = linear_sum_assignment(cost_matrix)
+    return list(row_ind), list(col_ind)
