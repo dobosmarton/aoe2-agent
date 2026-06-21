@@ -1,0 +1,9 @@
+name: real_000_dark_start
+screenshot: real_000_dark_start.jpg
+expected:
+  wood: 200
+  food: 200
+  gold: 100
+  stone: 200
+  population: 4/5
+  age: Dark Age

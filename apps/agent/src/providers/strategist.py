@@ -1,17 +1,26 @@
 """Strategist LLM provider for goal generation."""
 
-import base64
+import asyncio
 import contextlib
+import io
 from pathlib import Path
 from typing import ClassVar, cast
 
 import anthropic
 import structlog
+from PIL import Image
 from pydantic import BaseModel, Field
 
 from ..config import config
 from ..goals import Goal
 from ..memory import GameState
+from ..resource_ocr import (
+    Backend,
+    Calibration,
+    autodetect_calibration,
+    calibration_for,
+    read_resource_bar,
+)
 
 log = structlog.stdlib.get_logger()
 
@@ -29,23 +38,30 @@ class StrategistGoal(BaseModel):
     priority: int = Field(ge=1, le=10)
 
 
-class ResourceReadings(BaseModel):
-    """Resource readings extracted from screenshot by strategist."""
-
-    food: int = 0
-    wood: int = 0
-    gold: int = 0
-    stone: int = 0
-    population: str = "0/0"
-    age: str = "Dark Age"
-
-
 class StrategistResponse(BaseModel):
-    """Structured response from the strategist."""
+    """Structured response from the strategist.
+
+    Goals only — resources/population/age are read locally via OCR
+    (`read_resource_bar`), not by the model.
+    """
 
     reasoning: str
-    resource_readings: ResourceReadings
     goals: list[StrategistGoal]
+
+
+def _clean_readings(ocr: dict) -> dict:
+    """Shape `read_resource_bar` output into a readings dict.
+
+    Drops an empty age so a failed age read keeps the last-known age rather than
+    overwriting it; resource/population keys are present only when read.
+    """
+    readings: dict = {}
+    for key in ("food", "wood", "gold", "stone", "population"):
+        if key in ocr:
+            readings[key] = ocr[key]
+    if ocr.get("age"):
+        readings["age"] = ocr["age"]
+    return readings
 
 
 def get_default_goals(turn: int = 0) -> list[Goal]:
@@ -147,6 +163,29 @@ class StrategistProvider:
         )
         return cast("StrategistResponse", response.parsed_output)
 
+    async def _resolve_calibration(
+        self, width: int, height: int, screenshot_bytes: bytes
+    ) -> Calibration | None:
+        """Pick a calibration for this frame.
+
+        A hand-made ``calibration.<W>x<H>.yaml`` wins (keeps validated resolutions
+        byte-for-byte unchanged); otherwise auto-detect the bar from THIS frame.
+        Auto-detection is re-run every tick (it is ~450ms off-thread, cheaper than
+        the per-field read, and the strategist runs only every few turns): boxes
+        hug the current value, so re-detecting is what lets them track values as
+        they grow — no stale-box caching, no growth heuristics. Returns ``None``
+        only when the bar can't be localized, so the caller falls back to
+        last-known game state.
+        """
+        hand = calibration_for(width, height)
+        if hand is not None:
+            return hand
+        # Detection runs RapidOCR over the top band — CPU-bound, off the loop.
+        auto = await asyncio.to_thread(autodetect_calibration, screenshot_bytes)
+        if auto is not None:
+            log.info("ocr_autodetect", width=width, height=height, fields=sorted(auto.fields))
+        return auto
+
     async def generate_goals(
         self,
         game_state: GameState,
@@ -156,21 +195,55 @@ class StrategistProvider:
         screenshot_bytes: bytes | None = None,
         alarm: bool = False,
     ) -> tuple[list[Goal], dict]:
-        """Ask the strategist to create/update goals based on game state.
+        """Read the resource bar locally (OCR) and ask the LLM (text-only) for goals.
+
+        Claude vision is not used: resources/population/age come from
+        ``read_resource_bar``; the model only reasons over them to set goals.
 
         Returns:
             Tuple of (goals, resource_readings_dict)
         """
+        # 1. Perception — read the HUD locally; no screenshot is sent to the model.
+        readings: dict = {}
+        if screenshot_bytes:
+            with Image.open(io.BytesIO(screenshot_bytes)) as im:
+                width, height = im.width, im.height
+            # Hand YAML wins; else auto-detect the bar from this frame.
+            calib = await self._resolve_calibration(width, height, screenshot_bytes)
+            if calib is None:
+                log.error("ocr_no_calibration_autodetect_failed", width=width, height=height)
+            else:
+                # OCR is sync/CPU-bound — run off the event loop.
+                ocr = await asyncio.to_thread(
+                    read_resource_bar,
+                    screenshot_bytes,
+                    calib,
+                    backend=cast("Backend", config.ocr_backend),
+                )
+                readings = _clean_readings(ocr)
+                log.info("ocr_readings", **readings)
+
+        # 2. Reasoning — text-only prompt populated with the locally-read state
+        #    (falls back to last-known game_state when a field wasn't read).
+        food = readings.get("food", game_state.resources["food"])
+        wood = readings.get("wood", game_state.resources["wood"])
+        gold = readings.get("gold", game_state.resources["gold"])
+        stone = readings.get("stone", game_state.resources["stone"])
+        population = readings.get(
+            "population", f"{game_state.population}/{game_state.population_cap}"
+        )
+        age = readings.get("age", game_state.current_age)
+
         alarm_banner = ""
         if alarm:
             alarm_banner = "\n**ALARM: Enemy military units detected! Prioritize defense and military goals.**\n"
 
         prompt_text = f"""Turn: {turn}
 {alarm_banner}
-## Current Game State (from previous readings)
-- Resources: Food={game_state.resources["food"]}, Wood={game_state.resources["wood"]}, Gold={game_state.resources["gold"]}, Stone={game_state.resources["stone"]}
-- Population: {game_state.population}/{game_state.population_cap}
-- Age: {game_state.current_age}
+## Current Game State (resources read from the HUD)
+- Resources: Food={food}, Wood={wood}, Gold={gold}, Stone={stone}
+- Population: {population}
+- Age: {age}
 - Under Attack: {game_state.under_attack}
 - Enemy Located: {game_state.enemy_located}
 
@@ -180,23 +253,9 @@ class StrategistProvider:
 ## Current Goals
 {current_goals_summary}
 
-Read the screenshot to get exact current resource values (food, wood, gold, stone), population, and age. Then create 3-5 prioritized goals. Keep goals that are still relevant, replace completed or irrelevant ones."""
+Create 3-5 prioritized goals based on the state above. Keep goals that are still relevant, replace completed or irrelevant ones."""
 
-        # Build multimodal content: screenshot image + text
-        content: list[dict] = []
-        if screenshot_bytes:
-            image_base64 = base64.standard_b64encode(screenshot_bytes).decode("utf-8")
-            content.append(
-                {
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "image/jpeg",
-                        "data": image_base64,
-                    },
-                }
-            )
-        content.append({"type": "text", "text": prompt_text})
+        content: list[dict] = [{"type": "text", "text": prompt_text}]
 
         try:
             result = await self._call_api(content)
@@ -204,11 +263,7 @@ Read the screenshot to get exact current resource values (food, wood, gold, ston
                 "strategist_response",
                 reasoning=result.reasoning[:150],
                 goal_count=len(result.goals),
-                resources=result.resource_readings.model_dump(),
             )
-
-            # Convert resource readings to dict
-            readings = result.resource_readings.model_dump()
 
             # Convert to Goal objects
             goals = []
@@ -236,5 +291,6 @@ Read the screenshot to get exact current resource values (food, wood, gold, ston
             return goals, readings
 
         except Exception as e:
+            # OCR already succeeded — return its readings even if goal-gen failed.
             log.error("strategist_error", error=str(e))
-            return get_default_goals(turn), {}
+            return get_default_goals(turn), readings

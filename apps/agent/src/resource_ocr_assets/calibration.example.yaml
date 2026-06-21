@@ -1,0 +1,22 @@
+# Example resource-bar calibration. COPY to `calibration.<W>x<H>.yaml`
+# (e.g. calibration.1920x1080.yaml) and replace every box with the real pixel
+# coordinates measured from one of your screenshots. The scorer auto-loads the
+# file whose <W>x<H> matches the screenshot resolution.
+#
+# All boxes are [x0, y0, x1, y1] in full-screenshot pixels, inclusive-exclusive.
+# On-screen order is Wood -> Food -> Gold -> Stone -> Population (top-left bar).
+# The numbers below are PLACEHOLDERS — they will not read anything correctly
+# until you measure your own.
+
+width: 1920
+height: 1080
+
+template_dir: templates/1920x1080   # relative to this file; holds 0.png..9.png, slash.png
+
+fields:
+  wood:       [55, 8, 120, 34]
+  food:       [150, 8, 215, 34]
+  gold:       [245, 8, 310, 34]
+  stone:      [340, 8, 405, 34]
+  population: [435, 8, 510, 34]
+  # age:      [900, 8, 960, 40]   # optional, best-effort icon match

@@ -1,0 +1,9 @@
+name: real_160_imperial
+screenshot: real_160_imperial.jpg
+expected:
+  wood: 3646
+  food: 3166
+  gold: 687
+  stone: 651
+  population: 248/300
+  age: Imperial Age

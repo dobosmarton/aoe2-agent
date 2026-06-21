@@ -1,0 +1,9 @@
+name: real_180_low_pop
+screenshot: real_180_low_pop.jpg
+expected:
+  wood: 61
+  food: 249
+  gold: 150
+  stone: 200
+  population: 39/50
+  age: Feudal Age

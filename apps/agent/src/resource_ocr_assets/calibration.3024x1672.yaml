@@ -1,0 +1,15 @@
+# Live game-window capture (3024x1672, no chrome, bar at top). Field x-layout is
+# the retina 3024-wide AoE2 bar (matches the validated 3024x1964 calibration); Y is
+# the live bar row. Resource boxes widened for full-game 4-5 digit values; stone
+# stops before the population portrait; age fits "Imperial Age". Built+verified from
+# logs/screenshots frames via scripts/calibrate_resource_bar.py.
+width: 3024
+height: 1672
+template_dir: templates/3024x1672
+fields:
+  wood: [80, 24, 158, 68]
+  food: [236, 24, 314, 68]
+  gold: [388, 24, 466, 68]
+  stone: [546, 24, 624, 68]
+  population: [701, 24, 800, 68]
+  age: [1000, 18, 1360, 74]

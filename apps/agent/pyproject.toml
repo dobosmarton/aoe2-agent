@@ -19,6 +19,8 @@ dependencies = [
     "pygetwindow>=0.0.9",
     "python-multipart>=0.0.7",
     "pyyaml>=6.0",
+    # Resource-bar OCR (pip-only, runs on the onnxruntime detection already ships):
+    "rapidocr-onnxruntime>=1.4.0",
     "structlog>=24.1.0",
     "tenacity>=8.2.0",
 ]

@@ -37,6 +37,9 @@ class Config(BaseModel):
     executor_effort: EffortLevel = "low"  # output_config effort for the executor tool loop
     strategist_model: str = "claude-sonnet-4-6"  # Strategist: deeper reasoning
     strategist_interval: int = 10  # Run strategist every N turns
+    # Resource bar is read locally (Claude vision dropped). Backend: rapidocr
+    # (pip-only, runs on onnxruntime) | tesseract (needs binary) | template.
+    ocr_backend: str = "rapidocr"  # AOE2_OCR_BACKEND
 
     # Determinism knobs (Phase 3). Pin model snapshots via AOE2_MODEL /
     # AOE2_STRATEGIST_MODEL to a dated form (e.g. claude-sonnet-4-6-2026-XX-XX)
@@ -78,6 +81,7 @@ class Config(BaseModel):
             executor_effort=_parse_effort(os.environ.get("AOE2_EXECUTOR_EFFORT")),
             strategist_model=os.environ.get("AOE2_STRATEGIST_MODEL", "claude-sonnet-4-6"),
             strategist_interval=int(os.environ.get("AOE2_STRATEGIST_INTERVAL", "10")),
+            ocr_backend=os.environ.get("AOE2_OCR_BACKEND", "rapidocr"),
             loop_delay=float(os.environ.get("AOE2_LOOP_DELAY", "0.3")),
             save_screenshots=os.environ.get("AOE2_SAVE_SCREENSHOTS", "true").lower() == "true",
             detection_host=os.environ.get("AOE2_DETECTION_HOST", ""),

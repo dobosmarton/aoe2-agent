@@ -1,0 +1,9 @@
+name: real_215_imperial
+screenshot: real_215_imperial.jpg
+expected:
+  wood: 12430
+  food: 3277
+  gold: 875
+  stone: 1
+  population: 269/270
+  age: Imperial Age

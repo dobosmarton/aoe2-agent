@@ -1,0 +1,9 @@
+name: real_090_castle
+screenshot: real_090_castle.jpg
+expected:
+  wood: 5743
+  food: 8280
+  gold: 2017
+  stone: 1292
+  population: 95/120
+  age: Castle Age
