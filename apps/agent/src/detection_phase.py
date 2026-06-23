@@ -160,10 +160,10 @@ def _register_rescan_callbacks(
     async def _rescan_full() -> None:
         if overlay:
             overlay.hide()
-            screenshot_full, _, _ = capture_screenshot(quality=85)
+        screenshot_full, _, _ = capture_screenshot(quality=85)
         if frame_differ:
             frame_differ.reset()
-            entities = await _invoke_detector(detector, "detect", screenshot_full)
+        entities = await _invoke_detector(detector, "detect", screenshot_full)
         if detector.tracker:
             detector.tracker.reset()
         set_detected_entities(entities)
@@ -183,7 +183,7 @@ async def _capture_screenshot(
     """Capture game screenshot, optionally saving to disk."""
     if overlay:
         overlay.hide()
-        screenshot, width, height = capture_screenshot()
+    screenshot, width, height = capture_screenshot()
     log.debug("screenshot_captured", width=width, height=height)
 
     if config.save_screenshots and screenshots_dir:
