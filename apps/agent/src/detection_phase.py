@@ -163,7 +163,8 @@ def _register_rescan_callbacks(
         screenshot_full, _, _ = capture_screenshot(quality=85)
         if frame_differ:
             frame_differ.reset()
-        entities = await _invoke_detector(detector, "detect", screenshot_full)
+        full_method = "detect" if config.adaptive_sahi else "detect_fast"
+        entities = await _invoke_detector(detector, full_method, screenshot_full)
         if detector.tracker:
             detector.tracker.reset()
         set_detected_entities(entities)
@@ -211,7 +212,11 @@ async def _run_detection(
                 force_full=force_full,
             )
         else:
-            entities = await _invoke_detector(detector, "detect", screenshot)
+            # Single-pass. Use detect_fast: it is single-pass on BOTH the local and
+            # remote detectors. (The remote detector's detect() maps to /detect/sahi,
+            # which is bad for v6 — see Chapter 7 §7.4 — whereas detect_fast hits the
+            # single-pass /detect endpoint at imgsz.)
+            entities = await _invoke_detector(detector, "detect_fast", screenshot)
         set_detected_entities(entities)
         log.debug("detection_complete", entity_count=len(entities))
         return entities
