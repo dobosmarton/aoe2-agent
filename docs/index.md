@@ -88,7 +88,7 @@ See also the [Glossary](./glossary.md) for one-line definitions of terms used th
 
 | # | Chapter | Description | Key files |
 |---|---|---|---|
-| 04 | [Provider Pattern](./part2-llm-integration/04-provider-pattern.md) | Abstract base, Claude executor (text-only), strategist (vision) | `providers/base.py`, `providers/claude.py`, `providers/strategist.py` |
+| 04 | [Provider Pattern](./part2-llm-integration/04-provider-pattern.md) | Abstract base, Claude executor (text-only), strategist (text + local OCR) | `providers/base.py`, `providers/claude.py`, `providers/strategist.py` |
 | 05 | [Prompt Engineering](./part2-llm-integration/05-prompt-engineering.md) | Executor + strategist prompt design | `prompts/system.md`, `prompts/strategist.md` |
 | 06 | [Context Injection](./part2-llm-integration/06-context-injection.md) | Memory system, goals, resources, dynamic game knowledge | `memory.py`, `goals.py`, `providers/claude.py` |
 

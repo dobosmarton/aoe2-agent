@@ -1,24 +1,25 @@
 # AoE2 LLM Agent
 
-An AI agent that plays Age of Empires 2: Definitive Edition using a two-tier LLM architecture: a Sonnet strategist reads screenshots and sets goals, a Sonnet executor reads YOLO entity detections and executes actions.
+An AI agent that plays Age of Empires 2: Definitive Edition using a two-tier LLM architecture: a Sonnet strategist reads the resource bar via local OCR and sets goals, a Sonnet executor reads YOLO entity detections and executes actions. Both LLM tiers are text-only — no image is ever sent to Claude.
 
 ## Architecture
 
 ```
 Screenshot → YOLO Detection → Entity List (text)
+Screenshot → Local OCR (RapidOCR) → Resource Readings (text)
                                     ↓
-Screenshot → Strategist (Sonnet) → Goals + Resource Readings
+Resource Readings → Strategist (Sonnet, text) → Goals
                                     ↓
-Entity List + Goals + Resources → Executor (Sonnet) → Actions
-                                                       ↓
-                                                 Mouse/Keyboard
+Entity List + Goals + Resources → Executor (Sonnet, text) → Actions
+                                                             ↓
+                                                       Mouse/Keyboard
 ```
 
 **Two-model design:**
 
 | Role | Model | Input | Output | Frequency |
 |------|-------|-------|--------|-----------|
-| Strategist | `claude-sonnet-4-6` | Screenshot (vision) + game state | Goals + resource readings | Every 10 turns, or on alarm |
+| Strategist | `claude-sonnet-4-6` | Text (resources via local OCR) + game state | Goals + resource readings | Every 10 turns, or on alarm |
 | Executor | `claude-sonnet-4-6` | Text only (entities, goals, resources) | Mouse/keyboard actions | Every turn |
 
 The executor runs Sonnet (moved from Haiku for more reliable instruction-following) with a per-call `effort` knob (default `low`) for speed. Routine turns take a single-shot structured call; combat/housing turns take an agentic tool loop.
@@ -33,7 +34,7 @@ Each iteration (~3-5 seconds):
 2. **Detect** — Run YOLO v5 on screenshot → list of entities with IDs, classes, positions
 3. **Classify ownership** — Color-based blue-dominance check on military units (own vs enemy)
 4. **Alarm check** — Scan for enemy military → inject emergency defense goals if found
-5. **Strategist** (periodic) — Sonnet reads screenshot, extracts resources, creates/updates goals
+5. **Strategist** (periodic) — reads resources from the bar via local OCR (RapidOCR), then Sonnet creates/updates goals from that text
 6. **Build context** — Assemble text: entities + goals + resources + memory + game knowledge
 7. **Execute** — Haiku reads text context, returns structured actions (Pydantic-validated)
 8. **Act** — Execute mouse clicks / keyboard presses via pyautogui
@@ -108,6 +109,7 @@ export ANTHROPIC_API_KEY=your-key-here
 | `AOE2_STRATEGIST_INTERVAL` | `10` | Run strategist every N turns |
 | `AOE2_LOOP_DELAY` | `0.3` | Seconds between iterations |
 | `AOE2_SAVE_SCREENSHOTS` | `true` | Save screenshots to logs/ |
+| `AOE2_OCR_BACKEND` | `rapidocr` | Resource-bar OCR backend (`rapidocr`/`template`/`tesseract`) |
 | `AOE2_DETECTION_HOST` | — | Remote detection server URL (e.g., `http://192.168.64.1:8420`) |
 | `AOE2_TEMPERATURE` | `0.0` | Anthropic Messages API temperature (lowest variance) |
 | `AOE2_SEED` | — | Local-RNG seed (build-retry jitter); unset = OS entropy |

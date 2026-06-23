@@ -29,7 +29,7 @@
 
 ### The Problem
 
-The AoE2 agent can play the game — it captures screenshots, sends them to Claude Vision, receives actions, and executes them via pyautogui. But **it never learns from its gameplay**. Every game starts from the same system prompt with the same strategy. There is no feedback loop from game outcomes back to the agent's behavior.
+The AoE2 agent can play the game — it captures screenshots, perceives them locally (YOLO entity detection + OCR of the resource bar), sends that as text to Claude, receives actions, and executes them via pyautogui. But **it never learns from its gameplay**. Every game starts from the same system prompt with the same strategy. There is no feedback loop from game outcomes back to the agent's behavior.
 
 ### The Autoresearch Pattern (Karpathy)
 
@@ -60,7 +60,7 @@ Karpathy's [autoresearch](https://github.com/karpathy/autoresearch) demonstrates
 ## 2. Current Agent Architecture
 
 ```
-Screenshot → YOLO Detection (60 classes) → Entity Context → Claude Vision → JSON Actions → pyautogui
+Screenshot → YOLO Detection (60 classes) + resource-bar OCR → Entity + Resource Context (text) → Claude → JSON Actions → pyautogui
      ↑                                                                                          |
      └────────────────────────────── 2s loop delay ────────────────────────────────────────────┘
 ```
@@ -242,7 +242,7 @@ class Observations(BaseModel):
 
 The LLM reports game state in every response. The game loop checks it and stops on victory/defeat.
 
-**Design decision**: We use the LLM's observation rather than template matching or pixel heuristics because the LLM already sees the screenshot. Claude Vision coordinates are unreliable for UI elements (confirmed from prior testing), but classifying "is this a victory screen?" is reliable.
+**Design decision**: We use the LLM's reported game state rather than template matching or pixel heuristics — the executor already emits an observation (resources, population, age, events) every turn, so a victory/defeat signal rides the same channel without extra perception code. (Perception is local: YOLO entities + resource-bar OCR as text; no image is sent to the model.)
 
 #### 4.2 Cumulative Metrics (`gameplay_agent/memory.py`)
 

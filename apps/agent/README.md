@@ -19,14 +19,14 @@ packages/gameplay-agent/src/
 ├── goals.py               # Goal manager + alarm system + reward tracking
 ├── entity_utils.py        # DetectedEntity formatting helpers
 ├── detection_phase.py     # YOLO call + ownership classification per loop iteration
-├── strategist_phase.py    # Periodic Sonnet vision call → goal updates
+├── strategist_phase.py    # Periodic Sonnet text call (resources via local OCR) → goal updates
 ├── turn_phases.py         # Glue between detection / strategist / executor per turn
 ├── screen.py              # mss-based screenshot capture
 ├── window.py              # AoE2 window detect + focus (pygetwindow optional)
 ├── overlay.py             # Tkinter live overlay (optional)
 ├── goal_logger.py         # Per-game goal/score TSV writer
 ├── config.py              # Pydantic config from env vars
-├── providers/             # ClaudeProvider (executor) + StrategistProvider (vision)
+├── providers/             # ClaudeProvider (executor) + StrategistProvider (text + local OCR)
 ├── prompts/               # System prompts (core.md, hotkeys.md, strategist.md, ages/*.md)
 ├── scenario_runner.py     # `python -m gameplay_agent.scenario_runner ...` (multi-turn harness)
 ├── assertions.py          # Assertion DSL used by scenario fixtures

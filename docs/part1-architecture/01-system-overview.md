@@ -1,6 +1,6 @@
 # Chapter 1: System Overview
 
-The AoE2 LLM Arena agent plays Age of Empires II autonomously using a two-tier LLM architecture. A Sonnet strategist reads screenshots and sets goals; a Sonnet executor reads YOLO-detected entities as text and executes mouse/keyboard actions. No game API, no OCR, no memory-mapped data.
+The AoE2 LLM Arena agent plays Age of Empires II autonomously using a two-tier LLM architecture. A Sonnet strategist reads the resource bar via local OCR and sets goals; a Sonnet executor reads YOLO-detected entities as text and executes mouse/keyboard actions. No game API, no memory-mapped data — the agent perceives only pixels (YOLO entity detection + local OCR of the HUD), and both LLM tiers are text-only.
 
 <aside class="prereqs">
 
@@ -12,11 +12,11 @@ Python 3 and the `async`/`await` mental model. If `asyncio` is new, see [Glossar
 
 The agent splits decision-making into two models:
 
-**Strategist (Sonnet)** — Runs every 10 turns (or on alarm). Receives the full screenshot as a vision input. Reads resource values, population, and age from the game UI. Creates 3-5 prioritized goals and caches resource readings for the executor.
+**Strategist (Sonnet)** — Runs every 10 turns (or on alarm). Reads resource values, population, and age from the resource bar **locally via OCR** (`resource_ocr.py`, RapidOCR) — no screenshot is sent to the model; its prompt is text-only. Creates 3-5 prioritized goals and caches resource readings for the executor.
 
 **Executor (Sonnet)** — Runs every turn. Receives only text: YOLO entity list, cached resource readings, active goals, memory context, and game knowledge. Returns structured actions (clicks, key presses) validated as Pydantic models. Routine turns take a fast single-shot call; combat/housing turns take an agentic tool loop (see [Chapter 4 §4.3](../part2-llm-integration/04-provider-pattern.md)).
 
-The split separates concerns: the strategist owns slow, vision-based planning; the executor owns rapid, text-only tactics. Both run `claude-sonnet-4-6` — the executor was moved from Haiku to Sonnet for more reliable instruction-following — and a per-call `effort` knob (default `low`) keeps the executor fast.
+The split separates concerns: the strategist owns slow, periodic goal-setting; the executor owns rapid, per-turn tactics. Both tiers are text-only — the strategist reads the HUD via local OCR, the executor reads the YOLO entity list. Both run `claude-sonnet-4-6` — the executor was moved from Haiku to Sonnet for more reliable instruction-following — and a per-call `effort` knob (default `low`) keeps the executor fast.
 
 ## 1.2 Component Map
 
@@ -37,7 +37,7 @@ agent/
 │   └── providers/
 │       ├── base.py            # Abstract LLM provider interface
 │       ├── claude.py          # Sonnet executor (text-only, no images)
-│       └── strategist.py      # Sonnet strategist (vision + goal generation)
+│       └── strategist.py      # Sonnet strategist (local OCR + goal generation)
 ├── detection/                 # YOLO entity detection (optional)
 │   ├── inference/
 │   │   ├── detector.py        # EntityDetector, 60 classes, IoU tracking
@@ -77,7 +77,7 @@ except ImportError:
     DETECTION_AVAILABLE = False
 ```
 
-Without detection, the executor has no entity list — it cannot target units, buildings, or resources by class or ID. The strategist can still read screenshots and set goals, but the executor is limited to hotkeys and hardcoded coordinates. In practice, this makes the agent nearly non-functional: it can't gather resources, train units, or build at specific locations. Detection is technically optional (the agent starts and runs) but practically required for any useful gameplay.
+Without detection, the executor has no entity list — it cannot target units, buildings, or resources by class or ID. The strategist can still read the resource bar (local OCR) and set goals, but the executor is limited to hotkeys and hardcoded coordinates. In practice, this makes the agent nearly non-functional: it can't gather resources, train units, or build at specific locations. Detection is technically optional (the agent starts and runs) but practically required for any useful gameplay.
 
 **Game Knowledge** — imported inside a try/except in `apps/agent/src/providers/claude.py`:
 
@@ -104,12 +104,14 @@ Configuration uses a Pydantic `BaseModel` with environment variable overrides (`
 | `anthropic_api_key` | `ANTHROPIC_API_KEY` | `""` | Claude API authentication |
 | `model` | `AOE2_MODEL` | `claude-sonnet-4-6` | Executor model (instruction-following) |
 | `executor_effort` | `AOE2_EXECUTOR_EFFORT` | `low` | Executor `output_config` effort (`low`/`medium`/`high`) |
-| `strategist_model` | `AOE2_STRATEGIST_MODEL` | `claude-sonnet-4-6` | Strategist model (vision, deeper reasoning) |
+| `strategist_model` | `AOE2_STRATEGIST_MODEL` | `claude-sonnet-4-6` | Strategist model (deeper reasoning) |
 | `strategist_interval` | `AOE2_STRATEGIST_INTERVAL` | `10` | Run strategist every N turns |
 | `max_tokens` | — | `1536` | Max response tokens per executor call |
 | `max_tool_iterations` | — | `7` | Max tool roundtrips per turn (tool-loop path) |
-| `detection_imgsz` | — | `1280` | YOLO inference resolution |
+| `detection_imgsz` | — | `640` | YOLO inference resolution (matches the v6 training resolution) |
+| `adaptive_sahi` | — | `False` | SAHI tiling lowers real F1 at retina resolution; agent runs single-pass @640 |
 | `screenshot_quality` | — | `85` | JPEG quality (1-100) |
+| `ocr_backend` | `AOE2_OCR_BACKEND` | `rapidocr` | Resource-bar OCR backend (`rapidocr`/`template`/`tesseract`) |
 | `loop_delay` | `AOE2_LOOP_DELAY` | `0.3` | Seconds between iterations |
 | `action_delay` | — | `0.05` | Seconds between individual actions |
 | `pipeline_commit_max` | `AOE2_PIPELINE_COMMIT_MAX` | `2` | Actions committed per pipelined (routine) turn; the tail is discarded |
@@ -153,7 +155,7 @@ Key log events: `iteration_start`, `screenshot_captured`, `detection_complete`, 
 
 ## Summary
 
-- Two-tier architecture: Sonnet strategist (vision, goals) + Sonnet executor (text-only, actions; single-shot routine turns + tool loop for combat)
+- Two-tier architecture: Sonnet strategist (local OCR, goals) + Sonnet executor (text-only, actions; single-shot routine turns + tool loop for combat)
 - A deterministic reactive tier handles routine villager upkeep every turn with no LLM call; routine turns pipeline (RTC) and entity-affecting actions are verified by re-detection
 - Detection is practically required for useful gameplay; game knowledge and window management are truly optional
 - Pydantic for config and validation, structlog for observability, asyncio for concurrency

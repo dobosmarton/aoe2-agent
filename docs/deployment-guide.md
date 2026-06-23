@@ -1,6 +1,6 @@
 # Deployment Guide: Mac + Windows VM Setup
 
-Run the detection server on macOS (Apple Silicon) and the gameplay agent on a Windows VM. The agent sends screenshots to the Mac over HTTP for fast YOLO inference via CoreML/Neural Engine.
+Run the detection server on macOS (Apple Silicon) and the gameplay agent on a Windows VM. The agent sends screenshots to the Mac over HTTP for fast YOLO inference via CoreML/Neural Engine. (Screenshots leave the VM only for YOLO detection; the strategist reads the resource bar locally via OCR and sends Claude a text-only prompt — no image is sent to any LLM.)
 
 ```
 ┌─────────────────────────────┐         HTTP          ┌─────────────────────────────┐

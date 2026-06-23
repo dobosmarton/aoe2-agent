@@ -77,7 +77,7 @@ Loads from `prompts/system.md` on disk. If the file doesn't exist, falls back to
 
 ### Content Building (`claude.py:_build_content`)
 
-The executor is **text-only** — no screenshot — so all visual information arrives as the YOLO entity list plus the strategist's cached resource readings. `_build_content()` assembles a single text content block:
+The executor is **text-only** — no screenshot — so all visual information arrives as the YOLO entity list plus the strategist's cached resource readings. (The strategist itself is also text-only: it produces those readings by OCR-ing the resource bar locally — `resource_ocr.py`, RapidOCR — not via a Claude vision call.) `_build_content()` assembles a single text content block:
 
 1. Enhances the context with dynamic game knowledge (affordable units/buildings) when the knowledge DB is available
 2. Prepends a dimensions line: `"Game window: 1920x1080 pixels. Center=(960,540). ..."`

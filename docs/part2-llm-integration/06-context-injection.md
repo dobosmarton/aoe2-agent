@@ -19,9 +19,8 @@ flowchart TD
     ENHANCE -->|no| SKIP["Use as-is"]
     DYN --> FINAL["Enhanced Context"]
     SKIP --> FINAL
-    DIM["Screenshot dimensions<br/>(width x height + center)"] --> MSG["User Message"]
+    DIM["Screenshot dimensions<br/>(width x height + center, as text)"] --> MSG["User Message"]
     FINAL --> MSG
-    SS["Screenshot JPEG<br/>(base64)"] --> MSG
     SYS["System Prompt<br/>(prompts/system.md)"] --> API["Claude API Call"]
     MSG --> API
 ```

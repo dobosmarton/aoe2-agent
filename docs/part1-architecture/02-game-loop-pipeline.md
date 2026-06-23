@@ -67,12 +67,9 @@ Uses the `mss` library to grab the game window region, convert from BGRA to RGB 
 
 ### Step 4: Run entity detection — `_run_detection()`
 
-Entity detection uses **adaptive SAHI** by default (`config.adaptive_sahi = True`). Adaptive SAHI runs a fast single-pass scan at `imgsz=1280`, clusters detected entities into ROI regions, then runs SAHI tiling only on those regions (~3-8 tiles instead of ~18 for full SAHI). This reduces detection latency from ~234ms to ~100-200ms.
+Entity detection runs a **single forward pass at `imgsz=640`** — the resolution the v6 model was trained at (`config.detection_imgsz = 640`, `config.adaptive_sahi = False`). On real screenshots this beats both higher-resolution and SAHI-tiled inference: tiling a 3024px frame into 640 crops makes objects ~2.4× larger than training scale and *lowers* real F1 (≈0.42 single-pass @640 vs ≈0.04 with full SAHI). SAHI is implemented but off; see [Chapter 7 §7.4](../part3-entity-detection/07-detector-architecture.md) for the measurement.
 
-Full SAHI is forced on:
-- The first iteration (no prior entity data)
-- Every `full_sahi_interval` turns (default 5) to catch entities in new areas
-- When an alarm was triggered on the previous turn
+> When `config.adaptive_sahi` is `True` (it isn't, by default), the loop instead runs adaptive SAHI and forces full SAHI on the first iteration, every `full_sahi_interval` turns, and after an alarm — the parked path for a future SAHI-native model.
 
 Results are cached in the executor module via `set_detected_entities()` for later target_id/target_class resolution. Entity IDs persist across frames via the Kalman filter tracker. Detection failures are caught and logged without breaking the loop.
 
@@ -91,8 +88,8 @@ Scans detected entities for 21 enemy military classes (militia_line, archer_line
 The strategist (Sonnet) runs every N turns (default 10), on the first successful iteration, or when an alarm is triggered. It is launched **asynchronously** via `asyncio.create_task()` so it runs in the background while the executor continues. If a previous strategist task is still pending, it is reused rather than launching a new one.
 
 The strategist:
-1. Receives the screenshot as a base64 image
-2. Reads resource values, population, and age from the game UI
+1. Reads resource values, population, and age from the resource bar **locally via OCR** (`resource_ocr.read_resource_bar`, RapidOCR) — the screenshot is passed in for this, but **no image is sent to Claude**. Field geometry is auto-detected per frame (`autodetect_calibration`), with an optional `calibration.<W>x<H>.yaml` override.
+2. Sends those readings to Sonnet in a **text-only** prompt
 3. Creates 3-5 prioritized goals
 4. Returns resource readings that are cached for the executor
 
@@ -138,7 +135,7 @@ If the agentic tool loop already executed actions (indicated by `actions_already
   1. **Tracker prediction check** — if tracker confidence > 80%, extrapolate positions via Kalman predict (~0ms, no screenshot or inference needed)
   2. **Screenshot capture** — if prediction not used
   3. **Frame differencing** — compare to previous frame; skip detection if MAD < 3%
-  4. **Fast detection** — single-pass `detect_fast()` at `imgsz=1280` (~50ms)
+  4. **Fast detection** — single-pass `detect_fast()` at `imgsz=640` (the same mode as the main detection step)
 
 ### Step 12: Wait
 
@@ -158,13 +155,15 @@ MAD is the cheapest possible change-detection metric — one subtraction and one
 </aside>
 
 <details class="deep-dive">
-<summary>Deep dive — Adaptive SAHI and ROI clustering (how 18 tiles becomes 3–8)</summary>
+<summary>Deep dive — Adaptive SAHI and ROI clustering (built, measured, parked)</summary>
 
-**The base problem.** A single 1920×1080 game screenshot resized to YOLO's standard 640×640 throws away most of the resolution that small entities (sheep, scouts) depend on. Run YOLO on the resized image and you'll miss anything under ~20 px in the original. Run YOLO on the full 1920×1080 and you spend a lot of GPU time on the 70% of the screen that's empty terrain.
+> **This describes a path we built and then disabled.** The agent ships **single-pass @640**, not SAHI. We measured all three modes on real held-out frames (`evaluate_real.py`): single-pass @640 ≈ 0.42 real F1, @1280 ≈ 0.21, full SAHI ≈ 0.04. SAHI *loses* because tiling a 3024px frame into 640 crops shows the model objects ~2.4× larger than its `imgsz=640` training scale. The adaptive-SAHI machinery below stays in the codebase for a future model retrained at SAHI-native scale — it's kept here as the design we'd reach for *then*, not what runs now.
 
-**SAHI — the classic fix.** *Slicing Aided Hyper Inference* (Akyon et al., 2022) slices the input into overlapping tiles, runs the detector on each tile at full resolution, then merges the per-tile predictions back into image coordinates (with extra NMS on overlap zones). For a 1920×1080 screen with 640×640 tiles and 20% overlap, that's ~18 tiles per frame. Recall on small objects skyrockets. Latency triples.
+**The base problem (as it looked pre-v6).** A game screenshot resized to YOLO's 640×640 throws away resolution that small entities (sheep, scouts) depend on — *if the model was trained on larger crops*. The v6 fix turned out to be simpler than tiling: train and infer at the same 640, so the resize is exactly what the model expects.
 
-**Adaptive SAHI — what we ship.** A two-pass scheme that only pays the tiling cost where it matters:
+**SAHI — the classic fix.** *Slicing Aided Hyper Inference* (Akyon et al., 2022) slices the input into overlapping tiles, runs the detector on each tile at full resolution, then merges the per-tile predictions back into image coordinates (with extra NMS on overlap zones). For a 1920×1080 screen with 640×640 tiles and 20% overlap, that's ~18 tiles per frame. It raises recall on small objects *when the tile scale matches training* — which, for v6 at retina resolution, it doesn't.
+
+**Adaptive SAHI — the parked two-pass scheme.** Pays the tiling cost only where it matters:
 
 1. **Fast scan.** Run YOLO once at `imgsz=1280` (in-between the fast 640 and the slow tiled approach). Catches every medium-and-large object plus a noisy first guess at where the small stuff is. ~60 ms.
 2. **ROI clustering.** Take the bounding boxes of the small/uncertain detections, cluster them into a handful of regions of interest using a **Union-Find** (disjoint-set) data structure. Two boxes belong to the same ROI if their inflated bounding boxes intersect; Union-Find walks the box list once and assigns each to its cluster root in near-constant amortized time.
@@ -215,15 +214,14 @@ Captures a screenshot, runs detection, builds context, gets actions from Claude 
 |-------|----------|--------|
 | Window check + focus | ~200ms worst case | `window.py` (3 retries, 200ms each) |
 | Screenshot capture | ~10-30ms | mss grab + PIL convert + JPEG encode |
-| YOLO detection (adaptive SAHI) | ~100-200ms | Fast scan + targeted SAHI on ROI regions |
-| YOLO detection (full SAHI) | ~234ms | Full tiled inference (first turn, periodic, alarm) |
+| YOLO detection (single-pass @640) | one forward pass | The deployed path (`adaptive_sahi=False`); cost is backend/hardware-dependent |
 | Ownership classification | ~5ms | NumPy pixel analysis |
-| Strategist call (periodic) | 3-8s | Sonnet vision API call |
+| Strategist call (periodic) | 3-8s | Sonnet text call (resources via local OCR) |
 | Executor single-shot (routine turns) | ~2-4s | One `messages.parse` call, no tool loop |
 | Executor call (per tool iteration) | ~3s | Roundtrips in the agentic loop (combat/housing) |
 | Action execution | ~50ms per action | pyautogui + 50ms inter-action delay |
 | Rescan: tracker prediction | ~0ms | Kalman extrapolation (confidence > 80%) |
-| Rescan: fast detection | ~50ms | Single-pass YOLO at imgsz=1280 |
+| Rescan: fast detection | one forward pass | Single-pass YOLO at imgsz=640 |
 | Loop delay | 0.3s | `config.loop_delay` |
 
 Cycle time depends on the path: **routine turns single-shot in ~one roundtrip** (~2-4s of API + 0.3s loop delay), and because routine turns pipeline, the previous turn's committed head plus the reactive tier execute *during* that roundtrip rather than adding to it. Combat/housing turns run the agentic tool loop synchronously and can reach ~20-30s when they use all 7 iterations. Composite tools cut the loop path further (~9s saved per building placement). The strategist runs in the background and does not add to cycle time.
@@ -255,8 +253,8 @@ The game loop supports a `time_budget` parameter (seconds). When elapsed time ex
 - Action-effect verification (R1): entity-affecting actions are confirmed by re-detection, and misses emit `no visible change` into the stuck-loop detector
 - Strategist runs asynchronously in the background; executor runs every turn
 - Composite tools (build, send_villager, queue_villager) eliminate multiple API roundtrips per sequence
-- Detection uses adaptive SAHI by default (~100-200ms), falling back to full SAHI periodically
-- Rescans use tracker prediction (~0ms) or fast detection (~50ms)
+- Detection is a single pass at `imgsz=640` (training resolution); SAHI is implemented but disabled because it lowers real F1 at retina resolution
+- Rescans use tracker prediction (~0ms) or single-pass fast detection
 - Goal-driven with reward computation per turn
 - Action failure feedback tracked via `ActionResult` and fed back to memory
 

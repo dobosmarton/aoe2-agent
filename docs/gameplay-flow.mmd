@@ -78,7 +78,7 @@ flowchart TD
             S1["_maybe_launch_strategist()"]
             S2{"should_run?<br/><i>every N turns or alarm</i>"}
             S3["asyncio.create_task(_run_strategist_async())"]
-            S4["strategist.generate_goals()<br/><i>Claude Sonnet vision call</i>"]
+            S4["strategist.generate_goals()<br/><i>Sonnet text call — resources via local OCR</i>"]
             S5["goal_manager.set_goals()"]
             S6["goal_manager.update_resource_readings()"]
             S7["goal_logger.log_goals_created()"]

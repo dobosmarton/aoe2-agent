@@ -1,5 +1,7 @@
 # Virtual Box for AoE2 Agent Evaluation — Analysis & Idea Pool
 
+> **Note (2026-06):** Written before the strategist replaced Claude vision with local OCR. References below to a "vision-LLM" strategist and "vision-pipeline regression" describe the pre-OCR design; the strategist is now text-only and reads the resource bar via OCR (`resource_ocr.py`). The `vision_fixtures/` directory is now used for OCR regression. Current state: [System Overview](../part1-architecture/01-system-overview.md).
+
 ## Context
 
 Running real AoE2 games against the agent is **slow and expensive**:

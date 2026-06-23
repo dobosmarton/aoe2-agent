@@ -19,11 +19,10 @@ Every iteration executes the same pipeline. Steps marked **conditional** only ru
 | 1 | Game running check | ~5 ms | `window.py:is_game_running()` | Every turn |
 | 2 | Ensure game focus | ~50 ms | `window.py:ensure_game_focused()` | Every turn |
 | 3 | Screenshot capture | ~20 ms | `screen.py:capture_screenshot()` via mss | Every turn |
-| 4a | YOLO detection (adaptive SAHI) | ~150 ms | `detector.detect_adaptive()` | Turns without forced full SAHI |
-| 4b | YOLO detection (full SAHI) | ~234 ms | `detector.detect_adaptive(force_full=True)` | Turn 1, every 5th turn, on alarm |
+| 4 | YOLO detection (single-pass @640) | one forward pass | `detector.detect_fast()` (`adaptive_sahi=False`) | Every turn — the deployed path |
 | 5 | Entity ownership classification | ~5 ms | `packages/detection/src/inference/ownership.py` | Every turn (if entities detected) |
 | 6 | Alarm check | ~10 ms | `goals.py:check_alarm()` | Every turn (if entities detected) |
-| 7 | Strategist API call (Sonnet vision) | ~5000 ms | `providers/strategist.py` | Turn 1, every 10th turn, on alarm (3-turn cooldown) |
+| 7 | Strategist API call (Sonnet, text — resources via local OCR) | ~5000 ms | `providers/strategist.py` | Turn 1, every 10th turn, on alarm (3-turn cooldown) |
 | 8 | Build LLM context | ~10 ms | `game_loop.py:_build_llm_context()` | Every turn |
 | 9 | Executor agentic loop (1–7 tool calls) | ~2000 ms | `providers/claude.py` | Every turn |
 | 10 | Process response + memory update | ~50 ms | `game_loop.py:_process_response()` | Every turn |
@@ -31,7 +30,9 @@ Every iteration executes the same pipeline. Steps marked **conditional** only ru
 | 12 | Action execution (3–5 actions) | ~250 ms | `executor.py` at 50 ms/action | Every turn (or fallback) |
 | 13 | Loop delay (sleep) | 1000 ms | `config.loop_delay = 1.0` | Every turn |
 
-**Config defaults** (from `config.py`): `loop_delay=0.3` (the tables below use the pre-optimization `1.0` baseline — see the note above), `strategist_interval=10`, `full_sahi_interval=5`, `action_delay=0.05`, `max_tool_iterations=7`, `executor_effort="low"`.
+**Config defaults** (from `config.py`): `loop_delay=0.3` (the tables below use the pre-optimization `1.0` baseline — see the note above), `strategist_interval=10`, `detection_imgsz=640`, `adaptive_sahi=False`, `full_sahi_interval=5` (only consulted when `adaptive_sahi=True`), `action_delay=0.05`, `max_tool_iterations=7`, `executor_effort="low"`.
+
+> **Detection mode (v6).** The agent now runs a **single forward pass at `imgsz=640`** on every turn (`adaptive_sahi=False`) — SAHI lowers real F1 at retina resolution (see [Chapter 7 §7.4](../part3-entity-detection/07-detector-architecture.md)). The per-round "full/adaptive SAHI" distinctions and the millisecond detection figures in the timelines below are **illustrative/historical** from the pre-v6 design; treat detection as one constant single-pass cost per turn regardless of round.
 
 ---
 
@@ -39,13 +40,13 @@ Every iteration executes the same pipeline. Steps marked **conditional** only ru
 
 | Round | Strategist? | Detection Mode | Ground Cmds? | Notes |
 |-------|-------------|----------------|--------------|-------|
-| 1 | Yes | Full SAHI | Yes | Heaviest round — first strategist + zoom/scout |
-| 2 | No | Adaptive SAHI | No | Normal |
-| 3 | No | Adaptive SAHI | No | Normal |
-| 4 | No | Adaptive SAHI | No | Normal |
-| 5 | No | Full SAHI | No | `iteration % 5 == 0` triggers full scan |
-| 6 | No | Adaptive SAHI | No | Normal |
-| 7 | No | Adaptive SAHI | No | Normal |
+| 1 | Yes | Single-pass @640 | Yes | Heaviest round — first strategist + zoom/scout |
+| 2 | No | Single-pass @640 | No | Normal |
+| 3 | No | Single-pass @640 | No | Normal |
+| 4 | No | Single-pass @640 | No | Normal |
+| 5 | No | Single-pass @640 | No | Normal (no SAHI; `full_sahi_interval` only applies when `adaptive_sahi=True`) |
+| 6 | No | Single-pass @640 | No | Normal |
+| 7 | No | Single-pass @640 | No | Normal |
 
 ---
 
@@ -58,18 +59,18 @@ Every iteration executes the same pipeline. Steps marked **conditional** only ru
 | 1 | Game running check | 5 ms | 5 ms |
 | 2 | Ensure game focus | 50 ms | 55 ms |
 | 3 | Screenshot capture | 20 ms | 75 ms |
-| 4b | YOLO detection (**full SAHI**) | 234 ms | 309 ms |
-| 5 | Entity ownership classification | 5 ms | 314 ms |
-| 6 | Alarm check | 10 ms | 324 ms |
-| 7 | **Strategist API call** (Sonnet vision) | 5000 ms | 5324 ms |
-| 8 | Build LLM context | 10 ms | 5334 ms |
-| 9 | Executor agentic loop | 2000 ms | 7334 ms |
-| 10 | Process response + memory update | 50 ms | 7384 ms |
-| 11 | **Ground commands** (scroll ×5, select scout, auto-scout) | 250 ms | 7634 ms |
-| 12 | Action execution (~4 actions) | 200 ms | 7834 ms |
-| 13 | Loop delay | 1000 ms | 8834 ms |
+| 4 | YOLO detection (single-pass @640) | 150 ms | 225 ms |
+| 5 | Entity ownership classification | 5 ms | 230 ms |
+| 6 | Alarm check | 10 ms | 240 ms |
+| 7 | **Strategist API call** (Sonnet, text — resources via local OCR) | 5000 ms | 5240 ms |
+| 8 | Build LLM context | 10 ms | 5250 ms |
+| 9 | Executor agentic loop | 2000 ms | 7250 ms |
+| 10 | Process response + memory update | 50 ms | 7300 ms |
+| 11 | **Ground commands** (scroll ×5, select scout, auto-scout) | 250 ms | 7550 ms |
+| 12 | Action execution (~4 actions) | 200 ms | 7750 ms |
+| 13 | Loop delay | 1000 ms | 8750 ms |
 
-**Round 1 total: ~8.8 s**
+**Round 1 total: ~8.75 s**
 
 ### Rounds 2–4, 6–7 — Normal Iterations
 
@@ -78,7 +79,7 @@ Every iteration executes the same pipeline. Steps marked **conditional** only ru
 | 1 | Game running check | 5 ms | 5 ms |
 | 2 | Ensure game focus | 50 ms | 55 ms |
 | 3 | Screenshot capture | 20 ms | 75 ms |
-| 4a | YOLO detection (**adaptive SAHI**) | 150 ms | 225 ms |
+| 4 | YOLO detection (single-pass @640) | 150 ms | 225 ms |
 | 5 | Entity ownership classification | 5 ms | 230 ms |
 | 6 | Alarm check | 10 ms | 240 ms |
 | 7 | Strategist — *skipped* | 0 ms | 240 ms |
@@ -91,25 +92,27 @@ Every iteration executes the same pipeline. Steps marked **conditional** only ru
 
 **Normal round total: ~3.5 s**
 
-### Round 5 — Full SAHI Trigger
+### Round 5 — Normal Iteration
+
+> Pre-v6 this round forced a full SAHI scan (`iteration % 5 == 0`). With `adaptive_sahi=False` there is no forced full scan, so Round 5 is now an ordinary single-pass turn — identical in shape to Rounds 2–4.
 
 | # | Step | Time | Cumulative |
 |---|------|------|-----------|
 | 1 | Game running check | 5 ms | 5 ms |
 | 2 | Ensure game focus | 50 ms | 55 ms |
 | 3 | Screenshot capture | 20 ms | 75 ms |
-| 4b | YOLO detection (**full SAHI**) | 234 ms | 309 ms |
-| 5 | Entity ownership classification | 5 ms | 314 ms |
-| 6 | Alarm check | 10 ms | 324 ms |
-| 7 | Strategist — *skipped* | 0 ms | 324 ms |
-| 8 | Build LLM context | 10 ms | 334 ms |
-| 9 | Executor agentic loop | 2000 ms | 2334 ms |
-| 10 | Process response + memory update | 50 ms | 2384 ms |
-| 11 | Ground commands — *skipped* | 0 ms | 2384 ms |
-| 12 | Action execution (~4 actions) | 200 ms | 2584 ms |
-| 13 | Loop delay | 1000 ms | 3584 ms |
+| 4 | YOLO detection (single-pass @640) | 150 ms | 225 ms |
+| 5 | Entity ownership classification | 5 ms | 230 ms |
+| 6 | Alarm check | 10 ms | 240 ms |
+| 7 | Strategist — *skipped* | 0 ms | 240 ms |
+| 8 | Build LLM context | 10 ms | 250 ms |
+| 9 | Executor agentic loop | 2000 ms | 2250 ms |
+| 10 | Process response + memory update | 50 ms | 2300 ms |
+| 11 | Ground commands — *skipped* | 0 ms | 2300 ms |
+| 12 | Action execution (~4 actions) | 200 ms | 2500 ms |
+| 13 | Loop delay | 1000 ms | 3500 ms |
 
-**Round 5 total: ~3.6 s**
+**Round 5 total: ~3.5 s**
 
 ---
 
@@ -117,15 +120,15 @@ Every iteration executes the same pipeline. Steps marked **conditional** only ru
 
 | Round | Type | Round Time | Cumulative Elapsed |
 |-------|------|-----------|-------------------|
-| 1 | Strategist + Full SAHI + Ground Cmds | 8.83 s | 8.83 s |
-| 2 | Normal | 3.50 s | 12.33 s |
-| 3 | Normal | 3.50 s | 15.83 s |
-| 4 | Normal | 3.50 s | 19.33 s |
-| 5 | Full SAHI | 3.58 s | 22.91 s |
-| 6 | Normal | 3.50 s | 26.41 s |
-| 7 | Normal | 3.50 s | 29.91 s |
+| 1 | Strategist + Ground Cmds | 8.75 s | 8.75 s |
+| 2 | Normal | 3.50 s | 12.25 s |
+| 3 | Normal | 3.50 s | 15.75 s |
+| 4 | Normal | 3.50 s | 19.25 s |
+| 5 | Normal | 3.50 s | 22.75 s |
+| 6 | Normal | 3.50 s | 26.25 s |
+| 7 | Normal | 3.50 s | 29.75 s |
 
-**Total 7-round run: ~29.9 s**
+**Total 7-round run: ~29.8 s**
 
 Time distribution across the full run:
 
@@ -224,7 +227,7 @@ The timings above assume a clean run with no alarms. Real runs may vary:
 
 | Event | Effect on Timing |
 |-------|-----------------|
-| **Alarm triggered** (enemy detected) | Strategist runs on alarm turn (+5 s). Full SAHI forced (+84 ms vs adaptive). Alarm goal injected at priority 10. |
+| **Alarm triggered** (enemy detected) | Strategist runs on alarm turn (+5 s). Alarm goal injected at priority 10. (Pre-v6 an alarm also forced a full SAHI scan; with `adaptive_sahi=False` detection stays single-pass.) |
 | **Rescan during executor loop** | A `press` action with `rescan: true` triggers mid-turn screenshot + detection. Adds ~50–300 ms per rescan depending on frame differ result. |
 | **Strategist retry** (API error) | SDK retries up to 2× with exponential backoff. Could add 5–15 s on failure turns. Falls back to default goals on total failure. |
 | **Executor max iterations** | If the executor uses all 7 tool call iterations, the agentic loop may take 3.5 s+ instead of the typical 2 s. |
@@ -242,10 +245,10 @@ Round 1   [===STRATEGIST====][EXEC][ACT][SLEEP]
 Round 2                                          [DET][EXEC][ACT][SLP]
 Round 3                                                               [DET][EXEC][ACT][SLP]
 Round 4                                                                                    [DET][EXEC][ACT][SLP]
-Round 5                                                                                                         [DET*][EXEC][ACT][SLP]
+Round 5                                                                                                         [DET][EXEC][ACT][SLP]
 Round 6                                                                                                                                [DET][EXEC][ACT][SLP]
 Round 7                                                                                                                                                     [DET][EXEC][ACT][SLP]
 
-Legend: DET = detection  DET* = full SAHI  EXEC = executor API  ACT = action execution  SLP = sleep
-        STRATEGIST = Sonnet vision API call (only round 1 in a 7-round run)
+Legend: DET = detection (single-pass @640, every turn)  EXEC = executor API  ACT = action execution  SLP = sleep
+        STRATEGIST = Sonnet API call (text — resources via local OCR; only round 1 in a 7-round run)
 ```

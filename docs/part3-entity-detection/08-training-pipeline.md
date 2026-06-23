@@ -206,20 +206,25 @@ Training produces:
 
 ### Results
 
-> **No v6 model is trained yet.** The numbers below are the **last measured (v5, YOLO11n)** results. The switch to `yolo26n.pt`, the dataset-level rebalancing, and the distant-unit augmentation all land in v6 — **v6/YOLO26 retraining is pending** and will be the first run to exercise the new rebalancing. Expect these figures to be re-measured (and re-labeled v6/YOLO26) once that run completes.
+**v6 (YOLO26n) has shipped** — `aoe2_yolo_v6.onnx` / `.pt` are the deployed artifacts. v6 moved off the large mixed v5 corpus to a smaller, real-terrain-backed synthetic set (~2400 synthetic) merged with **187 real CVAT screenshots**, trained at `imgsz=640` (the resolution the agent infers at — see [Chapter 7 §7.4](./07-detector-architecture.md)).
 
-**Last measured (v5, YOLO11n):** **92.2% mAP50**, **85.4% mAP50-95** on validation data, 60 classes.
+**Two metrics, deliberately separated.** Synthetic-validation mAP50 flatters the model; the metric of record is **real** F1, measured by `evaluate_real.py` (Chapter 7 §7.13):
 
-| Metric | v5 (YOLO11n) | v4 (previous) |
-|--------|--------------|---------------|
-| mAP50 | **92.2%** | 86.8% |
-| mAP50-95 | **85.4%** | 72.3% |
-| Precision | **94.8%** | 87.1% |
-| Recall | **89.2%** | 78.5% |
+| Metric | v6 value | Notes |
+|--------|----------|-------|
+| Synthetic-val mAP50 (overall) | **~0.834** | after the water-scene fix (was 0.827 synthetic-only) |
+| `fish` synthetic mAP50 | **0.545** | up from **0.146** once fish/naval were composited only on water |
+| **Real micro-F1** (single-pass @640) | **≈ 0.42** | P 0.65 / R 0.31 — the realistic number; rare military lines still near-zero recall |
 
-**v5 dataset:** 18,520 images total (15,120 train + 3,400 val):
-- 8,000 synthetic train + 2,000 synthetic val
-- 7,120 real train + 1,400 real val
+> **Historical (v5, YOLO11n):** 92.2% mAP50 / 85.4% mAP50-95 on an 18,520-image hybrid set. These are *synthetic-heavy validation* numbers and are **not** comparable to v6's real-F1 figure — they're kept only as a lineage marker.
+
+#### v6 sim-to-real levers
+
+Three changes drove the move from "great synthetic mAP, poor real recall" toward real performance (full procedure in the [retrain runbook](../runbooks/retrain-detection-v6.md)):
+
+- **Water-scene mode.** Fish/naval classes (`fishing_ship`, `unique_ship`, `fish`, `galley`, `fire_galley`) are composited **only** on real water textures and removed from land scenes (`--water-backgrounds` + `--water-fraction`). Fish/naval-on-grass was a scene that never occurs in-game and capped `fish` at 0.146 mAP50; the fix lifted it to 0.545. The general rule: *if a class only exists in a specific scene, place it only in that scene.*
+- **Real-data oversampling.** `--oversample-real N` duplicates each real **train** pair N× (val never duplicated, so metrics stay honest), so the ~187 real images aren't drowned out by ~2400 synthetic ones in the loss.
+- **Synthetic UI overlays.** Selection ellipses, health bars, garrison badges, and a bottom command-panel HUD are layered on the synthetic frames so the model isn't brittle to artifacts that only appear in *real* screenshots.
 
 See [Chapter 12](../part5-operations/12-cloud-training.md) for cloud training details.
 
@@ -243,13 +248,14 @@ Once a model exists, the cheapest way to improve it is to feed it *the data it's
 - Distant-unit augmentation (`distant_fraction` / `scale_bounds()`) puts genuine ~20px units in the data, complementing YOLO26's small-object STAL head
 - 17+ architecture styles per building via wildcard patterns
 - 6 enhanced augmentations simulating real game conditions (fog, UI, compression, zoom, temperature, vignette)
-- YOLO26 nano model (`yolo26n.pt`, NMS-free): 150 epochs, isometric-tuned hyperparameters, optional `--cls-gain/--box-gain/--dfl-gain` loss-weight overrides
+- YOLO26 nano model (`yolo26n.pt`, NMS-free): 150 epochs at `imgsz=640`, isometric-tuned hyperparameters, optional `--cls-gain/--box-gain/--dfl-gain` loss-weight overrides
+- v6 sim-to-real levers: **water-scene mode** (fish 0.146 → 0.545 mAP50), **`--oversample-real`**, and synthetic **UI overlays**
 - Targeted data improvement: hard-negative mining (`labeling/hard_negatives.py`) and open-vocab auto-labeling (`prelabel.py --open-vocab`)
-- Last measured (v5, YOLO11n): 92.2% mAP50 on 18,520-image hybrid dataset; **v6/YOLO26 retraining is pending**
+- v6 (YOLO26n) shipped; synthetic-val mAP50 ~0.834, but the metric of record is **real F1 ≈ 0.42** (`evaluate_real.py`, single-pass @640)
 
 ## Related Topics
 
 - [Chapter 7: Detector Architecture](./07-detector-architecture.md) -- how the trained model is used at runtime
 - [Chapter 9: Labeling & Active Learning](./09-labeling-and-active-learning.md) -- how real data is labeled and merged
 - [Chapter 11: Sprite Extraction](../part4-game-knowledge/11-sprite-extraction.md) -- how sprites are extracted from game files
-- [Chapter 12: Cloud Training](../part5-operations/12-cloud-training.md) -- Lambda Labs training workflow
+- [Chapter 12: Cloud Training](../part5-operations/12-cloud-training.md) -- cloud GPU training workflow (RunPod is the tested path; Lambda alternative)
