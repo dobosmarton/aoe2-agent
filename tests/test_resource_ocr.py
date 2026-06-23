@@ -182,39 +182,47 @@ def test_build_fields_empty_when_nothing_detected():
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_calibration_precedence(monkeypatch):
-    """Hand-made YAML wins; otherwise auto-detect runs; None falls through."""
+def test_read_hud_readings_precedence(monkeypatch):
+    """Hand YAML wins; else auto-detect; both-None → {} with no per-field read.
+
+    This is the per-turn HUD reader the game loop calls every tick (and the
+    strategist reuses); the resolution precedence is the contract under test.
+    """
     from types import SimpleNamespace
 
     from gameplay_agent.providers import strategist as strat_mod
 
-    calls = {"auto": 0}
+    png = _png_bytes(np.zeros((10, 20, 3), dtype=np.uint8))
+    calls = {"auto": 0, "read": 0}
 
-    def fake_calibration_for(w, h):
-        return "HAND" if (w, h) == (100, 50) else None
+    def fake_read(_bytes, _calib, *, backend):
+        calls["read"] += 1
+        return {"food": 200, "wood": 200, "gold": 100, "stone": 200, "population": "4/5"}
 
     def fake_autodetect(_bytes):
         calls["auto"] += 1
-        return SimpleNamespace(fields={"wood": None, "food": None}) if calls["auto"] <= 2 else None
+        return SimpleNamespace(fields={"food": None}) if calls["auto"] == 1 else None
 
-    monkeypatch.setattr(strat_mod, "calibration_for", fake_calibration_for)
+    monkeypatch.setattr(strat_mod, "read_resource_bar", fake_read)
     monkeypatch.setattr(strat_mod, "autodetect_calibration", fake_autodetect)
 
-    # _resolve_calibration uses no instance state, so a bare instance is enough
-    # (avoids constructing the real Anthropic client / needing an API key).
-    prov = object.__new__(strat_mod.StrategistProvider)
+    # Hand YAML present → used; auto-detect never called.
+    monkeypatch.setattr(
+        strat_mod, "calibration_for", lambda w, h: SimpleNamespace(fields={"food": None})
+    )
+    out = asyncio.run(strat_mod.read_hud_readings(png))
+    assert out["food"] == 200 and out["population"] == "4/5"
+    assert calls["auto"] == 0 and calls["read"] == 1
 
-    # Hand YAML present → used, auto-detect never called.
-    assert asyncio.run(prov._resolve_calibration(100, 50, b"x")) == "HAND"
-    assert calls["auto"] == 0
-    # No YAML → auto-detect runs and its result is returned.
-    auto1 = asyncio.run(prov._resolve_calibration(200, 80, b"x"))
-    assert auto1 is not None and calls["auto"] == 1
-    # Re-detected fresh every tick (no caching) → called again same resolution.
-    asyncio.run(prov._resolve_calibration(200, 80, b"x"))
-    assert calls["auto"] == 2
-    # Auto-detect fails to localize → None (caller falls back to last-known state).
-    assert asyncio.run(prov._resolve_calibration(200, 80, b"x")) is None
+    # No hand YAML → auto-detect runs (first call returns a calib) and we read.
+    monkeypatch.setattr(strat_mod, "calibration_for", lambda w, h: None)
+    out = asyncio.run(strat_mod.read_hud_readings(png))
+    assert out["wood"] == 200 and calls["auto"] == 1
+
+    # Auto-detect now fails to localize → {} and read_resource_bar NOT called.
+    reads_before = calls["read"]
+    assert asyncio.run(strat_mod.read_hud_readings(png)) == {}
+    assert calls["read"] == reads_before
 
 
 # ---------------------------------------------------------------------------

@@ -39,7 +39,11 @@ async def _run_strategist_async(
     """Invoke the strategist to create/update goals (runs as background task)."""
     try:
         prev_goals = list(goal_manager.active_goals)
-        new_goals, resource_readings = await strategist.generate_goals(
+        # Resource readings are owned by the game loop's per-turn HUD OCR
+        # (read_hud_readings → update_resource_readings); the strategist only sets
+        # goals. We discard its returned readings so a late async run can't clobber
+        # game_state with an older frame.
+        new_goals, _readings = await strategist.generate_goals(
             memory.game_state,
             goal_manager.get_goals_summary(),
             entity_summary,
@@ -48,7 +52,6 @@ async def _run_strategist_async(
             alarm=alarm,
         )
         goal_manager.set_goals(new_goals)
-        goal_manager.update_resource_readings(resource_readings, memory)
         goal_logger.log_goals_created(iteration, new_goals)
         if prev_goals:
             goal_logger.log_strategist_update(iteration, prev_goals, new_goals)

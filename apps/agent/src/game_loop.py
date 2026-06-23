@@ -38,7 +38,7 @@ from .goal_logger import GoalLogger
 from .goals import GoalManager
 from .memory import AgentMemory
 from .models import validate_actions
-from .providers.strategist import StrategistProvider, get_default_goals
+from .providers.strategist import StrategistProvider, get_default_goals, read_hud_readings
 from .screen import capture_screenshot, save_screenshot
 from .strategist_phase import _maybe_launch_strategist
 from .turn_phases import (
@@ -246,6 +246,15 @@ async def game_loop(
                 screenshots_dir,
                 iteration,
             )
+
+            # Refresh game_state from the resource bar EVERY turn via local OCR,
+            # independent of the slow periodic strategist. Keeping population /
+            # resources current is what makes the housed/pop/resource signals
+            # accurate for the alarm check, strategist, and executor — so e.g. the
+            # build-house path triggers the turn the agent actually gets housed.
+            hud_readings = await read_hud_readings(screenshot)
+            if hud_readings:
+                goal_manager.update_resource_readings(hud_readings, memory)
 
             detected_entities = []
             if detector:

@@ -16,7 +16,6 @@ from ..goals import Goal
 from ..memory import GameState
 from ..resource_ocr import (
     Backend,
-    Calibration,
     autodetect_calibration,
     calibration_for,
     read_resource_bar,
@@ -62,6 +61,43 @@ def _clean_readings(ocr: dict) -> dict:
     if ocr.get("age"):
         readings["age"] = ocr["age"]
     return readings
+
+
+async def read_hud_readings(screenshot_bytes: bytes) -> dict:
+    """Read resources/population/age off the resource bar via local OCR.
+
+    Resolution precedence: a hand-tuned ``calibration.<W>x<H>.yaml`` wins; else
+    auto-detect the bar from this frame. Returns cleaned readings (``{}`` when the
+    bar can't be localized). No image is sent to any model. Called per-turn by the
+    game loop to keep ``game_state`` fresh, and by the strategist for its prompt.
+    A bad/undecodable frame returns ``{}`` rather than raising, so one bad capture
+    can never kill the game loop (the caller keeps last-known state).
+    """
+    try:
+        with Image.open(io.BytesIO(screenshot_bytes)) as im:
+            width, height = im.width, im.height
+        calib = calibration_for(width, height)
+        if calib is None:
+            # Detection runs RapidOCR over the top band — CPU-bound, off the loop.
+            calib = await asyncio.to_thread(autodetect_calibration, screenshot_bytes)
+            if calib is not None:
+                log.info("ocr_autodetect", width=width, height=height, fields=sorted(calib.fields))
+        if calib is None:
+            log.error("ocr_no_calibration_autodetect_failed", width=width, height=height)
+            return {}
+        # OCR is sync/CPU-bound — run off the event loop.
+        ocr = await asyncio.to_thread(
+            read_resource_bar,
+            screenshot_bytes,
+            calib,
+            backend=cast("Backend", config.ocr_backend),
+        )
+        readings = _clean_readings(ocr)
+        log.info("ocr_readings", **readings)
+        return readings
+    except Exception as e:  # a bad frame must not crash the loop — keep last-known
+        log.warning("hud_read_failed", error=str(e))
+        return {}
 
 
 def get_default_goals(turn: int = 0) -> list[Goal]:
@@ -163,29 +199,6 @@ class StrategistProvider:
         )
         return cast("StrategistResponse", response.parsed_output)
 
-    async def _resolve_calibration(
-        self, width: int, height: int, screenshot_bytes: bytes
-    ) -> Calibration | None:
-        """Pick a calibration for this frame.
-
-        A hand-made ``calibration.<W>x<H>.yaml`` wins (keeps validated resolutions
-        byte-for-byte unchanged); otherwise auto-detect the bar from THIS frame.
-        Auto-detection is re-run every tick (it is ~450ms off-thread, cheaper than
-        the per-field read, and the strategist runs only every few turns): boxes
-        hug the current value, so re-detecting is what lets them track values as
-        they grow — no stale-box caching, no growth heuristics. Returns ``None``
-        only when the bar can't be localized, so the caller falls back to
-        last-known game state.
-        """
-        hand = calibration_for(width, height)
-        if hand is not None:
-            return hand
-        # Detection runs RapidOCR over the top band — CPU-bound, off the loop.
-        auto = await asyncio.to_thread(autodetect_calibration, screenshot_bytes)
-        if auto is not None:
-            log.info("ocr_autodetect", width=width, height=height, fields=sorted(auto.fields))
-        return auto
-
     async def generate_goals(
         self,
         game_state: GameState,
@@ -203,25 +216,10 @@ class StrategistProvider:
         Returns:
             Tuple of (goals, resource_readings_dict)
         """
-        # 1. Perception — read the HUD locally; no screenshot is sent to the model.
-        readings: dict = {}
-        if screenshot_bytes:
-            with Image.open(io.BytesIO(screenshot_bytes)) as im:
-                width, height = im.width, im.height
-            # Hand YAML wins; else auto-detect the bar from this frame.
-            calib = await self._resolve_calibration(width, height, screenshot_bytes)
-            if calib is None:
-                log.error("ocr_no_calibration_autodetect_failed", width=width, height=height)
-            else:
-                # OCR is sync/CPU-bound — run off the event loop.
-                ocr = await asyncio.to_thread(
-                    read_resource_bar,
-                    screenshot_bytes,
-                    calib,
-                    backend=cast("Backend", config.ocr_backend),
-                )
-                readings = _clean_readings(ocr)
-                log.info("ocr_readings", **readings)
+        # 1. Perception — resources/population/age from the resource bar via local
+        #    OCR; no screenshot is sent to the model. game_state is the fallback
+        #    (the game loop keeps it fresh every turn with the same OCR).
+        readings: dict = await read_hud_readings(screenshot_bytes) if screenshot_bytes else {}
 
         # 2. Reasoning — text-only prompt populated with the locally-read state
         #    (falls back to last-known game_state when a field wasn't read).
