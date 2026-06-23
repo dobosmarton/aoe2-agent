@@ -95,12 +95,12 @@ class ClaudeProvider:
         hotkeys_file = PROMPTS_DIR / "hotkeys.md"
 
         if core_file.exists():
-            self._core_prompt = core_file.read_text()
+            self._core_prompt = core_file.read_text(encoding="utf-8")
         else:
             self._core_prompt = self._FALLBACK_PROMPT
 
         if hotkeys_file.exists():
-            self._core_prompt += "\n\n" + hotkeys_file.read_text()
+            self._core_prompt += "\n\n" + hotkeys_file.read_text(encoding="utf-8")
 
         # Append cross-game memories to the cached core block, so they're paid
         # once per game and hit the prompt cache for every turn after the first.
@@ -132,7 +132,7 @@ class ClaudeProvider:
         for age_name in self._AGE_NAMES:
             age_file = ages_dir / f"{age_name}.md"
             if age_file.exists():
-                self._age_prompts[age_name] = age_file.read_text()
+                self._age_prompts[age_name] = age_file.read_text(encoding="utf-8")
             else:
                 log.debug("age_prompt_missing", age=age_name)
 

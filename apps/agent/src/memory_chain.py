@@ -196,7 +196,7 @@ class MemoryChain:
 
         entries: list[_MemoryEntry] = []
         for f in files:
-            text = f.read_text()
+            text = f.read_text(encoding="utf-8")
             meta = self._parse_frontmatter(text)
             content = self._strip_frontmatter(text).strip()
             if not content:
@@ -263,7 +263,7 @@ class MemoryChain:
         """List all memory fragments with metadata."""
         result = []
         for f in sorted(self.memories_dir.glob("*.md")):
-            text = f.read_text()
+            text = f.read_text(encoding="utf-8")
             meta = self._parse_frontmatter(text)
             content = self._strip_frontmatter(text).strip()
             title = _resolve_memory_title(meta, f)
@@ -353,7 +353,7 @@ class MemoryChain:
         """
         titles: set[str] = set()
         for f in self.memories_dir.glob("*.md"):
-            meta = self._parse_frontmatter(f.read_text())
+            meta = self._parse_frontmatter(f.read_text(encoding="utf-8"))
             title = meta.get("title")
             if not title:
                 # Filename pattern: NNN_<title>.md
@@ -397,7 +397,7 @@ created: {now}
 
     def _read_memory(self, path: Path) -> str | None:
         """Read a memory file and return just the content (no frontmatter)."""
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         content = self._strip_frontmatter(text).strip()
         return content if content else None
 

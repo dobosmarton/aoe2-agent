@@ -114,7 +114,7 @@ class StrategistProvider:
         if self._system_prompt is None:
             prompt_file = PROMPTS_DIR / "strategist.md"
             if prompt_file.exists():
-                self._system_prompt = prompt_file.read_text()
+                self._system_prompt = prompt_file.read_text(encoding="utf-8")
             else:
                 self._system_prompt = "You are a strategic advisor for an AoE2 AI. Create 3-5 prioritized goals as JSON."
         return self._system_prompt
