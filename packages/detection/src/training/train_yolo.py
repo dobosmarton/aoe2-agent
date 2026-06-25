@@ -96,12 +96,18 @@ def main() -> int:
 
     args = parser.parse_args(namespace=_TrainYoloArgs())
 
-    # Import ultralytics (may not be installed on all systems)
+    # Import YOLO. In-repo, go through the compat shim (it centralizes the pyright
+    # suppression for ultralytics' re-exported YOLO). On a bare machine — e.g. a
+    # cloud GPU with only this file copied over — the `detection` package isn't
+    # importable, so fall back to importing YOLO straight from ultralytics.
     try:
         from detection._ultralytics_compat import YOLO
-    except ImportError:
-        print("Error: ultralytics not installed. Install with: pip install ultralytics")
-        return 1
+    except ModuleNotFoundError:
+        try:
+            from ultralytics import YOLO  # pyright: ignore[reportPrivateImportUsage]
+        except ImportError as e:
+            print(f"Error: ultralytics not installed ({e}). Install with: pip install ultralytics")
+            return 1
 
     # Resolve dataset path
     script_dir = Path(__file__).parent.parent  # agent/
