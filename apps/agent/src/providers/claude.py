@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
 from ..config import config
-from ..executor import execute_action, get_detected_entities
+from ..executor import default_build_placement, execute_action, get_detected_entities
 from ..models import LLMResponse, Observations, validate_actions
 from .base import LLMResult
 from .claude_tools import _ACTION_TOOLS
@@ -368,11 +368,17 @@ class ClaudeProvider:
         """
         inp = block.input
         intent = inp.get("intent", "Build")
+        # x,y are optional: the text-only model can't see open ground, so when it
+        # omits them we place near the town centre (or window centre) and let the
+        # click's build-retry escape blocked terrain. See default_build_placement.
+        x, y = inp.get("x"), inp.get("y")
+        if x is None or y is None:
+            x, y = default_build_placement()
         steps = [
             {"type": "press", "key": ".", "intent": f"Select idle villager ({intent})"},
             {"type": "press", "key": "q", "intent": "Open economic build menu"},
             {"type": "press", "key": inp["building_key"], "intent": f"Select building ({intent})"},
-            {"type": "click", "x": inp["x"], "y": inp["y"], "intent": f"Place building ({intent})"},
+            {"type": "click", "x": x, "y": y, "intent": f"Place building ({intent})"},
         ]
         success, detail = await self._run_steps("build", steps)
         action_dict = {"type": "build", **inp}

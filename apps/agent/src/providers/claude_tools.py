@@ -126,7 +126,7 @@ _ACTION_TOOLS: list[dict] = [
     # --- Composite tools (multi-step sequences, no intermediate API roundtrips) ---
     {
         "name": "build",
-        "description": "Composite: select idle villager → open economic build menu → press building_key → place at (x,y). MUCH faster than individual steps. Building keys: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm. ALWAYS use this instead of press(.)+press(q)+press(key)+click() separately.",
+        "description": "Composite: select idle villager → open economic build menu → press building_key → place the building. Building keys: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm. x,y are OPTIONAL: omit them to auto-place near your Town Center (recommended — you can't see open ground, so let the game place it). Only pass x,y if you have a specific detected location. ALWAYS use this instead of press(.)+press(q)+press(key)+click() separately.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -134,11 +134,17 @@ _ACTION_TOOLS: list[dict] = [
                     "type": "string",
                     "description": "Hotkey for the building: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm",
                 },
-                "x": {"type": "integer", "description": "X coordinate for placement"},
-                "y": {"type": "integer", "description": "Y coordinate for placement"},
+                "x": {
+                    "type": "integer",
+                    "description": "Optional X for placement; omit to auto-place near the Town Center",
+                },
+                "y": {
+                    "type": "integer",
+                    "description": "Optional Y for placement; omit to auto-place near the Town Center",
+                },
                 "intent": {"type": "string", "description": "What you are building and why"},
             },
-            "required": ["building_key", "x", "y", "intent"],
+            "required": ["building_key", "intent"],
             "additionalProperties": False,
         },
     },

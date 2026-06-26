@@ -25,6 +25,7 @@ import structlog
 from .entity_utils import extract_attrs
 from .executor import (
     clear_detected_entities,
+    default_build_placement,
     execute_actions,
     get_detected_entities,
     get_rescan_fn,
@@ -300,6 +301,41 @@ def _build_verification(
     return "\n".join(lines)
 
 
+def _fallback_actions(memory: AgentMemory) -> list[dict[str, object]]:
+    """Pick the actions to run on a turn where the LLM returned none.
+
+    While housed, queuing a villager fails (no population room), so build a house
+    to unfreeze growth — the executor chooses the placement, since the text-only
+    model can't see open ground. Otherwise nudge production: go to the Town
+    Center, queue a villager, and select an idle one.
+    """
+    state = memory.game_state
+    is_housed = state.population_cap > 0 and state.population >= state.population_cap
+    if is_housed:
+        place_x, place_y = default_build_placement()
+        return [
+            {
+                "type": "press",
+                "key": ".",
+                "rescan": True,
+                "intent": "Select idle villager (fallback build)",
+            },
+            {"type": "press", "key": "q", "intent": "Open economic build menu (fallback)"},
+            {"type": "press", "key": "q", "intent": "Select house (fallback)"},
+            {
+                "type": "click",
+                "x": place_x,
+                "y": place_y,
+                "intent": "Place house to raise pop cap (fallback build)",
+            },
+        ]
+    return [
+        {"type": "press", "key": "h", "intent": "Go to TC (fallback)"},
+        {"type": "press", "key": "q", "intent": "Queue villager (fallback)"},
+        {"type": "press", "key": ".", "rescan": True, "intent": "Select idle villager (fallback)"},
+    ]
+
+
 async def _execute_turn_actions(
     actions: list,
     iteration: int,
@@ -337,17 +373,7 @@ async def _execute_turn_actions(
             memory.set_last_verification(verification)
     else:
         log.warning("no_actions_fallback", iteration=iteration, reasoning=reasoning[:200])
-        fallback = [
-            {"type": "press", "key": "h", "intent": "Go to TC (fallback)"},
-            {"type": "press", "key": "q", "intent": "Queue villager (fallback)"},
-            {
-                "type": "press",
-                "key": ".",
-                "rescan": True,
-                "intent": "Select idle villager (fallback)",
-            },
-        ]
-        fallback_actions = validate_actions(fallback)
+        fallback_actions = validate_actions(_fallback_actions(memory))
         if fallback_actions:
             fb_results = await execute_actions(fallback_actions)
             fb_success = sum(1 for r in fb_results if r.success)

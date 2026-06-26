@@ -147,7 +147,8 @@ def _by_name(name: str) -> dict:
         ("wait", {"ms", "intent"}),
         ("scroll", {"clicks", "intent"}),
         ("detect", {"intent"}),
-        ("build", {"building_key", "x", "y", "intent"}),
+        # x,y are optional: omitting them auto-places near the Town Center.
+        ("build", {"building_key", "intent"}),
         ("send_villager", {"intent"}),
         ("queue_villager", {"intent"}),
     ],

@@ -215,6 +215,29 @@ DEFAULT_WAIT_MS = 100
 _build_retry_total_seconds: float = 0.0
 _build_retry_count: int = 0
 
+# Screenshot-relative placement used only when a build carries no x,y, no town
+# centre is detected, AND the window rect is unavailable (very rare).
+_FALLBACK_BUILD_PLACEMENT: tuple[int, int] = (700, 400)
+
+
+def default_build_placement() -> tuple[int, int]:
+    """Screenshot-relative point to start a building placement when the model
+    gave no x,y — the executor picks *where*, since the text-only model can't see
+    open ground.
+
+    Prefer the detected town centre (the base clusters around it); else the window
+    centre, where the starting base usually sits. ``_handle_click``'s build-retry
+    then escapes blocked terrain from that anchor.
+    """
+    town_center = _resolve_target_class("town_center")
+    if town_center is not None:
+        return town_center
+    rect = get_game_window_rect()
+    if rect is not None:
+        _left, _top, width, height = rect
+        return (width // 2, height // 2)
+    return _FALLBACK_BUILD_PLACEMENT
+
 
 async def _handle_click(action_dict: dict[str, object], intent: str) -> ActionResult:
     fail_detail, coords = _resolve_coords(action_dict)
