@@ -15,6 +15,7 @@ import asyncio
 import io
 import logging
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from .detector import DetectedEntity, EntityDetector, get_detector
@@ -285,16 +286,39 @@ class RemoteDetector:
         return await asyncio.to_thread(fn, screenshot)
 
 
+def _local_model_exists() -> bool:
+    """True if a real local YOLO model is on disk, so a non-mock fallback is possible.
+
+    On a remote-only deploy (the agent VM) the model files are gitignored and
+    absent — there is nothing to fall back to, and a *mock* fallback is worse than
+    none (it would silently return fabricated detections on a server outage).
+    """
+    models_dir = Path(__file__).parent / "models"
+    return any(
+        (models_dir / f"aoe2_yolo_{version}.{ext}").exists()
+        for version in ("v7", "v6")
+        for ext in ("onnx", "pt")
+    )
+
+
 def get_remote_detector(
     server_url: str,
     imgsz: int = 1280,
     with_fallback: bool = True,
 ) -> RemoteDetector:
-    """Create a RemoteDetector with optional local ONNX fallback."""
+    """Create a RemoteDetector, keeping a local model as fallback only if one exists.
+
+    A *mock* detector is never kept as the fallback: on a server outage it would
+    silently return fabricated detections instead of failing loudly. The fallback
+    is populated only when a real local model is present (e.g. the serving host);
+    remote-only deploys get ``None``, so an outage surfaces as empty detections
+    plus a logged error rather than garbage.
+    """
     fallback: EntityDetector | None = None
-    if with_fallback:
+    if with_fallback and _local_model_exists():
         try:
-            fallback = get_detector(imgsz=imgsz)
+            candidate = get_detector(imgsz=imgsz)
+            fallback = candidate if not candidate.use_mock else None
         except Exception:
             logger.warning("Could not create local fallback detector")
 
