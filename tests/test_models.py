@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import pytest
 from gameplay_agent.models import (
+    BuildAction,
     ClickAction,
     DetectAction,
     DragAction,
@@ -82,6 +83,23 @@ def test_scroll_without_coords_validates() -> None:
 def test_detect_validates() -> None:
     a = DetectAction(type="detect", intent="full scan")
     assert a.type == "detect"
+
+
+def test_build_validates_with_building_key() -> None:
+    a = BuildAction(type="build", building_key="w", intent="build mill")
+    assert a.building_key == "w"
+    assert a.type == "build"
+
+
+def test_build_requires_building_key() -> None:
+    with pytest.raises(ValidationError):
+        BuildAction.model_validate({"type": "build", "intent": "build something"})
+
+
+def test_validate_action_dispatches_build() -> None:
+    a = validate_action({"type": "build", "building_key": "q", "intent": "house"})
+    assert isinstance(a, BuildAction)
+    assert a.building_key == "q"
 
 
 # ---------------------------------------------------------------------------

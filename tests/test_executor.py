@@ -500,3 +500,11 @@ def test_build_executor_rng_with_none_seed_emits_valid_offset() -> None:
         assert 0.0 <= value <= 1.0
     finally:
         config.seed = original
+
+
+def test_build_steps_sequence() -> None:
+    """build_steps yields select-villager -> econ-menu -> building-key -> placement click."""
+    steps = ex.build_steps("w", "build mill", (700, 400))
+    assert [s["type"] for s in steps] == ["press", "press", "press", "click"]
+    assert steps[2]["key"] == "w"  # building_key selects the structure
+    assert (steps[3]["x"], steps[3]["y"]) == (700, 400)  # placement passed through

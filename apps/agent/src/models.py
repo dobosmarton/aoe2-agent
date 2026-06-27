@@ -172,6 +172,23 @@ class DetectAction(BaseModel):
     intent: str = ""
 
 
+class BuildAction(BaseModel):
+    """Build a structure via the economic build menu, auto-placed near the Town Center.
+
+    Coordinate-free on purpose: x,y are omitted because the text-only model can't see
+    open ground — the executor picks the placement (near the TC, with retry). Available
+    on the fast single-shot path too, so routine turns can build without the tool loop.
+    """
+
+    type: Literal["build"]
+    building_key: str = Field(
+        min_length=1,
+        max_length=2,
+        description="Build hotkey: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm",
+    )
+    intent: str = ""
+
+
 # Discriminated union ensures the JSON schema uses oneOf + discriminator on "type",
 # preventing the model from confusing field names across action types
 # (e.g., using DragAction's x1/y1 for ClickAction instead of x/y).
@@ -179,6 +196,7 @@ Action = Annotated[
     ClickAction
     | RightClickAction
     | PressAction
+    | BuildAction
     | DragAction
     | WaitAction
     | ScrollAction
@@ -203,6 +221,7 @@ _ACTION_TYPE_MAP: dict[str, type[Action]] = {
     "click": ClickAction,
     "right_click": RightClickAction,
     "press": PressAction,
+    "build": BuildAction,
     "drag": DragAction,
     "wait": WaitAction,
     "scroll": ScrollAction,

@@ -239,6 +239,25 @@ def default_build_placement() -> tuple[int, int]:
     return _FALLBACK_BUILD_PLACEMENT
 
 
+def build_steps(
+    building_key: str, intent: str, placement: tuple[int, int]
+) -> list[dict[str, object]]:
+    """Press/click sequence for a build: select idle villager → open the economic
+    build menu → pick the building → place it.
+
+    Shared by the single-shot build handler (`_handle_build`) and the tool-loop
+    build composite (`claude.ClaudeProvider._execute_build`) so the steps live in
+    exactly one place.
+    """
+    place_x, place_y = placement
+    return [
+        {"type": "press", "key": ".", "intent": f"Select idle villager ({intent})"},
+        {"type": "press", "key": "q", "intent": "Open economic build menu"},
+        {"type": "press", "key": building_key, "intent": f"Select building ({intent})"},
+        {"type": "click", "x": place_x, "y": place_y, "intent": f"Place building ({intent})"},
+    ]
+
+
 async def _handle_click(action_dict: dict[str, object], intent: str) -> ActionResult:
     fail_detail, coords = _resolve_coords(action_dict)
     if coords is None:
@@ -412,6 +431,23 @@ async def _handle_wait(action_dict: dict[str, object], intent: str) -> ActionRes
     return ActionResult(True, "ok")
 
 
+async def _handle_build(action_dict: dict[str, object], intent: str) -> ActionResult:
+    """Build a structure, auto-placed near the Town Center (coordinate-free).
+
+    Runs the shared `build_steps` sequence so the fast single-shot path can build
+    too — the executor picks placement since the text-only model can't see open
+    ground. The "place" intent triggers `_handle_click`'s blocked-terrain retry.
+    """
+    key = action_dict.get("building_key")
+    if not isinstance(key, str) or not key:
+        return ActionResult(False, "build: missing building_key")
+    for step in build_steps(key, intent, default_build_placement()):
+        result = await execute_action(step)
+        if not result.success:
+            return ActionResult(False, f"build failed at: {step.get('intent', '')}")
+    return ActionResult(True, f"built ({intent})")
+
+
 # Dispatch table: action type -> handler
 _ACTION_HANDLERS: dict[
     str,
@@ -420,6 +456,7 @@ _ACTION_HANDLERS: dict[
     "click": _handle_click,
     "right_click": _handle_right_click,
     "press": _handle_press,
+    "build": _handle_build,
     "drag": _handle_drag,
     "scroll": _handle_scroll,
     "detect": _handle_detect,
