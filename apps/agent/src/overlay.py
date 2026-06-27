@@ -47,6 +47,13 @@ _BUILDING_CLASSES = {
 }
 _DEFENSE_CLASSES = {"gate", "wall", "tower", "wonder", "krepost"}
 
+# Resource-bar OCR reading regions use a distinct color so they never read as an
+# entity box (entity boxes use the category colors above).
+_OCR_FIELD_COLOR = "#FFD700"  # gold
+
+# Shared label font for all overlay text (entity + OCR-field labels).
+_LABEL_FONT = ("Consolas", 9)
+
 
 def _get_color(class_name: str) -> str:
     """Get tkinter-compatible hex color for a class name."""
@@ -87,6 +94,10 @@ class DetectionOverlay:
         # Start hidden until first show() call
         self._root.withdraw()
         self._visible = False
+
+        # Resource-bar OCR reading regions (name -> screenshot-relative x0,y0,x1,y1).
+        # Stored as state so they persist across the mid-turn rescan show() calls.
+        self._ocr_fields: dict[str, tuple[int, int, int, int]] = {}
 
         # Apply Windows click-through transparency
         self._root.update_idletasks()
@@ -134,6 +145,33 @@ class DetectionOverlay:
             self._root.update_idletasks()
             self._visible = False
 
+    def set_ocr_fields(self, fields: dict[str, tuple[int, int, int, int]]) -> None:
+        """Set the resource-bar OCR reading regions to draw (screenshot-relative).
+
+        Stored as state and redrawn on every ``show()`` so the boxes survive the
+        mid-turn rescans (which call ``show()`` without a calibration). Pass an
+        empty dict to clear them.
+        """
+        self._ocr_fields = fields
+
+    def _draw_labeled_box(
+        self, box: tuple[float, float, float, float], color: str, label: str
+    ) -> None:
+        """Draw an outlined box with a filled label tab above its top-left corner.
+
+        Shared by the entity boxes and the OCR field boxes so the box/label drawing
+        geometry lives in exactly one place.
+        """
+        x0, y0, x1, y1 = box
+        self._canvas.create_rectangle(x0, y0, x1, y1, outline=color, width=2)
+        # Filled tab behind the label for legibility, then the label text on top.
+        self._canvas.create_rectangle(
+            x0, y0 - 16, x0 + len(label) * 7, y0 - 1, fill=color, outline=color
+        )
+        self._canvas.create_text(
+            x0 + 2, y0 - 9, text=label, fill="white", anchor="w", font=_LABEL_FONT
+        )
+
     def show(
         self,
         entities: Sequence[DetectedEntity],
@@ -158,38 +196,14 @@ class DetectionOverlay:
 
         # Draw each entity
         for entity in entities:
-            x1, y1, x2, y2 = entity.bbox
-            color = _get_color(entity.class_name)
-
-            # Bounding box
-            self._canvas.create_rectangle(
-                x1,
-                y1,
-                x2,
-                y2,
-                outline=color,
-                width=2,
-            )
-
-            # Label text
             label = f"{entity.class_name} {entity.confidence:.0%}"
-            # Text background (small filled rect behind text)
-            self._canvas.create_rectangle(
-                x1,
-                y1 - 16,
-                x1 + len(label) * 7,
-                y1 - 1,
-                fill=color,
-                outline=color,
-            )
-            self._canvas.create_text(
-                x1 + 2,
-                y1 - 9,
-                text=label,
-                fill="white",
-                anchor="w",
-                font=("Consolas", 9),
-            )
+            self._draw_labeled_box(entity.bbox, _get_color(entity.class_name), label)
+
+        # Resource-bar OCR reading regions (debug) — distinct color, name-labeled,
+        # drawn on top of entity boxes. Coordinates are screenshot-relative (the same
+        # space as entity bboxes), so no translation is needed.
+        for name, rect in self._ocr_fields.items():
+            self._draw_labeled_box(rect, _OCR_FIELD_COLOR, name)
 
         # Show overlay
         if not self._visible:

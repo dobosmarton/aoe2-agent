@@ -252,9 +252,12 @@ async def game_loop(
             # resources current is what makes the housed/pop/resource signals
             # accurate for the alarm check, strategist, and executor — so e.g. the
             # build-house path triggers the turn the agent actually gets housed.
-            hud_readings = await read_hud_readings(screenshot)
+            hud_readings, calib = await read_hud_readings(screenshot)
             if hud_readings:
                 goal_manager.update_resource_readings(hud_readings, memory)
+            # Show the OCR reading regions on the debug overlay (--overlay only).
+            if overlay is not None and calib is not None:
+                overlay.set_ocr_fields(calib.field_rects())
 
             detected_entities = []
             if detector:
@@ -264,8 +267,10 @@ async def game_loop(
                     iteration,
                     alarm,
                 )
-                if overlay and detected_entities:
-                    overlay.show(detected_entities, get_game_window_rect())
+            # Render every turn the overlay is enabled (even with no detections) so
+            # the resource-bar OCR boxes stay visible.
+            if overlay is not None:
+                overlay.show(detected_entities, get_game_window_rect())
 
             entity_summary, _ownership = _classify_entities(detected_entities, screenshot)
 

@@ -16,6 +16,7 @@ from ..goals import Goal
 from ..memory import GameState
 from ..resource_ocr import (
     Backend,
+    Calibration,
     autodetect_calibration,
     calibration_for,
     read_resource_bar,
@@ -63,15 +64,17 @@ def _clean_readings(ocr: dict) -> dict:
     return readings
 
 
-async def read_hud_readings(screenshot_bytes: bytes) -> dict:
+async def read_hud_readings(screenshot_bytes: bytes) -> tuple[dict, Calibration | None]:
     """Read resources/population/age off the resource bar via local OCR.
 
     Resolution precedence: a hand-tuned ``calibration.<W>x<H>.yaml`` wins; else
-    auto-detect the bar from this frame. Returns cleaned readings (``{}`` when the
-    bar can't be localized). No image is sent to any model. Called per-turn by the
-    game loop to keep ``game_state`` fresh, and by the strategist for its prompt.
-    A bad/undecodable frame returns ``{}`` rather than raising, so one bad capture
-    can never kill the game loop (the caller keeps last-known state).
+    auto-detect the bar from this frame. Returns ``(readings, calibration)`` — the
+    cleaned readings plus the calibration actually used, so callers can also draw
+    the reading regions (the debug overlay). Both are empty/``None`` when the bar
+    can't be localized. No image is sent to any model. Called per-turn by the game
+    loop to keep ``game_state`` fresh, and by the strategist for its prompt. A
+    bad/undecodable frame returns ``({}, None)`` rather than raising, so one bad
+    capture can never kill the game loop (the caller keeps last-known state).
     """
     try:
         with Image.open(io.BytesIO(screenshot_bytes)) as im:
@@ -84,7 +87,7 @@ async def read_hud_readings(screenshot_bytes: bytes) -> dict:
                 log.info("ocr_autodetect", width=width, height=height, fields=sorted(calib.fields))
         if calib is None:
             log.error("ocr_no_calibration_autodetect_failed", width=width, height=height)
-            return {}
+            return {}, None
         # OCR is sync/CPU-bound — run off the event loop.
         ocr = await asyncio.to_thread(
             read_resource_bar,
@@ -94,10 +97,10 @@ async def read_hud_readings(screenshot_bytes: bytes) -> dict:
         )
         readings = _clean_readings(ocr)
         log.info("ocr_readings", **readings)
-        return readings
+        return readings, calib
     except Exception as e:  # a bad frame must not crash the loop — keep last-known
         log.warning("hud_read_failed", error=str(e))
-        return {}
+        return {}, None
 
 
 def get_default_goals(turn: int = 0) -> list[Goal]:
@@ -219,7 +222,10 @@ class StrategistProvider:
         # 1. Perception — resources/population/age from the resource bar via local
         #    OCR; no screenshot is sent to the model. game_state is the fallback
         #    (the game loop keeps it fresh every turn with the same OCR).
-        readings: dict = await read_hud_readings(screenshot_bytes) if screenshot_bytes else {}
+        # Strategist only needs the numbers; the calibration is for the overlay.
+        readings, _calib = (
+            await read_hud_readings(screenshot_bytes) if screenshot_bytes else ({}, None)
+        )
 
         # 2. Reasoning — text-only prompt populated with the locally-read state
         #    (falls back to last-known game_state when a field wasn't read).

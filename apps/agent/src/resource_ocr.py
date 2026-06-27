@@ -111,6 +111,14 @@ class Calibration:
     fields: dict[str, FieldBox]
     template_dir: Path
 
+    def field_rects(self) -> dict[str, tuple[int, int, int, int]]:
+        """Per-field ``(x0, y0, x1, y1)`` rectangles in screenshot pixels.
+
+        A plain-tuple view of ``fields`` so callers (e.g. the debug overlay) can
+        draw the reading regions without importing ``FieldBox``.
+        """
+        return {name: (box.x0, box.y0, box.x1, box.y1) for name, box in self.fields.items()}
+
     @classmethod
     def from_yaml(cls, path: str | Path) -> Calibration:
         import yaml

@@ -177,6 +177,18 @@ def test_build_fields_empty_when_nothing_detected():
     assert _build_fields_single_frame({}, None, None, frame_w=3024, pad=4) == {}
 
 
+def test_calibration_field_rects_returns_plain_tuples():
+    """field_rects() exposes each FieldBox as a plain (x0,y0,x1,y1) tuple so the
+    overlay can draw the reading regions without importing FieldBox."""
+    calib = Calibration(
+        width=1200,
+        height=60,
+        fields={"food": FieldBox(10, 20, 30, 40), "wood": FieldBox(50, 20, 70, 40)},
+        template_dir=Path("/nonexistent"),
+    )
+    assert calib.field_rects() == {"food": (10, 20, 30, 40), "wood": (50, 20, 70, 40)}
+
+
 # ---------------------------------------------------------------------------
 # Strategist calibration precedence (no LLM, no network, no OCR engine)
 # ---------------------------------------------------------------------------
@@ -210,18 +222,20 @@ def test_read_hud_readings_precedence(monkeypatch):
     monkeypatch.setattr(
         strat_mod, "calibration_for", lambda w, h: SimpleNamespace(fields={"food": None})
     )
-    out = asyncio.run(strat_mod.read_hud_readings(png))
+    out, calib = asyncio.run(strat_mod.read_hud_readings(png))
     assert out["food"] == 200 and out["population"] == "4/5"
+    assert calib is not None  # the calibration is returned (for the overlay)
     assert calls["auto"] == 0 and calls["read"] == 1
 
     # No hand YAML → auto-detect runs (first call returns a calib) and we read.
     monkeypatch.setattr(strat_mod, "calibration_for", lambda w, h: None)
-    out = asyncio.run(strat_mod.read_hud_readings(png))
+    out, _calib = asyncio.run(strat_mod.read_hud_readings(png))
     assert out["wood"] == 200 and calls["auto"] == 1
 
     # Auto-detect now fails to localize → {} and read_resource_bar NOT called.
     reads_before = calls["read"]
-    assert asyncio.run(strat_mod.read_hud_readings(png)) == {}
+    out, calib = asyncio.run(strat_mod.read_hud_readings(png))
+    assert out == {} and calib is None
     assert calls["read"] == reads_before
 
 
