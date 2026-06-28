@@ -33,6 +33,7 @@ class _TrainYoloArgs(argparse.Namespace):
     imgsz: int
     device: int
     workers: int
+    cache: str
     patience: int
     project: str
     name: str
@@ -72,6 +73,14 @@ def main() -> int:
     parser.add_argument("--device", type=int, default=0, help="GPU device ID (default: 0)")
     parser.add_argument(
         "--workers", type=int, default=8, help="Number of data loader workers (default: 8)"
+    )
+    parser.add_argument(
+        "--cache",
+        choices=["ram", "disk", "none"],
+        default="none",
+        help="Cache images after epoch 1 for faster epochs: 'ram' (~14GB for the v8 set), "
+        "'disk' (no RAM pressure), or 'none' (default). Pure I/O speedup — augmentation still "
+        "runs fresh each epoch, so model quality is unaffected.",
     )
     parser.add_argument(
         "--patience", type=int, default=20, help="Early stopping patience (default: 20)"
@@ -156,6 +165,10 @@ def main() -> int:
     if loss_gains:
         print(f"Loss-gain overrides: {loss_gains}")
 
+    # cache=ram/disk skips disk decode on epochs after the first; "none" -> False (no
+    # caching). Augmentation still runs per-epoch, so this is a pure speedup.
+    cache: str | bool = args.cache if args.cache != "none" else False
+
     # Train with optimized hyperparameters for AoE2
     model.train(
         data=str(data_path),
@@ -164,6 +177,7 @@ def main() -> int:
         batch=args.batch,
         device=args.device,
         workers=args.workers,
+        cache=cache,
         patience=args.patience,
         **loss_gains,
         # Augmentation settings optimized for isometric game graphics
