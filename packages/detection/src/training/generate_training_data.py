@@ -37,6 +37,12 @@ from detection.labeling.class_mapping import (  # pyright: ignore[reportMissingI
     load_classes_yaml,
 )
 
+# Correct extracted-sprite set, at the repo root (gitignored). Absolute so it
+# resolves regardless of CWD or the package-dir anchoring in main() (script_dir).
+# The old default ("tmp/sprites", anchored to packages/detection/src) silently
+# pointed at a stale/mislabeled set — the cause of the v8 synthetic corruption.
+_DEFAULT_SPRITES_DIR = Path(__file__).resolve().parents[4] / "tmp" / "sprites_v6"
+
 
 @dataclass(frozen=True, slots=True)
 class SpriteConfig:
@@ -1463,8 +1469,10 @@ def main() -> int:
     parser.add_argument(
         "--sprites",
         "-s",
-        default="tmp/sprites",
-        help="Directory containing extracted sprites (default: tmp/sprites)",
+        default=str(_DEFAULT_SPRITES_DIR),
+        help=f"Directory containing extracted sprites (default: {_DEFAULT_SPRITES_DIR}). "
+        "An absolute path bypasses the package-dir anchoring; a relative path is "
+        "resolved against packages/detection/src.",
     )
     parser.add_argument(
         "--backgrounds",
@@ -1528,7 +1536,9 @@ def main() -> int:
     args = parser.parse_args(namespace=_GenerateTrainingDataArgs())
 
     # Resolve paths relative to script location
-    script_dir = Path(__file__).parent.parent  # agent/
+    script_dir = Path(
+        __file__
+    ).parent.parent  # packages/detection/src/ (relative paths anchor here)
     sprites_dir = script_dir / args.sprites
     output_dir = script_dir / args.output
     backgrounds_dir = Path(args.backgrounds) if args.backgrounds else None
