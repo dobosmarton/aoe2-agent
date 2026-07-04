@@ -1,0 +1,41 @@
+name: food_emergency_mill_exists_farms_only
+description: |
+  Food crisis WITH a Mill already standing: no sheep, no berry_bush, food=26,
+  and a `mill` is in the Detected Entities list. Per dark.md "One Mill is
+  enough" rule, the agent must read the entity list, recognise the existing
+  drop-off, and build farms ONLY (building_key=a) — never a second Mill
+  (building_key=w).
+
+  Regression guard for run 2026_07_04_1, where the food-emergency template
+  re-led with a fresh Mill every turn (7 Mills, ~700 wood wasted) because the
+  agent never keyed off the detected Mill. Sibling of
+  food_emergency_no_sheep_no_berries.yaml (the no-Mill-yet case).
+
+inputs:
+  age: Dark Age
+  resources:
+    food: 26
+    wood: 350
+    gold: 100
+    stone: 200
+    population: "14/20"
+  detected_entities:
+    - {class: town_center,  x: 1500, y: 800, confidence: 0.95}
+    - {class: mill,         x: 1180, y: 720, confidence: 0.91}
+    - {class: farm,         x: 1250, y: 760, confidence: 0.88}
+    - {class: villager,     x: 1450, y: 850, confidence: 0.88}
+    - {class: villager,     x: 1500, y: 870, confidence: 0.92}
+    - {class: villager,     x: 1480, y: 860, confidence: 0.90}
+    - {class: lumber_camp,  x: 1000, y: 700, confidence: 0.89}
+  goals:
+    - {name: "Build Mill + farms", type: local, metric: food, target: 200, priority: 10}
+  memories: []
+  recent_turns: []
+
+screenshot: null
+
+expected:
+  count_at_least:
+    - {type: build, building_key: a, n: 1}    # at least 1 farm this turn
+  count_at_most:
+    - {type: build, building_key: w, n: 0}    # NO second Mill — one is enough

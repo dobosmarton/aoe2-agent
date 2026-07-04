@@ -77,7 +77,7 @@ Screenshot → YOLO Detection (60 classes) + resource-bar OCR → Entity + Resou
 | `gameplay_agent/screen.py` | Screenshot capture via mss |
 | `gameplay_agent/window.py` | AoE2 window detection and focus |
 | `prompts/system.md` | System prompt with game rules, hotkeys, output format |
-| `detection/inference/detector.py` | YOLO11n entity detection (60 classes, 92.2% mAP50, v5 model) |
+| `detection/inference/detector.py` | YOLO26n entity detection (60 classes; current served model v9, real F1 ≈ 0.67 single-pass @1280 — the metric of record, not synthetic mAP) |
 
 ### Data Flow Per Turn
 

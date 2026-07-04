@@ -10,7 +10,7 @@ The agent's output is a list of actions that must be validated, resolved to scre
 
 ## 3.1 Action Types
 
-The agent has **seven base action types** (Pydantic-validated in `apps/agent/src/models.py`) and **three composite tools** (defined in `apps/agent/src/providers/claude.py`) that bundle multi-step sequences to eliminate API roundtrips.
+The agent has **eight base action types** (Pydantic-validated in `apps/agent/src/models.py`) and **two composite tools** (defined in `apps/agent/src/providers/claude.py`) that bundle multi-step sequences to eliminate API roundtrips.
 
 ### Base Actions
 
@@ -65,10 +65,10 @@ Mouse drag with start and end coordinates. Used for box-selecting units:
 ```python
 class DragAction(BaseModel):
     type: Literal["drag"]
-    x1: int = Field(ge=0, le=7680)
-    y1: int = Field(ge=0, le=4320)
-    x2: int = Field(ge=0, le=7680)
-    y2: int = Field(ge=0, le=4320)
+    start_x: int = Field(ge=0, le=7680)
+    start_y: int = Field(ge=0, le=4320)
+    end_x: int = Field(ge=0, le=7680)
+    end_y: int = Field(ge=0, le=4320)
 ```
 
 ### WaitAction
@@ -103,10 +103,24 @@ class DetectAction(BaseModel):
     intent: str = ""
 ```
 
+### BuildAction
+
+Build a structure, **coordinate-free**: the model supplies only the building hotkey, and the executor auto-places near the Town Center (the text-only model can't see open ground). Available on **both** the fast single-shot path and the tool loop:
+
+```python
+class BuildAction(BaseModel):
+    type: Literal["build"]
+    building_key: str = Field(min_length=1, max_length=2,
+                              description="q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm")
+    intent: str = ""
+```
+
+The executor's `_handle_build` expands this into the same press/click sequence as the tool-loop composite via the shared `build_steps()` helper, choosing placement with `default_build_placement()` (detected Town Center, else window center, with blocked-terrain retry).
+
 ### Union Type
 
 ```python
-Action = ClickAction | RightClickAction | PressAction | DragAction | WaitAction | ScrollAction | DetectAction
+Action = ClickAction | RightClickAction | PressAction | BuildAction | DragAction | WaitAction | ScrollAction | DetectAction
 ```
 
 ### LLMResponse
@@ -124,9 +138,7 @@ Field order matters: `actions` first ensures structured output generates them be
 
 ### Composite Tools
 
-Composite tools execute multi-step hotkey sequences locally without intermediate API roundtrips. They are defined as Claude tool_use tools in `_ACTION_TOOLS` and handled by dedicated methods in `ClaudeProvider`. Each composite calls `_run_steps()` which executes sub-actions sequentially via `execute_action()`, stopping on the first failure.
-
-**`build(building_key, x, y)`** — Select idle villager → open economic build menu → press building_key → click placement. Building keys: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm. Saves 3 API roundtrips (~9s) per building.
+Composite tools execute multi-step hotkey sequences locally without intermediate API roundtrips. They are defined as Claude tool_use tools in `_ACTION_TOOLS` and handled by dedicated methods in `ClaudeProvider`. Each composite calls `_run_steps()` which executes sub-actions sequentially via `execute_action()`, stopping on the first failure. (`build` used to be a composite tool but is now a first-class base action — see above — so routine single-shot turns can build directly; the tool loop still exposes a `build` tool that runs the same shared `build_steps()` sequence.)
 
 **`send_villager(target_class or x, y)`** — Select idle villager → right_click target. Accepts `target_class` (e.g. "sheep", "tree") or raw coordinates. Saves 1 roundtrip (~3s).
 
@@ -242,6 +254,7 @@ _ACTION_HANDLERS: dict[str, Callable] = {
     "click": _handle_click,
     "right_click": _handle_right_click,
     "press": _handle_press,
+    "build": _handle_build,
     "drag": _handle_drag,
     "scroll": _handle_scroll,
     "detect": _handle_detect,
@@ -264,6 +277,7 @@ Each handler dispatches to pyautogui:
 | `click` | `pyautogui.click(x, y)` | With building placement retry logic |
 | `right_click` | `pyautogui.rightClick(x, y)` | After coordinate translation |
 | `press` | `pyautogui.press(key)` or `pyautogui.hotkey(*modifiers, key)` | Supports modifiers; optional rescan after |
+| `build` | `build_steps()` → press `.` + `q` + building_key + `click` | Coordinate-free; auto-places near the TC with retry |
 | `drag` | `pyautogui.moveTo()` + `pyautogui.drag()` | 200ms drag duration |
 | `scroll` | `pyautogui.scroll(clicks)` | Optional x, y position |
 | `detect` | Calls `_rescan_full_fn()` | Full SAHI detection scan |
@@ -296,8 +310,8 @@ All coordinate fields enforce bounds: `ge=0, le=7680` for x, `ge=0, le=4320` for
 
 ## Summary
 
-- 7 base action types with Pydantic validation: click, right_click, press, drag, wait, scroll, detect
-- 3 composite tools: build, send_villager, queue_villager — bundle multi-step sequences to eliminate API roundtrips
+- 8 base action types with Pydantic validation: click, right_click, press, build, drag, wait, scroll, detect — `build` is coordinate-free (executor auto-places near the TC) and works on both the single-shot path and the tool loop
+- 2 composite tools: send_villager, queue_villager — bundle multi-step sequences to eliminate API roundtrips
 - `PointTargetAction` base class for shared triple-targeting logic (coordinates, target_id, target_class)
 - Unified `_resolve_coords()` resolver tries target_id → target_class → (x, y)
 - `_ACTION_HANDLERS` dispatch pattern maps base action types to async handler functions

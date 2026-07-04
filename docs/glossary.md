@@ -78,7 +78,7 @@ Entries are organized alphabetically. Most are followed by a short link of the f
 
 ## S
 
-- **SAHI (Slicing Aided Hyper Inference)** — A technique for detecting small objects in large images by tiling the input, running the detector on each tile, and stitching results. Implemented (including an *adaptive* variant that only tiles likely regions) but **disabled in v6** (`adaptive_sahi=False`): tiling a retina screenshot into 640 crops shows the model objects ~2.4× larger than its training scale, which *lowers* real F1, so the agent runs a single pass at `imgsz=640` instead. → [Chapter 7 §7.4](./part3-entity-detection/07-detector-architecture.md).
+- **SAHI (Slicing Aided Hyper Inference)** — A technique for detecting small objects in large images by tiling the input, running the detector on each tile, and stitching results. Implemented (including an *adaptive* variant that only tiles likely regions) but **disabled** (`adaptive_sahi=False`): tiling a retina screenshot into 640 crops shows the model objects ~2.4× larger than its training scale, which *lowers* real F1, so the agent runs a single pass at `imgsz=1280` (v9's training resolution) instead. → [Chapter 7 §7.4](./part3-entity-detection/07-detector-architecture.md).
 - **SSE (Server-Sent Events)** — A one-way HTTP streaming protocol where the server pushes `text/event-stream` chunks to the client. Simpler than WebSocket for fan-out telemetry. → [Chapter 19 — SSE callout](./part7-arena-web/19-web-architecture.md).
 - **Structured output** — Constraining an LLM to emit a parseable, schema-validated response (typically JSON). → [Chapter 5 — Structured output callout](./part2-llm-integration/05-prompt-engineering.md).
 

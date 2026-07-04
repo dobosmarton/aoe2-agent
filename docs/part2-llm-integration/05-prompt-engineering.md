@@ -17,10 +17,10 @@ The prompt is organized into major sections:
 | Your Capabilities | What the agent can do (detect, click, remember, target, rescan) |
 | Active Goals | How to follow strategist-provided goals by priority |
 | EVERY TURN Checklist | 11-point priority checklist (idle villagers, housing, food, etc.) |
-| Multi-Task Actions | Recipes using composite tools (build, send_villager, queue_villager) |
+| Multi-Task Actions | Recipes using the `build` action + composite tools (send_villager, queue_villager) |
 | Smart Targeting | rescan, target_class, fallback patterns, modifiers |
 | Handling Failed Actions | How to react to action failures |
-| Action Types | 7 base + 3 composite tool types |
+| Action Types | 8 base + 2 composite tool types |
 | Hotkeys | Full AoE2 hotkey reference (appended from hotkeys.md) |
 | Building Placement | Placement rules and constraints |
 | Action Limits | 3-7 actions per turn |
@@ -29,15 +29,15 @@ The prompt is organized into major sections:
 
 Camera-moving hotkeys (H, .) invalidate all screen coordinates. The prompt teaches the LLM to use `rescan: true` on press actions for these keys, which triggers a fresh screenshot + detection cycle. After rescan, entity coordinates are updated in the detection cache, and the LLM receives fresh entity positions in the tool result.
 
-Composite tools handle this automatically — for example, `build` executes the full press-click sequence without intermediate rescans since the placement coordinates are pre-determined.
+Composite tools (and the `build` action) handle this automatically — for example, `build` executes the full press-click sequence without intermediate rescans, with placement auto-derived near the Town Center.
 
 ## 5.3 Composite Tool Patterns
 
 The prompt defines recipes using composite tools for common operations:
 
-**Build a house (1 tool call):**
+**Build a house (coordinate-free — the executor auto-places near the TC):**
 ```json
-{"type": "build", "building_key": "q", "x": 1500, "y": 800, "intent": "Build house"}
+{"type": "build", "building_key": "q", "intent": "Build house"}
 ```
 
 **Queue a villager (1 tool call):**
@@ -50,7 +50,7 @@ The prompt defines recipes using composite tools for common operations:
 {"type": "send_villager", "target_class": "sheep", "intent": "Send villager to gather sheep"}
 ```
 
-These composite tools replaced the old multi-turn patterns where operations had to be split across turns due to camera movement. The composites execute the full sequence internally without intermediate API roundtrips.
+These actions replaced the old multi-turn patterns where operations had to be split across turns due to camera movement. They execute the full sequence internally without intermediate API roundtrips — and `build` is now a first-class action, so it works on the fast single-shot path too, not only the tool loop.
 
 ## 5.4 Entity Targeting
 
@@ -172,7 +172,7 @@ The `cache_control` markers are set in `providers/claude.py`: two on the system 
 ## Summary
 
 - ~320-line system prompt + ~113-line hotkey reference teaching game mechanics, composite tools, and strategic priorities
-- Composite tools (build, send_villager, queue_villager) collapse multi-step sequences into single tool calls
+- `build` is a first-class coordinate-free action; composite tools (send_villager, queue_villager) collapse multi-step sequences into single tool calls
 - 11-point EVERY TURN checklist drives prioritized decision-making
 - Rescan mechanism handles coordinate freshness after camera-moving keys
 - 3-7 actions per turn with multi-task turns encouraged

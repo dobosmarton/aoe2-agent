@@ -19,7 +19,7 @@ Every iteration executes the same pipeline. Steps marked **conditional** only ru
 | 1 | Game running check | ~5 ms | `window.py:is_game_running()` | Every turn |
 | 2 | Ensure game focus | ~50 ms | `window.py:ensure_game_focused()` | Every turn |
 | 3 | Screenshot capture | ~20 ms | `screen.py:capture_screenshot()` via mss | Every turn |
-| 4 | YOLO detection (single-pass @640) | one forward pass | `detector.detect_fast()` (`adaptive_sahi=False`) | Every turn — the deployed path |
+| 4 | YOLO detection (single-pass @1280) | one forward pass | `detector.detect_fast()` (`adaptive_sahi=False`) | Every turn — the deployed path |
 | 5 | Entity ownership classification | ~5 ms | `packages/detection/src/inference/ownership.py` | Every turn (if entities detected) |
 | 6 | Alarm check | ~10 ms | `goals.py:check_alarm()` | Every turn (if entities detected) |
 | 7 | Strategist API call (Sonnet, text — resources via local OCR) | ~5000 ms | `providers/strategist.py` | Turn 1, every 10th turn, on alarm (3-turn cooldown) |
@@ -30,9 +30,9 @@ Every iteration executes the same pipeline. Steps marked **conditional** only ru
 | 12 | Action execution (3–5 actions) | ~250 ms | `executor.py` at 50 ms/action | Every turn (or fallback) |
 | 13 | Loop delay (sleep) | 1000 ms | `config.loop_delay = 1.0` | Every turn |
 
-**Config defaults** (from `config.py`): `loop_delay=0.3` (the tables below use the pre-optimization `1.0` baseline — see the note above), `strategist_interval=10`, `detection_imgsz=640`, `adaptive_sahi=False`, `full_sahi_interval=5` (only consulted when `adaptive_sahi=True`), `action_delay=0.05`, `max_tool_iterations=7`, `executor_effort="low"`.
+**Config defaults** (from `config.py`): `loop_delay=0.3` (the tables below use the pre-optimization `1.0` baseline — see the note above), `strategist_interval=10`, `detection_imgsz=1280`, `adaptive_sahi=False`, `full_sahi_interval=5` (only consulted when `adaptive_sahi=True`), `action_delay=0.05`, `max_tool_iterations=7`, `executor_effort="low"`.
 
-> **Detection mode (v6).** The agent now runs a **single forward pass at `imgsz=640`** on every turn (`adaptive_sahi=False`) — SAHI lowers real F1 at retina resolution (see [Chapter 7 §7.4](../part3-entity-detection/07-detector-architecture.md)). The per-round "full/adaptive SAHI" distinctions and the millisecond detection figures in the timelines below are **illustrative/historical** from the pre-v6 design; treat detection as one constant single-pass cost per turn regardless of round.
+> **Detection mode (v9).** The agent now runs a **single forward pass at `imgsz=1280`** on every turn (`adaptive_sahi=False`) — the deployed v9 model is trained at 1280, and SAHI lowers real F1 at retina resolution (see [Chapter 7 §7.4](../part3-entity-detection/07-detector-architecture.md)). The per-round "full/adaptive SAHI" distinctions and the millisecond detection figures in the timelines below are **illustrative/historical** from the pre-v6 design; treat detection as one constant single-pass cost per turn regardless of round (the 1280 pass is somewhat heavier than the old 640 figures shown).
 
 ---
 
@@ -40,13 +40,13 @@ Every iteration executes the same pipeline. Steps marked **conditional** only ru
 
 | Round | Strategist? | Detection Mode | Ground Cmds? | Notes |
 |-------|-------------|----------------|--------------|-------|
-| 1 | Yes | Single-pass @640 | Yes | Heaviest round — first strategist + zoom/scout |
-| 2 | No | Single-pass @640 | No | Normal |
-| 3 | No | Single-pass @640 | No | Normal |
-| 4 | No | Single-pass @640 | No | Normal |
-| 5 | No | Single-pass @640 | No | Normal (no SAHI; `full_sahi_interval` only applies when `adaptive_sahi=True`) |
-| 6 | No | Single-pass @640 | No | Normal |
-| 7 | No | Single-pass @640 | No | Normal |
+| 1 | Yes | Single-pass @1280 | Yes | Heaviest round — first strategist + zoom/scout |
+| 2 | No | Single-pass @1280 | No | Normal |
+| 3 | No | Single-pass @1280 | No | Normal |
+| 4 | No | Single-pass @1280 | No | Normal |
+| 5 | No | Single-pass @1280 | No | Normal (no SAHI; `full_sahi_interval` only applies when `adaptive_sahi=True`) |
+| 6 | No | Single-pass @1280 | No | Normal |
+| 7 | No | Single-pass @1280 | No | Normal |
 
 ---
 
@@ -59,7 +59,7 @@ Every iteration executes the same pipeline. Steps marked **conditional** only ru
 | 1 | Game running check | 5 ms | 5 ms |
 | 2 | Ensure game focus | 50 ms | 55 ms |
 | 3 | Screenshot capture | 20 ms | 75 ms |
-| 4 | YOLO detection (single-pass @640) | 150 ms | 225 ms |
+| 4 | YOLO detection (single-pass @1280) | 150 ms | 225 ms |
 | 5 | Entity ownership classification | 5 ms | 230 ms |
 | 6 | Alarm check | 10 ms | 240 ms |
 | 7 | **Strategist API call** (Sonnet, text — resources via local OCR) | 5000 ms | 5240 ms |
@@ -79,7 +79,7 @@ Every iteration executes the same pipeline. Steps marked **conditional** only ru
 | 1 | Game running check | 5 ms | 5 ms |
 | 2 | Ensure game focus | 50 ms | 55 ms |
 | 3 | Screenshot capture | 20 ms | 75 ms |
-| 4 | YOLO detection (single-pass @640) | 150 ms | 225 ms |
+| 4 | YOLO detection (single-pass @1280) | 150 ms | 225 ms |
 | 5 | Entity ownership classification | 5 ms | 230 ms |
 | 6 | Alarm check | 10 ms | 240 ms |
 | 7 | Strategist — *skipped* | 0 ms | 240 ms |
@@ -101,7 +101,7 @@ Every iteration executes the same pipeline. Steps marked **conditional** only ru
 | 1 | Game running check | 5 ms | 5 ms |
 | 2 | Ensure game focus | 50 ms | 55 ms |
 | 3 | Screenshot capture | 20 ms | 75 ms |
-| 4 | YOLO detection (single-pass @640) | 150 ms | 225 ms |
+| 4 | YOLO detection (single-pass @1280) | 150 ms | 225 ms |
 | 5 | Entity ownership classification | 5 ms | 230 ms |
 | 6 | Alarm check | 10 ms | 240 ms |
 | 7 | Strategist — *skipped* | 0 ms | 240 ms |
@@ -249,6 +249,6 @@ Round 5                                                                         
 Round 6                                                                                                                                [DET][EXEC][ACT][SLP]
 Round 7                                                                                                                                                     [DET][EXEC][ACT][SLP]
 
-Legend: DET = detection (single-pass @640, every turn)  EXEC = executor API  ACT = action execution  SLP = sleep
+Legend: DET = detection (single-pass @1280, every turn)  EXEC = executor API  ACT = action execution  SLP = sleep
         STRATEGIST = Sonnet API call (text — resources via local OCR; only round 1 in a 7-round run)
 ```

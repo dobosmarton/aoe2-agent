@@ -7,8 +7,8 @@ Your only goal in Dark Age is to grow your economy as fast as possible. No milit
 **Plant farms BEFORE the food crisis, not after.** Farms take ~60 s to start producing — if you wait until food < 50, the crisis is already locked in.
 
 **As soon as you have 100 wood AND 4+ villagers gathering food:**
-1. Build a Mill (`build` with `building_key="w"`) next to a berry bush.
-2. Plant 3 farms (`build` × 3 with `building_key="a"`) adjacent to Mill or TC.
+1. If NO `mill` is in the Detected Entities list, build ONE Mill (`build` with `building_key="w"`) next to a berry bush. If a `mill` is already detected, skip this — one Mill is all you ever need.
+2. Plant 3 farms (`build` × 3 with `building_key="a"`) adjacent to the Mill or TC.
 
 By turn 5–8, NOT turn 15+. Sheep deplete around turn 10–12; the farm pipeline must already be running. (Past games dropped below 50 food for 12 of the first 20 turns because farms came too late.)
 
@@ -28,7 +28,13 @@ By turn 5–8, NOT turn 15+. Sheep deplete around turn 10–12; the farm pipelin
 
 **Feudal Age transition:** see the **Age-up Gate** in core.md. Two notes specific to Dark Age: (a) qualifying prereq buildings are Lumber Camp, Mill, Mining Camp, Barracks, or Dock — Mill + Lumber Camp is the easiest path; (b) wait for the TC queue to drain before pressing Z (each queued villager delays the research by 25 s).
 
-**Mill + Farms emergency:** NO sheep AND no berry_bush in entity list AND food < 100? → P10 EMERGENCY. Drop everything else, build Mill + 3 farms this turn (template below). Do NOT keep sending villagers to wood when food is the bottleneck.
+**Mill + Farms emergency:** NO sheep AND no berry_bush in entity list AND food < 100? → P10 EMERGENCY. Drop everything else and get farms running this turn (template below). Do NOT keep sending villagers to wood when food is the bottleneck.
+
+**One Mill is enough — decide from the Detected Entities list, never from habit:**
+- **`mill` IS in the Detected Entities list** → you already have your food drop-off. Do NOT build another Mill. Build **farms only** (`building_key="a"`), one per idle food villager, placed adjacent to that Mill or the TC.
+- **NO `mill` in the Detected Entities list** → build exactly ONE Mill (`building_key="w"`) this turn, then farms around it.
+
+A second Mill wastes 100 wood and fixes nothing — farms, not Mills, are what produce food. If food stays low turn after turn, the answer is *more farms*, not another Mill.
 
 ## Food Economy
 
@@ -64,7 +70,9 @@ In Dark Age, ONLY use the Q build menu (economic: House, Mill, Mining Camp, Lumb
 ]
 ```
 
-**FOOD EMERGENCY — Build Mill + farms** (when NO sheep/berry_bush AND food < 100):
+**FOOD EMERGENCY — pick the template by what you detect** (when NO sheep/berry_bush AND food < 100):
+
+**A) NO `mill` detected yet — build ONE Mill, then farms:**
 ```json
 [
   {"type": "build", "building_key": "w", "x": 1500, "y": 850, "intent": "Build Mill near TC (100 wood)"},
@@ -72,3 +80,13 @@ In Dark Age, ONLY use the Q build menu (economic: House, Mill, Mining Camp, Lumb
   {"type": "build", "building_key": "a", "x": 1450, "y": 900, "intent": "Build another farm (60 wood)"}
 ]
 ```
+
+**B) `mill` ALREADY in Detected Entities — farms ONLY, no second Mill:**
+```json
+[
+  {"type": "build", "building_key": "a", "x": 1550, "y": 900, "intent": "Build farm next to existing Mill (60 wood)"},
+  {"type": "build", "building_key": "a", "x": 1450, "y": 900, "intent": "Build farm next to existing Mill (60 wood)"},
+  {"type": "build", "building_key": "a", "x": 1600, "y": 850, "intent": "Build farm next to existing Mill (60 wood)"}
+]
+```
+Place each farm next to the detected `mill` (or the TC) and spread the coordinates so they don't stack on one tile.

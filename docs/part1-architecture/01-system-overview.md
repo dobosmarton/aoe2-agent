@@ -14,7 +14,7 @@ The agent splits decision-making into two models:
 
 **Strategist (Sonnet)** — Runs every 10 turns (or on alarm). Reads resource values, population, and age from the resource bar **locally via OCR** (`resource_ocr.py`, RapidOCR) — no screenshot is sent to the model; its prompt is text-only. Creates 3-5 prioritized goals and caches resource readings for the executor.
 
-**Executor (Sonnet)** — Runs every turn. Receives only text: YOLO entity list, cached resource readings, active goals, memory context, and game knowledge. Returns structured actions (clicks, key presses) validated as Pydantic models. Routine turns take a fast single-shot call; combat/housing turns take an agentic tool loop (see [Chapter 4 §4.3](../part2-llm-integration/04-provider-pattern.md)).
+**Executor (Sonnet)** — Runs every turn. Receives only text: YOLO entity list, cached resource readings, active goals, memory context, and game knowledge. Returns structured actions (clicks, key presses) validated as Pydantic models. `build` is a **coordinate-free** action — the model picks the building, the executor auto-places it near the Town Center — and a no-actions turn falls back to building a house when housed, so the economy never freezes at the population cap. Routine turns take a fast single-shot call; combat/housing turns take an agentic tool loop (see [Chapter 4 §4.3](../part2-llm-integration/04-provider-pattern.md)).
 
 The split separates concerns: the strategist owns slow, periodic goal-setting; the executor owns rapid, per-turn tactics. Both tiers are text-only — the strategist reads the HUD via local OCR, the executor reads the YOLO entity list. Both run `claude-sonnet-4-6` — the executor was moved from Haiku to Sonnet for more reliable instruction-following — and a per-call `effort` knob (default `low`) keeps the executor fast.
 
@@ -30,7 +30,7 @@ agent/
 │   ├── goals.py               # Goal management, alarm system, reward computation
 │   ├── goal_logger.py         # Goal progress and completion logging
 │   ├── executor.py            # Action execution via pyautogui (dispatch pattern)
-│   ├── models.py              # Pydantic action/response validation (7 action types)
+│   ├── models.py              # Pydantic action/response validation (8 action types)
 │   ├── entity_utils.py        # Entity attribute extraction and summary formatting
 │   ├── screen.py              # Screenshot capture via mss
 │   ├── window.py              # Game window detection and focus management
@@ -108,8 +108,8 @@ Configuration uses a Pydantic `BaseModel` with environment variable overrides (`
 | `strategist_interval` | `AOE2_STRATEGIST_INTERVAL` | `10` | Run strategist every N turns |
 | `max_tokens` | — | `1536` | Max response tokens per executor call |
 | `max_tool_iterations` | — | `7` | Max tool roundtrips per turn (tool-loop path) |
-| `detection_imgsz` | — | `640` | YOLO inference resolution (matches the v6 training resolution) |
-| `adaptive_sahi` | — | `False` | SAHI tiling lowers real F1 at retina resolution; agent runs single-pass @640 |
+| `detection_imgsz` | — | `1280` | YOLO inference resolution (matches v9's training resolution) |
+| `adaptive_sahi` | — | `False` | SAHI tiling lowers real F1 at retina resolution; agent runs single-pass @1280 |
 | `screenshot_quality` | — | `85` | JPEG quality (1-100) |
 | `ocr_backend` | `AOE2_OCR_BACKEND` | `rapidocr` | Resource-bar OCR backend (`rapidocr`/`template`/`tesseract`) |
 | `loop_delay` | `AOE2_LOOP_DELAY` | `0.3` | Seconds between iterations |

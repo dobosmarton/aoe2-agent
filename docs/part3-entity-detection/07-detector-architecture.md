@@ -2,7 +2,7 @@
 
 The entity detection system runs YOLO inference on game screenshots, producing labeled bounding boxes with semantic IDs like `sheep_0` or `town_center_0`. It supports three backends (PyTorch, ONNX, Mock), a 60-class taxonomy, Kalman filter-based object tracking, and (optional, currently disabled) SAHI tiling.
 
-> **What the agent actually runs (v6).** A **single forward pass at `imgsz=640`** — the model's training resolution. `config.detection_imgsz=640` and `config.adaptive_sahi=False`; the per-turn detection in `apps/agent/src/detection_phase.py` builds the detector with `use_sahi=config.adaptive_sahi` and calls `detect_fast`/`detect_fast_multi`. SAHI tiling (§7.4, §7.11) is still implemented but **off by default**, because on real screenshots it *lowers* accuracy (§7.4 — Why single-pass @640). The SAHI sections below document a path the agent keeps for a future model retrained at SAHI-native scale, not the deployed one.
+> **What the agent actually runs (v9).** A **single forward pass at `imgsz=1280`** — the model's training resolution. `config.detection_imgsz=1280` and `config.adaptive_sahi=False`; the per-turn detection in `apps/agent/src/detection_phase.py` builds the detector with `use_sahi=config.adaptive_sahi` and calls `detect_fast`/`detect_fast_multi`. SAHI tiling (§7.4, §7.11) is still implemented but **off by default**, because on real screenshots it *lowers* accuracy (§7.4 — Why single-pass at training res). The SAHI sections below document a path the agent keeps for a future model retrained at SAHI-native scale, not the deployed one.
 
 <aside class="prereqs">
 
@@ -61,13 +61,13 @@ Defined at `packages/detection/src/inference/detector.py`. Key initialization pa
 | `confidence_threshold` | `0.35` | Minimum confidence for detections |
 | `class_names` | loaded from `classes.yaml` | 60-class name list (PyTorch overrides with `model.names`) |
 | `use_mock` | `False` | Use mock detections for testing |
-| `imgsz` | `1280` | Constructor default. The agent overrides it to **`640`** via `config.detection_imgsz` (match training resolution) |
+| `imgsz` | `1280` | Constructor default. The agent runs at **`1280`** via `config.detection_imgsz` — matches v9's training resolution |
 | `use_sahi` | `True` | Constructor default. The agent passes `use_sahi=config.adaptive_sahi`, i.e. **`False`** — single-pass, no tiling |
 | `tracker` | auto-init | Kalman filter tracker for persistent IDs (see §7.9) |
 
 ### Model Loading
 
-The trained artifact is **YOLO26n** (NMS-free), shipped as `aoe2_yolo_v6.onnx` / `aoe2_yolo_v6.pt`. The detector supports two model formats:
+The trained artifact is **YOLO26n** (NMS-free), shipped as `aoe2_yolo_v9.onnx` / `aoe2_yolo_v9.pt`. The detector supports two model formats:
 
 - **PyTorch (.pt)** -- loaded via ultralytics YOLO library. Requires `torch` and `ultralytics` packages. At load time, `_load_pytorch()` reads `model.names` from the model file to set `self.class_names` — this is authoritative and overrides the YAML-loaded defaults.
 - **ONNX (.onnx)** -- loaded via `onnxruntime`. Cross-platform, works on ARM64 Windows where PyTorch may not be available. Uses `DEFAULT_CLASSES` loaded from `classes.yaml`. Session options: `ORT_ENABLE_ALL` graph optimization, 4 intra-op threads, auto-detected execution provider (DML or CPU).
@@ -90,21 +90,23 @@ The detector provides three detection methods:
 
 All three methods apply NMS and persistent ID assignment (Kalman tracker or greedy IoU fallback) before returning results. Exact latency is hardware- and backend-dependent (ONNX on the deploy VM vs. PyTorch on a dev Mac differ by an order of magnitude), so the table ranks the modes rather than pinning millisecond figures. `detect_fast_multi()` adds a center-crop second pass at 640 to recover small objects without paying for full tiling.
 
-## 7.4 Why single-pass @640 (and why SAHI is off)
+## 7.4 Why single-pass at training resolution (and why SAHI is off)
 
 This is the design decision that drives the deployed detection path, so it comes first.
 
-The intuition that bigger inputs detect more is wrong for *this* model. v6 (YOLO26n) was **trained at `imgsz=640`**, and a YOLO model detects best when inference objects appear at the scale it trained on. The agent therefore resizes the whole 3024×1672 screenshot down to 640 and runs **one** forward pass.
+A YOLO model detects best when inference objects appear at the scale it trained on — so inference resolution must match training resolution. The deployed model, **v9 (YOLO26n), was trained at `imgsz=1280`**, so the agent resizes the whole 3024×1672 screenshot down to 1280 and runs **one** forward pass. On held-out **real** screenshots, measured through the deployment path, that scores real micro-F1 ≈ **0.67** (recall 0.665) — see §7.13 for an eval-harness caveat that *under*-reported this number.
 
-We validated this on held-out **real** screenshots with `evaluate_real.py` (per-class precision/recall/F1 by IoU matching — see §7.13). On the real split, the three candidate inference modes ranked:
+The matching rule matters more than any single figure, and the earlier v6/v7 model — **trained at `imgsz=640`** — makes the point from the other direction. Validated on the real split with `evaluate_real.py` (per-class precision/recall/F1 by IoU matching — see §7.13), the three candidate inference modes ranked:
 
-| Inference mode | Real micro-F1 |
+| Inference mode (v6/v7, trained @640) | Real micro-F1 |
 |----------------|---------------|
-| **Single-pass @640** (training resolution) | **≈ 0.42** (P 0.65 / R 0.31) |
-| Single-pass @1280 | ≈ 0.21 |
+| **Single-pass @640** (its training resolution) | **≈ 0.42** (P 0.65 / R 0.31) |
+| Single-pass @1280 (objects too large) | ≈ 0.21 |
 | Full SAHI (3024px → 640 tiles) | ≈ 0.04 |
 
-SAHI is *worse*, not better, and the reason is scale. Tiling a 3024px screenshot into 640 crops shows the model objects at roughly **2.4× the size** they had in training (a 50px sheep becomes ~120px). The model never saw entities that large, so it misses or hallucinates them and real F1 collapses. This is why the agent pins `config.detection_imgsz=640` and `config.adaptive_sahi=False`.
+Push that model *above* its 640 training scale and accuracy falls; tile it with SAHI and it collapses. The lesson transfers directly: v9 is trained at 1280, so **1280 — not 640 — is *its* native scale**, and that is exactly what the agent runs.
+
+SAHI is still off, for the same scale reason. Tiling a 3024px screenshot into 640 crops shows the model objects at roughly **2.4× the size** they had at v9's 1280 training (a sheep that trains as ~21px appears ~50px in a native 640 tile). The model never saw entities that large, so it misses or hallucinates them and real F1 collapses. This is why the agent pins `config.detection_imgsz=1280` and `config.adaptive_sahi=False`.
 
 > **The SAHI code stays — disabled.** The tiling machinery below (§7.4.1, §7.11) is fully implemented and tested. It is the right tool only once the model is retrained at a resolution whose SAHI tiles match the training scale; until then it is off. Treat the SAHI sections as "built, measured, parked," not as the current path.
 
@@ -112,7 +114,7 @@ SAHI is *worse*, not better, and the reason is scale. Tiling a 3024px screenshot
 
 When `use_sahi=True`, images wider than 640px use SAHI (Slicing Aided Hyper Inference):
 
-1. Tiles the screenshot into overlapping **640x640** chunks (model's training resolution)
+1. Tiles the screenshot into overlapping **640x640** chunks (the fixed SAHI tile size — no longer the training resolution since v9 trains at 1280)
 2. Overlap: **64px** (10%) — prevents missing entities at tile boundaries
 3. Runs YOLO on each tile at native resolution
 4. Offsets each tile's detections by `(x_start, y_start)` to get original-image coordinates
@@ -128,7 +130,7 @@ The agent runs this path. For images ≤640px wide, or whenever `use_sahi=False`
 results = self.model(image, conf=self.confidence_threshold, imgsz=self.input_size, verbose=False)
 ```
 
-The `imgsz` parameter (constructor default 1280, set to **640** by the agent via `config.detection_imgsz`) controls inference resolution.
+The `imgsz` parameter (constructor default 1280, which the agent keeps at **1280** via `config.detection_imgsz` — v9's training resolution) controls inference resolution.
 
 ## 7.5 Backend: ONNX
 
@@ -296,11 +298,11 @@ def get_detector(model_path=None, use_mock=False, imgsz=1280) -> EntityDetector:
     return _instance
 ```
 
-The per-turn detection phase (`apps/agent/src/detection_phase.py`) calls `get_detector(use_mock=False, imgsz=config.detection_imgsz, use_sahi=config.adaptive_sahi)` once — i.e. `imgsz=640`, `use_sahi=False`. The same instance is reused for all subsequent detection calls, preserving the Kalman tracker state across frames.
+The per-turn detection phase (`apps/agent/src/detection_phase.py`) calls `get_detector(use_mock=False, imgsz=config.detection_imgsz, use_sahi=config.adaptive_sahi)` once — i.e. `imgsz=1280`, `use_sahi=False`. The same instance is reused for all subsequent detection calls, preserving the Kalman tracker state across frames.
 
 ## 7.11 Adaptive SAHI (Smart Tiling) — disabled by default
 
-> **Off in v6.** Everything in this section is gated behind `config.adaptive_sahi`, which defaults to `False` (see §7.4 for why). The agent does **not** run adaptive SAHI; this documents the parked path for a future model retrained at SAHI-native scale.
+> **Off in v9.** Everything in this section is gated behind `config.adaptive_sahi`, which defaults to `False` (see §7.4 for why). The agent does **not** run adaptive SAHI; this documents the parked path for a future model retrained at SAHI-native scale.
 
 Full SAHI tiles the entire screenshot (~18 tiles for 3024×1672). Most tiles cover static terrain with no entities. Adaptive SAHI reduces this to ~3-8 tiles by running SAHI only on regions of interest around detected entities.
 
@@ -360,8 +362,8 @@ detected_entities = detector.detect_adaptive(screenshot, force_full=force_full)
 
 | Parameter | Default | Purpose |
 |-----------|---------|---------|
-| `config.adaptive_sahi` | **`False`** | Master switch for all SAHI. `False` ⇒ single-pass @640 (the deployed path); `True` ⇒ adaptive SAHI with full-SAHI fallback |
-| `config.detection_imgsz` | `640` | Inference resolution — pinned to the training resolution |
+| `config.adaptive_sahi` | **`False`** | Master switch for all SAHI. `False` ⇒ single-pass @1280 (the deployed path); `True` ⇒ adaptive SAHI with full-SAHI fallback |
+| `config.detection_imgsz` | `1280` | Inference resolution — pinned to v9's training resolution |
 | `config.full_sahi_interval` | `5` | Force full SAHI scan every N turns (only consulted when `adaptive_sahi=True`) |
 
 ### Relative cost (when SAHI is enabled)
@@ -397,7 +399,9 @@ Used in the game loop's rescan callback, after the tracker prediction check and 
 
 ## 7.13 Measuring real performance & per-class thresholds
 
-The metric of record is **real** F1, not synthetic mAP. A blended mAP over a ~95%-synthetic validation set hides real-world behaviour, so `packages/detection/src/testing/evaluate_real.py` scores **per-class precision/recall/F1 by IoU-matching** against the ground-truth labels in a `training_data_vN/val/` split, and reports real images **separately** from synthetic. It runs at the model's training resolution single-pass (`--mode detect_fast --imgsz 640`) — the realistic number. The latest real micro-F1 is **≈ 0.42** (precision 0.65, recall 0.31); the per-class breakdown (in `eval_real_summary.json`) is what exposes the rare-class tail — several cavalry and unique-unit lines still sit near zero recall on real frames.
+The metric of record is **real** F1, not synthetic mAP. A blended mAP over a ~95%-synthetic validation set hides real-world behaviour, so `packages/detection/src/testing/evaluate_real.py` scores **per-class precision/recall/F1 by IoU-matching** against the ground-truth labels in a `training_data_vN/val/` split, and reports real images **separately** from synthetic. It runs at the model's training resolution single-pass (`--mode detect_fast --imgsz 1280` for v9) — the realistic number. The current served model is **v9** (trained @1280): real micro-F1 ≈ **0.67** (precision 0.676, recall 0.665), up from v7's ≈ 0.54 @640 and v6's ≈ 0.42, thanks to a cleaned synthetic set plus the higher training resolution that enlarges small objects (berry 4/6, sheep 3/6 on real frames, vs v7's 2/6 and 1/6). The per-class breakdown (in `eval_real_summary.json`) still exposes a rare-class tail — several cavalry and unique-unit lines sit near zero recall on real frames.
+
+> **Eval-harness caveat — measure through the deployment path.** `evaluate_real.py` loads the ONNX **via ultralytics**, which *mismeasures* a dynamic high-resolution export: v9's 1280 ONNX read **0.21** through that loader, while the deployment path — **raw `onnxruntime`**, exactly what the detection server runs — gives the true **0.665**. For a dynamic-axes export, trust the onnxruntime/server numbers; the ultralytics-loaded figure is a measurement artifact, not a real regression. (Reworking the harness to score via onnxruntime is tracked as a separate code change.)
 
 `--conf-sweep` finds the best-F1 confidence per class and writes it to `recommended_thresholds`. Those promote into **`packages/detection/src/inference/thresholds.py`** — the single source both the detection server and the local detector read — via `detection.inference.sync_thresholds`, so each change lands as a reviewable git diff:
 
@@ -416,8 +420,8 @@ See [Chapter 8 — Training Pipeline](./08-training-pipeline.md) for the sim-to-
 
 - 60-class taxonomy organized by category (resources, buildings, units, siege, naval, animals)
 - Three backends: PyTorch (ultralytics), ONNX Runtime, Mock
-- Resolves the model as `aoe2_yolo_v6.onnx` (preferred, ARM64 deploy path), else `aoe2_yolo_v6.pt`, else mock — YOLO26n, NMS-free, no legacy version fallback
-- **Deployed path: single forward pass at `imgsz=640`** (`detect_fast`/`detect_fast_multi`, `adaptive_sahi=False`) — matches training resolution; beats @1280 and SAHI on real F1
+- Resolves the model as `aoe2_yolo_v9.onnx` (preferred, the deployed artifact), else `aoe2_yolo_v9.pt`, else mock — YOLO26n, NMS-free, no legacy version fallback
+- **Deployed path: single forward pass at `imgsz=1280`** (`detect_fast`/`detect_fast_multi`, `adaptive_sahi=False`) — matches v9's training resolution; beats off-scale inference and SAHI on real F1
 - **SAHI (full + adaptive)**: implemented and tested but **disabled** — scale mismatch lowers real accuracy; parked for a future SAHI-native retrain
 - **ONNX batched SAHI**: all tiles in one inference call (~3-5x faster than sequential) — only relevant when SAHI is re-enabled
 - **Kalman filter tracking**: 6D state with Hungarian algorithm matching for stable entity IDs

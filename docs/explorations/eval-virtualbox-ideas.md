@@ -25,7 +25,7 @@ The eval framework added in `evaluation/runner.py` is a great start — it runs 
 | **Variant matrices** | ✅ Same scenario × multiple memory states already supported (`variants:` in YAML). |
 | **Memory extraction & loading** | ✅ `autoresearch/memory_chain.py` writes `memories/*.md`; loaded into the cached system block. |
 | **Real-game telemetry** | ✅ `logs/YYYY_MM_DD/game.txt` — 100–250 KB structlog streams per game (~30–60 turns each), full prompts, tool calls, costs. 2 days of real-game data on disk. |
-| **Vision training corpus** | ✅ `training_data_v4.tar.gz` (1.4 GB) and `v5.tar.gz` (3.5 GB) — annotated AoE2 screenshots for YOLO. |
+| **Vision training corpus** | ✅ `training_data_v4.tar.gz` (1.4 GB) and `v5.tar.gz` (3.5 GB) — annotated AoE2 screenshots for YOLO. *(Historical — pre-v6 dataset refs; the current detector is v9 @1280, deployed, trained on a cleaned real+synthetic set.)* |
 | **Perception is already remote** | ✅ Detector runs at `http://172.16.216.1:8420` — agent process is already decoupled from the YOLO infra. |
 
 ## What we don't have

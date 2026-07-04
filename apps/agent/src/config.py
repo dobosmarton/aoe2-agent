@@ -54,7 +54,9 @@ class Config(BaseModel):
     # 3024px screenshot into 640 crops, so objects appear ~2.4x larger than
     # training and the model hallucinates). Keep SAHI off until the model is
     # retrained at a SAHI-consistent / native scale. See testing/evaluate_real.py.
-    detection_imgsz: int = 640  # YOLO inference resolution (match training res!)
+    detection_imgsz: int = (
+        1280  # YOLO inference resolution (match training res!) — v9 trained @1280
+    )
     adaptive_sahi: bool = False  # SAHI hurts v6 at retina res (scale mismatch); single-pass wins
     full_sahi_interval: int = 5  # Force full SAHI scan every N turns (only if adaptive_sahi=True)
     detection_host: str = ""  # Remote CoreML server URL (e.g., "http://192.168.64.1:8420")

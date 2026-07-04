@@ -67,7 +67,7 @@ Uses the `mss` library to grab the game window region, convert from BGRA to RGB 
 
 ### Step 4: Run entity detection — `_run_detection()`
 
-Entity detection runs a **single forward pass at `imgsz=640`** — the resolution the v6 model was trained at (`config.detection_imgsz = 640`, `config.adaptive_sahi = False`). On real screenshots this beats both higher-resolution and SAHI-tiled inference: tiling a 3024px frame into 640 crops makes objects ~2.4× larger than training scale and *lowers* real F1 (≈0.42 single-pass @640 vs ≈0.04 with full SAHI). SAHI is implemented but off; see [Chapter 7 §7.4](../part3-entity-detection/07-detector-architecture.md) for the measurement.
+Entity detection runs a **single forward pass at `imgsz=1280`** — the resolution the v9 model was trained at (`config.detection_imgsz = 1280`, `config.adaptive_sahi = False`). On real screenshots, matching inference resolution to training resolution beats SAHI-tiled inference: tiling a 3024px frame into 640 crops makes objects ~2.4× larger than v9's training scale and *lowers* real F1. SAHI is implemented but off; see [Chapter 7 §7.4](../part3-entity-detection/07-detector-architecture.md) for the measurement and the v6/v7-era mode comparison.
 
 > When `config.adaptive_sahi` is `True` (it isn't, by default), the loop instead runs adaptive SAHI and forces full SAHI on the first iteration, every `full_sahi_interval` turns, and after an alarm — the parked path for a future SAHI-native model.
 
@@ -130,12 +130,12 @@ If the agentic tool loop already executed actions (indicated by `actions_already
 - Executes via pyautogui with `action_delay` (50ms) between actions
 - Tracks success/failure via `ActionResult` — failed actions are recorded in memory as feedback for the next turn
 - **Verifies effects (R1).** After entity-affecting actions (a `build`/placement, or a camera move), it re-detects and records a verification line — `CONFIRMED built: <class>` on success, or the exact phrase `no visible change` on a miss. That line feeds the stuck-loop detector in `memory.get_context_for_llm`, so repeated no-ops escalate to a warning the LLM sees. Routine economy turns with no entity expectation skip the extra rescan.
-- If no actions were returned, logs `no_actions_fallback` (the reactive tier already handled routine upkeep this turn).
+- If no actions were returned, logs `no_actions_fallback` and runs a **housed-aware** fallback: when population ≥ population cap (housed), it builds a house (via the coordinate-free `build` action) to unblock villager production; otherwise it nudges the economy — go to TC, queue a villager, select an idle one. This keeps a stalled turn from freezing the economy at the population cap.
 - On `rescan: true`, runs the rescan pipeline:
   1. **Tracker prediction check** — if tracker confidence > 80%, extrapolate positions via Kalman predict (~0ms, no screenshot or inference needed)
   2. **Screenshot capture** — if prediction not used
   3. **Frame differencing** — compare to previous frame; skip detection if MAD < 3%
-  4. **Fast detection** — single-pass `detect_fast()` at `imgsz=640` (the same mode as the main detection step)
+  4. **Fast detection** — single-pass `detect_fast()` at `imgsz=1280` (the same mode as the main detection step)
 
 ### Step 12: Wait
 
@@ -157,15 +157,15 @@ MAD is the cheapest possible change-detection metric — one subtraction and one
 <details class="deep-dive">
 <summary>Deep dive — Adaptive SAHI and ROI clustering (built, measured, parked)</summary>
 
-> **This describes a path we built and then disabled.** The agent ships **single-pass @640**, not SAHI. We measured all three modes on real held-out frames (`evaluate_real.py`): single-pass @640 ≈ 0.42 real F1, @1280 ≈ 0.21, full SAHI ≈ 0.04. SAHI *loses* because tiling a 3024px frame into 640 crops shows the model objects ~2.4× larger than its `imgsz=640` training scale. The adaptive-SAHI machinery below stays in the codebase for a future model retrained at SAHI-native scale — it's kept here as the design we'd reach for *then*, not what runs now.
+> **This describes a path we built and then disabled.** The agent ships **single-pass @1280** (v9's training resolution), not SAHI. The mode comparison that ruled SAHI out was run on the v6/v7 model (trained @640): single-pass @640 ≈ 0.42 real F1, @1280 ≈ 0.21 (run *above* its training scale), full SAHI ≈ 0.04. The lesson is scale-matching, not a fixed number — run a model off its training resolution and accuracy drops. v9 is trained at 1280, so the agent infers at 1280; SAHI stays off because tiling a 3024px frame into 640 crops *still* shows objects ~2.4× larger than v9's 1280 training scale. The adaptive-SAHI machinery below stays in the codebase for a future model retrained at SAHI-native scale — it's kept here as the design we'd reach for *then*, not what runs now.
 
-**The base problem (as it looked pre-v6).** A game screenshot resized to YOLO's 640×640 throws away resolution that small entities (sheep, scouts) depend on — *if the model was trained on larger crops*. The v6 fix turned out to be simpler than tiling: train and infer at the same 640, so the resize is exactly what the model expects.
+**The base problem (as it looked pre-v6).** A game screenshot resized to YOLO's 640×640 throws away resolution that small entities (sheep, scouts) depend on — *if the model was trained on larger crops*. The fix turned out to be simpler than tiling: train and infer at the same resolution, so the resize is exactly what the model expects. v6 did this at 640; v9 raised both training and inference to 1280, giving small entities more pixels without tiling.
 
-**SAHI — the classic fix.** *Slicing Aided Hyper Inference* (Akyon et al., 2022) slices the input into overlapping tiles, runs the detector on each tile at full resolution, then merges the per-tile predictions back into image coordinates (with extra NMS on overlap zones). For a 1920×1080 screen with 640×640 tiles and 20% overlap, that's ~18 tiles per frame. It raises recall on small objects *when the tile scale matches training* — which, for v6 at retina resolution, it doesn't.
+**SAHI — the classic fix.** *Slicing Aided Hyper Inference* (Akyon et al., 2022) slices the input into overlapping tiles, runs the detector on each tile at full resolution, then merges the per-tile predictions back into image coordinates (with extra NMS on overlap zones). For a 1920×1080 screen with 640×640 tiles and 20% overlap, that's ~18 tiles per frame. It raises recall on small objects *when the tile scale matches training* — which, for our model at retina resolution, it doesn't.
 
 **Adaptive SAHI — the parked two-pass scheme.** Pays the tiling cost only where it matters:
 
-1. **Fast scan.** Run YOLO once at `imgsz=1280` (in-between the fast 640 and the slow tiled approach). Catches every medium-and-large object plus a noisy first guess at where the small stuff is. ~60 ms.
+1. **Fast scan.** Run YOLO once at `imgsz=1280` (a single full-frame pass, far cheaper than the tiled approach). Catches every medium-and-large object plus a noisy first guess at where the small stuff is. ~60 ms.
 2. **ROI clustering.** Take the bounding boxes of the small/uncertain detections, cluster them into a handful of regions of interest using a **Union-Find** (disjoint-set) data structure. Two boxes belong to the same ROI if their inflated bounding boxes intersect; Union-Find walks the box list once and assigns each to its cluster root in near-constant amortized time.
 3. **Targeted SAHI.** Run YOLO at full resolution only on those 3–8 ROI tiles. ~40–140 ms depending on ROI count.
 4. **Merge + NMS.** Combine fast-scan predictions outside the ROIs with the targeted-SAHI predictions inside them, then a final NMS pass.
@@ -214,14 +214,14 @@ Captures a screenshot, runs detection, builds context, gets actions from Claude 
 |-------|----------|--------|
 | Window check + focus | ~200ms worst case | `window.py` (3 retries, 200ms each) |
 | Screenshot capture | ~10-30ms | mss grab + PIL convert + JPEG encode |
-| YOLO detection (single-pass @640) | one forward pass | The deployed path (`adaptive_sahi=False`); cost is backend/hardware-dependent |
+| YOLO detection (single-pass @1280) | one forward pass | The deployed path (`adaptive_sahi=False`); cost is backend/hardware-dependent |
 | Ownership classification | ~5ms | NumPy pixel analysis |
 | Strategist call (periodic) | 3-8s | Sonnet text call (resources via local OCR) |
 | Executor single-shot (routine turns) | ~2-4s | One `messages.parse` call, no tool loop |
 | Executor call (per tool iteration) | ~3s | Roundtrips in the agentic loop (combat/housing) |
 | Action execution | ~50ms per action | pyautogui + 50ms inter-action delay |
 | Rescan: tracker prediction | ~0ms | Kalman extrapolation (confidence > 80%) |
-| Rescan: fast detection | one forward pass | Single-pass YOLO at imgsz=640 |
+| Rescan: fast detection | one forward pass | Single-pass YOLO at imgsz=1280 |
 | Loop delay | 0.3s | `config.loop_delay` |
 
 Cycle time depends on the path: **routine turns single-shot in ~one roundtrip** (~2-4s of API + 0.3s loop delay), and because routine turns pipeline, the previous turn's committed head plus the reactive tier execute *during* that roundtrip rather than adding to it. Combat/housing turns run the agentic tool loop synchronously and can reach ~20-30s when they use all 7 iterations. Composite tools cut the loop path further (~9s saved per building placement). The strategist runs in the background and does not add to cycle time.
@@ -253,7 +253,7 @@ The game loop supports a `time_budget` parameter (seconds). When elapsed time ex
 - Action-effect verification (R1): entity-affecting actions are confirmed by re-detection, and misses emit `no visible change` into the stuck-loop detector
 - Strategist runs asynchronously in the background; executor runs every turn
 - Composite tools (build, send_villager, queue_villager) eliminate multiple API roundtrips per sequence
-- Detection is a single pass at `imgsz=640` (training resolution); SAHI is implemented but disabled because it lowers real F1 at retina resolution
+- Detection is a single pass at `imgsz=1280` (v9's training resolution); SAHI is implemented but disabled because it lowers real F1 at retina resolution
 - Rescans use tracker prediction (~0ms) or single-pass fast detection
 - Goal-driven with reward computation per turn
 - Action failure feedback tracked via `ActionResult` and fed back to memory

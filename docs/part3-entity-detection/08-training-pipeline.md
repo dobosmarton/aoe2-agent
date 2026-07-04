@@ -206,15 +206,19 @@ Training produces:
 
 ### Results
 
-**v6 (YOLO26n) has shipped** — `aoe2_yolo_v6.onnx` / `.pt` are the deployed artifacts. v6 moved off the large mixed v5 corpus to a smaller, real-terrain-backed synthetic set (~2400 synthetic) merged with **187 real CVAT screenshots**, trained at `imgsz=640` (the resolution the agent infers at — see [Chapter 7 §7.4](./07-detector-architecture.md)).
+**The real+synthetic model shipped as v7 @640, then improved to v9 @1280** — `aoe2_yolo_v9.onnx` / `.pt` are the **current served artifacts** (the local `get_detector` default still resolves v6; the server runs v9 via `--model`). The lineage moved off the large mixed v5 corpus to a smaller, real-terrain-backed synthetic set merged with **real CVAT screenshots**: v7 added more/cleaner real labels at `imgsz=640`, and **v9 retrained on a *cleaned* synthetic set (corrected sprite labels) at `imgsz=1280`** — the higher resolution enlarges small objects, and the agent infers at the same 1280 (see [Chapter 7 §7.4](./07-detector-architecture.md)).
 
 **Two metrics, deliberately separated.** Synthetic-validation mAP50 flatters the model; the metric of record is **real** F1, measured by `evaluate_real.py` (Chapter 7 §7.13):
 
-| Metric | v6 value | Notes |
+| Metric | value | Notes |
 |--------|----------|-------|
 | Synthetic-val mAP50 (overall) | **~0.834** | after the water-scene fix (was 0.827 synthetic-only) |
 | `fish` synthetic mAP50 | **0.545** | up from **0.146** once fish/naval were composited only on water |
-| **Real micro-F1** (single-pass @640) | **≈ 0.42** | P 0.65 / R 0.31 — the realistic number; rare military lines still near-zero recall |
+| **Real micro-F1** — v6 (single-pass @640) | **≈ 0.42** | P 0.65 / R 0.31 — synthetic-only model, ≈0 real recall on animals/berries |
+| **Real micro-F1** — v7 (single-pass @640) | **≈ 0.54** | P 0.69 / R 0.45 — after adding real CVAT labels; rare military lines still near-zero recall |
+| **Real micro-F1** — v9 (current, single-pass @1280) | **≈ 0.67** | P 0.676 / R 0.665 — cleaned synthetic + 1280; berry 4/6, sheep 3/6 on real frames (measured via onnxruntime) |
+
+> **Measure through the deployment path.** `evaluate_real.py` loads the ONNX **via ultralytics**, which *mismeasured* v9's dynamic-1280 export (read **0.21**); the deployment path — raw `onnxruntime`, exactly what the detection server runs — gives the true **0.665**. For a dynamic-axes export, trust the onnxruntime/server numbers; the ultralytics-loaded figure is an artifact. (Reworking the harness to score via onnxruntime is tracked as a separate code change.)
 
 > **Historical (v5, YOLO11n):** 92.2% mAP50 / 85.4% mAP50-95 on an 18,520-image hybrid set. These are *synthetic-heavy validation* numbers and are **not** comparable to v6's real-F1 figure — they're kept only as a lineage marker.
 
@@ -251,7 +255,7 @@ Once a model exists, the cheapest way to improve it is to feed it *the data it's
 - YOLO26 nano model (`yolo26n.pt`, NMS-free): 150 epochs at `imgsz=640`, isometric-tuned hyperparameters, optional `--cls-gain/--box-gain/--dfl-gain` loss-weight overrides
 - v6 sim-to-real levers: **water-scene mode** (fish 0.146 → 0.545 mAP50), **`--oversample-real`**, and synthetic **UI overlays**
 - Targeted data improvement: hard-negative mining (`labeling/hard_negatives.py`) and open-vocab auto-labeling (`prelabel.py --open-vocab`)
-- v6 (YOLO26n) shipped; synthetic-val mAP50 ~0.834, but the metric of record is **real F1 ≈ 0.42** (`evaluate_real.py`, single-pass @640)
+- v6 (YOLO26n, synthetic-only) shipped at real F1 ≈ 0.42; **v7** (added real CVAT labels) reached ≈ 0.54 @640; **v9** (cleaned synthetic + `imgsz=1280`) is the current served model at **real F1 ≈ 0.67** (`evaluate_real.py` via onnxruntime, single-pass @1280). Synthetic-val mAP50 (~0.834) flatters the model — real F1 is the metric of record.
 
 ## Related Topics
 
