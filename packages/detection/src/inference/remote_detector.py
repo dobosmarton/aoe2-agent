@@ -136,9 +136,13 @@ class RemoteDetector:
         full_bytes = self._to_jpeg(screenshot)
         crop_bytes = self._to_jpeg(center_crop)
 
-        # Parallel requests
+        # Parallel requests. Both legs use self.imgsz: a fixed-shape ONNX graph
+        # (static export, required for CoreML/ANE at 1280) only accepts the one
+        # size it was exported at, so the crop cannot request a different imgsz.
+        # At 1280 the crop is downscaled ~1.2x (vs ~2.4x for the full frame), so
+        # it still adds center resolution for small units.
         full_task = self._post_detect("/detect", full_bytes, imgsz=self.imgsz)
-        crop_task = self._post_detect("/detect", crop_bytes, imgsz=640)
+        crop_task = self._post_detect("/detect", crop_bytes, imgsz=self.imgsz)
         full_dets, crop_dets = await asyncio.gather(full_task, crop_task)
 
         if full_dets is None or crop_dets is None:
