@@ -8,11 +8,14 @@ resources).
 Design notes:
   - On alarm we return nothing and cede the turn to the LLM combat path —
     auto-garrison / town-bell here previously collapsed the economy.
-  - Idle-villager assignment relies on the game's own `.` (cycle idle
-    villager) hotkey, which selects nothing when no villager is idle, so the
-    follow-up right-click is a safe no-op. This avoids needing an idle flag
-    that YOLO does not provide. The executor resolves `target_class` from its
-    detected-entity cache, so we only name the nearest resource class.
+  - Idle-villager assignment uses the game's own `Shift-.` (select ALL idle
+    villagers) hotkey followed by one right-click, dispatching the whole idle
+    pool in two actions. It selects nothing when none are idle, so the
+    right-click is a safe no-op. Selecting all sidesteps the "how many are
+    idle" question that YOLO cannot answer, and fits the per-turn commit cap
+    (a single `.` cycled only one villager, leaving the rest waiting). The
+    executor resolves `target_class` from its detected-entity cache, so we only
+    name the nearest resource class.
 """
 
 from __future__ import annotations
@@ -65,11 +68,17 @@ def _idle_villager_actions(entities: list[object]) -> list[dict[str, object]]:
     if target is None:
         return []
     return [
-        {"type": "press", "key": ".", "rescan": True, "intent": "Select idle villager (reactive)"},
+        {
+            "type": "press",
+            "key": ".",
+            "modifiers": ["shift"],
+            "rescan": True,
+            "intent": "Select ALL idle villagers (reactive)",
+        },
         {
             "type": "right_click",
             "target_class": target,
-            "intent": f"Send idle villager to {target} (reactive)",
+            "intent": f"Send all idle villagers to {target} (reactive)",
         },
     ]
 

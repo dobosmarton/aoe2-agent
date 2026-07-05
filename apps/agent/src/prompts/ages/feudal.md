@@ -70,7 +70,7 @@ Note: the `build` composite ONLY works for the economic (Q) menu. Military and a
 ```json
 [
   {"type": "queue_villager", "intent": "Queue villager"},
-  {"type": "build", "building_key": "a", "x": 1500, "y": 850, "intent": "Build farm for food"},
+  {"type": "build", "building_key": "a", "intent": "Build farm for food"},
   {"type": "send_villager", "target_class": "gold_mine", "intent": "Send idle vill to gold"},
   {"type": "press", "key": "b", "modifiers": ["ctrl"], "rescan": true, "intent": "Go to Barracks"},
   {"type": "press", "key": "w", "intent": "Train Spearman"}

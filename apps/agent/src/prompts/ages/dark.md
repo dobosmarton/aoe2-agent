@@ -36,6 +36,8 @@ By turn 5–8, NOT turn 15+. Sheep deplete around turn 10–12; the farm pipelin
 
 A second Mill wastes 100 wood and fixes nothing — farms, not Mills, are what produce food. If food stays low turn after turn, the answer is *more farms*, not another Mill.
 
+**Sanity check the mill detection (avoid a house-as-mill trap).** Detection sometimes labels a house as `mill`. If a `mill` appears in detections BUT the strategist reasoning says *no mill visible*, OR you have **never built a Mill this game and food keeps starving**, treat the `mill` as a misdetection and **build a real Mill** (`building_key="w"`). A redundant Mill costs 100 wood; farms with no drop-off building never fix food — that's the far worse failure.
+
 ## Food Economy
 
 **Gathering order:** sheep → berries (build Mill near berries) → farms (build Mill anywhere, then 1 farm per food villager).
@@ -48,6 +50,8 @@ A second Mill wastes 100 wood and fixes nothing — farms, not Mills, are what p
 ## Emergency: Under Attack
 
 **In Dark Age: NEVER press B (town bell) or T (garrison) — no exceptions.** Even with 3+ enemy military, the TC's auto-arrows + economy continuity beats garrisoning. The Town Bell Rule in core.md only applies in Feudal Age and later.
+
+**NEVER build Towers or any defensive/military building in Dark Age — not even under attack.** Towers cost wood + stone, take the villager off the economy, and cannot be built from the economic (Q) menu anyway. A starving economy loses far faster than enemy harassment does; the TC's own arrows handle raiders. Under threat, **keep building economy** (houses, Mill, farms) and gathering — do not switch to defenses.
 
 **Strategist's `alarm` flag in Dark Age: ignore it.** Continue your build order.
 
@@ -66,27 +70,28 @@ In Dark Age, ONLY use the Q build menu (economic: House, Mill, Mining Camp, Lumb
   {"type": "right_click", "target_class": "sheep", "intent": "Set gather point to sheep"},
   {"type": "queue_villager", "intent": "Queue villager (auto-gathers)"},
   {"type": "queue_villager", "intent": "Queue another villager"},
-  {"type": "send_villager", "target_class": "tree", "intent": "Sweep idle to wood"}
+  {"type": "send_all_idle", "target_class": "tree", "intent": "Sweep ALL idle villagers to wood"}
 ]
 ```
 
 **FOOD EMERGENCY — pick the template by what you detect** (when NO sheep/berry_bush AND food < 100):
 
+**Omit `x`/`y` on every `build`** — the executor auto-places each building on **open ground near the town centre** (it picks the emptiest spot; clicking a fixed coordinate lands on the TC or a house and fails). Only pass `x`/`y` if you have a specific *detected* empty tile in mind.
+
 **A) NO `mill` detected yet — build ONE Mill, then farms:**
 ```json
 [
-  {"type": "build", "building_key": "w", "x": 1500, "y": 850, "intent": "Build Mill near TC (100 wood)"},
-  {"type": "build", "building_key": "a", "x": 1550, "y": 900, "intent": "Build farm near Mill (60 wood)"},
-  {"type": "build", "building_key": "a", "x": 1450, "y": 900, "intent": "Build another farm (60 wood)"}
+  {"type": "build", "building_key": "w", "intent": "Build Mill near TC (100 wood)"},
+  {"type": "build", "building_key": "a", "intent": "Build farm near Mill (60 wood)"},
+  {"type": "build", "building_key": "a", "intent": "Build another farm (60 wood)"}
 ]
 ```
 
 **B) `mill` ALREADY in Detected Entities — farms ONLY, no second Mill:**
 ```json
 [
-  {"type": "build", "building_key": "a", "x": 1550, "y": 900, "intent": "Build farm next to existing Mill (60 wood)"},
-  {"type": "build", "building_key": "a", "x": 1450, "y": 900, "intent": "Build farm next to existing Mill (60 wood)"},
-  {"type": "build", "building_key": "a", "x": 1600, "y": 850, "intent": "Build farm next to existing Mill (60 wood)"}
+  {"type": "build", "building_key": "a", "intent": "Build farm next to existing Mill (60 wood)"},
+  {"type": "build", "building_key": "a", "intent": "Build farm next to existing Mill (60 wood)"},
+  {"type": "build", "building_key": "a", "intent": "Build farm next to existing Mill (60 wood)"}
 ]
 ```
-Place each farm next to the detected `mill` (or the TC) and spread the coordinates so they don't stack on one tile.

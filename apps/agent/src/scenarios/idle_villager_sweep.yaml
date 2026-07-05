@@ -1,9 +1,10 @@
 name: idle_villager_sweep
 description: |
   Multiple idle villagers visible (no current task). Per core.md item 1
-  (THIS IS THE HIGHEST PRIORITY) the agent must send idle villagers to a
-  resource using either send_villager or press(.) + right_click. Tests that
-  idle-sweep stays the top priority.
+  (THIS IS THE HIGHEST PRIORITY) the agent must dispatch them with `send_all_idle`
+  (Shift-. select-all → right_click a resource), which puts the WHOLE idle pool to
+  work in one action rather than cycling `.` one villager at a time. Tests that
+  idle-sweep stays the top priority AND uses the select-all path.
 
 inputs:
   age: Dark Age
@@ -32,4 +33,4 @@ screenshot: null
 
 expected:
   count_at_least:
-    {type: send_villager, n: 1}
+    {type: send_all_idle, n: 1}

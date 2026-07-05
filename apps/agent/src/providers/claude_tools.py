@@ -170,6 +170,27 @@ _ACTION_TOOLS: list[dict] = [
         },
     },
     {
+        "name": "send_all_idle",
+        "description": "Composite: select ALL idle villagers (Shift-.) → right_click target. Dispatches every idle villager at once in a single action — use this instead of repeating send_villager when several villagers are idle. Use target_class for resources (e.g. 'tree', 'sheep') or x,y for a location.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "x": {"type": "integer", "description": "X coordinate to right-click"},
+                "y": {"type": "integer", "description": "Y coordinate to right-click"},
+                "target_class": {
+                    "type": "string",
+                    "description": "Entity class to send all idle villagers to (e.g. 'tree', 'sheep')",
+                },
+                "intent": {
+                    "type": "string",
+                    "description": "Where you are sending the idle villagers and why",
+                },
+            },
+            "required": ["intent"],
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "queue_villager",
         "description": "Composite: go to TC (press h) → queue villager (press q). MUCH faster than individual steps. Use this instead of doing press(h)+press(q) separately.",
         "input_schema": {

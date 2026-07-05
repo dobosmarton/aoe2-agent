@@ -64,6 +64,18 @@ def _clean_readings(ocr: dict) -> dict:
     return readings
 
 
+# A frame is trusted only when OCR decoded most of the core resources. A frame that
+# yields a single field (e.g. only "stone=1", the rest dropped) is a mis-read —
+# discarding it keeps last-known state instead of poisoning game_state with garbage.
+_CORE_RESOURCE_FIELDS: tuple[str, ...] = ("food", "wood", "gold", "stone")
+_MIN_CORE_FIELDS: int = 3
+
+
+def _is_reliable_frame(readings: dict) -> bool:
+    """Whether enough core resource fields decoded to trust this OCR frame."""
+    return sum(1 for key in _CORE_RESOURCE_FIELDS if key in readings) >= _MIN_CORE_FIELDS
+
+
 async def read_hud_readings(screenshot_bytes: bytes) -> tuple[dict, Calibration | None]:
     """Read resources/population/age off the resource bar via local OCR.
 
@@ -96,6 +108,9 @@ async def read_hud_readings(screenshot_bytes: bytes) -> tuple[dict, Calibration 
             backend=cast("Backend", config.ocr_backend),
         )
         readings = _clean_readings(ocr)
+        if not _is_reliable_frame(readings):
+            log.warning("ocr_frame_discarded", fields=sorted(readings))
+            return {}, calib
         log.info("ocr_readings", **readings)
         return readings, calib
     except Exception as e:  # a bad frame must not crash the loop — keep last-known

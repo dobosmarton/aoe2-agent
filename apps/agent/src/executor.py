@@ -5,7 +5,6 @@ Dispatches validated actions to per-type handler functions.
 
 import asyncio
 import math
-import random
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
@@ -93,16 +92,6 @@ def clear_detected_entities() -> None:
     """Clear the cached detected entities."""
     global _detected_entities
     _detected_entities = []
-
-
-def _build_executor_rng() -> random.Random:
-    """Fresh local RNG seeded from config.seed.
-
-    Read at call time so tests that mutate config.seed pick up the change
-    without re-importing. Never seeds the global `random` module — keeps the
-    determinism contract local to the build-retry helper.
-    """
-    return random.Random(config.seed)
 
 
 # ---------------------------------------------------------------------------
@@ -197,16 +186,41 @@ def _translate(x: int, y: int) -> tuple[int, int]:
 # ---------------------------------------------------------------------------
 
 BUILD_PLACEMENT_KEYWORDS = ("place", "build")
-# Random angular retries — large enough to escape dense tree/building clusters
-# that broke the old 80px cardinal-offset retry (exp_0013 logged 63 retries
-# across 35 turns, many on the same blocked terrain).
-BUILD_RETRY_RADIUS_MIN = 250
-BUILD_RETRY_RADIUS_MAX = 350
-BUILD_RETRY_ATTEMPTS = 2
+# Local retry offsets sprayed around an already-open anchor — systematic compass
+# points (not random) so coverage is deterministic. The anchor itself is now
+# chosen on empty ground (see default_build_placement), so these only need to
+# escape small local blockage rather than the whole base.
+BUILD_RETRY_RADIUS = 130
+BUILD_RETRY_ATTEMPTS = 6
 BUILD_SETTLE_DELAY = 0.15
 BUILD_RETRY_DELAY = 0.1
 RESCAN_SETTLE_DELAY = 0.3
 DEFAULT_WAIT_MS = 100
+
+# Ring geometry for picking open build ground around the town centre. The base
+# clusters on the TC, so the emptiest ring point is almost always valid ground.
+BUILD_RING_RADII: tuple[int, ...] = (280, 400, 520)
+BUILD_RING_DIRECTIONS: int = 8
+BUILD_CLUTTER_RADIUS: int = 160  # entities within this of a candidate = clutter
+
+# Play-area margins (screenshot px). The HUD occupies the top resource bar and the
+# bottom command panel; those regions have no entities, so an emptiness score would
+# wrongly rank them as "open" — exclude them from build candidates and gather clicks.
+UI_MARGIN_TOP: int = 160
+UI_MARGIN_BOTTOM: int = 240
+UI_MARGIN_SIDE: int = 40
+
+# Economic build-menu key → detected building class, used to verify a placement
+# actually landed (the class appears in the entity cache after a rescan).
+BUILD_KEY_TO_CLASS: dict[str, str] = {
+    "q": "house",
+    "w": "mill",
+    "e": "mining_camp",
+    "r": "lumber_camp",
+    "a": "farm",
+    "s": "blacksmith",
+    "t": "dock",
+}
 
 # Module-level cumulative retry telemetry (resets per process / per game).
 # Surfaced via build_placement_retry log lines so the user can grep
@@ -220,23 +234,74 @@ _build_retry_count: int = 0
 _FALLBACK_BUILD_PLACEMENT: tuple[int, int] = (700, 400)
 
 
+def _play_area_bounds() -> tuple[int, int, int, int]:
+    """(min_x, min_y, max_x, max_y) of the on-map play area, excluding the HUD."""
+    rect = get_game_window_rect()
+    width, height = (rect[2], rect[3]) if rect is not None else (3024, 1672)
+    return (
+        UI_MARGIN_SIDE,
+        UI_MARGIN_TOP,
+        width - UI_MARGIN_SIDE,
+        height - UI_MARGIN_BOTTOM,
+    )
+
+
+def _in_play_area(x: int, y: int) -> bool:
+    """Whether (x, y) falls on the game map rather than the HUD margins.
+
+    Detections in the top resource bar / bottom command panel / screen edges are
+    almost always false positives; right-clicking them sends a villager off into a
+    corner instead of onto a resource.
+    """
+    min_x, min_y, max_x, max_y = _play_area_bounds()
+    return min_x <= x <= max_x and min_y <= y <= max_y
+
+
+def _clutter_score(point: tuple[int, int]) -> int:
+    """Number of detected entities within BUILD_CLUTTER_RADIUS of `point`.
+
+    Lower = emptier ground = more likely a valid building spot.
+    """
+    px, py = point
+    r2 = BUILD_CLUTTER_RADIUS * BUILD_CLUTTER_RADIUS
+    return sum(
+        1
+        for entity in _detected_entities
+        if (center := entity.get("center")) and (px - center[0]) ** 2 + (py - center[1]) ** 2 <= r2
+    )
+
+
+def _open_ground_candidates(anchor: tuple[int, int]) -> list[tuple[int, int]]:
+    """Ring points around `anchor` that lie in the play area, emptiest-first."""
+    ax, ay = anchor
+    min_x, min_y, max_x, max_y = _play_area_bounds()
+    candidates: list[tuple[int, int]] = []
+    for radius in BUILD_RING_RADII:
+        for i in range(BUILD_RING_DIRECTIONS):
+            angle = 2.0 * math.pi * i / BUILD_RING_DIRECTIONS
+            cx = int(ax + radius * math.cos(angle))
+            cy = int(ay + radius * math.sin(angle))
+            if min_x <= cx <= max_x and min_y <= cy <= max_y:
+                candidates.append((cx, cy))
+    candidates.sort(key=_clutter_score)
+    return candidates
+
+
 def default_build_placement() -> tuple[int, int]:
     """Screenshot-relative point to start a building placement when the model
     gave no x,y — the executor picks *where*, since the text-only model can't see
     open ground.
 
-    Prefer the detected town centre (the base clusters around it); else the window
-    centre, where the starting base usually sits. ``_handle_click``'s build-retry
-    then escapes blocked terrain from that anchor.
+    Anchors on the detected town centre but returns the emptiest ring point *around*
+    it, never the TC tile itself (clicking on the TC always fails). Falls back to the
+    window centre's open ring, then a fixed point, when no TC is detected.
     """
-    town_center = _resolve_target_class("town_center")
-    if town_center is not None:
-        return town_center
-    rect = get_game_window_rect()
-    if rect is not None:
-        _left, _top, width, height = rect
-        return (width // 2, height // 2)
-    return _FALLBACK_BUILD_PLACEMENT
+    anchor = _resolve_target_class("town_center")
+    if anchor is None:
+        rect = get_game_window_rect()
+        anchor = (rect[2] // 2, rect[3] // 2) if rect is not None else _FALLBACK_BUILD_PLACEMENT
+    candidates = _open_ground_candidates(anchor)
+    return candidates[0] if candidates else anchor
 
 
 def build_steps(
@@ -254,7 +319,13 @@ def build_steps(
         {"type": "press", "key": ".", "intent": f"Select idle villager ({intent})"},
         {"type": "press", "key": "q", "intent": "Open economic build menu"},
         {"type": "press", "key": building_key, "intent": f"Select building ({intent})"},
-        {"type": "click", "x": place_x, "y": place_y, "intent": f"Place building ({intent})"},
+        {
+            "type": "click",
+            "x": place_x,
+            "y": place_y,
+            "building_key": building_key,  # lets _handle_click verify the placement landed
+            "intent": f"Place building ({intent})",
+        },
     ]
 
 
@@ -277,24 +348,18 @@ async def _handle_click(action_dict: dict[str, object], intent: str) -> ActionRe
         intent=intent,
     )
 
-    # Building placement retry — if first click was invalid (tree/building/water),
-    # try `BUILD_RETRY_ATTEMPTS` random angular offsets at 250-350 px from the
-    # original. Replaces the previous 4 cardinal 80 px offsets, which often hit
-    # the same blocked terrain because tree clusters and building footprints
-    # are larger than 80 px.
+    # Building placement: the anchor is already chosen on open ground
+    # (default_build_placement), so spray a few deterministic compass offsets to
+    # escape small local blockage, then right-click to cancel the leftover ghost.
+    # A build placement consumes at the first valid tile, so extra clicks are inert
+    # ground clicks. If the build carries a building_key, verify it actually landed.
     intent_lower = intent.lower()
     if any(word in intent_lower for word in BUILD_PLACEMENT_KEYWORDS):
         global _build_retry_total_seconds, _build_retry_count
         retry_start = time.monotonic()
         await asyncio.sleep(BUILD_SETTLE_DELAY)
-        offsets: list[tuple[int, int]] = []
-        rng = _build_executor_rng()
-        for _ in range(BUILD_RETRY_ATTEMPTS):
-            angle = rng.uniform(0.0, 2.0 * math.pi)
-            radius = rng.uniform(BUILD_RETRY_RADIUS_MIN, BUILD_RETRY_RADIUS_MAX)
-            dx = int(radius * math.cos(angle))
-            dy = int(radius * math.sin(angle))
-            offsets.append((dx, dy))
+        offsets = _compass_offsets(BUILD_RETRY_RADIUS, BUILD_RETRY_ATTEMPTS)
+        for dx, dy in offsets:
             pyautogui.click(screen_x + dx, screen_y + dy)
             await asyncio.sleep(BUILD_RETRY_DELAY)
         # Cancel any remaining ghost — right-click on the original spot.
@@ -311,8 +376,46 @@ async def _handle_click(action_dict: dict[str, object], intent: str) -> ActionRe
             total_count=_build_retry_count,
             total_seconds=round(_build_retry_total_seconds, 1),
         )
+        building_key = action_dict.get("building_key")
+        if isinstance(building_key, str):
+            await _verify_build_placement(building_key, (x, y))
 
     return ActionResult(True, "ok")
+
+
+def _compass_offsets(radius: int, count: int) -> list[tuple[int, int]]:
+    """`count` evenly-spaced (dx, dy) offsets at `radius` px — a deterministic spray."""
+    return [
+        (int(radius * math.cos(a)), int(radius * math.sin(a)))
+        for i in range(count)
+        for a in (2.0 * math.pi * i / count,)
+    ]
+
+
+async def _verify_build_placement(building_key: str, point: tuple[int, int]) -> None:
+    """Rescan and log whether a building of the expected class landed near `point`.
+
+    Best-effort (needs a rescan callback). Turns the old silent placement failure
+    into a greppable build_placement_verified / build_placement_failed signal so the
+    next turn can react instead of re-issuing the same doomed build.
+    """
+    expected = BUILD_KEY_TO_CLASS.get(building_key)
+    if expected is None or _rescan_fn is None:
+        return
+    await asyncio.sleep(RESCAN_SETTLE_DELAY)
+    await _rescan_fn()
+    px, py = point
+    r2 = BUILD_CLUTTER_RADIUS * BUILD_CLUTTER_RADIUS
+    landed = any(
+        entity.get("class") == expected
+        and (center := entity.get("center"))
+        and (px - center[0]) ** 2 + (py - center[1]) ** 2 <= r2
+        for entity in _detected_entities
+    )
+    if landed:
+        log.info("build_placement_verified", building=expected, x=px, y=py)
+    else:
+        log.warning("build_placement_failed", building=expected, x=px, y=py)
 
 
 # Classes that appear as the subject ("Send villager to..."), never the target.
@@ -355,6 +458,10 @@ async def _handle_right_click(action_dict: dict[str, object], intent: str) -> Ac
     x, y = coords
     if not action_dict.get("target_id") and not action_dict.get("target_class"):
         x, y = _re_resolve_from_intent(x, y, intent)
+
+    if not _in_play_area(x, y):
+        log.warning("right_click_off_map", x=x, y=y, intent=intent)
+        return ActionResult(False, f"({x}, {y}) is in the HUD margin, not on the map")
 
     screen_x, screen_y = _translate(x, y)
     pyautogui.rightClick(screen_x, screen_y)

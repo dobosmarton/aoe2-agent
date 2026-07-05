@@ -417,6 +417,37 @@ class ClaudeProvider:
         tool_result = self._make_tool_result(block, success, detail, include_entities=True)
         return action_dict, tool_result
 
+    async def _execute_send_all_idle(self, block: ToolUseBlock) -> tuple[dict, dict]:
+        """Composite: Shift-. (select ALL idle) → right_click target.
+
+        Dispatches every idle villager in one action. Mirrors send_villager but
+        uses the select-all hotkey so no idle count is needed.
+        """
+        inp = block.input
+        intent = inp.get("intent", "Send all idle villagers")
+
+        rc_action: dict[str, object] = {"type": "right_click", "intent": intent}
+        if "target_class" in inp:
+            rc_action["target_class"] = inp["target_class"]
+        else:
+            rc_action["x"] = inp["x"]
+            rc_action["y"] = inp["y"]
+
+        steps: list[dict] = [
+            {
+                "type": "press",
+                "key": ".",
+                "modifiers": ["shift"],
+                "rescan": True,
+                "intent": f"Select ALL idle villagers ({intent})",
+            },
+            rc_action,
+        ]
+        success, detail = await self._run_steps("send_all_idle", steps)
+        action_dict = {"type": "send_all_idle", **inp}
+        tool_result = self._make_tool_result(block, success, detail, include_entities=True)
+        return action_dict, tool_result
+
     async def _execute_queue_villager(self, block: ToolUseBlock) -> tuple[dict, dict]:
         """Composite: press h → press q."""
         inp = block.input
@@ -435,6 +466,7 @@ class ClaudeProvider:
     _COMPOSITE_HANDLERS: ClassVar[dict[str, str]] = {
         "build": "_execute_build",
         "send_villager": "_execute_send_villager",
+        "send_all_idle": "_execute_send_all_idle",
         "queue_villager": "_execute_queue_villager",
     }
 

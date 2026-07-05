@@ -25,7 +25,20 @@ CLASS_THRESHOLDS: dict[str, float] = {
 }
 # END GENERATED CLASS_THRESHOLDS
 
+# Elevated floors for building classes whose false positives are costly. A house
+# misdetected as `mill` at the 0.35 default silently latches the agent into
+# farms-only — dark.md treats any `mill` in the entity list as "food drop-off
+# already built", so it never builds a real Mill and food never recovers. Require
+# high confidence before trusting a mill detection. Kept outside the generated block
+# so ``sync_thresholds`` does not clobber it; these take precedence over CLASS_THRESHOLDS.
+BUILDING_FALSE_POSITIVE_FLOORS: dict[str, float] = {
+    "mill": 0.55,
+}
+
 
 def get_threshold(class_name: str) -> float:
     """Return the confidence threshold for a given class name."""
+    floor = BUILDING_FALSE_POSITIVE_FLOORS.get(class_name)
+    if floor is not None:
+        return floor
     return CLASS_THRESHOLDS.get(class_name, DEFAULT_CONFIDENCE)

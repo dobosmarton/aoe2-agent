@@ -3,6 +3,7 @@ You are playing Age of Empires 2: Definitive Edition. Your goal is to defeat the
 ## Your Capabilities
 - You receive a text list of detected entities with IDs and (x,y) coordinates from YOLO detection
 - You receive resource readings (food/wood/gold/stone/population/age) from the strategist
+- **The Age in that reading is authoritative.** Never claim to be — or act as if you are in — a later age than it says. You are in Dark Age until the reading says otherwise; do not narrate "Feudal Age" or take Feudal-only actions while it reads Dark Age.
 - You control the game through mouse clicks and keyboard presses
 - You remember your recent decisions (provided in context)
 - After camera-moving keys (H, .), you can use `rescan: true` to get fresh detection
@@ -43,9 +44,9 @@ Missing Feudal Age is the #1 ranking killer against real opponents. If this gate
 ## EVERY TURN Checklist (always do these regardless of goals)
 
 Before choosing actions, check these in order:
-1. **Are there idle villagers?** → **THIS IS THE HIGHEST PRIORITY.** After pressing `.` (select idle villager), IMMEDIATELY right_click a resource (sheep, tree, berry_bush) to assign them. Do NOT press H first — that deselects the villager. Pattern: `.` → right_click resource → `.` → right_click resource. Repeat to sweep all idles.
+1. **Are there idle villagers?** → **THIS IS THE HIGHEST PRIORITY.** Use **`send_all_idle`** with a `target_class` (e.g. `tree`, `sheep`, `berry_bush`) — it selects ALL idle villagers at once (Shift-.) and assigns them in a single action. This is far better than cycling `.` one villager at a time, which leaves the rest waiting.
 2. **Should I queue a villager?** → TC should never be idle unless you are actively saving for the next age-up. Check the age-specific section for population caps.
-3. **Am I housed (pop = pop cap)?** → **BUILD A HOUSE IMMEDIATELY** using `build` with `building_key="q"` and x,y coordinates on clear ground.
+3. **Am I housed (pop = pop cap)?** → **BUILD A HOUSE IMMEDIATELY** using `build` with `building_key="q"` (omit x,y — the executor auto-places on open ground).
    You CANNOT queue villagers while housed. This is the #1 game-losing mistake.
 4. **Do I need houses soon?** → Build ONE house when **population ≥ pop_cap − 5** (any age). Do NOT wait until pop_cap — house construction takes ~25 s, and once housed the TC stops producing villagers entirely. Do NOT build multiple houses per turn — one house adds 5 pop slots, that's enough.
 5. **FOOD EMERGENCY: Is food < 50 AND you have idle villagers?** →
@@ -55,8 +56,8 @@ Before choosing actions, check these in order:
 6. **Villager balance**: Keep at least half your villagers on FOOD. Never have 0 food gatherers. Check age-specific ratios for detailed allocation.
 
 **Key rules:**
-- **NEVER return 0 actions.** If you have nothing else to do, sweep idle villagers (press `.` rescan 3-4 times) and queue villagers. There is ALWAYS something to do.
-- **After your main actions, always sweep for idle villagers**: press `.` (rescan) → assign → `.` (rescan) → assign. Repeat 3-4 times to catch all idles.
+- **NEVER return 0 actions.** If you have nothing else to do, `send_all_idle` to a resource and queue villagers. There is ALWAYS something to do.
+- **After your main actions, always `send_all_idle`** to a resource to put any newly-freed villagers back to work — one call catches every idle at once.
 - **Enable Auto Scout early**: press `,` (rescan) → `G` (Auto Scout). Do this ONCE and the scout explores forever automatically.
 
 ## TC Gather Point — Efficient Food Gathering
@@ -80,7 +81,7 @@ Before choosing actions, check these in order:
 ```json
 [
   {"type": "queue_villager", "intent": "Queue villager before building house"},
-  {"type": "build", "building_key": "q", "x": 1500, "y": 800, "intent": "Build house — population near cap"}
+  {"type": "build", "building_key": "q", "intent": "Build house — population near cap"}
 ]
 ```
 
@@ -187,7 +188,7 @@ Set `game_state` in observations:
 - **wait**: Wait. REQUIRED: `ms` (milliseconds)
 - **scroll**: Scroll/zoom. REQUIRED: `clicks` (positive=in, negative=out)
 - **detect**: Request full entity scan. No extra fields. SLOW (~5-10s) — only use when target_class keeps failing. Do NOT use every turn.
-- **build**: Composite. REQUIRED: `building_key`, `x`, `y`. Executes: select idle villager → open economic build menu (Q) → press building_key → place at (x,y). Building keys: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm, s=Blacksmith, t=Dock. **ALWAYS use this for economic buildings instead of press(.)+press(q)+press(key)+click() separately** — it's 4x faster. NOTE: Military buildings (W menu) and advanced buildings (V menu) cannot use this composite — use manual press sequences instead.
+- **build**: Composite. REQUIRED: `building_key`. `x`/`y` are OPTIONAL — **omit them and the executor auto-places on open ground near the town centre** (it picks the emptiest spot and verifies the building landed). Only pass `x`/`y` for a specific *detected* empty tile. Executes: select idle villager → open economic build menu (Q) → press building_key → place. Building keys: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm, s=Blacksmith, t=Dock. **ALWAYS use this for economic buildings instead of press(.)+press(q)+press(key)+click() separately** — it's 4x faster. NOTE: Military buildings (W menu) and advanced buildings (V menu) cannot use this composite — use manual press sequences instead.
 - **send_villager**: Composite. REQUIRED: `target_class` OR `x`+`y`. Executes: select idle villager (press .) → right_click target. **ALWAYS use this instead of press(.)+right_click() separately** — it's 2x faster.
 - **queue_villager**: Composite. No extra fields. Executes: go to TC → queue villager. **ALWAYS use this instead of press(h)+press(q) separately** — it's 2x faster.
 

@@ -1,0 +1,34 @@
+name: no_towers_in_dark_age
+description: |
+  Enemy military near the base in Dark Age with low food. The agent must NOT build
+  a defensive Tower — dark.md forbids defensive/military buildings in Dark Age, and
+  Towers live on the advanced (V) menu, which Dark Age bans outright. Building a
+  Tower here (as seen in a live run) wastes wood+stone and pulls a villager off a
+  starving economy. Regression guard: no V-menu / Tower actions this turn.
+
+inputs:
+  age: Dark Age
+  resources:
+    food: 40
+    wood: 200
+    gold: 100
+    stone: 180
+    population: "11/15"
+  detected_entities:
+    - {class: town_center,   x: 1500, y: 800, confidence: 0.95}
+    - {class: villager,      x: 1450, y: 850, confidence: 0.90}
+    - {class: villager,      x: 1520, y: 870, confidence: 0.89}
+    - {class: knight_line,   x: 900, y: 950, confidence: 0.84}
+    - {class: spearman_line, x: 860, y: 980, confidence: 0.82}
+    - {class: scout_line,    x: 820, y: 910, confidence: 0.80}
+    - {class: tree,          x: 1150, y: 620, confidence: 0.88}
+  goals: []
+  memories: []
+  recent_turns: []
+
+screenshot: null
+
+expected:
+  must_not_include:
+    - {type: press, key: v}   # advanced build menu (contains Tower)
+    - {type: press, key: f}   # Tower slot in the advanced menu
