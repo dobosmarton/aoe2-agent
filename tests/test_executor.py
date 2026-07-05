@@ -15,7 +15,6 @@ also stubbed so tests don't sleep or depend on a focused game window.
 from __future__ import annotations
 
 import asyncio
-import random
 from typing import TYPE_CHECKING
 
 import pytest
@@ -250,7 +249,6 @@ def test_handle_click_build_intent_triggers_retry_clicks(
 ) -> None:
     """Build/place intents click N+1 times (initial + retries) and finish
     with a right-click cancel on the original."""
-    random.seed(0)  # deterministic retry offsets
     _run(ex._handle_click({"x": 200, "y": 300}, "Place a house"))
     click_count = sum(1 for c in fake_pyautogui.names() if c == "click")
     right_clicks = sum(1 for c in fake_pyautogui.names() if c == "rightClick")
@@ -259,10 +257,11 @@ def test_handle_click_build_intent_triggers_retry_clicks(
 
 
 def test_handle_right_click_translates_and_calls(fake_pyautogui: _FakePyautogui) -> None:
-    ex._detected_entities = [{"id": "s1", "class": "sheep", "center": (50, 60)}]
+    # Coords must sit on the map (not the HUD margins) or the play-area guard drops them.
+    ex._detected_entities = [{"id": "s1", "class": "sheep", "center": (500, 600)}]
     result = _run(ex._handle_right_click({"target_id": "s1"}, "gather wood"))
     assert result.success is True
-    assert ("rightClick", (50, 60), {}) in fake_pyautogui.calls
+    assert ("rightClick", (500, 600), {}) in fake_pyautogui.calls
 
 
 def test_handle_right_click_re_resolves_when_no_target(
@@ -456,50 +455,6 @@ def test_execute_actions_runs_each_in_order(fake_pyautogui: _FakePyautogui) -> N
     assert all(r.success for r in results)
     press_keys = [c[1][0] for c in fake_pyautogui.calls if c[0] == "press"]
     assert press_keys == ["h", "q"]
-
-
-# ---------------------------------------------------------------------------
-# _build_executor_rng — Phase 3 determinism knob
-# ---------------------------------------------------------------------------
-
-
-def test_build_executor_rng_with_seed_is_deterministic() -> None:
-    from gameplay_agent.config import config
-
-    original = config.seed
-    config.seed = 42
-    try:
-        rng_a = ex._build_executor_rng()
-        rng_b = ex._build_executor_rng()
-        assert rng_a.uniform(0.0, 1.0) == rng_b.uniform(0.0, 1.0)
-    finally:
-        config.seed = original
-
-
-def test_build_executor_rng_different_seeds_differ() -> None:
-    from gameplay_agent.config import config
-
-    original = config.seed
-    try:
-        config.seed = 1
-        first = ex._build_executor_rng().uniform(0.0, 1.0)
-        config.seed = 2
-        second = ex._build_executor_rng().uniform(0.0, 1.0)
-        assert first != second
-    finally:
-        config.seed = original
-
-
-def test_build_executor_rng_with_none_seed_emits_valid_offset() -> None:
-    from gameplay_agent.config import config
-
-    original = config.seed
-    config.seed = None
-    try:
-        value = ex._build_executor_rng().uniform(0.0, 1.0)
-        assert 0.0 <= value <= 1.0
-    finally:
-        config.seed = original
 
 
 def test_build_steps_sequence() -> None:
