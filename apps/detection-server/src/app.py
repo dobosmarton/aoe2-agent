@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol, TypeAlias, cast
 
 import numpy as np
+from detection.inference.preprocess import PAD_COLOR, letterbox
 from detection.inference.thresholds import (
     CLASS_THRESHOLDS,
 )
@@ -272,19 +273,6 @@ def _load_onnx(onnx_path: str, class_names: tuple[str, ...]) -> ModelState:
 # ---------------------------------------------------------------------------
 
 
-def _preprocess(image: Image.Image, target_size: int) -> tuple[np.ndarray, int, int]:
-    """Resize + normalize a PIL Image for YOLO inference.
-
-    Returns (chw_array, orig_width, orig_height).
-    chw_array shape: (3, target_size, target_size) float32 [0, 1].
-    """
-    orig_w, orig_h = image.size
-    resized = image.resize((target_size, target_size))
-    arr = np.array(resized, dtype=np.float32) / 255.0
-    chw = np.transpose(arr, (2, 0, 1))  # HWC -> CHW
-    return chw, orig_w, orig_h
-
-
 def _run_onnx_batch(state: ModelState, batch: np.ndarray) -> np.ndarray:
     """Run batched ONNX inference. batch shape: (N, 3, H, W)."""
     session = cast("_ONNXSession", state.model)
@@ -426,18 +414,28 @@ def _detect_single(state: ModelState, image: Image.Image, imgsz: int) -> list[De
         detections, _ = _detect_sahi(state, image, tile_size=state.input_size)
         return detections
 
-    chw, orig_w, orig_h = _preprocess(image, imgsz)
+    box = letterbox(image, imgsz)
     num_classes = len(state.class_names)
 
     if state.backend == "coreml":
-        raw = _run_coreml_single(state, chw)
+        raw = _run_coreml_single(state, box.chw)
     else:
-        batch = np.expand_dims(chw, axis=0)
+        batch = np.expand_dims(box.chw, axis=0)
         raw = _run_onnx_batch(state, batch)
 
-    scale_x = orig_w / imgsz
-    scale_y = orig_h / imgsz
-    return _parse_raw_output(raw, 0, num_classes, state.class_names, scale_x, scale_y)
+    # Undo the letterbox: orig = (coord - pad) / scale. _parse_raw_output applies
+    # abs = coord * scale_x + x_offset, so scale_x = 1/scale and offset = -pad/scale.
+    inv = 1.0 / box.scale
+    return _parse_raw_output(
+        raw,
+        0,
+        num_classes,
+        state.class_names,
+        scale_x=inv,
+        scale_y=inv,
+        x_offset=-box.pad_x * inv,
+        y_offset=-box.pad_y * inv,
+    )
 
 
 def _detect_sahi(
@@ -465,7 +463,7 @@ def _detect_sahi(
             tile_w, tile_h = tile.size
 
             if tile.size != (tile_size, tile_size):
-                padded = PILImage.new("RGB", (tile_size, tile_size), (0, 0, 0))
+                padded = PILImage.new("RGB", (tile_size, tile_size), PAD_COLOR)
                 padded.paste(tile, (0, 0))
                 tile = padded
 

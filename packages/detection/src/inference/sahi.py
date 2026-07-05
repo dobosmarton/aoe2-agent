@@ -28,6 +28,7 @@ import numpy as np
 from ._ultralytics_results import yolo_boxes_to_lists
 from .onnx_layout import UnknownOnnxLayoutError, decode_example
 from .postprocess import iou
+from .preprocess import PAD_COLOR
 
 if TYPE_CHECKING:
     from PIL import Image
@@ -175,7 +176,7 @@ def generate_tiles(
                 tile = image.crop((x, y, x_end, y_end))
                 tile_w, tile_h = tile.size
                 if tile.size != (tile_size, tile_size):
-                    padded = PILImage.new("RGB", (tile_size, tile_size), (0, 0, 0))
+                    padded = PILImage.new("RGB", (tile_size, tile_size), PAD_COLOR)
                     padded.paste(tile, (0, 0))
                     tile = padded
                 tiles.append(tile)

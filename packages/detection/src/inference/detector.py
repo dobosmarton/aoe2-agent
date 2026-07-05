@@ -23,6 +23,7 @@ from ._ultralytics_results import yolo_boxes_to_lists
 from .mock import mock_detect
 from .onnx_layout import UnknownOnnxLayoutError, decode_example
 from .postprocess import iou, nms
+from .preprocess import letterbox
 from .sahi import (
     compute_sahi_rois,
     merge_detections,
@@ -709,13 +710,11 @@ class EntityDetector:
         # back to the configured imgsz for a dynamic export.
         infer_size = self.onnx_input_hw or self.input_size
 
-        # Preprocess: resize and normalize for YOLO
-        image_resized = image.resize((infer_size, infer_size))
-        img_array = np.array(image_resized).astype(np.float32) / 255.0
-
-        # Convert from HWC to CHW format and add batch dimension
-        img_array = np.transpose(img_array, (2, 0, 1))
-        img_array = np.expand_dims(img_array, axis=0)
+        # Letterbox (aspect-preserving) to match training preprocessing; a naive
+        # square resize distorts sprites and loses small classes. See
+        # inference/preprocess.py for the geometry and the inverse mapping below.
+        box = letterbox(image, infer_size)
+        img_array = np.expand_dims(box.chw, axis=0)
 
         # Run inference
         if self.onnx_session is None:
@@ -739,9 +738,9 @@ class EntityDetector:
             )
             return []
 
-        # Scale model-input coordinates back to the original screenshot size.
-        scale_x = orig_width / infer_size
-        scale_y = orig_height / infer_size
+        # Undo the letterbox back to original screenshot coordinates:
+        # orig = (coord - pad) / scale.
+        inv = 1.0 / box.scale
 
         entities: list[DetectedEntity] = []
         for row in rows:
@@ -753,10 +752,10 @@ class EntityDetector:
             if row.confidence < self._get_threshold(class_name):
                 continue
 
-            x1 = max(0.0, min(row.x1 * scale_x, orig_width))
-            y1 = max(0.0, min(row.y1 * scale_y, orig_height))
-            x2 = max(0.0, min(row.x2 * scale_x, orig_width))
-            y2 = max(0.0, min(row.y2 * scale_y, orig_height))
+            x1 = max(0.0, min((row.x1 - box.pad_x) * inv, orig_width))
+            y1 = max(0.0, min((row.y1 - box.pad_y) * inv, orig_height))
+            x2 = max(0.0, min((row.x2 - box.pad_x) * inv, orig_width))
+            y2 = max(0.0, min((row.y2 - box.pad_y) * inv, orig_height))
             if x2 <= x1 or y2 <= y1:
                 continue
 
