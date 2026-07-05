@@ -7,8 +7,14 @@ Cover the pure/deterministic pieces. The behavioural fixes that need a live mode
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+from unittest.mock import MagicMock
+
 import gameplay_agent.executor as ex
 from gameplay_agent.providers.strategist import _is_reliable_frame
+
+if TYPE_CHECKING:
+    import pytest
 
 _TC = (1500, 800)
 
@@ -59,6 +65,22 @@ def test_in_play_area_rejects_hud_margins() -> None:
     assert not ex._in_play_area(8, 934)  # left screen edge
     assert not ex._in_play_area(1500, 50)  # top resource bar
     assert not ex._in_play_area(1500, 1600)  # bottom command panel
+
+
+def test_window_helpers_survive_mock_rect(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Under headless CI, conftest shims pygetwindow with a MagicMock, so
+    get_game_window_rect returns a rect whose elements are not ints. The window
+    helpers must fall back to the default screen instead of raising TypeError."""
+    monkeypatch.setattr(ex, "get_game_window_rect", lambda: MagicMock())
+    assert ex._window_size() == ex._DEFAULT_SCREEN
+    assert all(isinstance(v, int) for v in ex._play_area_bounds())
+    assert ex._in_play_area(*_TC)
+    ex.set_detected_entities([{"class": "town_center", "center": _TC, "id": "tc"}])
+    try:
+        x, y = ex.default_build_placement()
+        assert isinstance(x, int) and isinstance(y, int)
+    finally:
+        ex.clear_detected_entities()
 
 
 def test_ocr_frame_reliability() -> None:

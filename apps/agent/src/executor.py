@@ -229,15 +229,34 @@ BUILD_KEY_TO_CLASS: dict[str, str] = {
 _build_retry_total_seconds: float = 0.0
 _build_retry_count: int = 0
 
-# Screenshot-relative placement used only when a build carries no x,y, no town
-# centre is detected, AND the window rect is unavailable (very rare).
-_FALLBACK_BUILD_PLACEMENT: tuple[int, int] = (700, 400)
+# Fallback screen size (retina capture) when the window rect is unavailable.
+_DEFAULT_SCREEN: tuple[int, int] = (3024, 1672)
+# Any real game window is far larger than this; values below it mean the rect is
+# bogus (e.g. the MagicMock pyautogui/pygetwindow shim under headless CI, whose
+# int() coerces to 1 rather than raising).
+_MIN_WINDOW_DIM: int = 320
+
+
+def _window_size() -> tuple[int, int]:
+    """(width, height) of the game window, or ``_DEFAULT_SCREEN`` when unavailable.
+
+    Defensive against ``get_game_window_rect`` returning ``None`` or a malformed
+    rect whose dimensions are absent, non-numeric, or implausibly small.
+    """
+    rect = get_game_window_rect()
+    if rect is not None:
+        try:
+            width, height = int(rect[2]), int(rect[3])
+            if width >= _MIN_WINDOW_DIM and height >= _MIN_WINDOW_DIM:
+                return width, height
+        except (TypeError, ValueError, IndexError):
+            pass
+    return _DEFAULT_SCREEN
 
 
 def _play_area_bounds() -> tuple[int, int, int, int]:
     """(min_x, min_y, max_x, max_y) of the on-map play area, excluding the HUD."""
-    rect = get_game_window_rect()
-    width, height = (rect[2], rect[3]) if rect is not None else (3024, 1672)
+    width, height = _window_size()
     return (
         UI_MARGIN_SIDE,
         UI_MARGIN_TOP,
@@ -298,8 +317,8 @@ def default_build_placement() -> tuple[int, int]:
     """
     anchor = _resolve_target_class("town_center")
     if anchor is None:
-        rect = get_game_window_rect()
-        anchor = (rect[2] // 2, rect[3] // 2) if rect is not None else _FALLBACK_BUILD_PLACEMENT
+        width, height = _window_size()
+        anchor = (width // 2, height // 2)
     candidates = _open_ground_candidates(anchor)
     return candidates[0] if candidates else anchor
 
