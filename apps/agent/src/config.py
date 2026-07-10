@@ -57,6 +57,12 @@ class Config(BaseModel):
     # History: v6 was trained @640; upscaling it to 1280 tanked F1 (0.42→0.21) —
     # that penalty is a train/inference scale mismatch, not a property of 1280.
     detection_imgsz: int = 1280
+    # Served YOLO model — SINGLE SOURCE OF TRUTH for the version the agent runs
+    # locally (detection.inference.detector resolves this name in its bundled
+    # models dir). The remote detection server picks its model via --model at
+    # launch; keep the two in sync. detection_imgsz above must match this
+    # model's training resolution (v9 trained @1280).
+    detection_model: str = "aoe2_yolo_v9"  # AOE2_DETECTION_MODEL
     adaptive_sahi: bool = False  # SAHI hurts v6 at retina res (scale mismatch); single-pass wins
     full_sahi_interval: int = 5  # Force full SAHI scan every N turns (only if adaptive_sahi=True)
     detection_host: str = ""  # Remote CoreML server URL (e.g., "http://192.168.64.1:8420")
@@ -87,6 +93,7 @@ class Config(BaseModel):
             loop_delay=float(os.environ.get("AOE2_LOOP_DELAY", "0.3")),
             save_screenshots=os.environ.get("AOE2_SAVE_SCREENSHOTS", "true").lower() == "true",
             detection_host=os.environ.get("AOE2_DETECTION_HOST", ""),
+            detection_model=os.environ.get("AOE2_DETECTION_MODEL", "aoe2_yolo_v9"),
             temperature=float(os.environ.get("AOE2_TEMPERATURE", "0.0")),
             seed=_parse_optional_int(os.environ.get("AOE2_SEED")),
             pipeline_commit_max=int(os.environ.get("AOE2_PIPELINE_COMMIT_MAX", "2")),

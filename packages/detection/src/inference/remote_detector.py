@@ -15,10 +15,9 @@ import asyncio
 import io
 import logging
 import time
-from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from .detector import DetectedEntity, EntityDetector, get_detector
+from .detector import DetectedEntity, EntityDetector, get_detector, resolve_model_path
 from .postprocess import nms as _apply_nms
 
 if TYPE_CHECKING:
@@ -297,12 +296,7 @@ def _local_model_exists() -> bool:
     absent — there is nothing to fall back to, and a *mock* fallback is worse than
     none (it would silently return fabricated detections on a server outage).
     """
-    models_dir = Path(__file__).parent / "models"
-    return any(
-        (models_dir / f"aoe2_yolo_{version}.{ext}").exists()
-        for version in ("v7", "v6")
-        for ext in ("onnx", "pt")
-    )
+    return resolve_model_path() is not None
 
 
 def get_remote_detector(

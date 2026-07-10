@@ -206,7 +206,7 @@ Training produces:
 
 ### Results
 
-**The real+synthetic model shipped as v7 @640, then improved to v9 @1280** — `aoe2_yolo_v9.onnx` / `.pt` are the **current served artifacts** (the local `get_detector` default still resolves v6; the server runs v9 via `--model`). The lineage moved off the large mixed v5 corpus to a smaller, real-terrain-backed synthetic set merged with **real CVAT screenshots**: v7 added more/cleaner real labels at `imgsz=640`, and **v9 retrained on a *cleaned* synthetic set (corrected sprite labels) at `imgsz=1280`** — the higher resolution enlarges small objects, and the agent infers at the same 1280 (see [Chapter 7 §7.4](./07-detector-architecture.md)).
+**The real+synthetic model shipped as v7 @640, then improved to v9 @1280** — `aoe2_yolo_v9.onnx` / `.pt` are the **current served artifacts** (the served version is set in `apps/agent/src/config.py` `detection_model` — the single source of truth; a bare `get_detector()` falls back to the newest bundled weights, and the server runs its model via `--model`). The lineage moved off the large mixed v5 corpus to a smaller, real-terrain-backed synthetic set merged with **real CVAT screenshots**: v7 added more/cleaner real labels at `imgsz=640`, and **v9 retrained on a *cleaned* synthetic set (corrected sprite labels) at `imgsz=1280`** — the higher resolution enlarges small objects, and the agent infers at the same 1280 (see [Chapter 7 §7.4](./07-detector-architecture.md)).
 
 **Two metrics, deliberately separated.** Synthetic-validation mAP50 flatters the model; the metric of record is **real** F1, measured by `evaluate_real.py` (Chapter 7 §7.13):
 

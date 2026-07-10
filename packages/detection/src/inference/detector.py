@@ -849,16 +849,53 @@ class EntityDetector:
 _instance: EntityDetector | None = None
 
 
+def resolve_model_path(model_name: str | None = None) -> str | None:
+    """Resolve a model name to a weights file in the bundled models directory.
+
+    The served version is configured in `apps/agent/src/config.py`
+    (`detection_model` / AOE2_DETECTION_MODEL) — that is the single source of
+    truth, passed down here as `model_name`. Callers without access to the
+    agent config (tests, the remote-detector local fallback) pass no name and
+    get the *highest-versioned* `aoe2_yolo_v*` weights present, so a stale
+    hardcoded default can never silently resolve an old model again.
+
+    ONNX is preferred over PyTorch (the ARM64 deploy path). Returns None when
+    no matching weights exist (e.g. remote-only deploys where models are
+    gitignored).
+    """
+    models_dir = Path(__file__).parent / "models"
+    if model_name:
+        for ext in ("onnx", "pt"):
+            path = models_dir / f"{model_name}.{ext}"
+            if path.exists():
+                return str(path)
+        return None
+
+    def _version(path: Path) -> int:
+        stem_version = path.stem.rsplit("_v", 1)[-1]
+        return int(stem_version) if stem_version.isdigit() else -1
+
+    candidates = [p for p in models_dir.glob("aoe2_yolo_v*") if p.suffix in (".onnx", ".pt")]
+    if not candidates:
+        return None
+    # Highest version wins; at equal version ONNX beats PyTorch.
+    best = max(candidates, key=lambda p: (_version(p), p.suffix == ".onnx"))
+    return str(best)
+
+
 def get_detector(
     model_path: str | None = None,
     use_mock: bool = False,
     imgsz: int = 1280,
     use_sahi: bool = True,
+    model_name: str | None = None,
 ) -> EntityDetector:
     """Get or create the singleton detector instance.
 
-    Resolves the YOLO26 model (`aoe2_yolo_v6`) unless an explicit `model_path` is
-    given. ONNX is preferred over PyTorch (the ARM64 deploy path).
+    `model_name` names bundled weights (e.g. `"aoe2_yolo_v9"`) — the agent
+    passes `config.detection_model` here so the served version has one source
+    of truth. Without a name or explicit `model_path`, the newest bundled
+    `aoe2_yolo_v*` weights are used (see `resolve_model_path`).
 
     `use_sahi=False` makes `detect()` run a single full-image pass instead of
     SAHI tiling — required for models whose training resolution doesn't match
@@ -867,10 +904,13 @@ def get_detector(
     global _instance
     if _instance is None:
         if model_path is None:
-            models_dir = Path(__file__).parent / "models"
-            onnx_path = models_dir / "aoe2_yolo_v6.onnx"
-            pt_path = models_dir / "aoe2_yolo_v6.pt"
-            model_path = str(onnx_path if onnx_path.exists() else pt_path)
+            resolved = resolve_model_path(model_name)
+            if resolved is None:
+                # Keep a deterministic (missing) path so EntityDetector's
+                # missing-model handling degrades to mock with a warning.
+                missing = model_name or "aoe2_yolo_v9"
+                resolved = str(Path(__file__).parent / "models" / f"{missing}.onnx")
+            model_path = resolved
 
         _instance = EntityDetector(
             model_path=model_path, use_mock=use_mock, imgsz=imgsz, use_sahi=use_sahi

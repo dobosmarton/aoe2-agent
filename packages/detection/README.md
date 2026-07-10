@@ -12,9 +12,9 @@ Screenshot → YOLO Model → Detected Entities (class, bbox, confidence)
 
 **Key Features:**
 - 60 entity classes (units, buildings, resources, animals)
-- Real-time inference at 1280px resolution (~234ms full SAHI, ~100-200ms adaptive)
-- 92.2% mAP50 — last measured (v5, YOLO11n, 18,520-image hybrid dataset); v6/YOLO26 retraining is pending
-- **Adaptive SAHI** — smart tiling that only runs SAHI on regions with entities (~3-8 tiles vs ~18)
+- Real-time inference: **single-pass at 1280px** (the deployed mode)
+- Current model **v9** (YOLO26n, NMS-free): cleaned synthetic + real CVAT labels @1280; real-frame F1 ≈ 0.67 (see Model Performance). The served version is configured in `apps/agent/src/config.py` (`detection_model` / `AOE2_DETECTION_MODEL`) — that file is the single source of truth.
+- **Adaptive SAHI** — smart tiling that only runs SAHI on regions with entities (~3-8 tiles vs ~18); *available in code but currently disabled* — single-pass at the training resolution wins because SAHI's tile scale doesn't match the training scale
 - **Kalman filter object tracking** — 6D state vector with Hungarian algorithm assignment for persistent entity IDs
 - **Tracker prediction mode** — extrapolate entity positions without inference (~0ms) when confidence is high
 - **Frame differencing** — skip redundant rescans when the screen hasn't changed
@@ -85,8 +85,8 @@ detection/
 │   ├── frame_diff.py            # Frame differencing (skip unchanged frames)
 │   ├── ownership.py             # Blue-dominance ownership classifier (own vs enemy)
 │   └── models/
-│       ├── aoe2_yolo_v6.onnx    # ONNX model (v6, preferred — batched SAHI)
-│       └── aoe2_yolo_v6.pt      # PyTorch model weights (v6)
+│       ├── aoe2_yolo_v9.onnx    # ONNX model (v9, served — single-pass @1280)
+│       └── aoe2_yolo_v9.pt      # PyTorch model weights (v9)
 │
 ├── training/                    # Training pipeline
 │   ├── train_yolo.py            # YOLO training script (defaults to YOLO26n; --cls-gain/--box-gain/--dfl-gain knobs)
@@ -190,21 +190,21 @@ python -m detection.extraction.capture_replay --count 200 --interval 5
 3. Run the capture script
 4. Move camera around during capture for diverse angles
 
-## Model Performance (last measured: v5, YOLO11n)
+## Model Performance (current: v9, YOLO26n @1280)
 
-> **v6/YOLO26 retraining is pending** — no v6 model has been trained yet, so no v6 numbers exist. The figures below are the last measured results from v5 (YOLO11n) and are retained as the current baseline. They will be re-measured once v6 is trained.
+The served model is **`aoe2_yolo_v9`** (YOLO26n, NMS-free), trained on cleaned synthetic + real CVAT labels at imgsz=1280 and run **single-pass at 1280** (`adaptive_sahi=False`). SAHI tiling is disabled: it presents objects at a different scale than training, which *lowers* real-frame accuracy (the scale-match rule). The served version is set in `apps/agent/src/config.py` (`detection_model`); the detection server takes its model via `--model` at launch — keep the two in sync.
 
-| Metric | v5 | v4 (previous) |
-|--------|-----|---------------|
-| mAP50 | **92.2%** | 86.8% |
-| mAP50-95 | **85.4%** | 72.3% |
-| Precision | **94.8%** | 87.1% |
-| Recall | **89.2%** | 78.5% |
-| Inference (imgsz=1280) | ~234ms | ~7ms (at 640) |
+The metric of record is **real-frame** detection (via `evaluate_real.py`, single-pass at the training resolution) — not synthetic-validation mAP, which is optimistic because the validation set is synthetic-heavy:
 
-**v5 dataset:** 18,520 images (8,000 synthetic train + 7,120 real train + 2,000 synthetic val + 1,400 real val)
+| Metric (real frames) | v9 (@1280) | v7 (@640) | v6 (@640) |
+|---|-----|-----|-----|
+| F1 | **~0.67** | ~0.54 | ~0.41 |
+| Recall | ~0.665 | ~0.45 | ~0.30 |
+| Precision | ~0.676 | ~0.69 | ~0.67 |
 
-**Inference resolution:** 1280px (up from 640). Benchmarked on 1920x1080 gameplay: imgsz=640 found 12 entities, imgsz=1280 found 55 entities (+4.6x detections, only +160ms). The LLM API call dominates at 1-3s, so detection latency is negligible.
+v6 was 100% synthetic (≈0 real recall on animals/berries); v7 added real CVAT labels, which lifted real recall; v9 retrained on a cleaned synthetic set at imgsz=1280, enlarging small objects (berries/sheep) for another recall step. Known blind spot: military-unit recall on real frames is still near zero (knight/cavalry-archer/militia lines) — see `IMPROVEMENT-PLAN.md` P1.
+
+> **Measure through the deployment path.** `evaluate_real.py` loaded via ultralytics *mismeasures* dynamic-axes ONNX exports (v9 read 0.21 that way); the raw-onnxruntime path — what the detection server runs — gives the true ~0.67.
 
 ## Object Tracking
 

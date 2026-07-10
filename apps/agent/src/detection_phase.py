@@ -94,7 +94,10 @@ def _init_detector() -> Detector | None:
         # adaptive_sahi gates SAHI everywhere: it picks detect_adaptive vs the
         # single-pass detect() below, and use_sahi keeps detect() from tiling.
         detector = get_detector(
-            use_mock=False, imgsz=config.detection_imgsz, use_sahi=config.adaptive_sahi
+            use_mock=False,
+            imgsz=config.detection_imgsz,
+            use_sahi=config.adaptive_sahi,
+            model_name=config.detection_model,
         )
         backend = "mock" if detector.use_mock else detector.backend or "yolo"
         log.info(

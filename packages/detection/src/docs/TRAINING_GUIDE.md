@@ -37,7 +37,7 @@ The detection system enables an AI agent to identify game entities (units, build
 │  └──────────────┘                                               │
 │        │                                                        │
 │        ▼                                                        │
-│  Trained Model (inference/models/aoe2_yolo_v6.pt)              │
+│  Trained Model (inference/models/aoe2_yolo_vN.pt)              │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -46,13 +46,15 @@ The detection system enables an AI agent to identify game entities (units, build
 
 ## Training Results
 
-> **Target model:** The pipeline now targets **YOLO26n** (Ultralytics, NMS-free), replacing YOLO11n. The base pretrained weights are `yolo26n.pt`, and the trained artifact is `aoe2_yolo_v6.{pt,onnx}`.
+> **Current served model: `aoe2_yolo_v9`** (YOLO26n, NMS-free, trained and inferred at imgsz=1280). The served version is configured in `apps/agent/src/config.py` (`detection_model` / `AOE2_DETECTION_MODEL`) — that is the single source of truth; bump it there when a new version ships.
 >
-> **No v6 model is trained yet.** The metrics below are the **last measured (v5, YOLO11n)** results. **v6/YOLO26 retraining is pending** — these numbers will be re-measured once v6 is trained.
+> **Metric of record: real-frame micro-F1** via `evaluate_real.py` (single-pass at the training resolution), *not* synthetic-validation mAP — the validation set is synthetic-heavy and flatters the model. Current numbers: **v9 F1 ≈ 0.67** (P 0.676 / R 0.665), up from v7 ≈ 0.54 (@640) and v6 ≈ 0.42 (synthetic-only). See `packages/detection/README.md` → Model Performance for the full table.
+>
+> The sections below record the historical v5/v4 (YOLO11n-era) synthetic-val metrics for lineage context only.
 
-### v5 (Last measured)
+### v5 (Historical, YOLO11n)
 
-**Model:** YOLO11n (nano) — superseded by the YOLO26n target (retraining pending)
+**Model:** YOLO11n (nano) — superseded by the YOLO26n lineage (v6→v7→v9)
 
 **Training Configuration:**
 - Dataset: 18,520 images (8,000 synthetic train + 7,120 real train + 2,000 synthetic val + 1,400 real val)
@@ -61,7 +63,7 @@ The detection system enables an AI agent to identify game entities (units, build
 - Batch size: 32
 - Classes: 60 (see `training/config/classes.yaml`)
 
-**Final Metrics (v5, YOLO11n — last measured; v6/YOLO26 retraining pending):**
+**Final Metrics (v5, YOLO11n — synthetic-val, historical):**
 
 | Metric | v5 | v4 (previous) |
 |--------|-----|---------------|
@@ -105,13 +107,13 @@ python -m detection.training.generate_training_data --num-images 3000 --output d
 ```
 
 ### 3. Train Model (Cloud)
-`train_yolo.py` now defaults to `--model yolo26n.pt --name aoe2_yolo_v6` (YOLO26n base weights → `aoe2_yolo_v6` artifact). See [Cloud Training](#cloud-training-lambda-labs) section below.
+`train_yolo.py` defaults to YOLO26n base weights (`yolo26n.pt`); always pass an explicit `--name aoe2_yolo_vN` for the next version (don't rely on the script's default name — it lags the current version). See [Cloud Training](#cloud-training-lambda-labs) section below.
 
 ### 4. Use Model
 ```python
 from ultralytics import YOLO
 
-model = YOLO("detection/inference/models/aoe2_yolo_v6.pt")
+model = YOLO("detection/inference/models/aoe2_yolo_v9.pt")
 results = model("screenshot.png", conf=0.5)
 ```
 
@@ -358,12 +360,12 @@ model = YOLO('yolo26n.pt')
 model.train(
     data='/home/ubuntu/training_data/dataset.yaml',
     epochs=100,
-    imgsz=640,
+    imgsz=1280,  # must match serving resolution (v9 lineage serves @1280)
     batch=32,
     device=0,
     workers=8,
     project='runs',
-    name='aoe2_yolo_v6',
+    name='aoe2_yolo_vN',  # next version number — never reuse an existing one
     exist_ok=True
 )
 "
@@ -377,7 +379,7 @@ model.train(
 
 ```bash
 # From your local machine:
-scp -i ~/.ssh/your-key.pem ubuntu@<IP>:/home/ubuntu/runs/aoe2_yolo_v6/weights/best.pt ./detection/inference/models/aoe2_yolo_v6.pt
+scp -i ~/.ssh/your-key.pem ubuntu@<IP>:/home/ubuntu/runs/aoe2_yolo_vN/weights/best.pt ./detection/inference/models/aoe2_yolo_vN.pt
 
 # IMPORTANT: Terminate the instance in Lambda dashboard to stop billing!
 ```
@@ -399,7 +401,7 @@ scp -i ~/.ssh/your-key.pem ubuntu@<IP>:/home/ubuntu/runs/aoe2_yolo_v6/weights/be
 from ultralytics import YOLO
 
 class EntityDetector:
-    def __init__(self, model_path="detection/inference/models/aoe2_yolo_v6.pt"):
+    def __init__(self, model_path="detection/inference/models/aoe2_yolo_v9.pt"):
         self.model = YOLO(model_path)
         # Class names loaded from classes.yaml (60 classes)
         # See detection/training/config/classes.yaml for the full list
@@ -442,7 +444,7 @@ pyautogui.click(x, y)
 For prelabeling high-resolution screenshots (e.g., 3024x1964 retina), direct inference even at imgsz=1280 misses many objects because the image is still downscaled ~2.4x. SAHI (Slicing Aided Hyper Inference) solves this:
 
 ```bash
-python -m detection.labeling.prelabel --model aoe2_yolo_v6.pt --sahi --conf 0.15
+python -m detection.labeling.prelabel --model aoe2_yolo_v9.pt --sahi --conf 0.15
 ```
 
 SAHI cuts the image into overlapping 640x640 tiles, runs inference on each, and merges results with a dedup NMS pass across tiles. (This tile-merge NMS is run by the detector itself and is unrelated to the model head — YOLO26 is NMS-free, but overlapping tiles still produce duplicate boxes that need merging.) Benchmarked on 3024x1964 retina screenshots:
@@ -487,9 +489,9 @@ detection/
 ├── inference/                   # Runtime detection
 │   ├── detector.py              # EntityDetector class
 │   └── models/
-│       └── aoe2_yolo_v6.pt      # Trained model (also .onnx)
+│       └── aoe2_yolo_v9.pt      # Trained model (also .onnx; served version set in apps/agent/src/config.py)
 ├── training/                    # Training pipeline
-│   ├── train_yolo.py            # YOLO training script (defaults: yolo26n.pt → aoe2_yolo_v6)
+│   ├── train_yolo.py            # YOLO training script (yolo26n.pt base; pass --name aoe2_yolo_vN)
 │   ├── generate_training_data.py # Synthetic data generator (canonical)
 │   └── config/
 │       └── classes.yaml         # Class definitions (60 classes)

@@ -380,7 +380,7 @@ async def run_single_iteration(
         try:
             from detection.inference.detector import get_detector
 
-            detector = get_detector(use_mock=False)
+            detector = get_detector(use_mock=False, model_name=config.detection_model)
             detected_entities = detector.detect(screenshot)
             set_detected_entities(detected_entities)
         except Exception as e:
