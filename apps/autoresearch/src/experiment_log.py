@@ -14,7 +14,10 @@ from .metrics import GameScore
 
 log = structlog.stdlib.get_logger()
 
-RESULTS_FILE = Path(__file__).parent.parent / "experiments" / "results.tsv"
+# The ledger lives at the REPO ROOT (experiments/results.tsv) — the committed,
+# reviewable record every change is measured against (IMPROVEMENT-PLAN.md P0.1).
+# parents[3]: src -> autoresearch -> apps -> repo root.
+RESULTS_FILE = Path(__file__).parents[3] / "experiments" / "results.tsv"
 
 HEADER = [
     "experiment_id",

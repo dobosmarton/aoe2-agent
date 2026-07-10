@@ -80,6 +80,28 @@ eval *ARGS:
 eval-all:
     uv run --package gameplay-agent python -m gameplay_agent.scenario_runner --all
 
+# ── Experiments (ledger: experiments/results.tsv) ──────────────────────────
+#
+# Every behavior-affecting change needs at least one recorded game before it
+# merges (IMPROVEMENT-PLAN.md P0.1). Games run on the Windows VM with the game
+# open; the gate runs anywhere.
+
+# Run one full game and append a row to the ledger.
+experiment description="manual game run" *ARGS:
+    uv run --package autoresearch python -m autoresearch.game_runner --description "{{description}}" {{ARGS}}
+
+# Record N baseline games in a row (P0.1 calls for 3-5).
+experiment-baseline n="3" *ARGS:
+    for i in $(seq {{n}}); do \
+        uv run --package autoresearch python -m autoresearch.game_runner \
+            --description "baseline run $i/{{n}}" {{ARGS}}; \
+    done
+
+# Merge gate: fails unless the ledger has a row recorded at HEAD.
+# Use `--any` to only require a non-empty ledger (bootstrap mode).
+experiment-gate *ARGS:
+    uv run --package autoresearch python -m autoresearch.experiment_gate {{ARGS}}
+
 # ── Detection (training / inference) ──────────────────────────────────────
 
 export-onnx model="detection/inference/models/aoe2_yolo_v5.pt":
