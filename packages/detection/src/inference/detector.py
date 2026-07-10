@@ -907,8 +907,10 @@ def get_detector(
             resolved = resolve_model_path(model_name)
             if resolved is None:
                 # Keep a deterministic (missing) path so EntityDetector's
-                # missing-model handling degrades to mock with a warning.
-                missing = model_name or "aoe2_yolo_v9"
+                # missing-model handling degrades to mock with a warning. The
+                # name is a placeholder, not a version — never hardcode a
+                # served version here (config.py owns that).
+                missing = model_name or "aoe2_yolo_missing"
                 resolved = str(Path(__file__).parent / "models" / f"{missing}.onnx")
             model_path = resolved
 

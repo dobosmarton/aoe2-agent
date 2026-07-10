@@ -26,7 +26,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .entity_utils import RESOURCE_KINDS, ResourceKind, extract_attrs, nearest_class_of_kind
+from .entity_utils import (
+    RESOURCE_KINDS,
+    ResourceKind,
+    first_center_of_class,
+    nearest_class_of_kind,
+)
 
 if TYPE_CHECKING:
     from .memory import GameState
@@ -130,10 +135,7 @@ def _distribute_idle_actions(entities: list[object], state: GameState) -> list[d
 
 def _tc_origin(entities: list[object]) -> tuple[float, float]:
     """Town Center center if detected, else the origin — the distance anchor."""
-    for a in (extract_attrs(e) for e in entities):
-        if a.class_name == "town_center":
-            return a.center
-    return (0.0, 0.0)
+    return first_center_of_class(entities, "town_center") or (0.0, 0.0)
 
 
 def _resolve_idle_target(

@@ -42,7 +42,7 @@ import numpy as np
 from PIL import Image
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     from PIL import ImageFont
     from rapidocr_onnxruntime import RapidOCR
@@ -79,6 +79,12 @@ _IDLE_COUNT_X_HI = 6.8
 _IDLE_COUNT_Y_HI = 1.8
 _IDLE_WHITE_THR = 185
 _IDLE_COUNT_MIN_NCC = 0.45
+# Digit-candidate component filter, in pop-field-height fractions (glyphs are
+# roughly one pop-row tall; anything squatter/taller/wider is disc edge or noise).
+_IDLE_DIGIT_MIN_H_FRAC = 0.45
+_IDLE_DIGIT_MAX_H_FRAC = 1.3
+_IDLE_DIGIT_MAX_W_FRAC = 1.2
+_IDLE_DIGIT_MIN_AREA = 12  # px; drops anti-aliasing specks
 _HUD_DIGITS_DIR = Path(__file__).parent / "resource_ocr_assets" / "templates" / "hud_digits"
 # Canonical glyph size every segmented digit / template is resized to before NCC.
 _GLYPH_HW: tuple[int, int] = (28, 20)
@@ -271,38 +277,64 @@ def load_templates(template_dir: Path, *, include_slash: bool) -> dict[str, np.n
     return templates
 
 
-def _segment_glyphs(field_binary: np.ndarray) -> list[tuple[int, np.ndarray]]:
-    """Connected-component digit segmentation, returned left-to-right.
+def _segment_components(
+    binary: np.ndarray,
+    *,
+    min_h: float,
+    max_h: float | None = None,
+    max_w: float | None = None,
+    min_area: int,
+) -> list[tuple[int, np.ndarray]]:
+    """Glyph-sized connected components of `binary`, normalized, left-to-right.
 
-    Returns (x, glyph_binary) pairs. Filters specks by height relative to the
-    field so noise/anti-aliasing doesn't become phantom digits.
+    Returns (x, normalized_glyph) pairs. Size bounds are absolute pixels — the
+    caller derives them from its own geometry (field height, badge row height).
     """
     import cv2
 
     n, _labels, stats, _centroids = cast(
         "tuple[int, np.ndarray, np.ndarray, np.ndarray]",
-        cv2.connectedComponentsWithStats(field_binary),
+        cv2.connectedComponentsWithStats(binary),
     )
-    field_h = cast("int", field_binary.shape[0])
     glyphs: list[tuple[int, np.ndarray]] = []
     for i in range(1, n):  # skip background label 0
         stat_row = cast("np.ndarray", stats[i])  # [x, y, w, h, area]
         x, y, w, h, area = (int(v) for v in cast("list[int]", stat_row.tolist()))
-        if h < 0.3 * field_h or area < 6:
+        if h < min_h or area < min_area:
             continue
-        glyph = cast("np.ndarray", field_binary[y : y + h, x : x + w])
+        if (max_h is not None and h > max_h) or (max_w is not None and w > max_w):
+            continue
+        glyph = cast("np.ndarray", binary[y : y + h, x : x + w])
         glyphs.append((x, _normalize_glyph(glyph)))
     glyphs.sort(key=lambda g: g[0])
     return glyphs
 
 
-def _classify(glyph: np.ndarray, templates: dict[str, np.ndarray]) -> str:
+def _segment_glyphs(field_binary: np.ndarray) -> list[tuple[int, np.ndarray]]:
+    """Connected-component digit segmentation of a resource field, left-to-right.
+
+    Filters specks by height relative to the field so noise/anti-aliasing
+    doesn't become phantom digits.
+    """
+    field_h = cast("int", field_binary.shape[0])
+    return _segment_components(field_binary, min_h=0.3 * field_h, min_area=6)
+
+
+def _classify_bank(
+    glyph: np.ndarray, bank: Mapping[str, Sequence[np.ndarray]]
+) -> tuple[str, float]:
+    """Best NCC match of `glyph` across a multi-sample template bank."""
     best_char, best_score = "", -2.0
-    for char, tmpl in templates.items():
-        score = _ncc(glyph, tmpl)
-        if score > best_score:
-            best_char, best_score = char, score
-    return best_char
+    for char, samples in bank.items():
+        for tmpl in samples:
+            score = _ncc(glyph, tmpl)
+            if score > best_score:
+                best_char, best_score = char, score
+    return best_char, best_score
+
+
+def _classify(glyph: np.ndarray, templates: dict[str, np.ndarray]) -> str:
+    return _classify_bank(glyph, {char: (tmpl,) for char, tmpl in templates.items()})[0]
 
 
 def _read_field(field_img: np.ndarray, templates: dict[str, np.ndarray]) -> str:
@@ -531,8 +563,6 @@ def read_idle_count(rgb: np.ndarray, pop: FieldBox) -> int | None:
     skins; engine OCR misreads this icon-overlapped digit, which is why the
     template path exists.
     """
-    import cv2
-
     ph = pop.y1 - pop.y0
     frame_h, frame_w = cast("tuple[int, int]", rgb.shape[:2])
     x0 = pop.x0 + int(_IDLE_COUNT_X_LO * ph)
@@ -547,30 +577,19 @@ def read_idle_count(rgb: np.ndarray, pop: FieldBox) -> int | None:
 
     patch = rgb[y0:y1, x0:x1]
     mask = cast("np.ndarray", (patch.min(axis=2) >= _IDLE_WHITE_THR).astype(np.uint8) * 255)
-    n, _labels, stats, _centroids = cast(
-        "tuple[int, np.ndarray, np.ndarray, np.ndarray]",
-        cv2.connectedComponentsWithStats(mask),
+    glyphs = _segment_components(
+        mask,
+        min_h=_IDLE_DIGIT_MIN_H_FRAC * ph,
+        max_h=_IDLE_DIGIT_MAX_H_FRAC * ph,
+        max_w=_IDLE_DIGIT_MAX_W_FRAC * ph,
+        min_area=_IDLE_DIGIT_MIN_AREA,
     )
-    comps: list[tuple[int, np.ndarray]] = []
-    for i in range(1, n):
-        stat_row = cast("np.ndarray", stats[i])
-        x, y, w, h, area = (int(v) for v in cast("list[int]", stat_row.tolist()))
-        if not (0.45 * ph <= h <= 1.3 * ph) or w > 1.2 * ph or area < 12:
-            continue
-        comps.append((x, cast("np.ndarray", mask[y : y + h, x : x + w])))
-    if not comps:
+    if not glyphs:
         return None
-    comps.sort(key=lambda c: c[0])
 
     digits = ""
-    for _x, glyph_raw in comps:
-        glyph = _normalize_glyph(glyph_raw)
-        best_char, best_score = "", -2.0
-        for char, samples in bank.items():
-            for tmpl in samples:
-                score = _ncc(glyph, tmpl)
-                if score > best_score:
-                    best_char, best_score = char, score
+    for _x, glyph in glyphs:
+        best_char, best_score = _classify_bank(glyph, bank)
         if best_score < _IDLE_COUNT_MIN_NCC:  # unfamiliar shape — don't guess
             return None
         digits += best_char

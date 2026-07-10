@@ -6,9 +6,12 @@ Entities may arrive as DetectedEntity objects (from YOLO) or plain dicts
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING, Literal, NamedTuple, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from detection.inference.ownership import Owner
 
 # The closed set of resources a villager can gather. A Literal (not a bare str) so a
@@ -64,8 +67,23 @@ CAMP_CLASS_BY_KIND: dict[ResourceKind, frozenset[str]] = {
 }
 
 
-def _dist_sq(a: tuple[float, float], b: tuple[float, float]) -> float:
-    return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2
+def dist(a: tuple[float, float], b: tuple[float, float]) -> float:
+    """Euclidean distance between two screen points — THE distance helper for the
+    agent app (entity counts are tiny; clarity beats squared-distance tricks)."""
+    return math.hypot(a[0] - b[0], a[1] - b[1])
+
+
+def iter_attrs(entities: list[object]) -> Iterator[EntityAttrs]:
+    """Normalized attributes of every entity — the standard entity-scan loop."""
+    return (extract_attrs(e) for e in entities)
+
+
+def first_center_of_class(entities: list[object], class_name: str) -> tuple[float, float] | None:
+    """Center of the first detected entity of `class_name`, or None."""
+    for a in iter_attrs(entities):
+        if a.class_name == class_name:
+            return a.center
+    return None
 
 
 def nearest_class_of_kind(
@@ -78,10 +96,10 @@ def nearest_class_of_kind(
     "Nearest" is measured to `origin` (pass the Town Center center when known).
     """
     classes = CLASSES_BY_KIND.get(kind, frozenset())
-    candidates = [a for a in (extract_attrs(e) for e in entities) if a.class_name in classes]
+    candidates = [a for a in iter_attrs(entities) if a.class_name in classes]
     if not candidates:
         return None
-    return min(candidates, key=lambda a: _dist_sq(a.center, origin)).class_name
+    return min(candidates, key=lambda a: dist(a.center, origin)).class_name
 
 
 def extract_attrs(entity: object) -> EntityAttrs:

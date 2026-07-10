@@ -323,6 +323,35 @@ def default_build_placement() -> tuple[int, int]:
     return candidates[0] if candidates else anchor
 
 
+def build_menu_steps(
+    building_key: str,
+    intent: str,
+    placement: tuple[int, int],
+    *,
+    menu_intent: str = "Open economic build menu",
+) -> list[dict[str, object]]:
+    """Menu → building → place sequence, for a villager that is ALREADY selected.
+
+    The tail every build shares: open the economic build menu (q), pick the
+    building, click the placement (with `building_key` attached so `_handle_click`
+    verifies the structure landed). `build_steps` prepends the idle-villager
+    select; `claude.ClaudeProvider._execute_reassign_villager` prepends its own
+    worker-click instead — the menu/place sequence lives in exactly one place.
+    """
+    place_x, place_y = placement
+    return [
+        {"type": "press", "key": "q", "intent": menu_intent},
+        {"type": "press", "key": building_key, "intent": f"Select building ({intent})"},
+        {
+            "type": "click",
+            "x": place_x,
+            "y": place_y,
+            "building_key": building_key,  # lets _handle_click verify the placement landed
+            "intent": f"Place building ({intent})",
+        },
+    ]
+
+
 def build_steps(
     building_key: str, intent: str, placement: tuple[int, int]
 ) -> list[dict[str, object]]:
@@ -333,18 +362,9 @@ def build_steps(
     build composite (`claude.ClaudeProvider._execute_build`) so the steps live in
     exactly one place.
     """
-    place_x, place_y = placement
     return [
         {"type": "press", "key": ".", "intent": f"Select idle villager ({intent})"},
-        {"type": "press", "key": "q", "intent": "Open economic build menu"},
-        {"type": "press", "key": building_key, "intent": f"Select building ({intent})"},
-        {
-            "type": "click",
-            "x": place_x,
-            "y": place_y,
-            "building_key": building_key,  # lets _handle_click verify the placement landed
-            "intent": f"Place building ({intent})",
-        },
+        *build_menu_steps(building_key, intent, placement),
     ]
 
 

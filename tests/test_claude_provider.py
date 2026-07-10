@@ -266,3 +266,71 @@ def test_reassign_villager_falls_back_to_villager_class(
     assert steps[0]["key"] == "g" and steps[0]["modifiers"] == ["ctrl"]  # Ctrl-G mining camp
     # Selection falls back to nearest villager by class when the job model finds none.
     assert steps[1]["type"] == "click" and steps[1]["target_class"] == "villager"
+
+
+# ---------------------------------------------------------------------------
+# Composite step-list characterization: the exact step dicts are the contract
+# (guards the shared-helper refactor against silent behavior drift)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def recorded_steps(provider: ClaudeProvider, monkeypatch: pytest.MonkeyPatch) -> list[dict]:
+    """Record every step a composite executes; entity snapshot stubbed empty."""
+    from gameplay_agent.providers import claude as claude_mod
+
+    steps: list[dict] = []
+
+    async def _record(action: dict) -> object:
+        steps.append(action)
+        return SimpleNamespace(success=True, detail="ok")
+
+    monkeypatch.setattr(claude_mod, "execute_action", _record)
+    monkeypatch.setattr(provider, "_entity_snapshot", lambda: [])
+    return steps
+
+
+def test_send_villager_step_list_verbatim(
+    provider: ClaudeProvider, recorded_steps: list[dict]
+) -> None:
+    block = SimpleNamespace(
+        id="tu3", name="send_villager", input={"target_class": "tree", "intent": "chop"}
+    )
+    action_dict, _result = _run(provider._execute_send_villager(block))
+    assert action_dict == {"type": "send_villager", "target_class": "tree", "intent": "chop"}
+    assert recorded_steps == [
+        {"type": "press", "key": ".", "rescan": True, "intent": "Select idle villager (chop)"},
+        {"type": "right_click", "intent": "chop", "target_class": "tree"},
+    ]
+
+
+def test_send_all_idle_step_list_verbatim(
+    provider: ClaudeProvider, recorded_steps: list[dict]
+) -> None:
+    block = SimpleNamespace(
+        id="tu4", name="send_all_idle", input={"x": 100, "y": 200, "intent": "regroup"}
+    )
+    action_dict, _result = _run(provider._execute_send_all_idle(block))
+    assert action_dict == {"type": "send_all_idle", "x": 100, "y": 200, "intent": "regroup"}
+    assert recorded_steps == [
+        {
+            "type": "press",
+            "key": ".",
+            "modifiers": ["shift"],
+            "rescan": True,
+            "intent": "Select ALL idle villagers (regroup)",
+        },
+        {"type": "right_click", "intent": "regroup", "x": 100, "y": 200},
+    ]
+
+
+def test_queue_villager_step_list_verbatim(
+    provider: ClaudeProvider, recorded_steps: list[dict]
+) -> None:
+    block = SimpleNamespace(id="tu5", name="queue_villager", input={"intent": "more vils"})
+    action_dict, _result = _run(provider._execute_queue_villager(block))
+    assert action_dict == {"type": "queue_villager", "intent": "more vils"}
+    assert recorded_steps == [
+        {"type": "press", "key": "h", "intent": "Go to TC (more vils)"},
+        {"type": "press", "key": "q", "intent": "Queue villager (more vils)"},
+    ]

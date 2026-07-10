@@ -7,11 +7,10 @@ villager's job from geometry — proximity to gatherable resources and drop-off 
 
   - ``infer_jobs`` / ``VillagerRoleModel``: per-villager job tags (single-frame and
     smoothed-over-frames), plus ``job_counts`` for LLM context.
-  - ``select_worker`` / ``cluster_box``: pick a worker of a given job to command.
-    Selecting a *moving* villager is the hard part; when per-track velocities are
-    available (from the Kalman tracker) we prefer the most stationary worker — a
-    villager chopping/mining sits near-still and is trivial to click. A box-select
-    rectangle around the job's cluster is the motion-robust fallback.
+  - ``select_worker``: pick a worker of a given job to command. Selecting a
+    *moving* villager is the hard part; when per-track velocities are available
+    (from the Kalman tracker) we prefer the most stationary worker — a villager
+    chopping/mining sits near-still and is trivial to click.
 
 Pure functions over ``DetectedEntity``-or-dict inputs (via ``entity_utils``); no
 detector, executor, or pyautogui coupling — the reassignment tool wires those in.
@@ -20,7 +19,6 @@ detector, executor, or pyautogui coupling — the reassignment tool wires those 
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
 from typing import Literal
 
 from .entity_utils import (
@@ -29,7 +27,8 @@ from .entity_utils import (
     RESOURCE_KINDS,
     EntityAttrs,
     ResourceKind,
-    extract_attrs,
+    dist,
+    iter_attrs,
 )
 
 # A villager's inferred job: a gatherable resource kind, or idle/unknown.
@@ -51,14 +50,10 @@ _CLASS_TO_KIND: dict[str, ResourceKind] = {
 }
 
 
-def _dist(a: tuple[float, float], b: tuple[float, float]) -> float:
-    return math.hypot(a[0] - b[0], a[1] - b[1])
-
-
 def _job_anchors(entities: list[object]) -> list[tuple[ResourceKind, tuple[float, float]]]:
     """(kind, center) for every resource/camp on screen — the job evidence."""
     anchors: list[tuple[ResourceKind, tuple[float, float]]] = []
-    for a in (extract_attrs(e) for e in entities):
+    for a in iter_attrs(entities):
         kind = _CLASS_TO_KIND.get(a.class_name)
         if kind is not None:
             anchors.append((kind, a.center))
@@ -78,7 +73,7 @@ def classify_job(
     best_kind: VillagerJob = IDLE
     best_d = radius
     for kind, pos in anchors:
-        d = _dist(center, pos)
+        d = dist(center, pos)
         if d < best_d:
             best_kind, best_d = kind, d
     return best_kind
@@ -88,7 +83,7 @@ def infer_jobs(entities: list[object]) -> dict[str, VillagerJob]:
     """Single-frame ``{villager_id: job}`` for every detected villager."""
     anchors = _job_anchors(entities)
     jobs: dict[str, VillagerJob] = {}
-    for a in (extract_attrs(e) for e in entities):
+    for a in iter_attrs(entities):
         if a.class_name == "villager":
             jobs[a.entity_id] = classify_job(a.center, anchors)
     return jobs
@@ -141,31 +136,6 @@ class VillagerRoleModel:
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True, slots=True)
-class WorkerSelection:
-    """How to select a chosen worker: a point-click and a box-select fallback.
-
-    `click` is the worker's center (prefer clicking a stationary one). `box` is a
-    drag rectangle around the job cluster — motion-robust, since AoE2 selects
-    whatever's inside regardless of how the units move mid-drag.
-    """
-
-    click: tuple[int, int]
-    box: tuple[int, int, int, int]
-
-
-def _cluster_box(centers: list[tuple[float, float]], pad: int) -> tuple[int, int, int, int]:
-    """Axis-aligned box enclosing all `centers`, expanded by `pad` on every side."""
-    xs = [c[0] for c in centers]
-    ys = [c[1] for c in centers]
-    return (
-        int(min(xs)) - pad,
-        int(min(ys)) - pad,
-        int(max(xs)) + pad,
-        int(max(ys)) + pad,
-    )
-
-
 def _speed(velocities: dict[str, tuple[float, float]] | None, vid: str) -> float:
     if not velocities or vid not in velocities:
         return math.inf  # unknown velocity sorts last so known-stationary wins
@@ -175,21 +145,20 @@ def _speed(velocities: dict[str, tuple[float, float]] | None, vid: str) -> float
 
 def select_worker(
     entities: list[object],
-    job: str,
+    job: ResourceKind,
     velocities: dict[str, tuple[float, float]] | None = None,
-    box_pad: int = 40,
-) -> WorkerSelection | None:
-    """Choose a villager working `job`, returning click + box-select geometry.
+) -> tuple[int, int] | None:
+    """Click point of a villager working `job`, or None when none is visible.
 
     Prefers the most *stationary* worker when per-track velocities are supplied
     (easiest to click); otherwise the one nearest its resource/camp (most solidly
-    "on the job"). Returns None when no villager of that job is visible.
+    "on the job").
     """
     all_anchors = _job_anchors(entities)
     job_anchors = [pos for kind, pos in all_anchors if kind == job]
     candidates = [
         a
-        for a in (extract_attrs(e) for e in entities)
+        for a in iter_attrs(entities)
         if a.class_name == "villager" and classify_job(a.center, all_anchors) == job
     ]
     if not candidates:
@@ -197,11 +166,8 @@ def select_worker(
 
     def rank(a: EntityAttrs) -> tuple[float, float]:
         speed = _speed(velocities, a.entity_id)
-        nearest_anchor = min((_dist(a.center, p) for p in job_anchors), default=0.0)
+        nearest_anchor = min((dist(a.center, p) for p in job_anchors), default=0.0)
         return (speed, nearest_anchor)  # stationary first, then closest to the job
 
     best = min(candidates, key=rank)
-    cx, cy = int(best.center[0]), int(best.center[1])
-    # Box around the whole job cluster (all workers of this job) for the drag fallback.
-    box = _cluster_box([c.center for c in candidates], box_pad)
-    return WorkerSelection(click=(cx, cy), box=box)
+    return (int(best.center[0]), int(best.center[1]))

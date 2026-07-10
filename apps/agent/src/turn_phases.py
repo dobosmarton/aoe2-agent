@@ -32,6 +32,7 @@ from .executor import (
 )
 from .memory import GameState
 from .models import validate_actions
+from .villager_roles import infer_jobs, job_counts
 
 if TYPE_CHECKING:
     from .executor import ActionResult
@@ -128,8 +129,6 @@ def _villager_jobs_line(detected_entities: list[object] | None) -> str:
     """
     if not detected_entities:
         return ""
-    from .villager_roles import infer_jobs, job_counts
-
     counts = job_counts(infer_jobs(detected_entities))
     working = {kind: n for kind, n in counts.items() if n}
     if not working:

@@ -31,32 +31,32 @@ def ledger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def test_missing_ledger_fails(ledger: Path) -> None:
-    ok, message = experiment_gate.check(sha="abc1234")
+    ok, message = experiment_gate.check_row_at("abc1234")
     assert not ok
     assert "no experiment row" in message
 
 
 def test_empty_ledger_fails_even_with_any(ledger: Path) -> None:
     _write_ledger(ledger, [])
-    assert not experiment_gate.check(allow_any=True)[0]
-    assert not experiment_gate.check(sha="abc1234")[0]
+    assert not experiment_gate.check_any_row()[0]
+    assert not experiment_gate.check_row_at("abc1234")[0]
 
 
 def test_row_at_sha_passes(ledger: Path) -> None:
     _write_ledger(ledger, [_row("abc1234")])
-    ok, message = experiment_gate.check(sha="abc1234")
+    ok, message = experiment_gate.check_row_at("abc1234")
     assert ok
     assert "abc1234" in message
 
 
 def test_row_at_other_sha_fails_but_shows_recent(ledger: Path) -> None:
     _write_ledger(ledger, [_row("abc1234")])
-    ok, message = experiment_gate.check(sha="fff0000")
+    ok, message = experiment_gate.check_row_at("fff0000")
     assert not ok
     assert "abc1234" in message  # recent rows are surfaced for context
 
 
 def test_any_mode_passes_on_nonempty_ledger(ledger: Path) -> None:
     _write_ledger(ledger, [_row("abc1234")])
-    ok, _ = experiment_gate.check(allow_any=True)
+    ok, _ = experiment_gate.check_any_row()
     assert ok

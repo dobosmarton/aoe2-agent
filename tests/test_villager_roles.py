@@ -13,10 +13,7 @@ from gameplay_agent.villager_roles import (
     select_worker,
 )
 
-
-def _ent(cls: str, center: tuple[float, float], vid: str | None = None) -> dict:
-    return {"class": cls, "id": vid or f"{cls}_0", "center": center, "confidence": 0.9}
-
+from tests.factories import make_entity as _ent
 
 # ---------------------------------------------------------------------------
 # Job inference
@@ -62,8 +59,9 @@ def test_role_model_forgets_vanished_villager() -> None:
     model = VillagerRoleModel()
     model.update([_ent("tree", (0, 0)), _ent("villager", (10, 10), "v")])
     model.update([_ent("tree", (0, 0))])  # villager gone
-    assert "v" not in model.counts() or model.counts().get("wood", 0) == 0
-    assert model.update([]) == {} or "v" not in model.update([])
+    # The vanished villager's wood tag is dropped, not counted as a ghost.
+    assert model.counts().get("wood", 0) == 0
+    assert model.update([]) == {}
 
 
 # ---------------------------------------------------------------------------
@@ -83,19 +81,4 @@ def test_select_worker_prefers_stationary() -> None:
         _ent("villager", (120, 120), "still"),
     ]
     velocities = {"moving": (30.0, 0.0), "still": (0.5, 0.0)}
-    sel = select_worker(entities, "wood", velocities=velocities)
-    assert sel is not None
-    assert sel.click == (120, 120)  # the stationary worker
-
-
-def test_select_worker_box_covers_cluster() -> None:
-    entities = [
-        _ent("tree", (100, 100)),
-        _ent("villager", (100, 100), "a"),
-        _ent("villager", (200, 160), "b"),
-    ]
-    sel = select_worker(entities, "wood", box_pad=40)
-    assert sel is not None
-    x0, y0, x1, y1 = sel.box
-    assert x0 == 60 and y0 == 60  # min - pad
-    assert x1 == 240 and y1 == 200  # max + pad
+    assert select_worker(entities, "wood", velocities=velocities) == (120, 120)

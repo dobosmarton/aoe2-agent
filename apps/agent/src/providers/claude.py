@@ -14,7 +14,9 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
 from ..config import config
+from ..entity_utils import ResourceKind
 from ..executor import (
+    build_menu_steps,
     build_steps,
     default_build_placement,
     execute_action,
@@ -27,12 +29,14 @@ from .claude_tools import _ACTION_TOOLS
 
 # Camera "go to work site" hotkey per source job (see prompts/hotkeys.md): jumps the
 # view to the drop-off camp so the workers of that job are on screen to pick from.
-_JOB_CAMERA_HOTKEY: dict[str, tuple[str, list[str]]] = {
+_JOB_CAMERA_HOTKEY: dict[ResourceKind, tuple[str, list[str]]] = {
     "wood": ("z", ["ctrl"]),  # Lumber Camp
     "gold": ("g", ["ctrl"]),  # Mining Camp
     "stone": ("g", ["ctrl"]),  # Mining Camp
     "food": ("i", ["ctrl"]),  # Mill
 }
+# Unknown/omitted job falls back to the Lumber Camp jump (wood is the most common pull).
+_DEFAULT_JOB_HOTKEY = _JOB_CAMERA_HOTKEY["wood"]
 
 
 def _tracker_velocities() -> dict[str, tuple[float, float]]:
@@ -52,10 +56,22 @@ def _tracker_velocities() -> dict[str, tuple[float, float]]:
         return {}
     # track.state is a numpy array (indexing returns library-typed Any); the layout
     # is [x, y, vx, vy, w, h] — see EntityTracker.
-    return {
-        t.id: (float(cast("float", t.state[2])), float(cast("float", t.state[3])))
-        for t in detector.tracker.tracks
-    }
+    return {t.id: (float(t.state[2]), float(t.state[3])) for t in detector.tracker.tracks}
+
+
+def _target_right_click(inp: dict, intent: object) -> dict[str, object]:
+    """Right-click step for a send composite: target_class when given, else raw x/y.
+
+    The executor resolves `target_class` against its detected-entity cache; raw
+    coordinates are the LLM's explicit fallback.
+    """
+    rc_action: dict[str, object] = {"type": "right_click", "intent": intent}
+    if "target_class" in inp:
+        rc_action["target_class"] = inp["target_class"]
+    else:
+        rc_action["x"] = inp["x"]
+        rc_action["y"] = inp["y"]
+    return rc_action
 
 
 # Pricing per million tokens (claude-sonnet-4-6)
@@ -402,6 +418,26 @@ class ClaudeProvider:
         "reassign_villager",
     }
 
+    async def _run_composite(
+        self,
+        block: ToolUseBlock,
+        name: str,
+        steps: list[dict],
+        *,
+        include_entities: bool = True,
+    ) -> tuple[dict, dict]:
+        """Run a composite's steps and package the (action_dict, tool_result) pair.
+
+        The tail every composite handler shares: execute the steps, echo the tool
+        input back as the recorded action dict, wrap success/detail for Claude.
+        """
+        success, detail = await self._run_steps(name, steps)
+        action_dict = {"type": name, **block.input}
+        tool_result = self._make_tool_result(
+            block, success, detail, include_entities=include_entities
+        )
+        return action_dict, tool_result
+
     async def _execute_build(self, block: ToolUseBlock) -> tuple[dict, dict]:
         """Composite: press . → q (econ menu) → building_key → click(x,y).
 
@@ -421,10 +457,7 @@ class ClaudeProvider:
             else default_build_placement()
         )
         steps = build_steps(cast("str", inp["building_key"]), intent, placement)
-        success, detail = await self._run_steps("build", steps)
-        action_dict = {"type": "build", **inp}
-        tool_result = self._make_tool_result(block, success, detail, include_entities=True)
-        return action_dict, tool_result
+        return await self._run_composite(block, "build", steps)
 
     async def _execute_send_villager(self, block: ToolUseBlock) -> tuple[dict, dict]:
         """Composite: press . (with rescan) → right_click target.
@@ -434,14 +467,6 @@ class ClaudeProvider:
         """
         inp = block.input
         intent = inp.get("intent", "Send villager")
-
-        rc_action: dict[str, object] = {"type": "right_click", "intent": intent}
-        if "target_class" in inp:
-            rc_action["target_class"] = inp["target_class"]
-        else:
-            rc_action["x"] = inp["x"]
-            rc_action["y"] = inp["y"]
-
         steps: list[dict] = [
             {
                 "type": "press",
@@ -449,12 +474,9 @@ class ClaudeProvider:
                 "rescan": True,
                 "intent": f"Select idle villager ({intent})",
             },
-            rc_action,
+            _target_right_click(inp, intent),
         ]
-        success, detail = await self._run_steps("send_villager", steps)
-        action_dict = {"type": "send_villager", **inp}
-        tool_result = self._make_tool_result(block, success, detail, include_entities=True)
-        return action_dict, tool_result
+        return await self._run_composite(block, "send_villager", steps)
 
     async def _execute_send_all_idle(self, block: ToolUseBlock) -> tuple[dict, dict]:
         """Composite: Shift-. (select ALL idle) → right_click target.
@@ -464,14 +486,6 @@ class ClaudeProvider:
         """
         inp = block.input
         intent = inp.get("intent", "Send all idle villagers")
-
-        rc_action: dict[str, object] = {"type": "right_click", "intent": intent}
-        if "target_class" in inp:
-            rc_action["target_class"] = inp["target_class"]
-        else:
-            rc_action["x"] = inp["x"]
-            rc_action["y"] = inp["y"]
-
         steps: list[dict] = [
             {
                 "type": "press",
@@ -480,25 +494,19 @@ class ClaudeProvider:
                 "rescan": True,
                 "intent": f"Select ALL idle villagers ({intent})",
             },
-            rc_action,
+            _target_right_click(inp, intent),
         ]
-        success, detail = await self._run_steps("send_all_idle", steps)
-        action_dict = {"type": "send_all_idle", **inp}
-        tool_result = self._make_tool_result(block, success, detail, include_entities=True)
-        return action_dict, tool_result
+        return await self._run_composite(block, "send_all_idle", steps)
 
     async def _execute_queue_villager(self, block: ToolUseBlock) -> tuple[dict, dict]:
         """Composite: press h → press q."""
         inp = block.input
         intent = inp.get("intent", "Queue villager")
-        steps = [
+        steps: list[dict] = [
             {"type": "press", "key": "h", "intent": f"Go to TC ({intent})"},
             {"type": "press", "key": "q", "intent": f"Queue villager ({intent})"},
         ]
-        success, detail = await self._run_steps("queue_villager", steps)
-        action_dict = {"type": "queue_villager", **inp}
-        tool_result = self._make_tool_result(block, success, detail)
-        return action_dict, tool_result
+        return await self._run_composite(block, "queue_villager", steps, include_entities=False)
 
     async def _execute_reassign_villager(self, block: ToolUseBlock) -> tuple[dict, dict]:
         """Composite: jump to a work site → pick a working villager → build.
@@ -511,12 +519,15 @@ class ClaudeProvider:
         """
         inp = block.input
         intent = str(inp.get("intent", "Reassign villager"))
-        from_job = str(inp.get("from_job", "wood"))
+        # LLM boundary: the tool schema restricts from_job to the resource kinds, so
+        # narrow the raw string here; an off-schema value keeps today's behavior
+        # (default hotkey jump → no candidates → highest-confidence villager).
+        from_job = cast("ResourceKind", str(inp.get("from_job", "wood")))
         building_key = str(inp.get("building_key", "a"))  # 'a' = Farm in the econ menu
         action_dict = {"type": "reassign_villager", **inp}
 
         # Phase 1 — jump the camera to the source work site and re-detect.
-        goto_key, goto_mods = _JOB_CAMERA_HOTKEY.get(from_job, ("z", ["ctrl"]))
+        goto_key, goto_mods = _JOB_CAMERA_HOTKEY.get(from_job, _DEFAULT_JOB_HOTKEY)
         ok, detail = await self._run_steps(
             "reassign_villager",
             [
@@ -533,16 +544,16 @@ class ClaudeProvider:
             return action_dict, self._make_tool_result(block, False, detail, include_entities=True)
 
         # Phase 2 — pick a worker from the fresh view, then select → build → place.
-        sel = select_worker(
+        worker_click = select_worker(
             cast("list[object]", get_detected_entities()),
             from_job,
             velocities=_tracker_velocities(),
         )
-        if sel is not None:
+        if worker_click is not None:
             select_step: dict = {
                 "type": "click",
-                "x": sel.click[0],
-                "y": sel.click[1],
+                "x": worker_click[0],
+                "y": worker_click[1],
                 "intent": f"Select {from_job} villager ({intent})",
             }
         else:
@@ -552,18 +563,14 @@ class ClaudeProvider:
                 "target_class": "villager",
                 "intent": f"Select villager ({intent})",
             }
-        place_x, place_y = default_build_placement()
         steps = [
             select_step,
-            {"type": "press", "key": "q", "intent": f"Open economic build menu ({intent})"},
-            {"type": "press", "key": building_key, "intent": f"Select building ({intent})"},
-            {
-                "type": "click",
-                "x": place_x,
-                "y": place_y,
-                "building_key": building_key,  # lets _handle_click verify the placement
-                "intent": f"Place building ({intent})",
-            },
+            *build_menu_steps(
+                building_key,
+                intent,
+                default_build_placement(),
+                menu_intent=f"Open economic build menu ({intent})",
+            ),
         ]
         ok, detail = await self._run_steps("reassign_villager", steps)
         return action_dict, self._make_tool_result(block, ok, detail, include_entities=True)

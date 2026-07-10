@@ -9,9 +9,7 @@ from gameplay_agent.entity_utils import nearest_class_of_kind
 from gameplay_agent.memory import GameState
 from gameplay_agent.reactive import _resolve_idle_target, decide
 
-
-def _ent(cls: str, center: tuple[float, float] = (0.0, 0.0)) -> dict:
-    return {"class": cls, "id": f"{cls}_0", "center": center, "confidence": 0.9}
+from tests.factories import make_entity as _ent
 
 
 def _state(

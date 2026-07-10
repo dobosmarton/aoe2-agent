@@ -29,14 +29,17 @@ def _data_rows() -> list[dict[str, str]]:
         return [dict(row) for row in csv.DictReader(f, delimiter="\t")]
 
 
-def check(sha: str | None = None, allow_any: bool = False) -> tuple[bool, str]:
-    """Whether the ledger satisfies the gate; returns (ok, human message)."""
+def check_any_row() -> tuple[bool, str]:
+    """Bootstrap gate: the ledger has at least one recorded game."""
     rows = _data_rows()
-    if allow_any:
-        if rows:
-            return True, f"ledger has {len(rows)} recorded game(s)"
-        return False, f"ledger is empty: {RESULTS_FILE}"
+    if rows:
+        return True, f"ledger has {len(rows)} recorded game(s)"
+    return False, f"ledger is empty: {RESULTS_FILE}"
 
+
+def check_row_at(sha: str | None = None) -> tuple[bool, str]:
+    """Merge gate: the ledger has a game recorded at `sha` (default: HEAD)."""
+    rows = _data_rows()
     target = sha or get_git_sha()
     matched = [r for r in rows if r.get("git_sha") == target]
     if matched:
@@ -68,7 +71,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    ok, message = check(sha=args.sha, allow_any=args.allow_any)
+    ok, message = check_any_row() if args.allow_any else check_row_at(args.sha)
     print(("PASS: " if ok else "FAIL: ") + message)
     sys.exit(0 if ok else 1)
 
