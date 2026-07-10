@@ -202,4 +202,27 @@ _ACTION_TOOLS: list[dict] = [
             "additionalProperties": False,
         },
     },
+    {
+        "name": "reassign_villager",
+        "description": "Composite: pull a villager already GATHERING one resource and reassign it to build a building. Jumps the camera to the source work site (e.g. the Lumber Camp for wood), picks a worker there, then opens the build menu and places the building. Use to rebalance economy on the fly — e.g. pull a wood villager to build a Farm when food is low. Unlike build (which uses an idle villager), this pulls a working one. building_key: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "from_job": {
+                    "type": "string",
+                    "description": "Which worker to pull: 'wood', 'gold', 'stone', or 'food'",
+                },
+                "building_key": {
+                    "type": "string",
+                    "description": "Building to place: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm",
+                },
+                "intent": {
+                    "type": "string",
+                    "description": "Which worker you are pulling and what you are building",
+                },
+            },
+            "required": ["from_job", "building_key", "intent"],
+            "additionalProperties": False,
+        },
+    },
 ]

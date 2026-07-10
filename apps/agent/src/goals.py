@@ -234,6 +234,8 @@ class GoalManager:
                 }
             if "population" in readings:
                 obs["population"] = readings["population"]
+            if "idle_present" in readings:
+                obs["idle_present"] = readings["idle_present"]
             if obs:
                 memory.update_from_observations(obs)
             # Age goes through a dedicated channel — the strategist is the only

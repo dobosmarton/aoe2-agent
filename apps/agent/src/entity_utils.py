@@ -6,10 +6,16 @@ Entities may arrive as DetectedEntity objects (from YOLO) or plain dicts
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, NamedTuple, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Literal, NamedTuple, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from detection.inference.ownership import Owner
+
+# The closed set of resources a villager can gather. A Literal (not a bare str) so a
+# typo in a pattern table or kind lookup is a type error, not a silent no-match.
+# (Implicit alias form — the repo targets Python 3.11, which lacks the PEP 695
+# `type` statement.)
+ResourceKind = Literal["food", "wood", "gold", "stone"]
 
 
 @runtime_checkable
@@ -34,6 +40,48 @@ class EntityAttrs(NamedTuple):
     class_name: str
     center: tuple[float, float]
     confidence: float
+
+
+# Resource taxonomy shared by the reactive tier (idle-villager routing) and the
+# villager-job model. `RESOURCE_KINDS` is in gather-priority order; `CLASSES_BY_KIND`
+# maps each kind to the YOLO classes a villager gathers it from. Kept here (a
+# dependency-light module both callers already import) so the mapping lives once.
+RESOURCE_KINDS: tuple[ResourceKind, ...] = ("food", "wood", "gold", "stone")
+CLASSES_BY_KIND: dict[ResourceKind, frozenset[str]] = {
+    "food": frozenset({"sheep", "boar", "deer", "berry_bush", "farm"}),
+    "wood": frozenset({"tree"}),
+    "gold": frozenset({"gold_mine"}),
+    "stone": frozenset({"stone_mine"}),
+}
+# Camps/drop-offs that also signal a villager's job (used by the job model, not for
+# gather targeting — you can't right-click a lumber camp to chop). A mining camp
+# serves both gold and stone; it maps to gold here (the common case) and stone
+# villagers are tagged via stone_mine proximity instead, to keep this unambiguous.
+CAMP_CLASS_BY_KIND: dict[ResourceKind, frozenset[str]] = {
+    "food": frozenset({"mill"}),
+    "wood": frozenset({"lumber_camp"}),
+    "gold": frozenset({"mining_camp"}),
+}
+
+
+def _dist_sq(a: tuple[float, float], b: tuple[float, float]) -> float:
+    return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2
+
+
+def nearest_class_of_kind(
+    entities: list[object], kind: ResourceKind, origin: tuple[float, float] = (0.0, 0.0)
+) -> str | None:
+    """Concrete YOLO class of the nearest visible resource of `kind`, or None.
+
+    Returns the *class name* (e.g. "sheep") of the closest gatherable of the given
+    kind — a single string suitable for the executor's `target_class` resolution.
+    "Nearest" is measured to `origin` (pass the Town Center center when known).
+    """
+    classes = CLASSES_BY_KIND.get(kind, frozenset())
+    candidates = [a for a in (extract_attrs(e) for e in entities) if a.class_name in classes]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda a: _dist_sq(a.center, origin)).class_name
 
 
 def extract_attrs(entity: object) -> EntityAttrs:

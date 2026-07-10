@@ -8,35 +8,49 @@ resources).
 Design notes:
   - On alarm we return nothing and cede the turn to the LLM combat path —
     auto-garrison / town-bell here previously collapsed the economy.
-  - Idle-villager assignment uses the game's own `Shift-.` (select ALL idle
-    villagers) hotkey followed by one right-click, dispatching the whole idle
-    pool in two actions. It selects nothing when none are idle, so the
-    right-click is a safe no-op. Selecting all sidesteps the "how many are
-    idle" question that YOLO cannot answer, and fits the per-turn commit cap
-    (a single `.` cycled only one villager, leaving the rest waiting). The
-    executor resolves `target_class` from its detected-entity cache, so we only
-    name the nearest resource class.
+  - Idle-villager assignment is DISTRIBUTED, not blanket. The HUD idle-villager
+    badge glows yellow when villagers are idle (read into `state.idle_present`);
+    when it does we pull a few one at a time with `.` (select next idle) and route
+    each to a resource chosen by an age-keyed pattern, so newly-idle villagers
+    spread across food/wood/gold instead of all piling onto one tile. This replaces
+    the old `Shift-.` (select ALL idle → one right-click) blanket, which sent
+    everyone to the same spot and moved the camera every turn even when nobody was
+    idle. It is a PRESENCE signal, not a count (the count digit can't be OCR'd
+    reliably) — so we dispatch a fixed small batch per turn and let the badge, re-
+    read each turn, tell us when to stop (it greys out once all idle are assigned).
+    The executor resolves `target_class` from its detected-entity cache, so we only
+    name the concrete resource class.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .entity_utils import extract_attrs
+from .entity_utils import RESOURCE_KINDS, ResourceKind, extract_attrs, nearest_class_of_kind
 
 if TYPE_CHECKING:
     from .memory import GameState
 
-# Resource classes a villager can gather from, in assignment priority order.
-_RESOURCE_TIERS: tuple[frozenset[str], ...] = (
-    frozenset({"sheep", "boar", "deer", "berry_bush", "farm"}),  # food first
-    frozenset({"tree"}),  # then wood
-    frozenset({"gold_mine"}),
-    frozenset({"stone_mine"}),
-)
-
 # Stop queuing villagers past these per-age caps to bank food for aging up.
 _POP_CAP_BY_AGE: dict[str, int] = {"Dark Age": 22, "Feudal Age": 35}
+
+# Age-keyed repeating target pattern for routing idle villagers. Cycling the
+# pattern yields the per-age gather ratio (e.g. Dark Age 3:2 food:wood). Seeding the
+# phase on population (below) rotates the choice as villagers are produced, so even
+# a lone idle villager per turn still spreads across kinds over the game.
+_IDLE_PATTERN_BY_AGE: dict[str, tuple[ResourceKind, ...]] = {
+    "Dark Age": ("food", "food", "food", "wood", "wood"),
+    "Feudal Age": ("food", "food", "wood", "wood", "gold"),
+    "Castle Age": ("food", "wood", "gold", "food", "gold", "stone"),
+    "Imperial Age": ("food", "wood", "gold", "gold", "stone"),
+}
+_DEFAULT_IDLE_PATTERN: tuple[ResourceKind, ...] = _IDLE_PATTERN_BY_AGE["Dark Age"]
+
+# Idle villagers dispatched per turn while the badge shows present. Each `.` costs a
+# camera move + rescan, so keep this small; the badge re-read next turn drains any
+# remainder. Since we only know presence (not the count), a `.` beyond the last idle
+# villager is a harmless no-op — this is the max we'll spend chasing a lit badge.
+_IDLE_DISPATCH_PER_TURN = 3
 
 
 def decide(entities: list[object], state: GameState, alarm: bool) -> list[dict[str, object]]:
@@ -45,7 +59,7 @@ def decide(entities: list[object], state: GameState, alarm: bool) -> list[dict[s
         return []
     actions: list[dict[str, object]] = []
     actions.extend(_queue_villager_actions(state))
-    actions.extend(_idle_villager_actions(entities))
+    actions.extend(_distribute_idle_actions(entities, state))
     return actions
 
 
@@ -63,40 +77,69 @@ def _queue_villager_actions(state: GameState) -> list[dict[str, object]]:
     ]
 
 
-def _idle_villager_actions(entities: list[object]) -> list[dict[str, object]]:
-    target = _nearest_resource_class(entities)
-    if target is None:
-        return []
-    return [
-        {
-            "type": "press",
-            "key": ".",
-            "modifiers": ["shift"],
-            "rescan": True,
-            "intent": "Select ALL idle villagers (reactive)",
-        },
-        {
-            "type": "right_click",
-            "target_class": target,
-            "intent": f"Send all idle villagers to {target} (reactive)",
-        },
-    ]
+def _distribute_idle_actions(entities: list[object], state: GameState) -> list[dict[str, object]]:
+    """Route idle villagers one at a time, spread across resources by age pattern.
 
-
-def _dist_sq(a: tuple[float, float], b: tuple[float, float]) -> float:
-    return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2
-
-
-def _nearest_resource_class(entities: list[object]) -> str | None:
-    """Class of the nearest gatherable resource (food > wood > gold > stone).
-
-    "Nearest" is measured to the Town Center if one is detected, else the origin.
-    Returns None when no resource is visible.
+    Gated on the HUD badge presence (`state.idle_present`): False = none idle,
+    None = badge unread — both skip (never dispatch on an unknown reading). When
+    villagers are idle, pull up to `_IDLE_DISPATCH_PER_TURN` of them with `.`
+    (select next idle) and right-click each onto a resource whose kind is chosen by
+    the age pattern; the badge re-read next turn drains any remainder (a `.` past
+    the last idle villager is a harmless no-op).
     """
-    attrs = [extract_attrs(e) for e in entities]
-    origin = next((a.center for a in attrs if a.class_name == "town_center"), (0.0, 0.0))
-    for tier in _RESOURCE_TIERS:
-        candidates = [a for a in attrs if a.class_name in tier]
-        if candidates:
-            return min(candidates, key=lambda a: _dist_sq(a.center, origin)).class_name
+    if not state.idle_present:
+        return []
+
+    pattern = _IDLE_PATTERN_BY_AGE.get(state.current_age, _DEFAULT_IDLE_PATTERN)
+    origin = _tc_origin(entities)
+    actions: list[dict[str, object]] = []
+    for i in range(_IDLE_DISPATCH_PER_TURN):
+        kind = pattern[(state.population + i) % len(pattern)]
+        target = _resolve_idle_target(entities, kind, origin)
+        if target is None:
+            break  # nothing gatherable on screen — retry next turn
+        actions.append(
+            {
+                "type": "press",
+                "key": ".",
+                "rescan": True,
+                "intent": f"Select next idle villager → {kind}",
+            }
+        )
+        actions.append(
+            {
+                "type": "right_click",
+                "target_class": target,
+                "intent": f"Send idle villager to {target} ({kind})",
+            }
+        )
+    return actions
+
+
+def _tc_origin(entities: list[object]) -> tuple[float, float]:
+    """Town Center center if detected, else the origin — the distance anchor."""
+    for a in (extract_attrs(e) for e in entities):
+        if a.class_name == "town_center":
+            return a.center
+    return (0.0, 0.0)
+
+
+def _resolve_idle_target(
+    entities: list[object], kind: ResourceKind, origin: tuple[float, float]
+) -> str | None:
+    """Concrete class for `kind`, falling through gather priority to any visible.
+
+    Prefer the requested kind; if none of it is on screen, walk the gather-priority
+    order (food > wood > gold > stone) so an idle villager is never wasted when
+    *some* resource is visible. None only when nothing gatherable is detected.
+    """
+    target = nearest_class_of_kind(entities, kind, origin)
+    if target is not None:
+        return target
+    for fallback in RESOURCE_KINDS:
+        if fallback == kind:
+            continue
+        target = nearest_class_of_kind(entities, fallback, origin)
+        if target is not None:
+            return target
     return None

@@ -292,7 +292,7 @@ async def game_loop(
                 strategist_task,
             )
 
-            context = _build_llm_context(memory, goal_manager, entity_summary)
+            context = _build_llm_context(memory, goal_manager, entity_summary, detected_entities)
 
             # S6: pipeline routine turns — compute this turn's plan while last
             # turn's committed head executes; combat turns stay synchronous.

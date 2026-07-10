@@ -95,6 +95,7 @@ def _build_llm_context(
     memory: AgentMemory,
     goal_manager: GoalManager,
     entity_summary: str,
+    detected_entities: list[object] | None = None,
 ) -> str:
     """Assemble the full text context for the executor LLM."""
     context = memory.get_context_for_llm()
@@ -112,9 +113,29 @@ def _build_llm_context(
             "\n## Detected Entities (from YOLO)\n"
             "Use target_class or target_id to interact with these:\n" + entity_summary + "\n"
         )
+        entity_context += _villager_jobs_line(detected_entities)
         context = entity_context + "\n" + context
 
     return context
+
+
+def _villager_jobs_line(detected_entities: list[object] | None) -> str:
+    """One-line villager-by-job breakdown so the LLM can rebalance the economy.
+
+    Inferred from villager↔resource proximity (a single YOLO `villager` class can't
+    say who is on wood). Empty when no villagers are visible; zero-count kinds are
+    omitted to keep the line short.
+    """
+    if not detected_entities:
+        return ""
+    from .villager_roles import infer_jobs, job_counts
+
+    counts = job_counts(infer_jobs(detected_entities))
+    working = {kind: n for kind, n in counts.items() if n}
+    if not working:
+        return ""
+    breakdown = " ".join(f"{kind}={n}" for kind, n in working.items())
+    return f"Villagers by job (approx, from proximity): {breakdown}\n"
 
 
 def _process_response(

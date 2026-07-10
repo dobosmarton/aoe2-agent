@@ -54,6 +54,17 @@ if TYPE_CHECKING:
 # On-screen left-to-right order of the four resource counters + population.
 RESOURCE_FIELDS: tuple[str, ...] = ("wood", "food", "gold", "stone")
 POP_FIELD = "population"
+
+# Idle-villager PRESENCE (not count). The idle badge sits on the resource row just
+# right of population; its circle glows bright yellow when villagers are idle and is
+# grey when none are. Reading the tiny icon-overlapped count digit is unreliable
+# (it misreads badly), but the yellow-vs-grey state is trivially separable by colour
+# saturation. Measured on real frames: grey ≤ ~10, yellow ≥ ~58 — so a threshold of
+# 25 sits in a wide dead zone. We derive the sample box from the population field
+# (icon is immediately right of it) so no separate text-localization is needed.
+_IDLE_SAT_THRESHOLD = 25.0
+_IDLE_ICON_WIDTH_FRAC = 0.7  # of the population field width, starting at its right edge
+_IDLE_ICON_Y_PAD = 6
 # Canonical glyph size every segmented digit / template is resized to before NCC.
 _GLYPH_HW: tuple[int, int] = (28, 20)
 
@@ -435,6 +446,40 @@ def _extract(dets: list[tuple[Box, str]]) -> tuple[list[Box], Box | None, Box | 
     return main, pop_box, (age[0] if age else None)
 
 
+def _idle_icon_region(pop: FieldBox) -> tuple[int, int, int, int]:
+    """Sample box for the idle-villager icon, derived from the population field.
+
+    The badge sits immediately right of the population number on the same row. We
+    take a slice ~0.7x the population width starting at its right edge — wide enough
+    to land on the icon circle, narrow enough to clear the (also-golden) age emblem
+    further right.
+    """
+    pw = pop.x1 - pop.x0
+    return (
+        pop.x1,
+        pop.y0 - _IDLE_ICON_Y_PAD,
+        pop.x1 + int(_IDLE_ICON_WIDTH_FRAC * pw),
+        pop.y1 + _IDLE_ICON_Y_PAD // 2,
+    )
+
+
+def detect_idle_present(rgb: np.ndarray, pop: FieldBox) -> bool:
+    """Whether any villager is idle, from the idle badge's colour state.
+
+    Bright-yellow icon (high saturation) = idle villagers present; grey = none.
+    `rgb` is the full-frame HxWx3 array; the sample box is derived from `pop`.
+    """
+    x0, y0, x1, y1 = _idle_icon_region(pop)
+    h, w = cast("tuple[int, int]", rgb.shape[:2])
+    x0, x1 = max(0, x0), min(w, x1)
+    y0, y1 = max(0, y0), min(h, y1)
+    if x1 <= x0 or y1 <= y0:
+        return False
+    patch = rgb[y0:y1, x0:x1].astype(np.float32)
+    saturation = float((patch.max(axis=2) - patch.min(axis=2)).mean())
+    return saturation > _IDLE_SAT_THRESHOLD
+
+
 def _column_centers(x0s: list[int], k: int = 4, gap: int = 70) -> list[int]:
     """Cluster numeric left-edges into the k resource columns (1D, split on gaps)."""
     if not x0s:
@@ -620,6 +665,10 @@ def read_resource_bar(
         raw = read_pop(pop_box.crop(gray))
         if "/" in raw:
             out[POP_FIELD] = raw
+        # Idle-villager PRESENCE from the badge colour, anchored on the population
+        # field. Boolean, not a count — robust where digit OCR is not. Omitted when
+        # population isn't calibrated (no anchor → unknown, caller skips).
+        out["idle_present"] = detect_idle_present(_decode_rgb(screenshot_bytes), pop_box)
 
     # Age is text ("Dark/Feudal/Castle/Imperial Age") — OCR it and keyword-map.
     # The pure-template backend has no OCR engine, so age is left "" there.

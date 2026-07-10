@@ -876,3 +876,13 @@ def get_detector(
             model_path=model_path, use_mock=use_mock, imgsz=imgsz, use_sahi=use_sahi
         )
     return _instance
+
+
+def current_detector() -> EntityDetector | None:
+    """Return the existing singleton detector, or None — never creating one.
+
+    Unlike `get_detector()`, this only peeks at an already-initialized detector, so
+    callers that merely want to read live tracker state (e.g. entity velocities) can
+    do so without accidentally loading a model on the remote/mock paths.
+    """
+    return _instance

@@ -35,6 +35,11 @@ class GameState:
     population_cap: int = INITIAL_POPULATION_CAP
     current_age: str = "Dark Age"
     idle_tc: bool = False
+    # Whether any villager is idle, from the HUD badge colour (yellow=idle, grey=none).
+    # None = unknown (badge not read yet); True/False = read. Callers must treat None
+    # as "skip idle handling", never as False. Presence, not a count — the count digit
+    # can't be OCR'd reliably, but the icon's lit state is unambiguous.
+    idle_present: bool | None = None
     under_attack: bool = False
     enemy_located: bool = False
     enemy_location: str = ""
@@ -138,6 +143,11 @@ class AgentMemory:
         # strategist only — see `update_age()` below, called from
         # `GoalManager.update_resource_readings()`.
 
+        # Idle-villager presence read off the HUD badge colour. A missing key leaves
+        # the last-known value (never coerced — see GameState.idle_present).
+        if "idle_present" in observations:
+            self.game_state.idle_present = bool(observations["idle_present"])
+
         # Update flags
         if "idle_tc" in observations:
             self.game_state.idle_tc = bool(observations["idle_tc"])
@@ -223,6 +233,9 @@ class AgentMemory:
             f"- TC Idle: {state.idle_tc}",
             f"- Under Attack: {state.under_attack}",
         ]
+        # Idle-villager badge (HUD): None = unknown, so only show a known state.
+        if state.idle_present is not None:
+            lines.append(f"- Idle Villagers Present: {state.idle_present}")
 
         if state.enemy_located:
             lines.append(f"- Enemy Located: {state.enemy_location}")

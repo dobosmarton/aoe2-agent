@@ -21,8 +21,42 @@ from ..executor import (
     get_detected_entities,
 )
 from ..models import LLMResponse, Observations, validate_actions
+from ..villager_roles import select_worker
 from .base import LLMResult
 from .claude_tools import _ACTION_TOOLS
+
+# Camera "go to work site" hotkey per source job (see prompts/hotkeys.md): jumps the
+# view to the drop-off camp so the workers of that job are on screen to pick from.
+_JOB_CAMERA_HOTKEY: dict[str, tuple[str, list[str]]] = {
+    "wood": ("z", ["ctrl"]),  # Lumber Camp
+    "gold": ("g", ["ctrl"]),  # Mining Camp
+    "stone": ("g", ["ctrl"]),  # Mining Camp
+    "food": ("i", ["ctrl"]),  # Mill
+}
+
+
+def _tracker_velocities() -> dict[str, tuple[float, float]]:
+    """Best-effort per-entity velocity from the already-initialized detector.
+
+    Reads the local detector singleton if one exists (it does whenever local YOLO
+    is running) — never creates one, so the remote/mock paths simply return {} and
+    selection falls back to nearest-to-camp. Velocity lets `select_worker` prefer a
+    stationary (easy-to-click) worker.
+    """
+    try:
+        from detection.inference.detector import current_detector
+    except ImportError:
+        return {}
+    detector = current_detector()
+    if detector is None or detector.tracker is None:
+        return {}
+    # track.state is a numpy array (indexing returns library-typed Any); the layout
+    # is [x, y, vx, vy, w, h] — see EntityTracker.
+    return {
+        t.id: (float(cast("float", t.state[2])), float(cast("float", t.state[3])))
+        for t in detector.tracker.tracks
+    }
+
 
 # Pricing per million tokens (claude-sonnet-4-6)
 _PRICE_INPUT = 3.00
@@ -361,7 +395,12 @@ class ClaudeProvider:
     # -- Composite tool handlers ------------------------------------------------
     # Execute multi-step sequences locally, avoiding intermediate API roundtrips.
 
-    _COMPOSITE_NAMES: ClassVar[set[str]] = {"build", "send_villager", "queue_villager"}
+    _COMPOSITE_NAMES: ClassVar[set[str]] = {
+        "build",
+        "send_villager",
+        "queue_villager",
+        "reassign_villager",
+    }
 
     async def _execute_build(self, block: ToolUseBlock) -> tuple[dict, dict]:
         """Composite: press . → q (econ menu) → building_key → click(x,y).
@@ -461,6 +500,74 @@ class ClaudeProvider:
         tool_result = self._make_tool_result(block, success, detail)
         return action_dict, tool_result
 
+    async def _execute_reassign_villager(self, block: ToolUseBlock) -> tuple[dict, dict]:
+        """Composite: jump to a work site → pick a working villager → build.
+
+        Two phases because the worker's screen position only exists AFTER the camera
+        jump: (1) run the go-to-camp press with a rescan, then (2) read the fresh
+        detections, choose a worker of `from_job` (stationary-first when tracker
+        velocities are available), and select→build→place. Falls back to selecting
+        the highest-confidence villager on screen if the job model finds none.
+        """
+        inp = block.input
+        intent = str(inp.get("intent", "Reassign villager"))
+        from_job = str(inp.get("from_job", "wood"))
+        building_key = str(inp.get("building_key", "a"))  # 'a' = Farm in the econ menu
+        action_dict = {"type": "reassign_villager", **inp}
+
+        # Phase 1 — jump the camera to the source work site and re-detect.
+        goto_key, goto_mods = _JOB_CAMERA_HOTKEY.get(from_job, ("z", ["ctrl"]))
+        ok, detail = await self._run_steps(
+            "reassign_villager",
+            [
+                {
+                    "type": "press",
+                    "key": goto_key,
+                    "modifiers": goto_mods,
+                    "rescan": True,
+                    "intent": f"Go to {from_job} work site ({intent})",
+                }
+            ],
+        )
+        if not ok:
+            return action_dict, self._make_tool_result(block, False, detail, include_entities=True)
+
+        # Phase 2 — pick a worker from the fresh view, then select → build → place.
+        sel = select_worker(
+            cast("list[object]", get_detected_entities()),
+            from_job,
+            velocities=_tracker_velocities(),
+        )
+        if sel is not None:
+            select_step: dict = {
+                "type": "click",
+                "x": sel.click[0],
+                "y": sel.click[1],
+                "intent": f"Select {from_job} villager ({intent})",
+            }
+        else:
+            # No worker of that job resolved — grab the best villager on screen.
+            select_step = {
+                "type": "click",
+                "target_class": "villager",
+                "intent": f"Select villager ({intent})",
+            }
+        place_x, place_y = default_build_placement()
+        steps = [
+            select_step,
+            {"type": "press", "key": "q", "intent": f"Open economic build menu ({intent})"},
+            {"type": "press", "key": building_key, "intent": f"Select building ({intent})"},
+            {
+                "type": "click",
+                "x": place_x,
+                "y": place_y,
+                "building_key": building_key,  # lets _handle_click verify the placement
+                "intent": f"Place building ({intent})",
+            },
+        ]
+        ok, detail = await self._run_steps("reassign_villager", steps)
+        return action_dict, self._make_tool_result(block, ok, detail, include_entities=True)
+
     # -- Tool dispatch ---------------------------------------------------------
 
     _COMPOSITE_HANDLERS: ClassVar[dict[str, str]] = {
@@ -468,6 +575,7 @@ class ClaudeProvider:
         "send_villager": "_execute_send_villager",
         "send_all_idle": "_execute_send_all_idle",
         "queue_villager": "_execute_queue_villager",
+        "reassign_villager": "_execute_reassign_villager",
     }
 
     async def _execute_tool_call(self, block: ToolUseBlock) -> tuple[dict, dict]:

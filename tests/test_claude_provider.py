@@ -192,3 +192,77 @@ def test_serialize_response_is_pre_executed() -> None:
     resp = LLMResponse(actions=[{"type": "press", "key": "h"}])
     out = ClaudeProvider._serialize_response(resp)
     assert out["actions_already_executed"] is True
+
+
+# ---------------------------------------------------------------------------
+# reassign_villager composite: jump-to-camp → pick worker → build → place
+# ---------------------------------------------------------------------------
+
+
+def test_reassign_villager_sequences_camp_select_build(
+    provider: ClaudeProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from gameplay_agent.providers import claude as claude_mod
+
+    steps: list[dict] = []
+
+    async def _record(action: dict) -> object:
+        steps.append(action)
+        return SimpleNamespace(success=True, detail="ok")
+
+    # After the Ctrl-Z rescan the fresh view has a wood villager on a tree.
+    entities = [
+        {"class": "tree", "id": "tree_0", "center": (300, 300), "confidence": 0.9},
+        {"class": "villager", "id": "villager_0", "center": (310, 305), "confidence": 0.9},
+    ]
+    monkeypatch.setattr(claude_mod, "execute_action", _record)
+    monkeypatch.setattr(claude_mod, "get_detected_entities", lambda: entities)
+    monkeypatch.setattr(claude_mod, "default_build_placement", lambda: (500, 500))
+    monkeypatch.setattr(claude_mod, "_tracker_velocities", lambda: {})
+    monkeypatch.setattr(provider, "_entity_snapshot", lambda: [])
+
+    block = SimpleNamespace(
+        id="tu1",
+        name="reassign_villager",
+        input={"from_job": "wood", "building_key": "a", "intent": "need food"},
+    )
+    action_dict, _result = _run(provider._execute_reassign_villager(block))
+
+    assert action_dict["type"] == "reassign_villager"
+    kinds = [(s["type"], s.get("key"), s.get("modifiers")) for s in steps]
+    # 1) Ctrl-Z to the lumber camp (rescan), 2) click the wood villager,
+    # 3) q (econ menu), 4) a (Farm), 5) place with building_key.
+    assert kinds[0] == ("press", "z", ["ctrl"]) and steps[0]["rescan"] is True
+    assert steps[1]["type"] == "click" and (steps[1]["x"], steps[1]["y"]) == (310, 305)
+    assert kinds[2] == ("press", "q", None)
+    assert kinds[3] == ("press", "a", None)
+    assert steps[4]["type"] == "click" and steps[4]["building_key"] == "a"
+
+
+def test_reassign_villager_falls_back_to_villager_class(
+    provider: ClaudeProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from gameplay_agent.providers import claude as claude_mod
+
+    steps: list[dict] = []
+
+    async def _record(action: dict) -> object:
+        steps.append(action)
+        return SimpleNamespace(success=True, detail="ok")
+
+    monkeypatch.setattr(claude_mod, "execute_action", _record)
+    monkeypatch.setattr(claude_mod, "get_detected_entities", lambda: [])  # no worker found
+    monkeypatch.setattr(claude_mod, "default_build_placement", lambda: (500, 500))
+    monkeypatch.setattr(claude_mod, "_tracker_velocities", lambda: {})
+    monkeypatch.setattr(provider, "_entity_snapshot", lambda: [])
+
+    block = SimpleNamespace(
+        id="tu2",
+        name="reassign_villager",
+        input={"from_job": "gold", "building_key": "a", "intent": "farm"},
+    )
+    _run(provider._execute_reassign_villager(block))
+
+    assert steps[0]["key"] == "g" and steps[0]["modifiers"] == ["ctrl"]  # Ctrl-G mining camp
+    # Selection falls back to nearest villager by class when the job model finds none.
+    assert steps[1]["type"] == "click" and steps[1]["target_class"] == "villager"

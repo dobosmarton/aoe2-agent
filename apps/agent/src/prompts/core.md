@@ -44,20 +44,21 @@ Missing Feudal Age is the #1 ranking killer against real opponents. If this gate
 ## EVERY TURN Checklist (always do these regardless of goals)
 
 Before choosing actions, check these in order:
-1. **Are there idle villagers?** → **THIS IS THE HIGHEST PRIORITY.** Use **`send_all_idle`** with a `target_class` (e.g. `tree`, `sheep`, `berry_bush`) — it selects ALL idle villagers at once (Shift-.) and assigns them in a single action. This is far better than cycling `.` one villager at a time, which leaves the rest waiting.
+1. **Idle villagers are AUTO-DISTRIBUTED for you.** A background system reads the idle-villager badge each turn and spreads idle villagers across resources (food/wood/gold) by the age's ratio — you do NOT need to sweep them, and you should NOT use `send_all_idle` (it dumps everyone onto one tile, unbalancing the economy). Only send villagers yourself for a *deliberate* move: `send_villager` to put one on a specific resource, or `reassign_villager` to pull a worker off one job and build/gather something else (see the food-emergency rule).
 2. **Should I queue a villager?** → TC should never be idle unless you are actively saving for the next age-up. Check the age-specific section for population caps.
 3. **Am I housed (pop = pop cap)?** → **BUILD A HOUSE IMMEDIATELY** using `build` with `building_key="q"` (omit x,y — the executor auto-places on open ground).
    You CANNOT queue villagers while housed. This is the #1 game-losing mistake.
 4. **Do I need houses soon?** → Build ONE house when **population ≥ pop_cap − 5** (any age). Do NOT wait until pop_cap — house construction takes ~25 s, and once housed the TC stops producing villagers entirely. Do NOT build multiple houses per turn — one house adds 5 pop slots, that's enough.
-5. **FOOD EMERGENCY: Is food < 50 AND you have idle villagers?** →
-   **Dedicate the ENTIRE turn to building farms.** Do nothing else — no houses, no queuing, just farms.
-   Each farm costs 60 wood. If you have 300+ wood, build 5 farms this turn.
-   If no Mill exists yet: build Mill first, then farms.
+5. **FOOD EMERGENCY: Is food < 50?** →
+   **Dedicate the ENTIRE turn to farms.** Do nothing else — no houses, no queuing, just farms.
+   Each farm costs 60 wood. If you have 300+ wood, build several this turn.
+   If no Mill exists yet: build Mill first, then farms. If few villagers are idle,
+   use **`reassign_villager`** with `from_job="wood"`, `building_key="a"` to pull a
+   wood villager onto a farm — don't wait for an idle one.
 6. **Villager balance**: Keep at least half your villagers on FOOD. Never have 0 food gatherers. Check age-specific ratios for detailed allocation.
 
 **Key rules:**
-- **NEVER return 0 actions.** If you have nothing else to do, `send_all_idle` to a resource and queue villagers. There is ALWAYS something to do.
-- **After your main actions, always `send_all_idle`** to a resource to put any newly-freed villagers back to work — one call catches every idle at once.
+- **NEVER return 0 actions.** If you have nothing else to do, queue a villager, build a needed house/farm, or advance your build order. Idle villagers are already put back to work automatically — there is ALWAYS something useful to do.
 - **Enable Auto Scout early**: press `,` (rescan) → `G` (Auto Scout). Do this ONCE and the scout explores forever automatically.
 
 ## TC Gather Point — Efficient Food Gathering
@@ -191,6 +192,7 @@ Set `game_state` in observations:
 - **build**: Composite. REQUIRED: `building_key`. `x`/`y` are OPTIONAL — **omit them and the executor auto-places on open ground near the town centre** (it picks the emptiest spot and verifies the building landed). Only pass `x`/`y` for a specific *detected* empty tile. Executes: select idle villager → open economic build menu (Q) → press building_key → place. Building keys: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm, s=Blacksmith, t=Dock. **ALWAYS use this for economic buildings instead of press(.)+press(q)+press(key)+click() separately** — it's 4x faster. NOTE: Military buildings (W menu) and advanced buildings (V menu) cannot use this composite — use manual press sequences instead.
 - **send_villager**: Composite. REQUIRED: `target_class` OR `x`+`y`. Executes: select idle villager (press .) → right_click target. **ALWAYS use this instead of press(.)+right_click() separately** — it's 2x faster.
 - **queue_villager**: Composite. No extra fields. Executes: go to TC → queue villager. **ALWAYS use this instead of press(h)+press(q) separately** — it's 2x faster.
+- **reassign_villager**: Composite. REQUIRED: `from_job` (`wood`/`gold`/`stone`/`food`), `building_key`. Pulls a villager already GATHERING `from_job` and builds with it — jumps the camera to that work site, picks a worker there, then builds (q → building_key → auto-place). Unlike `build` (which uses an *idle* villager), this pulls a *working* one. Use to rebalance on the fly, e.g. `from_job="wood"`, `building_key="a"` to pull a wood villager onto a Farm when food is low and no villager is idle.
 
 **IMPORTANT**: click/right_click use `x` and `y`. drag uses `start_x`,`start_y`,`end_x`,`end_y`.
 **NEVER output x=0, y=0 or intent containing "Skip".** If you have no valid target, use press actions instead of placeholder click/right_click.

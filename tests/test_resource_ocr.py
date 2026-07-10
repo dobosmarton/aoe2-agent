@@ -177,6 +177,26 @@ def test_build_fields_empty_when_nothing_detected():
     assert _build_fields_single_frame({}, None, None, frame_w=3024, pad=4) == {}
 
 
+def test_detect_idle_present_by_icon_colour():
+    """Idle presence comes from the badge colour: yellow (saturated) = idle, grey = none.
+
+    Anchored on the population field; validated on real frames as ~10x separated
+    (grey ≤ 10 saturation, yellow ≥ 58). Here we synthesize both states.
+    """
+    from gameplay_agent.resource_ocr import detect_idle_present
+
+    pop = FieldBox(700, 176, 800, 204)  # icon sampled just right of this
+    frame = np.zeros((260, 1000, 3), dtype=np.uint8)
+
+    # Grey icon (equal channels → zero saturation) → no idle villagers.
+    frame[160:212, 800:880] = (120, 120, 120)
+    assert detect_idle_present(frame, pop) is False
+
+    # Bright-yellow icon (R,G high, B low → high saturation) → idle present.
+    frame[160:212, 800:880] = (235, 205, 20)
+    assert detect_idle_present(frame, pop) is True
+
+
 def test_calibration_field_rects_returns_plain_tuples():
     """field_rects() exposes each FieldBox as a plain (x0,y0,x1,y1) tuple so the
     overlay can draw the reading regions without importing FieldBox."""

@@ -56,7 +56,7 @@ def _clean_readings(ocr: dict) -> dict:
     overwriting it; resource/population keys are present only when read.
     """
     readings: dict = {}
-    for key in ("food", "wood", "gold", "stone", "population"):
+    for key in ("food", "wood", "gold", "stone", "population", "idle_present"):
         if key in ocr:
             readings[key] = ocr[key]
     if ocr.get("age"):
