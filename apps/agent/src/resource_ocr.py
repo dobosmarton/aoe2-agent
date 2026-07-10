@@ -65,6 +65,21 @@ POP_FIELD = "population"
 _IDLE_SAT_THRESHOLD = 25.0
 _IDLE_ICON_WIDTH_FRAC = 0.7  # of the population field width, starting at its right edge
 _IDLE_ICON_Y_PAD = 6
+# Idle-villager COUNT (read_idle_count). The badge's corner digit(s) are the HUD
+# digit font — white strokes with a black outline — at a fixed offset right of the
+# population field's LEFT edge (pop.x1 shifts with the number's width; pop.x0 is
+# stable HUD geometry). Window bounds are in pop-field-height units, sized to
+# cover the digit area while excluding the pop number (left) and the age emblem's
+# white Roman numerals (right). Measured on the real fixtures: digit strokes have
+# min(R,G,B) ≥ ~200 on all HUD skins; the yellow badge fill fails the blue
+# channel, grey disc/stone stay ≤ ~170 — 185 splits them. Correct NCC matches
+# score 0.62 to 0.80 against the bank, wrong shapes ≤ 0.44 — 0.45 floor.
+_IDLE_COUNT_X_LO = 3.5
+_IDLE_COUNT_X_HI = 6.8
+_IDLE_COUNT_Y_HI = 1.8
+_IDLE_WHITE_THR = 185
+_IDLE_COUNT_MIN_NCC = 0.45
+_HUD_DIGITS_DIR = Path(__file__).parent / "resource_ocr_assets" / "templates" / "hud_digits"
 # Canonical glyph size every segmented digit / template is resized to before NCC.
 _GLYPH_HW: tuple[int, int] = (28, 20)
 
@@ -480,6 +495,88 @@ def detect_idle_present(rgb: np.ndarray, pop: FieldBox) -> bool:
     return saturation > _IDLE_SAT_THRESHOLD
 
 
+_hud_digit_bank: dict[str, list[np.ndarray]] | None = None
+
+
+def _load_hud_digit_bank() -> dict[str, list[np.ndarray]]:
+    """Digit → glyph samples for the HUD font, cached after first load.
+
+    The bank was harvested from resource-bar digits on the real vision fixtures
+    (same font/rendering as the badge count); several samples per digit absorb
+    rendering variance. Glyphs are stored already `_normalize_glyph`-canonical
+    (28x20 binary), so any capture resolution matches after normalization.
+    """
+    global _hud_digit_bank
+    if _hud_digit_bank is None:
+        bank: dict[str, list[np.ndarray]] = {}
+        for p in sorted(_HUD_DIGITS_DIR.glob("[0-9]_*.png")):
+            arr = np.asarray(Image.open(p).convert("L"), dtype=np.uint8)
+            bank.setdefault(p.stem[0], []).append(np.where(arr > 127, 255, 0).astype(np.uint8))
+        _hud_digit_bank = bank
+    return _hud_digit_bank
+
+
+def read_idle_count(rgb: np.ndarray, pop: FieldBox) -> int | None:
+    """Idle-villager COUNT from the badge's corner digit(s); None = unreadable.
+
+    The count is drawn bottom-right of the badge in the HUD digit font: white
+    glyphs with a black outline, over backgrounds that vary by HUD skin (dark
+    bar, yellow badge fill, light stone). A near-white mask (all channels
+    bright) isolates exactly the glyph strokes on every skin — the yellow fill
+    fails the blue channel, the grey disc and stone sit below the threshold —
+    then connected components of digit-like size are NCC-classified against the
+    HUD digit bank. Anchored on `pop.x0` (the field's left edge is fixed HUD
+    geometry; `pop.x1` shifts with the number's width). Verified 7/7 on the
+    real vision fixtures (counts 0, 3, and the two-digit 18) across both HUD
+    skins; engine OCR misreads this icon-overlapped digit, which is why the
+    template path exists.
+    """
+    import cv2
+
+    ph = pop.y1 - pop.y0
+    frame_h, frame_w = cast("tuple[int, int]", rgb.shape[:2])
+    x0 = pop.x0 + int(_IDLE_COUNT_X_LO * ph)
+    x1 = min(frame_w, pop.x0 + int(_IDLE_COUNT_X_HI * ph))
+    y0 = max(0, pop.y0)
+    y1 = min(frame_h, pop.y0 + int(_IDLE_COUNT_Y_HI * ph))
+    if x1 <= x0 or y1 <= y0:
+        return None
+    bank = _load_hud_digit_bank()
+    if not bank:
+        return None
+
+    patch = rgb[y0:y1, x0:x1]
+    mask = cast("np.ndarray", (patch.min(axis=2) >= _IDLE_WHITE_THR).astype(np.uint8) * 255)
+    n, _labels, stats, _centroids = cast(
+        "tuple[int, np.ndarray, np.ndarray, np.ndarray]",
+        cv2.connectedComponentsWithStats(mask),
+    )
+    comps: list[tuple[int, np.ndarray]] = []
+    for i in range(1, n):
+        stat_row = cast("np.ndarray", stats[i])
+        x, y, w, h, area = (int(v) for v in cast("list[int]", stat_row.tolist()))
+        if not (0.45 * ph <= h <= 1.3 * ph) or w > 1.2 * ph or area < 12:
+            continue
+        comps.append((x, cast("np.ndarray", mask[y : y + h, x : x + w])))
+    if not comps:
+        return None
+    comps.sort(key=lambda c: c[0])
+
+    digits = ""
+    for _x, glyph_raw in comps:
+        glyph = _normalize_glyph(glyph_raw)
+        best_char, best_score = "", -2.0
+        for char, samples in bank.items():
+            for tmpl in samples:
+                score = _ncc(glyph, tmpl)
+                if score > best_score:
+                    best_char, best_score = char, score
+        if best_score < _IDLE_COUNT_MIN_NCC:  # unfamiliar shape — don't guess
+            return None
+        digits += best_char
+    return int(digits) if digits.isdigit() else None
+
+
 def _column_centers(x0s: list[int], k: int = 4, gap: int = 70) -> list[int]:
     """Cluster numeric left-edges into the k resource columns (1D, split on gaps)."""
     if not x0s:
@@ -665,10 +762,16 @@ def read_resource_bar(
         raw = read_pop(pop_box.crop(gray))
         if "/" in raw:
             out[POP_FIELD] = raw
-        # Idle-villager PRESENCE from the badge colour, anchored on the population
-        # field. Boolean, not a count — robust where digit OCR is not. Omitted when
-        # population isn't calibrated (no anchor → unknown, caller skips).
-        out["idle_present"] = detect_idle_present(_decode_rgb(screenshot_bytes), pop_box)
+        # Idle-villager badge, anchored on the population field. PRESENCE from the
+        # badge colour (robust boolean) plus the COUNT from the corner digit via
+        # template NCC — the count refines how many idles to dispatch, presence
+        # stays the gate. Both omitted when population isn't calibrated (no
+        # anchor → unknown, caller skips).
+        rgb = _decode_rgb(screenshot_bytes)
+        out["idle_present"] = detect_idle_present(rgb, pop_box)
+        idle_count = read_idle_count(rgb, pop_box)
+        if idle_count is not None:
+            out["idle_count"] = idle_count
 
     # Age is text ("Dark/Feudal/Castle/Imperial Age") — OCR it and keyword-map.
     # The pure-template backend has no OCR engine, so age is left "" there.

@@ -19,12 +19,14 @@ def _state(
     population_cap: int = 30,
     age: str = "Dark Age",
     idle_present: bool | None = None,
+    idle_count: int | None = None,
 ) -> GameState:
     return GameState(
         population=population,
         population_cap=population_cap,
         current_age=age,
         idle_present=idle_present,
+        idle_count=idle_count,
     )
 
 
@@ -82,6 +84,27 @@ def test_idle_dispatch_capped_per_turn() -> None:
     actions = decide(entities, _state(population=22, idle_present=True), alarm=False)
     # Presence only (no count) → a fixed _IDLE_DISPATCH_PER_TURN (3) batch.
     assert _types(actions) == ["press", "right_click"] * 3
+
+
+def test_idle_batch_sized_by_badge_count() -> None:
+    entities = [_ent("town_center", (0, 0)), _ent("sheep", (10, 10))]
+    # Known count 2 → exactly 2 dispatches (not the blind 3).
+    actions = decide(entities, _state(population=22, idle_present=True, idle_count=2), alarm=False)
+    assert _types(actions) == ["press", "right_click"] * 2
+
+
+def test_idle_batch_capped_on_mass_idle() -> None:
+    entities = [_ent("town_center", (0, 0)), _ent("sheep", (10, 10))]
+    # Count 18 (post-combat pile-up) → capped at _IDLE_DISPATCH_MAX (6) per turn.
+    actions = decide(entities, _state(population=22, idle_present=True, idle_count=18), alarm=False)
+    assert _types(actions) == ["press", "right_click"] * 6
+
+
+def test_idle_count_zero_overrides_presence() -> None:
+    entities = [_ent("town_center", (0, 0)), _ent("sheep", (10, 10))]
+    # Badge colour said present but the digit reads 0 → trust the digit, skip.
+    actions = decide(entities, _state(population=22, idle_present=True, idle_count=0), alarm=False)
+    assert actions == []
 
 
 def test_idle_distribution_spreads_across_kinds() -> None:

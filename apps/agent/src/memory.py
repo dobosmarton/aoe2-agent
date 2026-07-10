@@ -37,9 +37,12 @@ class GameState:
     idle_tc: bool = False
     # Whether any villager is idle, from the HUD badge colour (yellow=idle, grey=none).
     # None = unknown (badge not read yet); True/False = read. Callers must treat None
-    # as "skip idle handling", never as False. Presence, not a count — the count digit
-    # can't be OCR'd reliably, but the icon's lit state is unambiguous.
+    # as "skip idle handling", never as False. Presence stays the robust gate.
     idle_present: bool | None = None
+    # How many villagers are idle, from the badge's corner digit via template NCC
+    # (resource_ocr.read_idle_count). None = digit unreadable this frame — fall back
+    # to presence-only behavior, never treat as 0.
+    idle_count: int | None = None
     under_attack: bool = False
     enemy_located: bool = False
     enemy_location: str = ""
@@ -148,6 +151,12 @@ class AgentMemory:
         if "idle_present" in observations:
             self.game_state.idle_present = bool(observations["idle_present"])
 
+        # Idle-villager count from the badge digit — same missing-key convention
+        # as idle_present (observations come from several sources; only an OCR
+        # frame carries the key, others must not clear it).
+        if "idle_count" in observations:
+            self.game_state.idle_count = int(observations["idle_count"])
+
         # Update flags
         if "idle_tc" in observations:
             self.game_state.idle_tc = bool(observations["idle_tc"])
@@ -234,7 +243,10 @@ class AgentMemory:
             f"- Under Attack: {state.under_attack}",
         ]
         # Idle-villager badge (HUD): None = unknown, so only show a known state.
-        if state.idle_present is not None:
+        # The exact count (badge digit) beats the presence boolean when readable.
+        if state.idle_count is not None:
+            lines.append(f"- Idle Villagers: {state.idle_count}")
+        elif state.idle_present is not None:
             lines.append(f"- Idle Villagers Present: {state.idle_present}")
 
         if state.enemy_located:

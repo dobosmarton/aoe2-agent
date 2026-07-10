@@ -47,6 +47,15 @@ multi-digit fine without them): add `--template-frame IMG --template-values
 "wood food gold stone population"` (on-screen order) for one frame; they land in
 `templates/<W>x<H>/` as `0.png` … `9.png`, `slash.png`.
 
+`templates/hud_digits/` is different: it is the **resolution-independent** HUD
+digit bank used by `read_idle_count` (the idle-villager badge count). Each
+`<digit>_<n>.png` is a `_normalize_glyph`-canonical 28x20 binary sample harvested
+from resource-bar digits on the real `vision_fixtures/` frames (same font and
+rendering as the badge digit; several samples per digit absorb rendering
+variance). Engine OCR misreads the icon-overlapped badge digit — this NCC bank is
+what makes the count readable. It ships with the repo and needs no per-resolution
+regeneration; `tests/test_resource_ocr.py` locks its accuracy on all real frames.
+
 ## Calibration YAML format
 
 See `calibration.example.yaml`. Keys: `width`, `height`, `template_dir` (relative

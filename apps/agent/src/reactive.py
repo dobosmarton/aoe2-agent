@@ -15,11 +15,11 @@ Design notes:
     spread across food/wood/gold instead of all piling onto one tile. This replaces
     the old `Shift-.` (select ALL idle → one right-click) blanket, which sent
     everyone to the same spot and moved the camera every turn even when nobody was
-    idle. It is a PRESENCE signal, not a count (the count digit can't be OCR'd
-    reliably) — so we dispatch a fixed small batch per turn and let the badge, re-
-    read each turn, tell us when to stop (it greys out once all idle are assigned).
-    The executor resolves `target_class` from its detected-entity cache, so we only
-    name the concrete resource class.
+    idle. The badge's COUNT digit (template OCR, `state.idle_count`) sizes the
+    batch exactly when readable; the presence colour stays the gate and the
+    fallback (fixed small batch, badge re-read each turn tells us when to stop —
+    it greys out once all idle are assigned). The executor resolves `target_class`
+    from its detected-entity cache, so we only name the concrete resource class.
 """
 
 from __future__ import annotations
@@ -48,9 +48,14 @@ _DEFAULT_IDLE_PATTERN: tuple[ResourceKind, ...] = _IDLE_PATTERN_BY_AGE["Dark Age
 
 # Idle villagers dispatched per turn while the badge shows present. Each `.` costs a
 # camera move + rescan, so keep this small; the badge re-read next turn drains any
-# remainder. Since we only know presence (not the count), a `.` beyond the last idle
-# villager is a harmless no-op — this is the max we'll spend chasing a lit badge.
+# remainder. Used when only presence (not the count) is known — a `.` beyond the
+# last idle villager is a harmless no-op; this is the max we'll spend chasing a
+# lit badge blind.
 _IDLE_DISPATCH_PER_TURN = 3
+# With the badge count read (state.idle_count), the batch is sized exactly — but
+# still capped so a mass-idle event (post-combat, town-bell recovery) doesn't blow
+# the turn's action budget; the re-read next turn drains the rest with urgency.
+_IDLE_DISPATCH_MAX = 6
 
 
 def decide(entities: list[object], state: GameState, alarm: bool) -> list[dict[str, object]]:
@@ -81,19 +86,26 @@ def _distribute_idle_actions(entities: list[object], state: GameState) -> list[d
     """Route idle villagers one at a time, spread across resources by age pattern.
 
     Gated on the HUD badge presence (`state.idle_present`): False = none idle,
-    None = badge unread — both skip (never dispatch on an unknown reading). When
-    villagers are idle, pull up to `_IDLE_DISPATCH_PER_TURN` of them with `.`
-    (select next idle) and right-click each onto a resource whose kind is chosen by
-    the age pattern; the badge re-read next turn drains any remainder (a `.` past
-    the last idle villager is a harmless no-op).
+    None = badge unread — both skip (never dispatch on an unknown reading). The
+    batch is sized by the badge count when the digit was readable (capped at
+    `_IDLE_DISPATCH_MAX`), else a blind `_IDLE_DISPATCH_PER_TURN`; each villager
+    is pulled with `.` (select next idle) and right-clicked onto a resource whose
+    kind is chosen by the age pattern. The badge re-read next turn drains any
+    remainder (a `.` past the last idle villager is a harmless no-op).
     """
     if not state.idle_present:
+        return []
+    if state.idle_count is not None:
+        batch = min(state.idle_count, _IDLE_DISPATCH_MAX)
+    else:
+        batch = _IDLE_DISPATCH_PER_TURN
+    if batch == 0:  # digit says none idle — presence colour was a false positive
         return []
 
     pattern = _IDLE_PATTERN_BY_AGE.get(state.current_age, _DEFAULT_IDLE_PATTERN)
     origin = _tc_origin(entities)
     actions: list[dict[str, object]] = []
-    for i in range(_IDLE_DISPATCH_PER_TURN):
+    for i in range(batch):
         kind = pattern[(state.population + i) % len(pattern)]
         target = _resolve_idle_target(entities, kind, origin)
         if target is None:

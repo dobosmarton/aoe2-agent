@@ -16,6 +16,7 @@ import pytest
 pytest.importorskip("cv2")  # template backend needs OpenCV
 
 import asyncio
+import io
 from pathlib import Path
 
 import numpy as np
@@ -197,6 +198,31 @@ def test_detect_idle_present_by_icon_colour():
     assert detect_idle_present(frame, pop) is True
 
 
+def test_read_idle_count_returns_none_without_digits():
+    """No white glyph strokes in the badge window → None (unknown), never a guess."""
+    pytest.importorskip("cv2")
+    from gameplay_agent.resource_ocr import read_idle_count
+
+    pop = FieldBox(700, 176, 800, 204)
+    frame = np.zeros((260, 1000, 3), dtype=np.uint8)
+    frame[160:212, 800:880] = (235, 205, 20)  # yellow badge, no digit anywhere
+    assert read_idle_count(frame, pop) is None
+
+
+def test_read_idle_count_rejects_unfamiliar_shapes():
+    """A white blob of digit-like size that matches no template scores below the
+    NCC floor → None rather than a fabricated count."""
+    pytest.importorskip("cv2")
+    from gameplay_agent.resource_ocr import read_idle_count
+
+    pop = FieldBox(700, 176, 800, 204)
+    ph = pop.y1 - pop.y0  # 28px — window is pop.x0 + [3.5, 6.8]*ph
+    frame = np.zeros((260, 1000, 3), dtype=np.uint8)
+    # Solid white square (no digit structure) inside the count window.
+    frame[182 : 182 + ph - 6, 810 : 810 + 18] = (255, 255, 255)
+    assert read_idle_count(frame, pop) is None
+
+
 def test_calibration_field_rects_returns_plain_tuples():
     """field_rects() exposes each FieldBox as a plain (x0,y0,x1,y1) tuple so the
     overlay can draw the reading regions without importing FieldBox."""
@@ -291,6 +317,36 @@ def test_autodetect_matches_hand_calibration(fixture_path):
     expected = _expected_without_lone_digits(fixture["expected"])
     failures = evaluate_resource_readings(expected, readings)
     assert failures == [], f"{fixture_path.name}: {failures} (got {readings})"
+
+
+# Ground truth read off the badge in each fixture frame by eye (the fixture YAMLs
+# predate the idle-count reader). Covers both HUD skins, the yellow and grey badge
+# states, and a two-digit count.
+_EXPECTED_IDLE_COUNT: dict[str, int] = {
+    "real_000_dark_start": 3,
+    "real_040_castle": 0,
+    "real_060_imperial": 0,
+    "real_090_castle": 0,
+    "real_160_imperial": 18,
+    "real_180_low_pop": 0,
+    "real_215_imperial": 0,
+}
+
+
+@pytest.mark.parametrize("fixture_path", _REAL_FIXTURES, ids=lambda p: p.stem)
+def test_read_idle_count_real_fixtures(fixture_path):
+    """The badge count digit reads exactly on every real frame (template NCC)."""
+    pytest.importorskip("rapidocr_onnxruntime")  # autodetect needs the engine
+    pytest.importorskip("cv2")
+    from gameplay_agent.resource_ocr import read_idle_count
+
+    fixture = load_vision_fixture(fixture_path)
+    data = resolve_screenshot_path(fixture_path, fixture["screenshot"]).read_bytes()
+    calib = autodetect_calibration(data)
+    assert calib is not None
+    rgb = np.asarray(Image.open(io.BytesIO(data)).convert("RGB"))
+    got = read_idle_count(rgb, calib.fields["population"])
+    assert got == _EXPECTED_IDLE_COUNT[fixture_path.stem], f"{fixture_path.stem}: got {got}"
 
 
 def test_autodetect_no_template_path_reads_multidigit():
