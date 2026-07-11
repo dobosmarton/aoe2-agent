@@ -149,7 +149,8 @@ def _sync_turn_state(
 
     Deliberately NOT in update_from_observations (which fires more than once
     per turn): the idle-badge streak feeds the reactive tier's count trust
-    gate, and observe_hud feeds the executor's build gates (house headroom,
+    gate, the buildings-seen evidence feeds its Feudal prep/age-up gating, and
+    observe_hud feeds the executor's build gates (house headroom,
     prerequisites, wood cost, placement settlement).
     """
     if hud_readings:

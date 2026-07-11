@@ -81,8 +81,7 @@ _FARM_BUILD_KEY = "a"
 # `z`, prompts/hotkeys.md). With the villager queue firing every turn, 50 food
 # at a time, 500 can never accumulate (2026-07-11 run 3, F-16) — so once the
 # Dark Age economy is established (`_FEUDAL_BANK_POP` villagers) the queue
-# stops and food BANKS toward the research. The two Dark Age buildings Feudal
-# also requires are always up by then (houses + mill).
+# stops and food BANKS toward the research.
 _FEUDAL_FOOD_COST = 500
 _FEUDAL_BANK_POP = 16
 # Feudal also requires TWO qualifying Dark Age buildings — and houses don't
@@ -143,7 +142,7 @@ def _age_up_actions(state: GameState) -> list[dict[str, object]]:
     if (
         state.current_age != "Dark Age"
         or _resource(state, "food") < _FEUDAL_FOOD_COST
-        or not state.buildings_seen >= _FEUDAL_PREREQ_CLASSES
+        or not _FEUDAL_PREREQ_CLASSES.issubset(state.buildings_seen)
     ):
         return []
     return [

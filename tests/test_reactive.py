@@ -169,13 +169,15 @@ def test_food_crisis_with_no_wood_reserves_a_wood_slot() -> None:
     assert targets == ["sheep", "sheep", "tree"]  # exactly one wood slot per 3-batch
 
 
-def test_farm_wood_cost_matches_executor_table() -> None:
-    """Drift guard (V-4 seed): the reactive tier duplicates the farm cost to
-    stay dependency-free — this pins the two copies together."""
+def test_reactive_build_constants_match_executor_tables() -> None:
+    """Drift guard (V-4 seed): the reactive tier duplicates build keys/costs to
+    stay dependency-free — this pins every copy to the executor's tables."""
     from gameplay_agent import executor as ex
     from gameplay_agent import reactive
 
     assert ex._BUILD_WOOD_COST["a"] == reactive._FARM_WOOD_COST
+    assert ex.BUILD_KEY_TO_CLASS[reactive._FARM_BUILD_KEY] == "farm"
+    assert ex.BUILD_KEY_TO_CLASS[reactive._LUMBER_CAMP_BUILD_KEY] == "lumber_camp"
 
 
 # ---------------------------------------------------------------------------
