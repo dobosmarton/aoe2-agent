@@ -54,6 +54,11 @@ from .window import ensure_game_focused, get_game_window_rect, is_game_running
 
 log = structlog.stdlib.get_logger()
 
+# Consecutive focus failures (≈2 s each: 3 in-window retries + 1 s sleep) before
+# the run aborts with game_end_reason="lost_focus". Run 1 burned 12 of 30
+# iterations retrying an unfocusable window with no end-reason label (F-1).
+_MAX_FOCUS_FAILURES = 15
+
 
 # ---------------------------------------------------------------------------
 # Turn pipelining (S6, RTC-style)
@@ -223,6 +228,7 @@ async def game_loop(
 
     iteration = 0
     alarm = False
+    focus_failures = 0  # consecutive — reset on every successful focus
     strategist_task: asyncio.Task | None = None
     pending_plan: _PendingPlan | None = None  # S6: plan from last turn, run this turn
 
@@ -251,9 +257,22 @@ async def game_loop(
                     memory.game_end_reason = "game_not_found"
                 break
             if not ensure_game_focused():
-                log.warning("could_not_focus_game", message="Retrying in 1 second")
+                # Unplayable time isn't billed against the iteration budget —
+                # this attempt is retried under the same iteration number.
+                iteration -= 1
+                focus_failures += 1
+                if focus_failures >= _MAX_FOCUS_FAILURES:
+                    log.error("focus_lost_giving_up", failures=focus_failures)
+                    memory.game_end_reason = "lost_focus"
+                    break
+                log.warning(
+                    "could_not_focus_game",
+                    message="Retrying in 1 second",
+                    failures=focus_failures,
+                )
                 await asyncio.sleep(1)
                 continue
+            focus_failures = 0
 
             if iteration == 1:
                 # The opening (zoom, select scout, auto-scout) needs no perception —

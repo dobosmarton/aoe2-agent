@@ -110,8 +110,9 @@ def test_add_turn_does_not_reset_timer_after_first() -> None:
     assert m.game_start_time == first_time
 
 
-def test_add_turn_food_tracking_uses_max() -> None:
-    """Food counter is the *peak* across the game, not the latest reading."""
+def test_add_turn_food_does_not_feed_income_counter() -> None:
+    """Turn observations (LLM-echoed) must never count as gathered food —
+    only OCR frames via record_food_reading do (T-601)."""
     m = AgentMemory()
     m.add_turn(
         Turn(
@@ -121,7 +122,7 @@ def test_add_turn_food_tracking_uses_max() -> None:
     m.add_turn(
         Turn(iteration=2, timestamp="t", reasoning="r", actions=[], observed_resources={"food": 50})
     )  # later, smaller
-    assert m.total_food_gathered == 200
+    assert m.total_food_gathered == 0
 
 
 # ---------------------------------------------------------------------------
@@ -143,11 +144,11 @@ def test_update_from_observations_resources_merged() -> None:
     assert m.game_state.resources["wood"] == INITIAL_RESOURCES["wood"]
 
 
-def test_update_from_observations_food_idempotent_on_max() -> None:
+def test_update_from_observations_never_counts_food_income() -> None:
     m = AgentMemory()
     m.update_from_observations({"resources": {"food": 300}})
     m.update_from_observations({"resources": {"food": 100}})
-    assert m.total_food_gathered == 300  # max-tracked
+    assert m.total_food_gathered == 0  # income comes from record_food_reading only
 
 
 def test_update_from_observations_food_handles_non_numeric() -> None:
@@ -336,6 +337,7 @@ def test_metrics_snapshot_keys() -> None:
         "game_end_reason",
         "memories_loaded",
         "memories_used",
+        "executed_actions",
     }
     assert set(snap.keys()) == expected_keys
 
@@ -426,3 +428,58 @@ def test_create_turn_handles_no_observations() -> None:
     turn = m.create_turn(reasoning="r", actions=[])
     assert turn.observed_resources is None
     assert turn.observed_events == []
+
+
+# ---------------------------------------------------------------------------
+# Honest metrics (T-601)
+# ---------------------------------------------------------------------------
+
+
+def test_action_success_rate_uses_executed_denominator():
+    """Fallback/composite executions never enter turn.actions, so the old
+    successful/total ratio exceeded 1.0 (runs 1 and 3: 2.38, 1.54)."""
+    memory = AgentMemory()
+    memory.create_turn(reasoning="r", actions=[])  # planned 0
+    memory.record_action_results(3, 3)  # but 3 fallback actions executed
+    snap = memory.get_metrics_snapshot()
+    assert snap["executed_actions"] == 3
+    assert snap["action_success_rate"] == 1.0  # 3/3, never > 1 by construction
+    memory.record_action_results(0, 2)
+    assert memory.get_metrics_snapshot()["action_success_rate"] == 0.6  # 3/5
+
+
+def test_food_gathered_sums_positive_ocr_deltas():
+    memory = AgentMemory()
+    memory.record_food_reading(200)  # baseline (starting stock — not income)
+    memory.record_food_reading(150)  # spent on a villager — not income
+    memory.record_food_reading(210)  # +60 gathered
+    memory.record_food_reading(240)  # +30 gathered
+    assert memory.total_food_gathered == 90
+
+
+def test_food_gathered_drops_ocr_glitch_jumps():
+    memory = AgentMemory()
+    memory.record_food_reading(40)
+    memory.record_food_reading(900)  # misread — beyond the sanity cap, dropped
+    memory.record_food_reading(60)  # below the glitch baseline — no count
+    assert memory.total_food_gathered == 0
+
+
+def test_llm_observations_do_not_count_as_gathered_food():
+    memory = AgentMemory()
+    memory.record_food_reading(100)
+    # LLM-echoed observations update state but never the income counter.
+    memory.update_from_observations({"resources": {"food": 9999}})
+    memory.create_turn(reasoning="r", actions=[], observations={"resources": {"food": 5000}})
+    assert memory.total_food_gathered == 0
+
+
+def test_reset_clears_metric_state():
+    memory = AgentMemory()
+    memory.record_food_reading(100)
+    memory.record_food_reading(200)
+    memory.record_action_results(1, 2)
+    memory.reset()
+    assert memory.total_food_gathered == 0 and memory.executed_actions == 0
+    memory.record_food_reading(300)  # fresh baseline, not a +100 delta
+    assert memory.total_food_gathered == 0

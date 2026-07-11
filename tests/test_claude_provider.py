@@ -84,6 +84,51 @@ def test_call_api_forwards_configured_effort(
 
 
 # ---------------------------------------------------------------------------
+# Single-shot zero-action retry (T-506)
+# ---------------------------------------------------------------------------
+
+
+def _parse_response(actions: list[dict], reasoning: str = "r") -> SimpleNamespace:
+    from gameplay_agent.models import LLMResponse
+
+    return SimpleNamespace(
+        usage=_usage(), parsed_output=LLMResponse(actions=actions, reasoning=reasoning)
+    )
+
+
+def _install_parse(provider: ClaudeProvider, *responses: object) -> AsyncMock:
+    parse = AsyncMock(side_effect=list(responses))
+    provider.client = SimpleNamespace(messages=SimpleNamespace(parse=parse))
+    return parse
+
+
+def test_single_shot_retries_once_on_zero_actions(provider: ClaudeProvider) -> None:
+    parse = _install_parse(
+        provider,
+        _parse_response([], reasoning="plan narrated, nothing emitted"),
+        _parse_response([{"type": "press", "key": "h"}]),
+    )
+    out = _run(provider._call_single_shot([{"type": "text", "text": "ctx"}]))
+    assert parse.await_count == 2
+    assert out["actions"] and out["actions"][0]["key"] == "h"
+    retry_messages = parse.await_args.kwargs["messages"]
+    assert "zero actions" in retry_messages[-1]["content"]  # the nudge was sent
+
+
+def test_single_shot_no_retry_when_actions_present(provider: ClaudeProvider) -> None:
+    parse = _install_parse(provider, _parse_response([{"type": "press", "key": "q"}]))
+    _run(provider._call_single_shot([{"type": "text", "text": "ctx"}]))
+    assert parse.await_count == 1
+
+
+def test_single_shot_gives_up_after_one_retry(provider: ClaudeProvider) -> None:
+    parse = _install_parse(provider, _parse_response([]), _parse_response([]))
+    out = _run(provider._call_single_shot([{"type": "text", "text": "ctx"}]))
+    assert parse.await_count == 2  # bounded: no infinite nudging
+    assert out["actions"] == []  # game loop's fallback handles it from here
+
+
+# ---------------------------------------------------------------------------
 # S3 — prompt caching across the tool loop
 # ---------------------------------------------------------------------------
 

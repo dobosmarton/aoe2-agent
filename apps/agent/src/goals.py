@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 from typing import Literal
 
@@ -240,6 +241,12 @@ class GoalManager:
                 obs["idle_count"] = readings["idle_count"]
             if obs:
                 memory.update_from_observations(obs)
+            # Gathered-food accounting: this method only receives OCR frames
+            # (game loop + strategist), so it's the trustworthy place to feed
+            # the income counter — deltas telescope, so call frequency is fine.
+            if "food" in readings:
+                with contextlib.suppress(TypeError, ValueError):
+                    memory.record_food_reading(int(readings["food"]))
             # Age goes through a dedicated channel — the strategist is the only
             # authoritative source for current_age (executor was hallucinating it).
             if "age" in readings:

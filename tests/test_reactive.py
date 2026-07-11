@@ -19,8 +19,10 @@ def _state(
     idle_present: bool | None = None,
     idle_count: int | None = None,
     idle_streak: int = 0,
+    food: int = 200,
 ) -> GameState:
     return GameState(
+        resources={"food": food, "wood": 200, "gold": 100, "stone": 200},
         population=population,
         population_cap=population_cap,
         current_age=age,
@@ -49,6 +51,47 @@ def test_no_queue_at_dark_age_cap() -> None:
     # Dark Age cap is 22; pop 22 is not below it → no queue.
     actions = decide([], _state(population=22), alarm=False)
     assert actions == []
+
+
+# ---------------------------------------------------------------------------
+# Feudal banking + age-up (T-510 / T-511)
+# ---------------------------------------------------------------------------
+
+
+def test_age_up_fires_when_food_banked() -> None:
+    actions = decide([], _state(population=18, food=520), alarm=False)
+    assert actions == [
+        {"type": "press", "key": "h", "intent": "Select TC (age up)"},
+        {"type": "press", "key": "z", "intent": "Research Feudal Age (reactive)"},
+    ]  # banking (pop 18): no villager queue rides along to eat the 500
+
+
+def test_no_age_up_below_cost_or_outside_dark_age() -> None:
+    assert decide([], _state(population=18, food=499), alarm=False) == []  # banking, no age-up
+    feudal = decide([], _state(population=18, age="Feudal Age", food=600), alarm=False)
+    assert all(a.get("key") != "z" for a in feudal)
+
+
+def test_banking_stops_villager_queue_at_pop_threshold() -> None:
+    assert decide([], _state(population=16), alarm=False) == []  # Dark Age, pop ≥ 16 → bank
+    assert _types(decide([], _state(population=15), alarm=False)) == ["press", "press"]
+    # Banking is Dark Age only — Feudal queues again (toward its 35 cap).
+    feudal = decide([], _state(population=16, age="Feudal Age"), alarm=False)
+    assert _types(feudal) == ["press", "press"]
+
+
+def test_food_crisis_forces_all_idle_slots_to_food() -> None:
+    entities = [_ent("town_center", (0, 0)), _ent("sheep", (10, 10)), _ent("tree", (20, 20))]
+    # pop 22 phases would be food, wood, wood — the crisis override sends all to food.
+    actions = decide(entities, _state(population=22, idle_present=True, food=40), alarm=False)
+    targets = [a["target_class"] for a in actions if a["type"] == "right_click"]
+    assert targets == ["sheep"] * 3
+
+
+def test_food_crisis_without_forage_builds_one_farm() -> None:
+    entities = [_ent("town_center", (0, 0)), _ent("tree", (20, 20))]
+    actions = decide(entities, _state(population=22, idle_present=True, food=40), alarm=False)
+    assert [a["building_key"] for a in actions if a["type"] == "build"] == ["a"]
 
 
 # ---------------------------------------------------------------------------
@@ -108,11 +151,11 @@ def test_idle_food_turn_prefers_huntables_over_farm_build() -> None:
 
 
 def test_idle_farm_build_capped_at_one_per_turn() -> None:
-    # pop 20 → below the Dark Age cap (h/q queue first) and all three idle
-    # phases are food, none gatherable → exactly ONE farm build (this turn's
-    # HUD snapshot can't cost-check a second spend).
+    # pop 20 → Feudal banking (no queue) and all three idle phases are food,
+    # none gatherable → exactly ONE farm build (this turn's HUD snapshot can't
+    # cost-check a second spend).
     actions = decide([_ent("town_center")], _state(population=20, idle_present=True), alarm=False)
-    assert [a["type"] for a in actions] == ["press", "press", "build"]
+    assert [a["type"] for a in actions] == ["build"]
 
 
 def test_idle_dispatch_capped_per_turn() -> None:

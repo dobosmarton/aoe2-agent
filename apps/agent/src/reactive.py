@@ -77,15 +77,57 @@ _IDLE_COUNT_SUSPECT_STREAK = 4
 # build_rejection) reject the action at zero keystroke cost when it can't work.
 _FARM_BUILD_KEY = "a"
 
+# Feudal Age economics. Research costs 500 food and happens at the TC (`h` →
+# `z`, prompts/hotkeys.md). With the villager queue firing every turn, 50 food
+# at a time, 500 can never accumulate (2026-07-11 run 3, F-16) — so once the
+# Dark Age economy is established (`_FEUDAL_BANK_POP` villagers) the queue
+# stops and food BANKS toward the research. The two Dark Age buildings Feudal
+# also requires are always up by then (houses + mill).
+_FEUDAL_FOOD_COST = 500
+_FEUDAL_BANK_POP = 16
+# Below this food, every idle slot is forced to food: honoring the rotation's
+# wood/gold slots during a famine starves villager production (run 1, F-8).
+_FOOD_CRISIS_THRESHOLD = 60
+
 
 def decide(entities: list[object], state: GameState, alarm: bool) -> list[dict[str, object]]:
     """Return routine action dicts for this turn (empty on alarm)."""
     if alarm:
         return []
     actions: list[dict[str, object]] = []
+    actions.extend(_age_up_actions(state))
     actions.extend(_queue_villager_actions(state))
     actions.extend(_distribute_idle_actions(entities, state))
     return actions
+
+
+def _food(state: GameState) -> int:
+    """Last-known food reading, defensively coerced (resources is a plain dict)."""
+    try:
+        return int(state.resources.get("food", 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _age_up_actions(state: GameState) -> list[dict[str, object]]:
+    """Research Feudal Age the moment the food is banked (Dark Age only).
+
+    Runs before the villager queue so the 500 food buys the age, not another
+    villager. Pressing while the button is unavailable (already researching,
+    building requirements missing) is a harmless no-op, and once research
+    starts the food drops below the threshold, so this doesn't spam.
+    """
+    if state.current_age != "Dark Age" or _food(state) < _FEUDAL_FOOD_COST:
+        return []
+    return [
+        {"type": "press", "key": "h", "intent": "Select TC (age up)"},
+        {"type": "press", "key": "z", "intent": "Research Feudal Age (reactive)"},
+    ]
+
+
+def _banking_for_feudal(state: GameState) -> bool:
+    """Dark Age with an established economy: stop buying villagers, bank 500."""
+    return state.current_age == "Dark Age" and state.population >= _FEUDAL_BANK_POP
 
 
 def _pop_below_cap(state: GameState) -> bool:
@@ -94,7 +136,7 @@ def _pop_below_cap(state: GameState) -> bool:
 
 
 def _queue_villager_actions(state: GameState) -> list[dict[str, object]]:
-    if not _pop_below_cap(state):
+    if _banking_for_feudal(state) or not _pop_below_cap(state):
         return []
     return [
         {"type": "press", "key": "h", "intent": "Select TC (reactive)"},
@@ -131,6 +173,10 @@ def _distribute_idle_actions(entities: list[object], state: GameState) -> list[d
         return []
 
     pattern = _IDLE_PATTERN_BY_AGE.get(state.current_age, _DEFAULT_IDLE_PATTERN)
+    if _food(state) < _FOOD_CRISIS_THRESHOLD:
+        # Famine: every slot goes to food — wood/gold can wait, villager
+        # production (and the Feudal bank) cannot.
+        pattern = ("food",)
     origin = _tc_origin(entities)
     actions: list[dict[str, object]] = []
     farm_queued = False

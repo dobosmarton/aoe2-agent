@@ -38,6 +38,8 @@ class GameWindow(Protocol):
     @property
     def height(self) -> int: ...
     def activate(self) -> None: ...
+    def minimize(self) -> None: ...
+    def restore(self) -> None: ...
 
 
 def find_game_window() -> GameWindow | None:
@@ -82,7 +84,16 @@ def ensure_game_focused(retries: int = 3) -> bool:
             if window.isActive:
                 return True
 
-            window.activate()
+            if attempt == 0:
+                window.activate()
+            else:
+                # activate() was refused (Windows foreground lock — the log
+                # shows "Error code from Windows: 0 ... completed successfully"
+                # while nothing happens). A minimize/restore cycle forces the
+                # shell to re-foreground the window.
+                window.minimize()
+                time.sleep(0.1)
+                window.restore()
             time.sleep(0.2)  # Wait for focus to take effect
 
             if window.isActive:

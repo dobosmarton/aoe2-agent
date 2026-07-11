@@ -725,15 +725,17 @@ class ClaudeProvider:
         result._success_count = success_count
         return result
 
-    async def _call_single_shot(self, content: list[dict], age: str = "Dark Age") -> LLMResult:
-        """Fast path for routine turns: one structured-output call, no tool loop.
+    # Follow-up when a single-shot turn narrates a plan but emits zero actions —
+    # 6-7 turns/game were wasted this way (run reviews, F-7/F-19). One bounded
+    # retry converts most of them into real actions.
+    _EMPTY_ACTIONS_NUDGE: ClassVar[str] = (
+        "You returned zero actions. Respond again and EXECUTE your stated plan: "
+        "emit at least one concrete action (press/build/click/right_click), or a "
+        "single wait action if you genuinely intend to do nothing this turn."
+    )
 
-        Returns actions for the game loop to execute (actions_already_executed is
-        False), keeping coordinate resolution and failure tracking on the existing
-        executor path. Composite tools and mid-turn rescans are unavailable here;
-        turns that need them route to the tool loop via _use_single_shot.
-        """
-        system_prompt = self.get_system_prompt(age)
+    async def _parse_single_shot(self, messages: list[dict], age: str) -> LLMResponse:
+        """One structured-output call; accumulates token usage."""
         # parse() merges output_format into output_config.format, so we get
         # structured output and the effort knob in a single call.
         output_config: OutputConfigParam = {"effort": config.executor_effort}
@@ -741,8 +743,8 @@ class ClaudeProvider:
             model=self.model,
             max_tokens=config.max_tokens,
             temperature=config.temperature,
-            system=system_prompt,  # pyright: ignore[reportArgumentType]
-            messages=[{"role": "user", "content": content}],  # pyright: ignore[reportArgumentType]
+            system=self.get_system_prompt(age),  # pyright: ignore[reportArgumentType]
+            messages=messages,  # pyright: ignore[reportArgumentType]
             output_format=LLMResponse,
             output_config=output_config,
         )
@@ -751,7 +753,28 @@ class ClaudeProvider:
         self._total_output_tokens += usage.output_tokens
         self._total_cache_read_tokens += getattr(usage, "cache_read_input_tokens", 0) or 0
         self._total_cache_write_tokens += getattr(usage, "cache_creation_input_tokens", 0) or 0
-        parsed = cast("LLMResponse", response.parsed_output)
+        return cast("LLMResponse", response.parsed_output)
+
+    async def _call_single_shot(self, content: list[dict], age: str = "Dark Age") -> LLMResult:
+        """Fast path for routine turns: one structured-output call, no tool loop.
+
+        Returns actions for the game loop to execute (actions_already_executed is
+        False), keeping coordinate resolution and failure tracking on the existing
+        executor path. Composite tools and mid-turn rescans are unavailable here;
+        turns that need them route to the tool loop via _use_single_shot.
+        A zero-action response gets ONE nudged retry before the game loop's
+        hardcoded fallback takes over.
+        """
+        messages: list[dict] = [{"role": "user", "content": content}]
+        parsed = await self._parse_single_shot(messages, age)
+        if not parsed.actions:
+            log.warning("single_shot_no_actions_retry", reasoning=parsed.reasoning[:120])
+            messages = [
+                *messages,
+                {"role": "assistant", "content": parsed.reasoning or "(no actions)"},
+                {"role": "user", "content": self._EMPTY_ACTIONS_NUDGE},
+            ]
+            parsed = await self._parse_single_shot(messages, age)
         return self._serialize_single_shot(parsed)
 
     def _cumulative_cost_usd(self) -> float:

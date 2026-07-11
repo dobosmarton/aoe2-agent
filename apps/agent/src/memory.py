@@ -9,6 +9,9 @@ INITIAL_RESOURCES = {"food": 200, "wood": 200, "gold": 100, "stone": 200}
 INITIAL_POPULATION = 4
 INITIAL_POPULATION_CAP = 5
 STUCK_LOOP_THRESHOLD = 3
+# Largest believable food gain between two consecutive HUD reads (~30 s of a
+# full late-Dark-Age economy). Bigger jumps are OCR glitches, not income.
+FOOD_GAIN_SANITY_CAP = 300
 
 
 @dataclass
@@ -79,9 +82,16 @@ class AgentMemory:
 
         # Cumulative metrics for autoresearch scoring
         self.total_food_gathered: int = 0
+        self._last_food_reading: int | None = None
         self.peak_population: int = 0
         self.total_actions: int = 0
         self.successful_actions: int = 0
+        # Denominator for action_success_rate: actions actually EXECUTED (the
+        # numerator successful_actions counts their successes). total_actions
+        # counts PLANNED actions per turn — a different population (fallback and
+        # composite executions never enter turn.actions), which is why the old
+        # successful/total rate exceeded 1.0 (runs 1 and 3).
+        self.executed_actions: int = 0
         self.highest_age: str = "Dark Age"
         self.game_start_time: datetime | None = None
         self.game_end_reason: str = ""  # "victory", "defeat", "timeout", ""
@@ -104,33 +114,22 @@ class AgentMemory:
         # Track cumulative actions
         self.total_actions += len(turn.actions)
 
-        # Update game state from turn observations
+        # Update game state from turn observations. Food gathering is NOT
+        # accumulated here — LLM-echoed observations hallucinate; only OCR
+        # frames count (record_food_reading, called from
+        # GoalManager.update_resource_readings).
         if turn.observed_resources:
             self.game_state.resources.update(turn.observed_resources)
-            # Accumulate food (track delta from previous)
-            food = turn.observed_resources.get("food", 0)
-            if food > 0:
-                self.total_food_gathered = max(self.total_food_gathered, food)
 
     def update_from_observations(self, observations: dict) -> None:
         """Update game state from LLM observations."""
         if not observations:
             return
 
-        # Update resources
+        # Update resources. (Gathered-food accounting lives in
+        # record_food_reading — OCR frames only, never LLM-echoed values.)
         if "resources" in observations:
             self.game_state.resources.update(observations["resources"])
-            # Track peak food across the game — fixes total_food_gathered=0 bug.
-            # The strategist's readings flow through this method (via
-            # GoalManager.update_resource_readings); the executor's also do via
-            # create_turn. max() makes it idempotent across both paths.
-            food = observations["resources"].get("food", 0)
-            try:
-                food_int = int(food)
-            except (TypeError, ValueError):
-                food_int = 0
-            if food_int > 0:
-                self.total_food_gathered = max(self.total_food_gathered, food_int)
 
         # Update population
         if "population" in observations:
@@ -266,10 +265,26 @@ class AgentMemory:
             self.working_memory[-1].verification = verification
 
     def record_action_results(self, success_count: int, total: int) -> None:
-        """Record action execution results for metrics tracking."""
+        """Record executed-action outcomes — the sole inputs to action_success_rate."""
         self.successful_actions += success_count
-        # total_actions already tracked in add_turn, but correct if executor filtered some
-        pass
+        self.executed_actions += total
+
+    def record_food_reading(self, food: int) -> None:
+        """Accumulate gathered food from consecutive HUD (OCR) readings.
+
+        Sum of positive deltas between reads ≈ income; food spent within an
+        interval hides some income, so this UNDERCOUNTS, never overcounts.
+        Jumps beyond FOOD_GAIN_SANITY_CAP are OCR glitches and are dropped
+        (the reading still becomes the new baseline). Call only from the OCR
+        path — LLM-echoed resource observations hallucinate.
+        """
+        prev = self._last_food_reading
+        self._last_food_reading = food
+        if prev is None:
+            return
+        delta = food - prev
+        if 0 < delta <= FOOD_GAIN_SANITY_CAP:
+            self.total_food_gathered += delta
 
     def record_memories_applied(self, titles: list[str]) -> None:
         """Increment per-title attribution counts.
@@ -297,8 +312,11 @@ class AgentMemory:
             "total_food_gathered": self.total_food_gathered,
             "total_actions": self.total_actions,
             "successful_actions": self.successful_actions,
+            "executed_actions": self.executed_actions,
             "action_success_rate": (
-                self.successful_actions / self.total_actions if self.total_actions > 0 else 0.0
+                self.successful_actions / self.executed_actions
+                if self.executed_actions > 0
+                else 0.0
             ),
             "turn_count": self.turn_count,
             "game_end_reason": self.game_end_reason,
@@ -313,9 +331,11 @@ class AgentMemory:
         self.game_state = GameState()
         self.turn_count = 0
         self.total_food_gathered = 0
+        self._last_food_reading = None
         self.peak_population = 0
         self.total_actions = 0
         self.successful_actions = 0
+        self.executed_actions = 0
         self.highest_age = "Dark Age"
         self.game_start_time = None
         self.game_end_reason = ""

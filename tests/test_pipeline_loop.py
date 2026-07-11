@@ -189,6 +189,42 @@ def test_pipeline_executes_previous_plan_head_next_turn(monkeypatch, tmp_path):
     assert len(provider.contexts) == 2  # both turns pre-launched a plan
 
 
+def test_focus_loss_aborts_labeled_without_consuming_iterations(monkeypatch, tmp_path):
+    """Permanent focus loss must end the run as lost_focus, not burn the
+    iteration budget doing nothing (run 1, F-1: 12 of 30 iterations wasted)."""
+    executed = []
+    _patch_loop_seams(monkeypatch, tmp_path, executed, "routine economy turn")
+    monkeypatch.setattr(gl, "ensure_game_focused", lambda: False)
+    monkeypatch.setattr(gl, "_MAX_FOCUS_FAILURES", 3)
+
+    async def _no_sleep(_s):
+        return None
+
+    monkeypatch.setattr(gl.asyncio, "sleep", _no_sleep)
+    provider = _FakePipelineProvider()
+    memory = _run(gl.game_loop(provider, max_iterations=5, use_detection=False, use_overlay=False))
+    assert memory.game_end_reason == "lost_focus"
+    assert provider.contexts == []  # no turns were played (or billed)
+
+
+def test_focus_recovery_replays_the_same_iteration(monkeypatch, tmp_path):
+    executed = []
+    _patch_loop_seams(monkeypatch, tmp_path, executed, "routine economy turn")
+    focus_results = iter([False, False, True])
+    monkeypatch.setattr(gl, "ensure_game_focused", lambda: next(focus_results, True))
+
+    async def _no_sleep(_s):
+        return None
+
+    monkeypatch.setattr(gl.asyncio, "sleep", _no_sleep)
+    provider = _FakePipelineProvider()
+    memory = _run(gl.game_loop(provider, max_iterations=2, use_detection=False, use_overlay=False))
+    # Two focus failures didn't consume the 2-iteration budget: both turns still
+    # ran once focus returned (the old billing behavior would have played zero).
+    assert len(provider.contexts) == 2
+    assert memory.game_end_reason == "iterations_exhausted"
+
+
 def test_loop_exit_survives_pending_ocr_warmup(monkeypatch, tmp_path):
     """Regression (CI-only flake): cancelling a still-running warm-up task at
     shutdown must not leak CancelledError out of game_loop — CancelledError is a
