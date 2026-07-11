@@ -407,10 +407,14 @@ def _zero_build_delays(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ex, "RESCAN_SETTLE_DELAY", 0.0)
 
 
-def test_place_click_fails_when_building_not_detected(
+def test_place_click_unconfirmed_stays_success_and_goes_pending(
     fake_pyautogui: _FakePyautogui, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Foundations aren't detectable — an unseen building is NOT a failure (the
+    false 'failed' caused run 2's duplicate mill); it queues for wood-delta
+    settlement instead."""
     _zero_build_delays(monkeypatch)
+    ex.set_hud_snapshot(10, 15, {"wood": 200})  # baseline for the pending entry
 
     async def rescan_sees_nothing() -> None:
         ex._detected_entities = []
@@ -419,7 +423,54 @@ def test_place_click_fails_when_building_not_detected(
     result = _run(
         ex._handle_click({"x": 500, "y": 600, "building_key": "q"}, "Place building (house)")
     )
-    assert result.success is False and "not confirmed" in result.detail
+    assert result.success is True and "not visually confirmed" in result.detail
+    assert [p.building_class for p in ex._pending_placements] == ["house"]
+
+
+def test_place_click_preexisting_building_does_not_vouch(
+    fake_pyautogui: _FakePyautogui, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An old farm inside the radius must not verify a new one — the count has
+    to INCREASE."""
+    _zero_build_delays(monkeypatch)
+    ex.set_hud_snapshot(10, 15, {"wood": 200})
+    old_farm = {"id": "farm_0", "class": "farm", "center": (505, 610)}
+    ex._detected_entities = [old_farm]
+
+    async def rescan_same_farm() -> None:
+        ex._detected_entities = [old_farm]
+
+    ex._rescan_fn = rescan_same_farm
+    _run(ex._handle_click({"x": 500, "y": 600, "building_key": "a"}, "Place building (farm)"))
+    assert [p.building_class for p in ex._pending_placements] == ["farm"]  # unconfirmed
+
+
+def test_pending_placement_confirmed_by_wood_spend(fake_pyautogui: _FakePyautogui) -> None:
+    ex.set_hud_snapshot(10, 15, {"wood": 200})
+    ex._note_pending_placement("w")  # mill, 100 wood
+    # Next snapshot: wood dropped by ~the cost → the purchase happened.
+    ex.set_hud_snapshot(10, 15, {"wood": 95})
+    assert ex._pending_placements == []
+    assert ex.build_rejection("a") is None  # confirmed mill unlocks farms
+
+
+def test_pending_placement_missing_when_wood_kept(fake_pyautogui: _FakePyautogui) -> None:
+    ex.set_hud_snapshot(10, 15, {"wood": 200})
+    ex._note_pending_placement("w")
+    # Wood went UP (gathering, nothing spent) → the placement never happened.
+    ex.set_hud_snapshot(10, 15, {"wood": 230})
+    assert ex._pending_placements == []
+    assert "mill" not in ex._buildings_confirmed
+
+
+def test_pending_placement_waits_out_stale_readings(fake_pyautogui: _FakePyautogui) -> None:
+    ex.set_hud_snapshot(10, 15, {"wood": 200})
+    ex._note_pending_placement("w")
+    # An identical reading is stale OCR, not evidence — the entry survives.
+    ex.set_hud_snapshot(10, 15, {"wood": 200})
+    assert len(ex._pending_placements) == 1
+    ex.set_hud_snapshot(10, 15, {"wood": 90})  # fresh reading settles it
+    assert ex._pending_placements == [] and "mill" in ex._buildings_confirmed
 
 
 def test_place_click_succeeds_and_records_when_building_lands(

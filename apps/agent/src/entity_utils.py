@@ -56,6 +56,16 @@ CLASSES_BY_KIND: dict[ResourceKind, frozenset[str]] = {
     "gold": frozenset({"gold_mine"}),
     "stone": frozenset({"stone_mine"}),
 }
+# Classes an idle villager can be SENT to gather from (right-click targeting).
+# `farm` is deliberately excluded: each farm supports exactly one villager
+# (clicking an occupied one does nothing), and bare ground misdetected as a farm
+# strands the villager (2026-07-11 run 2, F-12). Idle villagers get a fresh farm
+# BUILT instead — the builder auto-farms the field they finish. Job inference
+# keeps using CLASSES_BY_KIND, where farm proximity still means "food worker".
+GATHER_CLASSES_BY_KIND: dict[ResourceKind, frozenset[str]] = {
+    **CLASSES_BY_KIND,
+    "food": CLASSES_BY_KIND["food"] - {"farm"},
+}
 # Camps/drop-offs that also signal a villager's job (used by the job model, not for
 # gather targeting — you can't right-click a lumber camp to chop). A mining camp
 # serves both gold and stone; it maps to gold here (the common case) and stone
@@ -94,8 +104,10 @@ def nearest_class_of_kind(
     Returns the *class name* (e.g. "sheep") of the closest gatherable of the given
     kind — a single string suitable for the executor's `target_class` resolution.
     "Nearest" is measured to `origin` (pass the Town Center center when known).
+    Uses the gather-targeting taxonomy, so farms are never returned (see
+    GATHER_CLASSES_BY_KIND).
     """
-    classes = CLASSES_BY_KIND.get(kind, frozenset())
+    classes = GATHER_CLASSES_BY_KIND.get(kind, frozenset())
     candidates = [a for a in iter_attrs(entities) if a.class_name in classes]
     if not candidates:
         return None

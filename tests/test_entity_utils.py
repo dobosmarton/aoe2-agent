@@ -149,3 +149,18 @@ def test_build_entity_summary_floats_truncate_to_int() -> None:
     e = _FakeEntity(id="x", class_name="sheep", center=(123.7, 456.4), confidence=0.5)
     summary = build_entity_summary([e])
     assert "(123,456)" in summary
+
+
+def test_gather_classes_exclude_farm_but_jobs_keep_it() -> None:
+    """Farms are food for JOB inference (a villager on a farm is a food worker)
+    but never a gather TARGET (one villager per farm; misdetections strand)."""
+    from gameplay_agent.entity_utils import (
+        CLASSES_BY_KIND,
+        GATHER_CLASSES_BY_KIND,
+        nearest_class_of_kind,
+    )
+
+    assert "farm" in CLASSES_BY_KIND["food"]
+    assert "farm" not in GATHER_CLASSES_BY_KIND["food"]
+    only_farm = [{"id": "farm_0", "class": "farm", "center": (10, 10), "confidence": 0.9}]
+    assert nearest_class_of_kind(only_farm, "food", origin=(0, 0)) is None

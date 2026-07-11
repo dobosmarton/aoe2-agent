@@ -68,6 +68,14 @@ _IDLE_DISPATCH_MAX = 6
 # the blind batch on a long streak — extra `.` presses past the last idle villager
 # are harmless no-ops.
 _IDLE_COUNT_SUSPECT_STREAK = 4
+# Econ build-menu key for a Farm (executor.BUILD_KEY_TO_CLASS) — emitted when a
+# food turn finds nothing huntable/foragable on screen. Farms are never gather
+# targets (see entity_utils.GATHER_CLASSES_BY_KIND): each supports exactly one
+# villager and misdetected bare-ground "farms" strand villagers, so the rule is
+# one FRESH farm per idle villager — the builder auto-farms the field it
+# finishes. The executor's build gates (mill prerequisite, wood cost, via
+# build_rejection) reject the action at zero keystroke cost when it can't work.
+_FARM_BUILD_KEY = "a"
 
 
 def decide(entities: list[object], state: GameState, alarm: bool) -> list[dict[str, object]]:
@@ -104,8 +112,10 @@ def _distribute_idle_actions(entities: list[object], state: GameState) -> list[d
     lit `_IDLE_COUNT_SUSPECT_STREAK` turns — see the trust-gate note above), else
     a blind `_IDLE_DISPATCH_PER_TURN`; each villager
     is pulled with `.` (select next idle) and right-clicked onto a resource whose
-    kind is chosen by the age pattern. The badge re-read next turn drains any
-    remainder (a `.` past the last idle villager is a harmless no-op).
+    kind is chosen by the age pattern. A food turn with nothing huntable or
+    foragable on screen builds a fresh farm instead (see `_FARM_BUILD_KEY`).
+    The badge re-read next turn drains any remainder (a `.` past the last idle
+    villager is a harmless no-op).
     """
     if not state.idle_present:
         return []
@@ -123,8 +133,23 @@ def _distribute_idle_actions(entities: list[object], state: GameState) -> list[d
     pattern = _IDLE_PATTERN_BY_AGE.get(state.current_age, _DEFAULT_IDLE_PATTERN)
     origin = _tc_origin(entities)
     actions: list[dict[str, object]] = []
+    farm_queued = False
     for i in range(batch):
         kind = pattern[(state.population + i) % len(pattern)]
+        if kind == "food" and not farm_queued and nearest_class_of_kind(entities, "food") is None:
+            # Food wanted but nothing huntable/foragable on screen: build a fresh
+            # farm for this villager instead of falling through to wood. One per
+            # turn — the HUD snapshot the build gate checks doesn't see this
+            # turn's spend, so a second build here couldn't be cost-checked.
+            actions.append(
+                {
+                    "type": "build",
+                    "building_key": _FARM_BUILD_KEY,
+                    "intent": "Build farm for idle villager (no forage/huntables visible)",
+                }
+            )
+            farm_queued = True
+            continue
         target = _resolve_idle_target(entities, kind, origin)
         if target is None:
             break  # nothing gatherable on screen — retry next turn

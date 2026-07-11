@@ -121,11 +121,86 @@ _resources_snapshot: dict[str, int] | None = None
 _buildings_confirmed: set[str] = set()
 
 
+# A placement whose foundation wasn't visually confirmed, awaiting settlement
+# against the HUD wood spend (2026-07-11 run 2, F-11: YOLO can't see foundations,
+# so a fresh rescan reports almost every REAL placement as failed — that false
+# negative caused a duplicate mill).
+@dataclass
+class _PendingPlacement:
+    building_class: str
+    wood_cost: int
+    wood_before: int  # wood per the HUD snapshot when the placement was made
+    settles_left: int = 3  # stale-OCR grace: identical readings don't settle it
+
+
+# Wood gathered between the two HUD reads can mask this much of the spend.
+_PLACEMENT_INCOME_SLACK = 20
+
+_pending_placements: list[_PendingPlacement] = []
+
+
 def set_hud_snapshot(population: int, population_cap: int, resources: Mapping[str, int]) -> None:
-    """Cache this turn's HUD reading (population + resources) for build gates."""
+    """Cache this turn's HUD reading (population + resources) for build gates.
+
+    Also the settlement point for pending placements: the fresh wood value is
+    compared against each pending build's cost before the snapshot is replaced.
+    """
     global _population_snapshot, _resources_snapshot
+    _settle_pending_placements(resources.get("wood"))
     _population_snapshot = (population, population_cap)
     _resources_snapshot = dict(resources)
+
+
+def _note_pending_placement(building_key: str) -> None:
+    """Queue an unconfirmed placement for wood-delta settlement next snapshot."""
+    cls = BUILD_KEY_TO_CLASS.get(building_key)
+    cost = BUILD_WOOD_COST.get(building_key)
+    wood_before = (_resources_snapshot or {}).get("wood")
+    if cls is None or cost is None or wood_before is None:
+        return  # nothing to settle against — leave it unconfirmed
+    _pending_placements.append(
+        _PendingPlacement(building_class=cls, wood_cost=cost, wood_before=wood_before)
+    )
+
+
+def _settle_pending_placements(wood_now: int | None) -> None:
+    """Confirm or drop pending placements using the game's own ledger — the HUD.
+
+    A placement that consumed its wood cost DID succeed regardless of what
+    detection saw (the resource bar is authoritative; the vision model can't
+    see foundations). Judged per-entry, erring toward confirmation: a false
+    "failed" report is what caused the duplicate mill, while a false success
+    merely delays the retry by a turn. An unchanged wood reading is treated as
+    stale OCR and re-checked next snapshot (up to `settles_left` times).
+    """
+    global _pending_placements
+    if not _pending_placements or wood_now is None:
+        return
+    still_pending: list[_PendingPlacement] = []
+    for pending in _pending_placements:
+        if wood_now == pending.wood_before and pending.settles_left > 0:
+            pending.settles_left -= 1
+            still_pending.append(pending)
+            continue
+        purchased = wood_now <= pending.wood_before - pending.wood_cost + _PLACEMENT_INCOME_SLACK
+        if purchased:
+            record_confirmed_buildings([pending.building_class])
+            log.info(
+                "build_purchase_confirmed",
+                building=pending.building_class,
+                wood_before=pending.wood_before,
+                wood_now=wood_now,
+                cost=pending.wood_cost,
+            )
+        else:
+            log.warning(
+                "build_purchase_missing",
+                building=pending.building_class,
+                wood_before=pending.wood_before,
+                wood_now=wood_now,
+                cost=pending.wood_cost,
+            )
+    _pending_placements = still_pending
 
 
 def record_confirmed_buildings(classes: Iterable[str]) -> None:
@@ -139,6 +214,7 @@ def reset_build_gates() -> None:
     _population_snapshot = None
     _resources_snapshot = None
     _buildings_confirmed.clear()
+    _pending_placements.clear()
 
 
 def build_rejection(building_key: str) -> str | None:
@@ -528,12 +604,14 @@ async def _handle_click(action_dict: dict[str, object], intent: str) -> ActionRe
                 # The building is real — usable as prerequisite evidence.
                 record_confirmed_buildings([BUILD_KEY_TO_CLASS[building_key]])
             elif landed is False:
-                expected = BUILD_KEY_TO_CLASS.get(building_key, building_key)
+                # NOT reported as failure: the model can't see foundations, and a
+                # false "failed" makes the LLM rebuild what already exists (the
+                # run-2 duplicate mill). The wood spend settles it next snapshot.
+                _note_pending_placement(building_key)
                 return ActionResult(
-                    False,
-                    f"{expected} placement not confirmed: no new {expected} detected "
-                    f"near ({x}, {y}) after the click — the spot may be blocked or "
-                    "the build menu did not open",
+                    True,
+                    "placement not visually confirmed (foundations aren't detectable); "
+                    "will be settled against the wood spend next turn",
                 )
             # None = unverifiable (no rescan callback) — benefit of the doubt.
 
@@ -549,32 +627,41 @@ def _compass_offsets(radius: int, count: int) -> list[tuple[int, int]]:
     ]
 
 
-async def _verify_build_placement(building_key: str, point: tuple[int, int]) -> bool | None:
-    """Rescan and check whether a building of the expected class landed near `point`.
+def _count_class_near(class_name: str, point: tuple[int, int]) -> int:
+    """Detected entities of `class_name` within BUILD_CLUTTER_RADIUS of `point`."""
+    px, py = point
+    r2 = BUILD_CLUTTER_RADIUS * BUILD_CLUTTER_RADIUS
+    return sum(
+        1
+        for entity in _detected_entities
+        if entity.get("class") == class_name
+        and (center := entity.get("center"))
+        and (px - center[0]) ** 2 + (py - center[1]) ** 2 <= r2
+    )
 
-    Returns True when the rescan sees one, False when it doesn't, and None when
-    verification isn't possible (unknown key / no rescan callback) — the caller
-    gives None the benefit of the doubt. A False result fails the placement
-    action, so a phantom build (blocked spot, menu never opened) is reported to
-    the LLM as a failure instead of a fake success.
+
+async def _verify_build_placement(building_key: str, point: tuple[int, int]) -> bool | None:
+    """Rescan and check whether a NEW building of the expected class appeared near
+    `point` — the count must increase, so a pre-existing neighbor (e.g. an old
+    farm inside the radius) can't vouch for a new one.
+
+    Returns True on a confirmed appearance, False when the rescan saw no new
+    one, None when unverifiable (unknown key / no rescan callback). False is
+    NOT proof of failure: foundations aren't detectable by the vision model, so
+    the caller settles unconfirmed placements against the HUD wood spend
+    instead (see _settle_pending_placements).
     """
     expected = BUILD_KEY_TO_CLASS.get(building_key)
     if expected is None or _rescan_fn is None:
         return None
+    before = _count_class_near(expected, point)
     await asyncio.sleep(RESCAN_SETTLE_DELAY)
     await _rescan_fn()
-    px, py = point
-    r2 = BUILD_CLUTTER_RADIUS * BUILD_CLUTTER_RADIUS
-    landed = any(
-        entity.get("class") == expected
-        and (center := entity.get("center"))
-        and (px - center[0]) ** 2 + (py - center[1]) ** 2 <= r2
-        for entity in _detected_entities
-    )
+    landed = _count_class_near(expected, point) > before
     if landed:
-        log.info("build_placement_verified", building=expected, x=px, y=py)
+        log.info("build_placement_verified", building=expected, x=point[0], y=point[1])
     else:
-        log.warning("build_placement_failed", building=expected, x=px, y=py)
+        log.info("build_placement_unconfirmed", building=expected, x=point[0], y=point[1])
     return landed
 
 

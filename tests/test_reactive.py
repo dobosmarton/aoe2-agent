@@ -74,9 +74,45 @@ def test_no_dispatch_when_badge_absent_or_unknown() -> None:
     assert decide(entities, _state(population=22, idle_present=None), alarm=False) == []
 
 
-def test_no_idle_dispatch_without_resources() -> None:
+def test_idle_food_turn_without_food_builds_farm() -> None:
+    # pop 22 → phases food, wood, wood. Nothing gatherable on screen: the food
+    # slot builds a fresh farm (executor gates decide if it can actually work);
+    # the wood slots have no target and stop the batch.
     actions = decide([_ent("villager")], _state(population=22, idle_present=True), alarm=False)
-    assert actions == []
+    assert actions == [
+        {
+            "type": "build",
+            "building_key": "a",
+            "intent": "Build farm for idle villager (no forage/huntables visible)",
+        }
+    ]
+
+
+def test_idle_never_targets_farms_builds_one_instead() -> None:
+    # Farms are not gather targets (misdetected bare ground strands villagers;
+    # occupied farms take one villager each) — a visible farm changes nothing.
+    entities = [_ent("town_center", (0, 0)), _ent("farm", (10, 10))]
+    actions = decide(entities, _state(population=22, idle_present=True), alarm=False)
+    builds = [a for a in actions if a["type"] == "build"]
+    assert len(builds) == 1 and builds[0]["building_key"] == "a"
+    assert all(a.get("target_class") != "farm" for a in actions)
+
+
+def test_idle_food_turn_prefers_huntables_over_farm_build() -> None:
+    entities = [_ent("town_center", (0, 0)), _ent("sheep", (10, 10)), _ent("farm", (20, 20))]
+    actions = decide(entities, _state(population=20, idle_present=True), alarm=False)
+    # pop 20 → all-food phases: sheep is targeted, no farm build, farm untouched.
+    targets = [a["target_class"] for a in actions if a["type"] == "right_click"]
+    assert targets == ["sheep"] * 3
+    assert all(a["type"] != "build" for a in actions)
+
+
+def test_idle_farm_build_capped_at_one_per_turn() -> None:
+    # pop 20 → below the Dark Age cap (h/q queue first) and all three idle
+    # phases are food, none gatherable → exactly ONE farm build (this turn's
+    # HUD snapshot can't cost-check a second spend).
+    actions = decide([_ent("town_center")], _state(population=20, idle_present=True), alarm=False)
+    assert [a["type"] for a in actions] == ["press", "press", "build"]
 
 
 def test_idle_dispatch_capped_per_turn() -> None:
