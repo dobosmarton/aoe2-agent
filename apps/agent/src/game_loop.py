@@ -33,12 +33,14 @@ from .executor import (
     clear_detected_entities,
     execute_actions,
     set_detected_entities,
+    set_population_snapshot,
 )
 from .goal_logger import GoalLogger
 from .goals import GoalManager
 from .memory import AgentMemory
 from .models import validate_actions
 from .providers.strategist import StrategistProvider, get_default_goals, read_hud_readings
+from .resource_ocr import warm_up_ocr
 from .screen import capture_screenshot, save_screenshot
 from .strategist_phase import _maybe_launch_strategist
 from .turn_phases import (
@@ -109,13 +111,9 @@ async def _run_routine_upkeep(
     detected_entities: list[object],
     alarm: bool,
 ) -> None:
-    """Ground commands + routine villager upkeep — the work done in the LLM's
-    in-flight window while the turn's plan computes."""
-    ground_cmds = _get_ground_commands(iteration)
-    if ground_cmds:
-        ground_actions = validate_actions(ground_cmds)
-        if ground_actions:
-            await execute_actions(ground_actions)
+    """Routine villager upkeep — the work done in the LLM's in-flight window
+    while the turn's plan computes. (Opening ground commands run earlier, before
+    the first perception pass — see the iteration-1 block in `game_loop`.)"""
     routine_cmds = reactive.decide(detected_entities, memory.game_state, alarm)
     if routine_cmds:
         routine_actions = validate_actions(routine_cmds)
@@ -181,6 +179,16 @@ async def game_loop(
     # Initialize subsystems
     detector = _init_detector() if use_detection else None
 
+    # Build the OCR engine now, off the loop, instead of lazily inside the first
+    # turn — engine construction + first inference cost ~10-15 s on the VM and were
+    # the bulk of the post-startup freeze (2026-07-11 run review, F-6). Only the
+    # rapidocr backend uses the engine (autodetect aside, which implies rapidocr
+    # setups in practice). The task reference is kept so it isn't GC'd mid-warm-up;
+    # warm_up_ocr never raises.
+    ocr_warmup_task: asyncio.Task[None] | None = None
+    if config.ocr_backend == "rapidocr":
+        ocr_warmup_task = asyncio.create_task(asyncio.to_thread(warm_up_ocr))
+
     overlay = None
     if use_overlay:
         try:
@@ -235,11 +243,22 @@ async def game_loop(
 
             if not is_game_running():
                 log.error("game_not_found", message="AoE2 window not found")
+                if not memory.game_end_reason:
+                    memory.game_end_reason = "game_not_found"
                 break
             if not ensure_game_focused():
                 log.warning("could_not_focus_game", message="Retrying in 1 second")
                 await asyncio.sleep(1)
                 continue
+
+            if iteration == 1:
+                # The opening (zoom, select scout, auto-scout) needs no perception —
+                # run it before the first OCR/detection pass, which is the slowest
+                # of the game (engine warm-up), so the scout explores during that
+                # wait instead of after it.
+                ground_actions = validate_actions(_get_ground_commands(iteration))
+                if ground_actions:
+                    await execute_actions(ground_actions)
 
             screenshot, width, height = await _capture_screenshot(
                 overlay,
@@ -255,6 +274,13 @@ async def game_loop(
             hud_readings, calib = await read_hud_readings(screenshot)
             if hud_readings:
                 goal_manager.update_resource_readings(hud_readings, memory)
+            # Once-per-iteration state upkeep (deliberately NOT in
+            # update_from_observations, which fires more than once per turn):
+            # the idle-badge streak feeds the reactive tier's count trust gate,
+            # and the population snapshot feeds the executor's house headroom gate.
+            game_state = memory.game_state
+            game_state.idle_streak = game_state.idle_streak + 1 if game_state.idle_present else 0
+            set_population_snapshot(game_state.population, game_state.population_cap)
             # Show the OCR reading regions on the debug overlay (--overlay only).
             if overlay is not None and calib is not None:
                 overlay.set_ocr_fields(calib.field_rects())
@@ -322,6 +348,12 @@ async def game_loop(
 
             await asyncio.sleep(config.loop_delay)
 
+        # Normal exit: either max_iterations ran out, or a break above set the
+        # reason (victory/defeat/timeout/game_not_found). Never leave it empty —
+        # an unlabeled run is indistinguishable from a truncated one in results.tsv.
+        if not memory.game_end_reason:
+            memory.game_end_reason = "iterations_exhausted"
+
     except KeyboardInterrupt:
         log.info("game_loop_interrupted", iterations=iteration)
         if not memory.game_end_reason:
@@ -337,8 +369,13 @@ async def game_loop(
         if strategist_task is not None and not strategist_task.done():
             with contextlib.suppress(Exception):
                 await strategist_task
-        # Discard any pipelined plan still in flight (S6).
+        # Discard any pipelined plan still in flight (S6). The warm-up thread
+        # itself can't be interrupted — cancelling just stops waiting on it.
         await _cancel_pending(pending_plan)
+        if ocr_warmup_task is not None and not ocr_warmup_task.done():
+            ocr_warmup_task.cancel()
+            with contextlib.suppress(Exception):
+                await ocr_warmup_task
         if overlay:
             overlay.close()
         metrics = memory.get_metrics_snapshot()

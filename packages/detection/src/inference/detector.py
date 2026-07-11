@@ -905,6 +905,22 @@ def get_detector(
     if _instance is None:
         if model_path is None:
             resolved = resolve_model_path(model_name)
+            if resolved is None and model_name:
+                # The configured model isn't bundled here (weights are gitignored;
+                # git pull never ships them). Substitute the newest bundled weights
+                # rather than degrading to mock — but say so LOUDLY: a silent
+                # substitution is how a v5 fallback served for a v9 config
+                # (2026-07-11 run review, F-5).
+                substitute = resolve_model_path()
+                if substitute is not None:
+                    logger.warning(
+                        "configured model %r not found in bundled weights; "
+                        "substituting %s — copy the configured weights here if this "
+                        "host should serve them",
+                        model_name,
+                        Path(substitute).name,
+                    )
+                    resolved = substitute
             if resolved is None:
                 # Keep a deterministic (missing) path so EntityDetector's
                 # missing-model handling degrades to mock with a warning. The

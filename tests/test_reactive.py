@@ -18,6 +18,7 @@ def _state(
     age: str = "Dark Age",
     idle_present: bool | None = None,
     idle_count: int | None = None,
+    idle_streak: int = 0,
 ) -> GameState:
     return GameState(
         population=population,
@@ -25,6 +26,7 @@ def _state(
         current_age=age,
         idle_present=idle_present,
         idle_count=idle_count,
+        idle_streak=idle_streak,
     )
 
 
@@ -96,6 +98,37 @@ def test_idle_batch_capped_on_mass_idle() -> None:
     # Count 18 (post-combat pile-up) → capped at _IDLE_DISPATCH_MAX (6) per turn.
     actions = decide(entities, _state(population=22, idle_present=True, idle_count=18), alarm=False)
     assert _types(actions) == ["press", "right_click"] * 6
+
+
+def test_idle_count_trusted_below_streak_threshold() -> None:
+    entities = [_ent("town_center", (0, 0)), _ent("sheep", (10, 10))]
+    # Badge lit 3 turns (below the suspect threshold): the digit is still trusted.
+    state = _state(population=22, idle_present=True, idle_count=1, idle_streak=3)
+    assert _types(decide(entities, state, alarm=False)) == ["press", "right_click"] * 1
+
+
+def test_idle_count_distrusted_on_long_streak() -> None:
+    entities = [_ent("town_center", (0, 0)), _ent("sheep", (10, 10))]
+    # Badge lit 4+ turns while the digit reads 1 — the 2026-07-11 failure (digit
+    # pinned at 1 with 8 idle). Floor the batch at the blind presence default.
+    state = _state(population=22, idle_present=True, idle_count=1, idle_streak=4)
+    assert _types(decide(entities, state, alarm=False)) == ["press", "right_click"] * 3
+
+
+def test_idle_count_zero_distrusted_on_long_streak() -> None:
+    entities = [_ent("town_center", (0, 0)), _ent("sheep", (10, 10))]
+    # A pinned 0 with a lit badge is the same sensor fault as a pinned 1.
+    state = _state(population=22, idle_present=True, idle_count=0, idle_streak=4)
+    assert _types(decide(entities, state, alarm=False)) == ["press", "right_click"] * 3
+
+
+def test_idle_count_gate_never_reduces_batch() -> None:
+    entities = [_ent("town_center", (0, 0)), _ent("sheep", (10, 10))]
+    # A big count on a long streak keeps its exact size (and the per-turn cap).
+    state = _state(population=22, idle_present=True, idle_count=5, idle_streak=9)
+    assert _types(decide(entities, state, alarm=False)) == ["press", "right_click"] * 5
+    capped = _state(population=22, idle_present=True, idle_count=18, idle_streak=9)
+    assert _types(decide(entities, capped, alarm=False)) == ["press", "right_click"] * 6
 
 
 def test_idle_count_zero_overrides_presence() -> None:

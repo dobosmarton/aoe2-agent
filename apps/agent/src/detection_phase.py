@@ -88,7 +88,11 @@ def _init_detector() -> Detector | None:
         if config.detection_host:
             from detection.inference.remote_detector import get_remote_detector
 
-            detector = get_remote_detector(config.detection_host, imgsz=config.detection_imgsz)
+            detector = get_remote_detector(
+                config.detection_host,
+                imgsz=config.detection_imgsz,
+                model_name=config.detection_model,
+            )
             log.info("detector_initialized", mode="remote", server=config.detection_host)
             return detector
         # adaptive_sahi gates SAHI everywhere: it picks detect_adaptive vs the

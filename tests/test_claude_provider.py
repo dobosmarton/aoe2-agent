@@ -324,6 +324,30 @@ def test_send_all_idle_step_list_verbatim(
     ]
 
 
+def test_build_house_rejected_by_headroom_gate(
+    provider: ClaudeProvider, recorded_steps: list[dict], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from gameplay_agent import executor as ex
+
+    monkeypatch.setattr(ex, "_population_snapshot", (10, 30))  # 20 headroom
+    block = SimpleNamespace(id="tu6", name="build", input={"building_key": "q", "intent": "house"})
+    action_dict, result = _run(provider._execute_build(block))
+    assert action_dict == {"type": "build", "building_key": "q", "intent": "house"}
+    assert recorded_steps == []  # gate fired before any step executed
+    assert "headroom" in str(result)  # the reason reaches the LLM as the tool result
+
+
+def test_build_house_allowed_near_cap(
+    provider: ClaudeProvider, recorded_steps: list[dict], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from gameplay_agent import executor as ex
+
+    monkeypatch.setattr(ex, "_population_snapshot", (28, 30))  # housed-adjacent
+    block = SimpleNamespace(id="tu7", name="build", input={"building_key": "q", "intent": "house"})
+    _run(provider._execute_build(block))
+    assert recorded_steps  # steps ran — the gate let it through
+
+
 def test_queue_villager_step_list_verbatim(
     provider: ClaudeProvider, recorded_steps: list[dict]
 ) -> None:

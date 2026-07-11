@@ -61,6 +61,13 @@ _IDLE_DISPATCH_PER_TURN = 3
 # still capped so a mass-idle event (post-combat, town-bell recovery) doesn't blow
 # the turn's action budget; the re-read next turn drains the rest with urgency.
 _IDLE_DISPATCH_MAX = 6
+# Count trust gate: after this many consecutive turns with the badge lit, a count
+# smaller than the blind batch is treated as an OCR under-read (a working dispatch
+# drains the badge within a turn or two; a lit badge that outlives its own count is
+# the digit lying). Presence is the robust signal, so never dispatch *less* than
+# the blind batch on a long streak — extra `.` presses past the last idle villager
+# are harmless no-ops.
+_IDLE_COUNT_SUSPECT_STREAK = 4
 
 
 def decide(entities: list[object], state: GameState, alarm: bool) -> list[dict[str, object]]:
@@ -93,7 +100,9 @@ def _distribute_idle_actions(entities: list[object], state: GameState) -> list[d
     Gated on the HUD badge presence (`state.idle_present`): False = none idle,
     None = badge unread — both skip (never dispatch on an unknown reading). The
     batch is sized by the badge count when the digit was readable (capped at
-    `_IDLE_DISPATCH_MAX`), else a blind `_IDLE_DISPATCH_PER_TURN`; each villager
+    `_IDLE_DISPATCH_MAX`, and floored at the blind batch once the badge has been
+    lit `_IDLE_COUNT_SUSPECT_STREAK` turns — see the trust-gate note above), else
+    a blind `_IDLE_DISPATCH_PER_TURN`; each villager
     is pulled with `.` (select next idle) and right-clicked onto a resource whose
     kind is chosen by the age pattern. The badge re-read next turn drains any
     remainder (a `.` past the last idle villager is a harmless no-op).
@@ -102,6 +111,10 @@ def _distribute_idle_actions(entities: list[object], state: GameState) -> list[d
         return []
     if state.idle_count is not None:
         batch = min(state.idle_count, _IDLE_DISPATCH_MAX)
+        if state.idle_streak >= _IDLE_COUNT_SUSPECT_STREAK:
+            # Badge lit for many turns while the digit stays small: the count is
+            # under-reading. Fall back to (at least) the blind presence batch.
+            batch = max(batch, _IDLE_DISPATCH_PER_TURN)
     else:
         batch = _IDLE_DISPATCH_PER_TURN
     if batch == 0:  # digit says none idle — presence colour was a false positive

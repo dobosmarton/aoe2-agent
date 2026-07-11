@@ -375,3 +375,32 @@ def test_autodetect_rejects_non_bar_frames():
     blank = _png_bytes(np.zeros((400, 1200, 3), dtype=np.uint8))
     assert autodetect_calibration(blank) is None
     assert autodetect_calibration(b"") is None
+
+
+def test_warm_up_ocr_never_raises(monkeypatch):
+    """Warm-up is opportunistic: an engine failure logs and returns, no raise."""
+    from gameplay_agent import resource_ocr as ro
+
+    def _boom() -> object:
+        raise RuntimeError("no engine on this host")
+
+    monkeypatch.setattr(ro, "_rapidocr_engine", _boom)
+    ro.warm_up_ocr()  # must not raise
+
+
+def test_warm_up_ocr_runs_one_inference(monkeypatch):
+    """Warm-up builds the engine and pushes one tiny frame through it."""
+    from gameplay_agent import resource_ocr as ro
+
+    calls: list[object] = []
+
+    def _fake_engine() -> object:
+        def engine(img: object) -> tuple[None, float]:
+            calls.append(img)
+            return None, 0.0
+
+        return engine
+
+    monkeypatch.setattr(ro, "_rapidocr_engine", _fake_engine)
+    ro.warm_up_ocr()
+    assert len(calls) == 1

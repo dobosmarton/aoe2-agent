@@ -43,6 +43,12 @@ class GameState:
     # (resource_ocr.read_idle_count). None = digit unreadable this frame — fall back
     # to presence-only behavior, never treat as 0.
     idle_count: int | None = None
+    # Consecutive game-loop iterations the badge has stayed lit (idle_present True).
+    # Maintained once per iteration by the game loop, NOT by observation updates
+    # (those fire more than once per turn). A long streak with a tiny idle_count
+    # means the digit is under-reading — the reactive tier then distrusts the count
+    # (2026-07-11 run review, F-4: digit pinned at 1 while 8 villagers idled).
+    idle_streak: int = 0
     under_attack: bool = False
     enemy_located: bool = False
     enemy_location: str = ""

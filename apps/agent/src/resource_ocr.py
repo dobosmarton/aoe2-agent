@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import io
 import statistics
+import threading
 from dataclasses import dataclass
 from itertools import pairwise
 from pathlib import Path
@@ -389,16 +390,44 @@ def _read_field_tesseract(field_img: np.ndarray, *, whitelist: str, binarize: bo
 
 
 _RAPIDOCR_ENGINE = None
+# Serializes engine construction: the startup warm-up thread (warm_up_ocr) and the
+# first read_hud_readings worker race here; without the lock both would build the
+# ~10 s engine.
+_RAPIDOCR_ENGINE_LOCK = threading.Lock()
 
 
 def _rapidocr_engine() -> RapidOCR:
     """Lazily build the RapidOCR engine (expensive init — reuse across calls)."""
     global _RAPIDOCR_ENGINE
-    if _RAPIDOCR_ENGINE is None:
-        from rapidocr_onnxruntime import RapidOCR
+    with _RAPIDOCR_ENGINE_LOCK:
+        if _RAPIDOCR_ENGINE is None:
+            from rapidocr_onnxruntime import RapidOCR
 
-        _RAPIDOCR_ENGINE = RapidOCR()
-    return _RAPIDOCR_ENGINE
+            _RAPIDOCR_ENGINE = RapidOCR()
+        return _RAPIDOCR_ENGINE
+
+
+def warm_up_ocr() -> None:
+    """Eagerly build the RapidOCR engine and run one tiny inference.
+
+    Engine construction + first inference cost ~10-15 s (CPU model loads); paid
+    lazily they land inside the first game turn — the bulk of the post-startup
+    freeze. The game loop runs this in a background thread at startup instead,
+    so the first real read only waits on the construction lock, not a cold start.
+    Never raises: warm-up is opportunistic.
+    """
+    import time
+
+    import structlog
+
+    log = structlog.stdlib.get_logger()
+    try:
+        started = time.monotonic()
+        engine = _rapidocr_engine()
+        engine(np.zeros((32, 96, 3), dtype=np.uint8))
+        log.info("ocr_engine_warmed", seconds=round(time.monotonic() - started, 1))
+    except Exception as e:
+        log.warning("ocr_warmup_failed", error=str(e))
 
 
 def _read_field_rapidocr(field_img: np.ndarray, *, whitelist: str, binarize: bool = True) -> str:

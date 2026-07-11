@@ -71,6 +71,7 @@ def fake_pyautogui(monkeypatch: pytest.MonkeyPatch) -> _FakePyautogui:
     ex._window_offset = (0, 0)
     ex._rescan_fn = None
     ex._rescan_full_fn = None
+    ex.clear_population_snapshot()
     return fake
 
 
@@ -301,6 +302,48 @@ def test_handle_press_with_rescan_invokes_rescan_fn(
     monkeypatch.setattr(ex, "RESCAN_SETTLE_DELAY", 0.0)
     _run(ex._handle_press({"key": ".", "rescan": True}, "select idle"))
     assert rescan_called is True
+
+
+# ---------------------------------------------------------------------------
+# House headroom gate — build_rejection + the _handle_build reject path
+# ---------------------------------------------------------------------------
+
+
+def test_build_rejection_allows_without_snapshot(fake_pyautogui: _FakePyautogui) -> None:
+    # No population reading yet → never block on missing data.
+    assert ex.build_rejection("q") is None
+
+
+def test_build_rejection_blocks_house_with_ample_headroom(
+    fake_pyautogui: _FakePyautogui,
+) -> None:
+    ex.set_population_snapshot(10, 30)  # 20 headroom — another house is wasted wood
+    reason = ex.build_rejection("q")
+    assert reason is not None and "headroom" in reason
+
+
+def test_build_rejection_allows_house_near_cap(fake_pyautogui: _FakePyautogui) -> None:
+    ex.set_population_snapshot(26, 30)  # headroom 4 = the gate boundary, allowed
+    assert ex.build_rejection("q") is None
+
+
+def test_build_rejection_blocks_house_at_game_cap(fake_pyautogui: _FakePyautogui) -> None:
+    ex.set_population_snapshot(199, 200)
+    reason = ex.build_rejection("q")
+    assert reason is not None and "maximum" in reason
+
+
+def test_build_rejection_ignores_non_house_builds(fake_pyautogui: _FakePyautogui) -> None:
+    ex.set_population_snapshot(10, 30)
+    assert ex.build_rejection("w") is None  # mill
+    assert ex.build_rejection("a") is None  # farm
+
+
+def test_handle_build_rejects_house_with_headroom(fake_pyautogui: _FakePyautogui) -> None:
+    ex.set_population_snapshot(10, 30)
+    result = _run(ex._handle_build({"building_key": "q"}, "Build house to increase pop cap"))
+    assert result.success is False and "headroom" in result.detail
+    assert fake_pyautogui.calls == []  # rejected before any key was pressed
 
 
 def test_handle_drag_emits_moveto_then_drag(fake_pyautogui: _FakePyautogui) -> None:

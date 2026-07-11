@@ -303,6 +303,7 @@ def get_remote_detector(
     server_url: str,
     imgsz: int = 1280,
     with_fallback: bool = True,
+    model_name: str | None = None,
 ) -> RemoteDetector:
     """Create a RemoteDetector, keeping a local model as fallback only if one exists.
 
@@ -311,11 +312,15 @@ def get_remote_detector(
     is populated only when a real local model is present (e.g. the serving host);
     remote-only deploys get ``None``, so an outage surfaces as empty detections
     plus a logged error rather than garbage.
+
+    ``model_name`` is the configured served model (``config.detection_model``) —
+    passing it lets ``get_detector`` warn loudly when the local fallback has to
+    substitute different bundled weights (e.g. only an old version on disk).
     """
     fallback: EntityDetector | None = None
     if with_fallback and _local_model_exists():
         try:
-            candidate = get_detector(imgsz=imgsz)
+            candidate = get_detector(imgsz=imgsz, model_name=model_name)
             fallback = candidate if not candidate.use_mock else None
         except Exception:
             logger.warning("Could not create local fallback detector")

@@ -17,6 +17,7 @@ from ..config import config
 from ..entity_utils import ResourceKind
 from ..executor import (
     build_menu_steps,
+    build_rejection,
     build_steps,
     default_build_placement,
     execute_action,
@@ -448,6 +449,12 @@ class ClaudeProvider:
         """
         inp = block.input
         intent = str(inp.get("intent", "Build"))
+        building_key = cast("str", inp["building_key"])
+        rejection = build_rejection(building_key)
+        if rejection is not None:
+            log.info("build_rejected", building_key=building_key, reason=rejection, intent=intent)
+            action_dict = {"type": "build", **inp}
+            return action_dict, self._make_tool_result(block, False, rejection)
         # x,y are optional: the text-only model can't see open ground, so when it
         # omits them we auto-place near the town centre. See default_build_placement.
         x, y = inp.get("x"), inp.get("y")
@@ -456,7 +463,7 @@ class ClaudeProvider:
             if x is not None and y is not None
             else default_build_placement()
         )
-        steps = build_steps(cast("str", inp["building_key"]), intent, placement)
+        steps = build_steps(building_key, intent, placement)
         return await self._run_composite(block, "build", steps)
 
     async def _execute_send_villager(self, block: ToolUseBlock) -> tuple[dict, dict]:

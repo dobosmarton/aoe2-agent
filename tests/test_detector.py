@@ -14,6 +14,7 @@ not numerical accuracy of inference.
 from __future__ import annotations
 
 import io
+from pathlib import Path
 
 import detection.inference.detector as detector_mod
 import pytest
@@ -325,6 +326,32 @@ def test_get_detector_returns_singleton():
     a = get_detector(use_mock=True)
     b = get_detector(use_mock=True)
     assert a is b
+
+
+def test_get_detector_warns_and_substitutes_when_configured_model_missing(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A configured model that isn't bundled substitutes the newest weights LOUDLY.
+
+    Guards the 2026-07-11 failure where a v9 config silently served v5 on a host
+    whose gitignored v9 weights were never copied over.
+    """
+    import logging
+
+    created: dict[str, object] = {}
+
+    class _StubDetector:
+        def __init__(self, **kwargs: object) -> None:
+            created.update(kwargs)
+
+    monkeypatch.setattr(detector_mod, "EntityDetector", _StubDetector)
+    with caplog.at_level(logging.WARNING, logger="detection.inference.detector"):
+        detector_mod.get_detector(model_name="aoe2_yolo_v999")
+
+    assert "aoe2_yolo_v999" in caplog.text  # names the configured model
+    substituted = str(created["model_path"])
+    assert "aoe2_yolo_v999" not in substituted  # real bundled weights, not the missing name
+    assert Path(substituted).exists()
 
 
 # ---------------------------------------------------------------------------

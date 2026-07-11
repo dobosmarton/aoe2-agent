@@ -95,6 +95,57 @@ def clear_detected_entities() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Population snapshot (house headroom gate)
+# ---------------------------------------------------------------------------
+
+# Only build a house when within this many pop of the cap. The 2026-07-11 run
+# built houses at 15+ headroom (125 wood) while the first farm starved for 60 —
+# a satisfied "raise pop cap" goal kept re-triggering because every house
+# "succeeds". Cap 200 is the game maximum: houses past it add nothing.
+HOUSE_HEADROOM_MAX = 4
+_GAME_POP_CAP_LIMIT = 200
+
+# (population, population_cap) as of this iteration's HUD read; set by the game
+# loop each turn (same lifecycle as the entity cache). None = no reading yet —
+# the gate then allows the build rather than blocking on missing data.
+_population_snapshot: tuple[int, int] | None = None
+
+
+def set_population_snapshot(population: int, population_cap: int) -> None:
+    """Cache this turn's population reading for build-time sanity checks."""
+    global _population_snapshot
+    _population_snapshot = (population, population_cap)
+
+
+def clear_population_snapshot() -> None:
+    """Drop the cached population reading (tests / new game)."""
+    global _population_snapshot
+    _population_snapshot = None
+
+
+def build_rejection(building_key: str) -> str | None:
+    """Reason this build is pointless right now, or None when it's allowed.
+
+    Currently gates houses only: with ample pop-cap headroom another house is
+    wasted wood, and with the cap at the game maximum it does nothing. The
+    reason string is returned to the LLM as the action's failure detail so the
+    next turn plans around it instead of re-issuing the build.
+    """
+    if BUILD_KEY_TO_CLASS.get(building_key) != "house" or _population_snapshot is None:
+        return None
+    population, cap = _population_snapshot
+    if cap >= _GAME_POP_CAP_LIMIT:
+        return f"house skipped: population cap {cap} is already the game maximum"
+    headroom = cap - population
+    if headroom > HOUSE_HEADROOM_MAX:
+        return (
+            f"house skipped: population {population}/{cap} leaves {headroom} headroom "
+            f"(> {HOUSE_HEADROOM_MAX}) — spend the wood on economy buildings instead"
+        )
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Coordinate resolution
 # ---------------------------------------------------------------------------
 
@@ -587,6 +638,10 @@ async def _handle_build(action_dict: dict[str, object], intent: str) -> ActionRe
     key = action_dict.get("building_key")
     if not isinstance(key, str) or not key:
         return ActionResult(False, "build: missing building_key")
+    rejection = build_rejection(key)
+    if rejection is not None:
+        log.info("build_rejected", building_key=key, reason=rejection, intent=intent)
+        return ActionResult(False, rejection)
     for step in build_steps(key, intent, default_build_placement()):
         result = await execute_action(step)
         if not result.success:
