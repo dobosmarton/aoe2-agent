@@ -85,6 +85,15 @@ _FARM_BUILD_KEY = "a"
 # also requires are always up by then (houses + mill).
 _FEUDAL_FOOD_COST = 500
 _FEUDAL_BANK_POP = 16
+# Feudal also requires TWO qualifying Dark Age buildings — and houses don't
+# count (run 6, F-26: 14 age-up presses no-oped against a greyed button with
+# only the mill built while 767 food sat banked). Mirrors
+# evaluation.world_sim.FEUDAL_PREREQ_BUILDINGS; a drift test pins the two.
+_FEUDAL_PREREQ_CLASSES = frozenset({"mill", "lumber_camp"})
+# Start building the prerequisites a bit before the banking phase (pop 16) so
+# they're standing by the time 500 food is.
+_FEUDAL_PREP_POP = 12
+_LUMBER_CAMP_BUILD_KEY = "r"  # econ menu: Lumber Camp (100 wood)
 # Below this food, the idle rotation is overridden toward food: honoring the
 # normal wood/gold slots during a famine starves villager production (run 1, F-8).
 _FOOD_CRISIS_THRESHOLD = 60
@@ -103,6 +112,7 @@ def decide(entities: list[object], state: GameState, alarm: bool) -> list[dict[s
     actions: list[dict[str, object]] = []
     actions.extend(_age_up_actions(state))
     actions.extend(_queue_villager_actions(state))
+    actions.extend(_feudal_prep_actions(state))
     actions.extend(_distribute_idle_actions(entities, state))
     return actions
 
@@ -121,18 +131,48 @@ def _resource(state: GameState, kind: ResourceKind) -> int:
 
 
 def _age_up_actions(state: GameState) -> list[dict[str, object]]:
-    """Research Feudal Age the moment the food is banked (Dark Age only).
+    """Research Feudal Age once the food is banked AND the buildings qualify.
 
     Runs before the villager queue so the 500 food buys the age, not another
-    villager. Pressing while the button is unavailable (already researching,
-    building requirements missing) is a harmless no-op, and once research
-    starts the food drops below the threshold, so this doesn't spam.
+    villager. Gated on the two-building requirement being visibly met, so the
+    press fires once when it can succeed instead of spamming no-ops (run 6:
+    14 presses against a greyed button — and each press was a chance for the
+    F-27 UI-context leak). The escape press first clears any open build menu /
+    placement ghost, so `z` can't land in the econ menu (where Z = Outpost).
     """
-    if state.current_age != "Dark Age" or _resource(state, "food") < _FEUDAL_FOOD_COST:
+    if (
+        state.current_age != "Dark Age"
+        or _resource(state, "food") < _FEUDAL_FOOD_COST
+        or not state.buildings_seen >= _FEUDAL_PREREQ_CLASSES
+    ):
         return []
     return [
+        {"type": "press", "key": "escape", "intent": "Clear UI state (age up)"},
         {"type": "press", "key": "h", "intent": "Select TC (age up)"},
         {"type": "press", "key": "z", "intent": "Research Feudal Age (reactive)"},
+    ]
+
+
+def _feudal_prep_actions(state: GameState) -> list[dict[str, object]]:
+    """Ensure the second qualifying Dark Age building (lumber camp) exists.
+
+    Emitted every turn from `_FEUDAL_PREP_POP` until evidence shows one — the
+    executor's unique-building gate rejects re-emits at zero keystroke cost
+    once a lumber camp is confirmed or pending, and its cost gate waits out
+    the 100 wood. Doubles as a wood-income boost (closer drop-off).
+    """
+    if (
+        state.current_age != "Dark Age"
+        or state.population < _FEUDAL_PREP_POP
+        or "lumber_camp" in state.buildings_seen
+    ):
+        return []
+    return [
+        {
+            "type": "build",
+            "building_key": _LUMBER_CAMP_BUILD_KEY,
+            "intent": "Build lumber camp (Feudal prerequisite + wood income)",
+        }
     ]
 
 

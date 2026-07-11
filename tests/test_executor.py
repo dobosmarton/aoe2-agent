@@ -389,6 +389,29 @@ def test_record_confirmed_buildings_ignores_non_gate_classes(
     assert ex._build_gates.buildings_confirmed == set()
 
 
+def test_unique_buildings_not_rebuilt(fake_pyautogui: _FakePyautogui) -> None:
+    """One mill / lumber camp is enough — the Feudal prep re-emits its build
+    every turn and relies on this gate to stop once one stands."""
+    ex.record_confirmed_buildings(["mill"])
+    reason = ex.build_rejection("w")
+    assert reason is not None and "already built" in reason
+    # Farms are NOT unique — many are the whole point.
+    ex.observe_hud(10, 15, {"wood": 500})
+    assert ex.build_rejection("a") is None
+
+
+def test_unique_building_pending_blocks_double_build(fake_pyautogui: _FakePyautogui) -> None:
+    ex.observe_hud(10, 15, {"wood": 300})
+    ex._note_pending_placement("r")  # lumber camp placed, settlement pending
+    reason = ex.build_rejection("r")
+    assert reason is not None and "pending" in reason
+
+
+def test_confirmed_buildings_accessor(fake_pyautogui: _FakePyautogui) -> None:
+    ex.record_confirmed_buildings(["mill", "sheep"])  # non-buildings filtered
+    assert ex.confirmed_buildings() == frozenset({"mill"})
+
+
 def test_reset_build_gates_clears_evidence(fake_pyautogui: _FakePyautogui) -> None:
     ex.record_confirmed_buildings(["mill"])
     ex.observe_hud(10, 15, {"wood": 500})

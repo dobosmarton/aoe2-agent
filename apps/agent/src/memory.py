@@ -53,6 +53,12 @@ class GameState:
     # means the digit is under-reading — the reactive tier then distrusts the count
     # (2026-07-11 run review, F-4: digit pinned at 1 while 8 villagers idled).
     idle_streak: int = 0
+    # Building classes known to exist this game — copied once per iteration by
+    # the game loop from the executor's build-gate evidence (detection sightings
+    # + wood-delta-confirmed purchases). Drives the reactive tier's Feudal prep
+    # (build the lumber camp) and gates the age-up press on the two-building
+    # requirement (run 6, F-26).
+    buildings_seen: frozenset[str] = frozenset()
     under_attack: bool = False
     enemy_located: bool = False
     enemy_location: str = ""

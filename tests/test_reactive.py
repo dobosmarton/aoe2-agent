@@ -22,6 +22,9 @@ def _state(
     idle_streak: int = 0,
     food: int = 200,
     wood: int = 200,
+    # Default = Feudal prereqs satisfied, so tests about OTHER features aren't
+    # polluted by the lumber-camp prep action; prep/age-up tests override it.
+    buildings: frozenset[str] = frozenset({"mill", "lumber_camp"}),
 ) -> GameState:
     return GameState(
         resources={"food": food, "wood": wood, "gold": 100, "stone": 200},
@@ -31,6 +34,7 @@ def _state(
         idle_present=idle_present,
         idle_count=idle_count,
         idle_streak=idle_streak,
+        buildings_seen=buildings,
     )
 
 
@@ -60,12 +64,59 @@ def test_no_queue_at_dark_age_cap() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_age_up_fires_when_food_banked() -> None:
+def test_age_up_fires_when_food_banked_and_buildings_qualify() -> None:
     actions = decide([], _state(population=18, food=520), alarm=False)
     assert actions == [
+        {"type": "press", "key": "escape", "intent": "Clear UI state (age up)"},
         {"type": "press", "key": "h", "intent": "Select TC (age up)"},
         {"type": "press", "key": "z", "intent": "Research Feudal Age (reactive)"},
-    ]  # banking (pop 18): no villager queue rides along to eat the 500
+    ]  # banking (pop 18): no villager queue rides along to eat the 500;
+    # escape first so `z` can't land in an open build menu (F-27's outposts)
+
+
+def test_age_up_waits_for_two_qualifying_buildings() -> None:
+    """Run 6 (F-26): 500+ food banked, only the mill built — 14 presses no-oped
+    against a greyed button. Now the press waits and the prep builds the camp."""
+    state = _state(population=18, food=520, buildings=frozenset({"mill"}))
+    actions = decide([], state, alarm=False)
+    assert all(a.get("key") != "z" for a in actions)  # no futile age-up press
+    assert [a.get("building_key") for a in actions if a["type"] == "build"] == ["r"]
+
+
+def test_feudal_prep_builds_lumber_camp_once_economy_established() -> None:
+    state = _state(population=12, buildings=frozenset({"mill"}))
+    actions = decide([], state, alarm=False)
+    builds = [a for a in actions if a["type"] == "build"]
+    assert builds == [
+        {
+            "type": "build",
+            "building_key": "r",
+            "intent": "Build lumber camp (Feudal prerequisite + wood income)",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("population", "age", "buildings"),
+    [
+        (11, "Dark Age", frozenset({"mill"})),  # economy not established yet
+        (12, "Dark Age", frozenset({"mill", "lumber_camp"})),  # already standing
+        (12, "Feudal Age", frozenset({"mill"})),  # prereq is a Dark Age concern
+    ],
+    ids=["below-prep-pop", "camp-exists", "wrong-age"],
+)
+def test_feudal_prep_not_emitted(population: int, age: str, buildings: frozenset[str]) -> None:
+    actions = decide([], _state(population=population, age=age, buildings=buildings), alarm=False)
+    assert all(a.get("type") != "build" for a in actions)
+
+
+def test_feudal_prereq_classes_match_world_sim() -> None:
+    """Drift guard (V-4): run 6 proved the sim knew the requirement the agent
+    lacked — keep the two encodings pinned together."""
+    from evaluation.world_sim import FEUDAL_PREREQ_BUILDINGS
+    from gameplay_agent import reactive
+
+    assert reactive._FEUDAL_PREREQ_CLASSES == FEUDAL_PREREQ_BUILDINGS
 
 
 @pytest.mark.parametrize(

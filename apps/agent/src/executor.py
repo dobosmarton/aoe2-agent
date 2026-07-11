@@ -220,6 +220,13 @@ def record_confirmed_buildings(classes: Iterable[str]) -> None:
     _build_gates.buildings_confirmed.update(c for c in classes if c in _GATE_BUILDING_CLASSES)
 
 
+def confirmed_buildings() -> frozenset[str]:
+    """Building classes known to exist this game (detection or wood-delta
+    evidence) — copied into GameState each turn so the reactive tier can gate
+    Feudal prep and the age-up press on the two-building requirement."""
+    return frozenset(_build_gates.buildings_confirmed)
+
+
 def reset_build_gates() -> None:
     """Fresh build-gate state (new game / tests)."""
     global _build_gates
@@ -250,6 +257,11 @@ def _rejection_reason(building_key: str) -> str | None:
     cls = BUILD_KEY_TO_CLASS.get(building_key)
     if cls is None:
         return None
+    if cls in _UNIQUE_BUILDING_CLASSES:
+        if cls in _build_gates.buildings_confirmed:
+            return f"{cls} already built — one is enough; spend the wood on farms"
+        if any(p.building_class == cls for p in _build_gates.pending_placements):
+            return f"{cls} placement already pending wood-delta settlement — don't double-build"
     if cls == "house" and _build_gates.population is not None:
         population, cap = _build_gates.population
         if cap >= _GAME_POP_CAP_LIMIT:
@@ -423,6 +435,12 @@ _BUILD_WOOD_COST: dict[str, int] = {
 # pressing the key without it selects nothing and the placement click lands as
 # a plain ground click.
 _BUILD_PREREQ_CLASS: dict[str, str] = {"a": "mill"}  # farm needs a mill
+
+# One of each is enough for this bot: a second mill/lumber camp is wasted wood
+# (run 3 attempted a duplicate mill; run 6's Feudal plan re-emits the lumber
+# camp build every turn and relies on this gate to stop once one stands —
+# confirmed OR pending, so the settlement lag can't slip a double through).
+_UNIQUE_BUILDING_CLASSES: frozenset[str] = frozenset({"mill", "lumber_camp"})
 
 # Module-level cumulative retry telemetry (resets per process / per game).
 # Surfaced via build_placement_retry log lines so the user can grep

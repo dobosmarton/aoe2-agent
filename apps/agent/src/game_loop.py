@@ -31,6 +31,7 @@ from .entity_utils import build_entity_summary
 from .executor import (
     can_resolve,
     clear_detected_entities,
+    confirmed_buildings,
     execute_actions,
     observe_hud,
     reset_build_gates,
@@ -155,6 +156,7 @@ def _sync_turn_state(
         goal_manager.update_resource_readings(hud_readings, memory)
     game_state = memory.game_state
     game_state.idle_streak = (game_state.idle_streak + 1) if game_state.idle_present else 0
+    game_state.buildings_seen = confirmed_buildings()
     observe_hud(game_state.population, game_state.population_cap, game_state.resources)
 
 
