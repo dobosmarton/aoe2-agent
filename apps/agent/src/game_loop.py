@@ -156,7 +156,9 @@ async def _cancel_pending(plan: _PendingPlan | None) -> None:
     if plan is None or plan.task.done():
         return
     plan.task.cancel()
-    with contextlib.suppress(Exception):
+    # CancelledError is a BaseException (Python 3.8+) — suppress(Exception)
+    # alone would let the cancellation we just requested escape the caller.
+    with contextlib.suppress(asyncio.CancelledError, Exception):
         await plan.task
 
 
@@ -377,7 +379,7 @@ async def game_loop(
         await _cancel_pending(pending_plan)
         if ocr_warmup_task is not None and not ocr_warmup_task.done():
             ocr_warmup_task.cancel()
-            with contextlib.suppress(Exception):
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await ocr_warmup_task
         if overlay:
             overlay.close()

@@ -8,6 +8,7 @@ no API key) to assert the one-turn-lag behavior and the disabled==baseline path.
 from __future__ import annotations
 
 import asyncio
+import time
 
 import gameplay_agent.game_loop as gl
 from gameplay_agent.executor import clear_detected_entities, set_detected_entities
@@ -166,6 +167,9 @@ def _patch_loop_seams(monkeypatch, tmp_path, executed, context_text):
     )
     monkeypatch.setattr(gl, "execute_actions", _noop_execute)
     monkeypatch.setattr(gl, "_execute_turn_actions", _record_exec)
+    # No real OCR engine in unit tests: the default rapidocr backend would spawn
+    # a warm-up thread that loads onnxruntime models.
+    monkeypatch.setattr(gl, "warm_up_ocr", lambda: None)
     monkeypatch.setattr(gl.config, "log_dir", tmp_path)
     monkeypatch.setattr(gl.config, "save_screenshots", False)
 
@@ -183,3 +187,19 @@ def test_pipeline_executes_previous_plan_head_next_turn(monkeypatch, tmp_path):
     # cancelled in finally. So only plan-1's 2-action head executes.
     assert executed == [["t1a0", "t1a1"]]
     assert len(provider.contexts) == 2  # both turns pre-launched a plan
+
+
+def test_loop_exit_survives_pending_ocr_warmup(monkeypatch, tmp_path):
+    """Regression (CI-only flake): cancelling a still-running warm-up task at
+    shutdown must not leak CancelledError out of game_loop — CancelledError is a
+    BaseException, so a plain suppress(Exception) misses it."""
+    executed = []
+    _patch_loop_seams(monkeypatch, tmp_path, executed, "routine economy turn")
+    # A warm-up that outlives the 1-iteration loop, so finally cancels it mid-run.
+    monkeypatch.setattr(gl, "warm_up_ocr", lambda: time.sleep(0.3))
+    monkeypatch.setattr(gl.config, "ocr_backend", "rapidocr")
+
+    provider = _FakePipelineProvider()
+    # Must return normally, not raise CancelledError.
+    memory = _run(gl.game_loop(provider, max_iterations=1, use_detection=False, use_overlay=False))
+    assert memory.game_end_reason == "iterations_exhausted"
