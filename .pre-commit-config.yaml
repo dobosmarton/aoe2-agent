@@ -8,6 +8,9 @@ repos:
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
+        # In a TSV, trailing tabs ARE data (empty trailing columns) — stripping
+        # them silently truncates ledger rows.
+        exclude: '\.tsv$'
       - id: end-of-file-fixer
       - id: check-yaml
         # --unsafe so compose-spec custom tags (!reset, !override) parse cleanly.
