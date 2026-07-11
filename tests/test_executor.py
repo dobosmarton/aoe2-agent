@@ -358,10 +358,21 @@ def test_farm_rejected_without_mill(fake_pyautogui: _FakePyautogui) -> None:
     assert reason is not None and "mill" in reason
 
 
-def test_farm_allowed_once_mill_seen(fake_pyautogui: _FakePyautogui) -> None:
-    ex.set_detected_entities([{"id": "mill_0", "class": "mill", "center": (100, 100)}])
+def test_farm_allowed_once_mill_seen_repeatedly(fake_pyautogui: _FakePyautogui) -> None:
+    mill_frame = [{"id": "mill_0", "class": "mill", "center": (100, 100)}]
+    for _ in range(3):  # _BUILDING_CONFIRM_SIGHTINGS distinct frames
+        ex.set_detected_entities(mill_frame)
     ex.set_detected_entities([])  # camera moved away — evidence must persist
     assert ex.build_rejection("a") is None
+
+
+def test_single_frame_phantom_does_not_unlock_farms(fake_pyautogui: _FakePyautogui) -> None:
+    """Run 7: a one-frame misdetected mill unlocked farm builds (whose `a` key
+    is the OUTPOST without a real mill → phantom towers) and simultaneously
+    blocked the real mill via the unique-building gate. One frame is not proof."""
+    ex.set_detected_entities([{"id": "mill_0", "class": "mill", "center": (100, 100)}])
+    assert ex.build_rejection("a") is not None  # farm still gated
+    assert ex.build_rejection("w") is None  # and the REAL mill is still buildable
 
 
 def test_farm_rejected_when_wood_short_even_with_mill(fake_pyautogui: _FakePyautogui) -> None:
@@ -686,8 +697,11 @@ def test_execute_actions_runs_each_in_order(fake_pyautogui: _FakePyautogui) -> N
 
 
 def test_build_steps_sequence() -> None:
-    """build_steps yields select-villager -> econ-menu -> building-key -> placement click."""
+    """build_steps: select villager -> econ menu -> building key -> placement
+    click -> escape (leave the UI clean so later keys can't land in a leaked
+    menu — runs 6-7 built phantom outposts that way)."""
     steps = ex.build_steps("w", "build mill", (700, 400))
-    assert [s["type"] for s in steps] == ["press", "press", "press", "click"]
+    assert [s["type"] for s in steps] == ["press", "press", "press", "click", "press"]
     assert steps[2]["key"] == "w"  # building_key selects the structure
     assert (steps[3]["x"], steps[3]["y"]) == (700, 400)  # placement passed through
+    assert steps[4]["key"] == "escape"  # UI-state hygiene

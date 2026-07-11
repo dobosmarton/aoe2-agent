@@ -81,8 +81,10 @@ def set_detected_entities(entities: Sequence[object]) -> None:
             log.warning("detected_entity_unrecognized_type", entity_type=type(e).__name__)
     _detected_entities = normalized
     # Every detection frame (turn scans and mid-turn rescans alike) feeds the
-    # build-prerequisite evidence — a mill seen once means farms are buildable.
-    record_confirmed_buildings(str(e.get("class", "")) for e in normalized)
+    # build-prerequisite evidence — thresholded, so a one-frame phantom can't
+    # poison the gates (run 7: a misdetected mill unlocked impossible farms
+    # AND blocked the real mill).
+    record_building_sightings(str(e.get("class", "")) for e in normalized)
     log.debug("detected_entities_set", count=len(_detected_entities))
 
 
@@ -143,6 +145,12 @@ class _BuildGates:
     population: tuple[int, int] | None = None
     resources: dict[str, int] | None = None
     buildings_confirmed: set[str] = field(default_factory=set)
+    # Frames each gate-relevant building class has been detected in. A class
+    # only graduates to buildings_confirmed after _BUILDING_CONFIRM_SIGHTINGS
+    # distinct frames: a single-frame phantom (run 7: a misdetected "mill" at
+    # minute 2) both unlocked impossible farm builds AND blocked the real mill
+    # via the unique-building gate. Phantoms flicker; real buildings persist.
+    building_sightings: dict[str, int] = field(default_factory=dict)
     pending_placements: list[_PendingPlacement] = field(default_factory=list)
 
 
@@ -215,8 +223,28 @@ def _settle_pending_placements(wood_now: int | None) -> None:
     _build_gates.pending_placements = still_pending
 
 
+# Distinct detection frames a building class must appear in before it counts
+# as build-gate evidence. 1 frame = a phantom can poison the gates (run 7).
+_BUILDING_CONFIRM_SIGHTINGS = 3
+
+
+def record_building_sightings(classes: Iterable[str]) -> None:
+    """Count one detection frame's building sightings toward confirmation.
+
+    Detection evidence is thresholded (see building_sightings); direct
+    evidence — a wood-delta-confirmed purchase or a verified placement — goes
+    through record_confirmed_buildings instead and confirms immediately.
+    """
+    for cls in set(classes) & _GATE_BUILDING_CLASSES:
+        seen = _build_gates.building_sightings.get(cls, 0) + 1
+        _build_gates.building_sightings[cls] = seen
+        if seen >= _BUILDING_CONFIRM_SIGHTINGS:
+            _build_gates.buildings_confirmed.add(cls)
+
+
 def record_confirmed_buildings(classes: Iterable[str]) -> None:
-    """Remember gate-relevant building classes seen by detection."""
+    """Remember gate-relevant building classes proven to exist (ledger or
+    verified placement — NOT raw detection; that goes through sightings)."""
     _build_gates.buildings_confirmed.update(c for c in classes if c in _GATE_BUILDING_CLASSES)
 
 
@@ -247,10 +275,10 @@ def build_rejection(building_key: str, intent: str = "") -> str | None:
 
 
 def _rejection_reason(building_key: str) -> str | None:
-    """Three gates: house with ample pop-cap headroom (wasted wood), missing
-    prerequisite (the menu entry doesn't even exist — the keypress would be a
-    silent no-op, how the 2026-07-11 run "built" two farms that never existed),
-    and unaffordable cost. The reason string is returned to the LLM as the
+    """Four gates: unique building already standing, house with ample pop-cap
+    headroom (wasted wood), missing prerequisite (without a mill the farm key
+    selects the OUTPOST — runs 6-7 built phantom towers this way), and
+    unaffordable cost. The reason string is returned to the LLM as the
     action's failure detail so the next turn plans around it instead of
     re-issuing the same doomed build.
     """
@@ -431,9 +459,10 @@ _BUILD_WOOD_COST: dict[str, int] = {
     "t": 150,  # dock
 }
 
-# Menu entries that only exist once a prerequisite building is COMPLETED —
-# pressing the key without it selects nothing and the placement click lands as
-# a plain ground click.
+# Menu entries that only exist once a prerequisite building is COMPLETED.
+# CRITICAL (user-observed, runs 6-7): without a mill the econ menu re-flows and
+# the `A` slot is the OUTPOST — pressing it doesn't no-op, it BUILDS A TOWER.
+# This gate is therefore a safety gate, not just an efficiency gate.
 _BUILD_PREREQ_CLASS: dict[str, str] = {"a": "mill"}  # farm needs a mill
 
 # One of each is enough for this bot: a second mill/lumber camp is wasted wood
@@ -569,6 +598,9 @@ def build_menu_steps(
             "building_key": building_key,  # lets _handle_click verify the placement landed
             "intent": f"Place building ({intent})",
         },
+        # Always leave the UI in a clean state: a menu left open re-maps later
+        # keystrokes (runs 6-7 built phantom outposts through leaked menus).
+        {"type": "press", "key": "escape", "intent": f"Close build menu ({intent})"},
     ]
 
 

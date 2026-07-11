@@ -32,7 +32,7 @@
 - W: Mill (100 wood)
 - E: Mining Camp (100 wood)
 - R: Lumber Camp (100 wood)
-- A: Farm (60 wood)
+- A: Farm (60 wood) — ONLY when a Mill exists; without a Mill this slot is the OUTPOST (pressing A builds a tower!)
 - T: Dock (150 wood)
 - S: Blacksmith (150 wood)
 

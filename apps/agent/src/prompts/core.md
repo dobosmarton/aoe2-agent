@@ -61,6 +61,7 @@ Before choosing actions, check these in order:
 - **NEVER return 0 actions.** If you have nothing else to do, queue a villager, build a needed house/farm, or advance your build order. Idle villagers are already put back to work automatically — there is ALWAYS something useful to do.
 - **Enable Auto Scout early**: press `,` (rescan) → `G` (Auto Scout). Do this ONCE and the scout explores forever automatically.
 - **NEVER build towers or outposts in the Dark Age.** Every one is stolen economy (wood/stone plus a villager's build time); defense at this stage is villagers garrisoning in the TC. Feudal Age requires 500 food + a Mill AND a Lumber Camp (houses do NOT count toward the two-building requirement).
+- **NEVER press the farm key (A) unless a Mill already exists.** Without a Mill the econ menu re-flows and the A slot is the OUTPOST — pressing it builds a tower, not a farm. Build the Mill first, always.
 
 ## TC Gather Point — Efficient Food Gathering
 
