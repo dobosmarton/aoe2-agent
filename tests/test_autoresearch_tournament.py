@@ -11,8 +11,8 @@ import asyncio
 from typing import TYPE_CHECKING
 
 import autoresearch.orchestrator as orch_module
-from autoresearch.json_utils import extract_json_array
 from autoresearch.metrics import GameScore
+from core.json_utils import extract_json_array
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable

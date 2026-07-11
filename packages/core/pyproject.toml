@@ -3,7 +3,7 @@ name = "core"
 version = "0.1.0"
 description = "Shared types — Event/Payload, WorldState, DetectedEntity. Zero I/O."
 requires-python = ">=3.11"
-dependencies = ["pydantic>=2.5.0"]
+dependencies = ["pydantic>=2.5.0", "structlog>=24.1.0"]
 
 [build-system]
 requires = ["setuptools>=68.0"]

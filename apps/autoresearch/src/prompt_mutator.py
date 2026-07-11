@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 import anthropic
 import structlog
+from core.json_utils import extract_json_array
 
 if TYPE_CHECKING:
     from .trace import GameTrace
@@ -177,8 +178,6 @@ description, old_text, new_text, rationale. Output the JSON array only."""
 
     def _parse_changes(self, text: str) -> list[dict]:
         """Extract a list of well-formed change dicts from the LLM response."""
-        from .json_utils import extract_json_array
-
         return [item for item in extract_json_array(text) if self._is_valid_change(item)]
 
     @staticmethod

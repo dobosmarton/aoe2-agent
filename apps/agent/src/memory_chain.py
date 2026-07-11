@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 import anthropic
 import structlog
+from core.json_utils import extract_json_object
 
 if TYPE_CHECKING:
     from autoresearch.metrics import GameScore
@@ -320,8 +321,6 @@ class MemoryChain:
         Drops entries with empty content (was producing 0-byte files —
         see exp_0011's `006_missing_feudal_age_target.md`).
         """
-        from .json_utils import extract_json_object
-
         data = extract_json_object(text)
         if data is None:
             log.warning("memory_parse_failed", text=text[:200])
