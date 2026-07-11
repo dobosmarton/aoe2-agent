@@ -71,7 +71,7 @@ def fake_pyautogui(monkeypatch: pytest.MonkeyPatch) -> _FakePyautogui:
     ex._window_offset = (0, 0)
     ex._rescan_fn = None
     ex._rescan_full_fn = None
-    ex.clear_population_snapshot()
+    ex.reset_build_gates()
     return fake
 
 
@@ -317,33 +317,142 @@ def test_build_rejection_allows_without_snapshot(fake_pyautogui: _FakePyautogui)
 def test_build_rejection_blocks_house_with_ample_headroom(
     fake_pyautogui: _FakePyautogui,
 ) -> None:
-    ex.set_population_snapshot(10, 30)  # 20 headroom — another house is wasted wood
+    ex.set_hud_snapshot(10, 30, {})  # 20 headroom — another house is wasted wood
     reason = ex.build_rejection("q")
     assert reason is not None and "headroom" in reason
 
 
 def test_build_rejection_allows_house_near_cap(fake_pyautogui: _FakePyautogui) -> None:
-    ex.set_population_snapshot(26, 30)  # headroom 4 = the gate boundary, allowed
+    ex.set_hud_snapshot(26, 30, {})  # headroom 4 = the gate boundary, allowed
     assert ex.build_rejection("q") is None
 
 
 def test_build_rejection_blocks_house_at_game_cap(fake_pyautogui: _FakePyautogui) -> None:
-    ex.set_population_snapshot(199, 200)
+    ex.set_hud_snapshot(199, 200, {})
     reason = ex.build_rejection("q")
     assert reason is not None and "maximum" in reason
 
 
-def test_build_rejection_ignores_non_house_builds(fake_pyautogui: _FakePyautogui) -> None:
-    ex.set_population_snapshot(10, 30)
+def test_build_rejection_headroom_gate_is_house_only(fake_pyautogui: _FakePyautogui) -> None:
+    ex.set_hud_snapshot(10, 30, {})  # 20 headroom blocks houses, nothing else
     assert ex.build_rejection("w") is None  # mill
-    assert ex.build_rejection("a") is None  # farm
+    ex.record_confirmed_buildings(["mill"])
+    assert ex.build_rejection("a") is None  # farm (prereq satisfied)
 
 
 def test_handle_build_rejects_house_with_headroom(fake_pyautogui: _FakePyautogui) -> None:
-    ex.set_population_snapshot(10, 30)
+    ex.set_hud_snapshot(10, 30, {})
     result = _run(ex._handle_build({"building_key": "q"}, "Build house to increase pop cap"))
     assert result.success is False and "headroom" in result.detail
     assert fake_pyautogui.calls == []  # rejected before any key was pressed
+
+
+# ---------------------------------------------------------------------------
+# Build gates — prerequisite (farm needs a seen mill) + wood cost
+# ---------------------------------------------------------------------------
+
+
+def test_farm_rejected_without_mill(fake_pyautogui: _FakePyautogui) -> None:
+    # No mill ever detected: the farm menu entry doesn't exist — silent no-op.
+    reason = ex.build_rejection("a")
+    assert reason is not None and "mill" in reason
+
+
+def test_farm_allowed_once_mill_seen(fake_pyautogui: _FakePyautogui) -> None:
+    ex.set_detected_entities([{"id": "mill_0", "class": "mill", "center": (100, 100)}])
+    ex.set_detected_entities([])  # camera moved away — evidence must persist
+    assert ex.build_rejection("a") is None
+
+
+def test_farm_rejected_when_wood_short_even_with_mill(fake_pyautogui: _FakePyautogui) -> None:
+    ex.record_confirmed_buildings(["mill"])
+    ex.set_hud_snapshot(10, 15, {"wood": 30})
+    reason = ex.build_rejection("a")
+    assert reason is not None and "60 wood" in reason and "30" in reason
+
+
+def test_cost_gate_blocks_unaffordable_mill(fake_pyautogui: _FakePyautogui) -> None:
+    ex.set_hud_snapshot(10, 15, {"wood": 50})
+    reason = ex.build_rejection("w")
+    assert reason is not None and "100 wood" in reason
+
+
+def test_cost_gate_allows_when_resources_unknown(fake_pyautogui: _FakePyautogui) -> None:
+    ex.record_confirmed_buildings(["mill"])
+    assert ex.build_rejection("a") is None  # no snapshot → never block on missing data
+
+
+def test_record_confirmed_buildings_ignores_non_gate_classes(
+    fake_pyautogui: _FakePyautogui,
+) -> None:
+    ex.record_confirmed_buildings(["sheep", "villager", "town_center"])
+    assert ex._buildings_confirmed == set()
+
+
+def test_reset_build_gates_clears_evidence(fake_pyautogui: _FakePyautogui) -> None:
+    ex.record_confirmed_buildings(["mill"])
+    ex.set_hud_snapshot(10, 15, {"wood": 500})
+    ex.reset_build_gates()
+    assert ex.build_rejection("a") is not None  # mill evidence gone
+
+
+# ---------------------------------------------------------------------------
+# Effect-level placement verification (_handle_click with building_key)
+# ---------------------------------------------------------------------------
+
+
+def _zero_build_delays(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ex, "BUILD_SETTLE_DELAY", 0.0)
+    monkeypatch.setattr(ex, "BUILD_RETRY_DELAY", 0.0)
+    monkeypatch.setattr(ex, "RESCAN_SETTLE_DELAY", 0.0)
+
+
+def test_place_click_fails_when_building_not_detected(
+    fake_pyautogui: _FakePyautogui, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _zero_build_delays(monkeypatch)
+
+    async def rescan_sees_nothing() -> None:
+        ex._detected_entities = []
+
+    ex._rescan_fn = rescan_sees_nothing
+    result = _run(
+        ex._handle_click({"x": 500, "y": 600, "building_key": "q"}, "Place building (house)")
+    )
+    assert result.success is False and "not confirmed" in result.detail
+
+
+def test_place_click_succeeds_and_records_when_building_lands(
+    fake_pyautogui: _FakePyautogui, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _zero_build_delays(monkeypatch)
+
+    async def rescan_sees_mill() -> None:
+        ex._detected_entities = [{"id": "mill_0", "class": "mill", "center": (505, 610)}]
+
+    ex._rescan_fn = rescan_sees_mill
+    result = _run(
+        ex._handle_click({"x": 500, "y": 600, "building_key": "w"}, "Place building (mill)")
+    )
+    assert result.success is True
+    # A verified placement is prerequisite evidence: farms are now buildable.
+    assert ex.build_rejection("a") is None
+
+
+def test_place_click_unverifiable_without_rescan_gets_benefit_of_doubt(
+    fake_pyautogui: _FakePyautogui, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _zero_build_delays(monkeypatch)
+    result = _run(
+        ex._handle_click({"x": 500, "y": 600, "building_key": "q"}, "Place building (house)")
+    )
+    assert result.success is True  # no rescan callback → cannot verify → allow
+
+
+def test_handle_build_rejects_farm_without_mill(fake_pyautogui: _FakePyautogui) -> None:
+    result = _run(ex._handle_build({"building_key": "a"}, "Build farm for food"))
+    assert result.success is False and "mill" in result.detail
+    assert fake_pyautogui.calls == []
 
 
 def test_handle_drag_emits_moveto_then_drag(fake_pyautogui: _FakePyautogui) -> None:

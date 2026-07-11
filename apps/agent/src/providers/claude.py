@@ -533,6 +533,13 @@ class ClaudeProvider:
         building_key = str(inp.get("building_key", "a"))  # 'a' = Farm in the econ menu
         action_dict = {"type": "reassign_villager", **inp}
 
+        # Same gates as the plain build composite (prerequisite / cost / headroom):
+        # reassigning a worker to a build that can't exist wastes the whole jump.
+        rejection = build_rejection(building_key)
+        if rejection is not None:
+            log.info("build_rejected", building_key=building_key, reason=rejection, intent=intent)
+            return action_dict, self._make_tool_result(block, False, rejection)
+
         # Phase 1 — jump the camera to the source work site and re-detect.
         goto_key, goto_mods = _JOB_CAMERA_HOTKEY.get(from_job, _DEFAULT_JOB_HOTKEY)
         ok, detail = await self._run_steps(

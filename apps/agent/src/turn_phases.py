@@ -346,6 +346,7 @@ def _fallback_actions(memory: AgentMemory) -> list[dict[str, object]]:
                 "type": "click",
                 "x": place_x,
                 "y": place_y,
+                "building_key": "q",  # lets _handle_click verify the house landed
                 "intent": "Place house to raise pop cap (fallback build)",
             },
         ]

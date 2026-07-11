@@ -47,6 +47,11 @@ class ClickAction(PointTargetAction):
     """Left click action."""
 
     type: Literal["click"]
+    building_key: str | None = Field(
+        default=None,
+        description="Econ build-menu key when this click places a building — carried "
+        "through validation so the executor can verify the placement landed",
+    )
 
 
 class RightClickAction(PointTargetAction):

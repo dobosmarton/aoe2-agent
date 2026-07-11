@@ -32,8 +32,9 @@ from .executor import (
     can_resolve,
     clear_detected_entities,
     execute_actions,
+    reset_build_gates,
     set_detected_entities,
-    set_population_snapshot,
+    set_hud_snapshot,
 )
 from .goal_logger import GoalLogger
 from .goals import GoalManager
@@ -175,6 +176,7 @@ async def game_loop(
     """Main game loop: capture -> detect -> strategist -> execute -> repeat."""
     if memory is None:
         memory = AgentMemory()
+    reset_build_gates()  # per-game state: HUD snapshot + buildings seen
 
     # Initialize subsystems
     detector = _init_detector() if use_detection else None
@@ -277,10 +279,11 @@ async def game_loop(
             # Once-per-iteration state upkeep (deliberately NOT in
             # update_from_observations, which fires more than once per turn):
             # the idle-badge streak feeds the reactive tier's count trust gate,
-            # and the population snapshot feeds the executor's house headroom gate.
+            # and the HUD snapshot feeds the executor's build gates (house
+            # headroom, prerequisites, wood cost).
             game_state = memory.game_state
             game_state.idle_streak = game_state.idle_streak + 1 if game_state.idle_present else 0
-            set_population_snapshot(game_state.population, game_state.population_cap)
+            set_hud_snapshot(game_state.population, game_state.population_cap, game_state.resources)
             # Show the OCR reading regions on the debug overlay (--overlay only).
             if overlay is not None and calib is not None:
                 overlay.set_ocr_fields(calib.field_rects())

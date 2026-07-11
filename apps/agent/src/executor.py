@@ -6,7 +6,7 @@ Dispatches validated actions to per-type handler functions.
 import asyncio
 import math
 import time
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import cast
 
@@ -80,6 +80,9 @@ def set_detected_entities(entities: Sequence[object]) -> None:
         else:
             log.warning("detected_entity_unrecognized_type", entity_type=type(e).__name__)
     _detected_entities = normalized
+    # Every detection frame (turn scans and mid-turn rescans alike) feeds the
+    # build-prerequisite evidence — a mill seen once means farms are buildable.
+    record_confirmed_buildings(str(e.get("class", "")) for e in normalized)
     log.debug("detected_entities_set", count=len(_detected_entities))
 
 
@@ -95,7 +98,7 @@ def clear_detected_entities() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Population snapshot (house headroom gate)
+# Build gates: HUD snapshot + confirmed buildings feeding build_rejection
 # ---------------------------------------------------------------------------
 
 # Only build a house when within this many pop of the cap. The 2026-07-11 run
@@ -105,43 +108,73 @@ def clear_detected_entities() -> None:
 HOUSE_HEADROOM_MAX = 4
 _GAME_POP_CAP_LIMIT = 200
 
-# (population, population_cap) as of this iteration's HUD read; set by the game
-# loop each turn (same lifecycle as the entity cache). None = no reading yet —
-# the gate then allows the build rather than blocking on missing data.
+# (population, population_cap) and resources as of this iteration's HUD read;
+# set by the game loop each turn (same lifecycle as the entity cache). None =
+# no reading yet — the gates then allow the build rather than blocking on
+# missing data.
 _population_snapshot: tuple[int, int] | None = None
+_resources_snapshot: dict[str, int] | None = None
+# Building classes detection has EVER seen this game — evidence that a
+# prerequisite exists. Buildings persist once seen (the camera moves; absence
+# from one frame is not absence from the game). A destroyed prerequisite
+# surfaces as the next build failing verification, not as set corruption.
+_buildings_confirmed: set[str] = set()
 
 
-def set_population_snapshot(population: int, population_cap: int) -> None:
-    """Cache this turn's population reading for build-time sanity checks."""
-    global _population_snapshot
+def set_hud_snapshot(population: int, population_cap: int, resources: Mapping[str, int]) -> None:
+    """Cache this turn's HUD reading (population + resources) for build gates."""
+    global _population_snapshot, _resources_snapshot
     _population_snapshot = (population, population_cap)
+    _resources_snapshot = dict(resources)
 
 
-def clear_population_snapshot() -> None:
-    """Drop the cached population reading (tests / new game)."""
-    global _population_snapshot
+def record_confirmed_buildings(classes: Iterable[str]) -> None:
+    """Remember gate-relevant building classes seen by detection."""
+    _buildings_confirmed.update(c for c in classes if c in _GATE_BUILDING_CLASSES)
+
+
+def reset_build_gates() -> None:
+    """Drop all build-gate state (new game / tests)."""
+    global _population_snapshot, _resources_snapshot
     _population_snapshot = None
+    _resources_snapshot = None
+    _buildings_confirmed.clear()
 
 
 def build_rejection(building_key: str) -> str | None:
-    """Reason this build is pointless right now, or None when it's allowed.
+    """Reason this build cannot work right now, or None when it's allowed.
 
-    Currently gates houses only: with ample pop-cap headroom another house is
-    wasted wood, and with the cap at the game maximum it does nothing. The
-    reason string is returned to the LLM as the action's failure detail so the
-    next turn plans around it instead of re-issuing the build.
+    Three gates: house with ample pop-cap headroom (wasted wood), missing
+    prerequisite (the menu entry doesn't even exist — the keypress would be a
+    silent no-op, how the 2026-07-11 run "built" two farms that never existed),
+    and unaffordable cost. The reason string is returned to the LLM as the
+    action's failure detail so the next turn plans around it instead of
+    re-issuing the same doomed build.
     """
-    if BUILD_KEY_TO_CLASS.get(building_key) != "house" or _population_snapshot is None:
+    cls = BUILD_KEY_TO_CLASS.get(building_key)
+    if cls is None:
         return None
-    population, cap = _population_snapshot
-    if cap >= _GAME_POP_CAP_LIMIT:
-        return f"house skipped: population cap {cap} is already the game maximum"
-    headroom = cap - population
-    if headroom > HOUSE_HEADROOM_MAX:
+    if cls == "house" and _population_snapshot is not None:
+        population, cap = _population_snapshot
+        if cap >= _GAME_POP_CAP_LIMIT:
+            return f"house skipped: population cap {cap} is already the game maximum"
+        headroom = cap - population
+        if headroom > HOUSE_HEADROOM_MAX:
+            return (
+                f"house skipped: population {population}/{cap} leaves {headroom} headroom "
+                f"(> {HOUSE_HEADROOM_MAX}) — spend the wood on economy buildings instead"
+            )
+    prereq = BUILD_PREREQ_CLASS.get(building_key)
+    if prereq is not None and prereq not in _buildings_confirmed:
         return (
-            f"house skipped: population {population}/{cap} leaves {headroom} headroom "
-            f"(> {HOUSE_HEADROOM_MAX}) — spend the wood on economy buildings instead"
+            f"{cls} unavailable: requires a completed {prereq} and none has been "
+            f"seen yet — build a {prereq} first"
         )
+    cost = BUILD_WOOD_COST.get(building_key)
+    if cost is not None and _resources_snapshot is not None:
+        wood = _resources_snapshot.get("wood")
+        if wood is not None and wood < cost:
+            return f"{cls} unavailable: costs {cost} wood, you have {wood}"
     return None
 
 
@@ -272,6 +305,28 @@ BUILD_KEY_TO_CLASS: dict[str, str] = {
     "s": "blacksmith",
     "t": "dock",
 }
+
+# Building classes that can serve as build-gate evidence (see
+# record_confirmed_buildings) — the econ buildings the agent itself can place.
+_GATE_BUILDING_CLASSES: frozenset[str] = frozenset(BUILD_KEY_TO_CLASS.values())
+
+# Wood cost per econ-menu entry (all seven are wood-only). Literals on purpose:
+# packages/data's aoe2.db holds the full cost table, but the build gate must not
+# depend on a DB handle, and these seven haven't changed in years.
+BUILD_WOOD_COST: dict[str, int] = {
+    "q": 25,  # house
+    "w": 100,  # mill
+    "e": 100,  # mining camp
+    "r": 100,  # lumber camp
+    "a": 60,  # farm
+    "s": 150,  # blacksmith
+    "t": 150,  # dock
+}
+
+# Menu entries that only exist once a prerequisite building is COMPLETED —
+# pressing the key without it selects nothing and the placement click lands as
+# a plain ground click.
+BUILD_PREREQ_CLASS: dict[str, str] = {"a": "mill"}  # farm needs a mill
 
 # Module-level cumulative retry telemetry (resets per process / per game).
 # Surfaced via build_placement_retry log lines so the user can grep
@@ -468,7 +523,19 @@ async def _handle_click(action_dict: dict[str, object], intent: str) -> ActionRe
         )
         building_key = action_dict.get("building_key")
         if isinstance(building_key, str):
-            await _verify_build_placement(building_key, (x, y))
+            landed = await _verify_build_placement(building_key, (x, y))
+            if landed is True:
+                # The building is real — usable as prerequisite evidence.
+                record_confirmed_buildings([BUILD_KEY_TO_CLASS[building_key]])
+            elif landed is False:
+                expected = BUILD_KEY_TO_CLASS.get(building_key, building_key)
+                return ActionResult(
+                    False,
+                    f"{expected} placement not confirmed: no new {expected} detected "
+                    f"near ({x}, {y}) after the click — the spot may be blocked or "
+                    "the build menu did not open",
+                )
+            # None = unverifiable (no rescan callback) — benefit of the doubt.
 
     return ActionResult(True, "ok")
 
@@ -482,16 +549,18 @@ def _compass_offsets(radius: int, count: int) -> list[tuple[int, int]]:
     ]
 
 
-async def _verify_build_placement(building_key: str, point: tuple[int, int]) -> None:
-    """Rescan and log whether a building of the expected class landed near `point`.
+async def _verify_build_placement(building_key: str, point: tuple[int, int]) -> bool | None:
+    """Rescan and check whether a building of the expected class landed near `point`.
 
-    Best-effort (needs a rescan callback). Turns the old silent placement failure
-    into a greppable build_placement_verified / build_placement_failed signal so the
-    next turn can react instead of re-issuing the same doomed build.
+    Returns True when the rescan sees one, False when it doesn't, and None when
+    verification isn't possible (unknown key / no rescan callback) — the caller
+    gives None the benefit of the doubt. A False result fails the placement
+    action, so a phantom build (blocked spot, menu never opened) is reported to
+    the LLM as a failure instead of a fake success.
     """
     expected = BUILD_KEY_TO_CLASS.get(building_key)
     if expected is None or _rescan_fn is None:
-        return
+        return None
     await asyncio.sleep(RESCAN_SETTLE_DELAY)
     await _rescan_fn()
     px, py = point
@@ -506,6 +575,7 @@ async def _verify_build_placement(building_key: str, point: tuple[int, int]) -> 
         log.info("build_placement_verified", building=expected, x=px, y=py)
     else:
         log.warning("build_placement_failed", building=expected, x=px, y=py)
+    return landed
 
 
 # Classes that appear as the subject ("Send villager to..."), never the target.

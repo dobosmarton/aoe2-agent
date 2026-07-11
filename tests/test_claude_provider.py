@@ -199,6 +199,13 @@ def test_serialize_response_is_pre_executed() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _allow_farm(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Satisfy the farm build gate: a mill has been seen this game."""
+    from gameplay_agent import executor as ex
+
+    monkeypatch.setattr(ex, "_buildings_confirmed", {"mill"})
+
+
 def test_reassign_villager_sequences_camp_select_build(
     provider: ClaudeProvider, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -220,6 +227,7 @@ def test_reassign_villager_sequences_camp_select_build(
     monkeypatch.setattr(claude_mod, "default_build_placement", lambda: (500, 500))
     monkeypatch.setattr(claude_mod, "_tracker_velocities", lambda: {})
     monkeypatch.setattr(provider, "_entity_snapshot", lambda: [])
+    _allow_farm(monkeypatch)  # a mill has been seen → the farm gate passes
 
     block = SimpleNamespace(
         id="tu1",
@@ -239,6 +247,36 @@ def test_reassign_villager_sequences_camp_select_build(
     assert steps[4]["type"] == "click" and steps[4]["building_key"] == "a"
 
 
+def test_reassign_villager_rejected_when_farm_gate_fails(
+    provider: ClaudeProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No mill seen → the whole reassign composite is rejected before the camera
+    jump, and the reason reaches the LLM as the tool result."""
+    from gameplay_agent import executor as ex
+    from gameplay_agent.providers import claude as claude_mod
+
+    steps: list[dict] = []
+
+    async def _record(action: dict) -> object:
+        steps.append(action)
+        return SimpleNamespace(success=True, detail="ok")
+
+    monkeypatch.setattr(claude_mod, "execute_action", _record)
+    monkeypatch.setattr(provider, "_entity_snapshot", lambda: [])
+    monkeypatch.setattr(ex, "_buildings_confirmed", set())
+
+    block = SimpleNamespace(
+        id="tu8",
+        name="reassign_villager",
+        input={"from_job": "wood", "building_key": "a", "intent": "need food"},
+    )
+    action_dict, result = _run(provider._execute_reassign_villager(block))
+
+    assert action_dict["type"] == "reassign_villager"
+    assert steps == []  # rejected before the camera jump
+    assert "mill" in str(result)
+
+
 def test_reassign_villager_falls_back_to_villager_class(
     provider: ClaudeProvider, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -255,6 +293,7 @@ def test_reassign_villager_falls_back_to_villager_class(
     monkeypatch.setattr(claude_mod, "default_build_placement", lambda: (500, 500))
     monkeypatch.setattr(claude_mod, "_tracker_velocities", lambda: {})
     monkeypatch.setattr(provider, "_entity_snapshot", lambda: [])
+    _allow_farm(monkeypatch)  # a mill has been seen → the farm gate passes
 
     block = SimpleNamespace(
         id="tu2",

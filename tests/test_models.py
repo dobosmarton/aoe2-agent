@@ -308,3 +308,13 @@ def test_observations_full_payload() -> None:
 def test_observations_invalid_game_state_rejected() -> None:
     with pytest.raises(ValidationError):
         Observations(game_state="paused")
+
+
+def test_click_action_preserves_building_key() -> None:
+    """The place-click's building_key must survive validation — it's what lets
+    the executor verify the placement landed (it was silently dropped before)."""
+    action = validate_action(
+        {"type": "click", "x": 10, "y": 20, "building_key": "q", "intent": "Place building"}
+    )
+    assert action is not None
+    assert action.model_dump()["building_key"] == "q"
