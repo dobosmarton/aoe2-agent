@@ -38,12 +38,10 @@ tmp/
 build/
 dist/
 
-# WIP scratch dirs (kept out of git deliberately) — but the experiment ledger
-# IS tracked: it's the shared record the merge gate (experiment_gate) and
-# baseline comparisons depend on. `experiments/*` (not `experiments/`) so git
-# descends into the dir and the negation can take effect.
-experiments/*
-!experiments/results.tsv
+# WIP scratch dirs (kept out of git deliberately). This includes the experiment
+# ledger (experiments/results.tsv): it stays machine-local — the VM that runs
+# the games is its source of truth; run the merge gate (experiment_gate) there.
+experiments/
 overlay-update.zip
 # Pre-implementation plans, design sketches, scratch notes — written while a
 # feature is in flight; replaced by canonical docs under docs/design/ when

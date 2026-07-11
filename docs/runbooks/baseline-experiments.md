@@ -23,13 +23,16 @@ Each game appends a row to `experiments/results.tsv` (composite score, survival,
 population, age, economy, action-success rate, end reason, turn count, git SHA)
 and, when the memory chain is enabled, extracts cross-game memories (P4.1).
 
-## Verify & commit
+## Verify
 
 ```bash
 just experiment-gate          # requires a row at HEAD — should PASS now
-git add experiments/results.tsv
-git commit -m "chore(experiments): record P0.1 baseline runs"
 ```
+
+The ledger (`experiments/results.tsv`) is deliberately NOT committed — it is
+machine-local, and the VM that runs the games is its source of truth. Run the
+gate on that machine; copy the file (e.g. into a run's `logs/` folder) when a
+snapshot needs to be shared.
 
 ## Ongoing discipline
 
