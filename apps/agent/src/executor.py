@@ -115,6 +115,9 @@ _PLACEMENT_INCOME_SLACK = 20
 # Stale-OCR grace: identical wood readings a pending placement survives before
 # it is settled anyway.
 _PLACEMENT_SETTLE_ATTEMPTS = 3
+# Distinct detection frames a building class must appear in before it counts
+# as build-gate evidence. 1 frame = a phantom can poison the gates (run 7).
+_BUILDING_CONFIRM_SIGHTINGS = 3
 
 
 # A placement whose foundation wasn't visually confirmed, awaiting settlement
@@ -223,11 +226,6 @@ def _settle_pending_placements(wood_now: int | None) -> None:
     _build_gates.pending_placements = still_pending
 
 
-# Distinct detection frames a building class must appear in before it counts
-# as build-gate evidence. 1 frame = a phantom can poison the gates (run 7).
-_BUILDING_CONFIRM_SIGHTINGS = 3
-
-
 def record_building_sightings(classes: Iterable[str]) -> None:
     """Count one detection frame's building sightings toward confirmation.
 
@@ -245,7 +243,7 @@ def record_building_sightings(classes: Iterable[str]) -> None:
 def record_confirmed_buildings(classes: Iterable[str]) -> None:
     """Remember gate-relevant building classes proven to exist (ledger or
     verified placement — NOT raw detection; that goes through sightings)."""
-    _build_gates.buildings_confirmed.update(c for c in classes if c in _GATE_BUILDING_CLASSES)
+    _build_gates.buildings_confirmed.update(set(classes) & _GATE_BUILDING_CLASSES)
 
 
 def confirmed_buildings() -> frozenset[str]:
@@ -579,12 +577,13 @@ def build_menu_steps(
     *,
     menu_intent: str = "Open economic build menu",
 ) -> list[dict[str, object]]:
-    """Menu → building → place sequence, for a villager that is ALREADY selected.
+    """Menu → building → place → escape sequence, for an ALREADY-selected villager.
 
     The tail every build shares: open the economic build menu (q), pick the
     building, click the placement (with `building_key` attached so `_handle_click`
-    verifies the structure landed). `build_steps` prepends the idle-villager
-    select; `claude.ClaudeProvider._execute_reassign_villager` prepends its own
+    verifies the structure landed), then escape so no menu is left open to
+    re-map later keystrokes. `build_steps` prepends the idle-villager select;
+    `claude.ClaudeProvider._execute_reassign_villager` prepends its own
     worker-click instead — the menu/place sequence lives in exactly one place.
     """
     place_x, place_y = placement

@@ -315,7 +315,7 @@ class MemoryChain:
 
         return "\n".join(parts)
 
-    def _parse_observations(self, text: str) -> list[dict]:
+    def _parse_observations(self, text: str) -> list[dict[str, object]]:
         """Parse LLM response into observation dicts.
 
         Drops entries with empty content (was producing 0-byte files —

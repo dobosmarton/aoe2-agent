@@ -176,11 +176,11 @@ description, old_text, new_text, rationale. Output the JSON array only."""
         except Exception as e:
             log.error("prompt_revert_failed", error=str(e))
 
-    def _parse_changes(self, text: str) -> list[dict]:
+    def _parse_changes(self, text: str) -> list[dict[str, object]]:
         """Extract a list of well-formed change dicts from the LLM response."""
         return [item for item in extract_json_array(text) if self._is_valid_change(item)]
 
     @staticmethod
-    def _is_valid_change(item: dict) -> bool:
+    def _is_valid_change(item: dict[str, object]) -> bool:
         """A change must carry the keys the apply step relies on."""
         return all(key in item for key in ("description", "old_text", "new_text"))
