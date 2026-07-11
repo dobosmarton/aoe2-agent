@@ -450,9 +450,8 @@ class ClaudeProvider:
         inp = block.input
         intent = str(inp.get("intent", "Build"))
         building_key = cast("str", inp["building_key"])
-        rejection = build_rejection(building_key)
+        rejection = build_rejection(building_key, intent)
         if rejection is not None:
-            log.info("build_rejected", building_key=building_key, reason=rejection, intent=intent)
             action_dict = {"type": "build", **inp}
             return action_dict, self._make_tool_result(block, False, rejection)
         # x,y are optional: the text-only model can't see open ground, so when it
@@ -535,9 +534,8 @@ class ClaudeProvider:
 
         # Same gates as the plain build composite (prerequisite / cost / headroom):
         # reassigning a worker to a build that can't exist wastes the whole jump.
-        rejection = build_rejection(building_key)
+        rejection = build_rejection(building_key, intent)
         if rejection is not None:
-            log.info("build_rejected", building_key=building_key, reason=rejection, intent=intent)
             return action_dict, self._make_tool_result(block, False, rejection)
 
         # Phase 1 — jump the camera to the source work site and re-detect.
@@ -734,7 +732,7 @@ class ClaudeProvider:
         "single wait action if you genuinely intend to do nothing this turn."
     )
 
-    async def _parse_single_shot(self, messages: list[dict], age: str) -> LLMResponse:
+    async def _parse_single_shot(self, messages: list[dict[str, object]], age: str) -> LLMResponse:
         """One structured-output call; accumulates token usage."""
         # parse() merges output_format into output_config.format, so we get
         # structured output and the effort knob in a single call.
@@ -765,10 +763,10 @@ class ClaudeProvider:
         A zero-action response gets ONE nudged retry before the game loop's
         hardcoded fallback takes over.
         """
-        messages: list[dict] = [{"role": "user", "content": content}]
+        messages: list[dict[str, object]] = [{"role": "user", "content": content}]
         parsed = await self._parse_single_shot(messages, age)
         if not parsed.actions:
-            log.warning("single_shot_no_actions_retry", reasoning=parsed.reasoning[:120])
+            log.warning("single_shot_empty_actions_retried", reasoning=parsed.reasoning[:120])
             messages = [
                 *messages,
                 {"role": "assistant", "content": parsed.reasoning or "(no actions)"},

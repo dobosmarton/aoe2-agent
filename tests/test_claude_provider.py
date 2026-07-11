@@ -248,7 +248,7 @@ def _allow_farm(monkeypatch: pytest.MonkeyPatch) -> None:
     """Satisfy the farm build gate: a mill has been seen this game."""
     from gameplay_agent import executor as ex
 
-    monkeypatch.setattr(ex, "_buildings_confirmed", {"mill"})
+    monkeypatch.setattr(ex._build_gates, "buildings_confirmed", {"mill"})
 
 
 def test_reassign_villager_sequences_camp_select_build(
@@ -308,7 +308,7 @@ def test_reassign_villager_rejected_when_farm_gate_fails(
 
     monkeypatch.setattr(claude_mod, "execute_action", _record)
     monkeypatch.setattr(provider, "_entity_snapshot", lambda: [])
-    monkeypatch.setattr(ex, "_buildings_confirmed", set())
+    monkeypatch.setattr(ex._build_gates, "buildings_confirmed", set())
 
     block = SimpleNamespace(
         id="tu8",
@@ -413,7 +413,7 @@ def test_build_house_rejected_by_headroom_gate(
 ) -> None:
     from gameplay_agent import executor as ex
 
-    monkeypatch.setattr(ex, "_population_snapshot", (10, 30))  # 20 headroom
+    monkeypatch.setattr(ex._build_gates, "population", (10, 30))  # 20 headroom
     block = SimpleNamespace(id="tu6", name="build", input={"building_key": "q", "intent": "house"})
     action_dict, result = _run(provider._execute_build(block))
     assert action_dict == {"type": "build", "building_key": "q", "intent": "house"}
@@ -426,7 +426,7 @@ def test_build_house_allowed_near_cap(
 ) -> None:
     from gameplay_agent import executor as ex
 
-    monkeypatch.setattr(ex, "_population_snapshot", (28, 30))  # housed-adjacent
+    monkeypatch.setattr(ex._build_gates, "population", (28, 30))  # housed-adjacent
     block = SimpleNamespace(id="tu7", name="build", input={"building_key": "q", "intent": "house"})
     _run(provider._execute_build(block))
     assert recorded_steps  # steps ran — the gate let it through

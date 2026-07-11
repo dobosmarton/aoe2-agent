@@ -904,36 +904,40 @@ def get_detector(
     global _instance
     if _instance is None:
         if model_path is None:
-            resolved = resolve_model_path(model_name)
-            if resolved is None and model_name:
-                # The configured model isn't bundled here (weights are gitignored;
-                # git pull never ships them). Substitute the newest bundled weights
-                # rather than degrading to mock — but say so LOUDLY: a silent
-                # substitution is how a v5 fallback served for a v9 config
-                # (2026-07-11 run review, F-5).
-                substitute = resolve_model_path()
-                if substitute is not None:
-                    logger.warning(
-                        "configured model %r not found in bundled weights; "
-                        "substituting %s — copy the configured weights here if this "
-                        "host should serve them",
-                        model_name,
-                        Path(substitute).name,
-                    )
-                    resolved = substitute
-            if resolved is None:
-                # Keep a deterministic (missing) path so EntityDetector's
-                # missing-model handling degrades to mock with a warning. The
-                # name is a placeholder, not a version — never hardcode a
-                # served version here (config.py owns that).
-                missing = model_name or "aoe2_yolo_missing"
-                resolved = str(Path(__file__).parent / "models" / f"{missing}.onnx")
-            model_path = resolved
-
+            model_path = _resolve_or_substitute(model_name)
         _instance = EntityDetector(
             model_path=model_path, use_mock=use_mock, imgsz=imgsz, use_sahi=use_sahi
         )
     return _instance
+
+
+def _resolve_or_substitute(model_name: str | None) -> str:
+    """Weights path for `model_name`: resolved, substituted (loudly), or missing.
+
+    Substitution: the configured model isn't bundled here (weights are
+    gitignored; git pull never ships them) — use the newest bundled weights
+    rather than degrading to mock, but say so LOUDLY: a silent substitution is
+    how a v5 fallback served for a v9 config (2026-07-11 run review, F-5).
+    """
+    resolved = resolve_model_path(model_name)
+    if resolved is not None:
+        return resolved
+    if model_name:
+        substitute = resolve_model_path()
+        if substitute is not None:
+            logger.warning(
+                "configured model %r not found in bundled weights; "
+                "substituting %s — copy the configured weights here if this "
+                "host should serve them",
+                model_name,
+                Path(substitute).name,
+            )
+            return substitute
+    # Keep a deterministic (missing) path so EntityDetector's missing-model
+    # handling degrades to mock with a warning. The name is a placeholder, not
+    # a version — never hardcode a served version here (config.py owns that).
+    missing = model_name or "aoe2_yolo_missing"
+    return str(Path(__file__).parent / "models" / f"{missing}.onnx")
 
 
 def current_detector() -> EntityDetector | None:

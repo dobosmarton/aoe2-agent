@@ -7,7 +7,7 @@ import asyncio
 import math
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import cast
 
 import pyautogui
@@ -98,67 +98,80 @@ def clear_detected_entities() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Build gates: HUD snapshot + confirmed buildings feeding build_rejection
+# Build gates: per-game state feeding build_rejection + placement settlement
 # ---------------------------------------------------------------------------
 
 # Only build a house when within this many pop of the cap. The 2026-07-11 run
 # built houses at 15+ headroom (125 wood) while the first farm starved for 60 —
 # a satisfied "raise pop cap" goal kept re-triggering because every house
-# "succeeds". Cap 200 is the game maximum: houses past it add nothing.
-HOUSE_HEADROOM_MAX = 4
+# "succeeds".
+_HOUSE_HEADROOM_MAX = 4
+# The game's population-cap maximum: houses past it add nothing.
 _GAME_POP_CAP_LIMIT = 200
-
-# (population, population_cap) and resources as of this iteration's HUD read;
-# set by the game loop each turn (same lifecycle as the entity cache). None =
-# no reading yet — the gates then allow the build rather than blocking on
-# missing data.
-_population_snapshot: tuple[int, int] | None = None
-_resources_snapshot: dict[str, int] | None = None
-# Building classes detection has EVER seen this game — evidence that a
-# prerequisite exists. Buildings persist once seen (the camera moves; absence
-# from one frame is not absence from the game). A destroyed prerequisite
-# surfaces as the next build failing verification, not as set corruption.
-_buildings_confirmed: set[str] = set()
+# Wood gathered between two HUD reads can mask this much of a purchase.
+_PLACEMENT_INCOME_SLACK = 20
+# Stale-OCR grace: identical wood readings a pending placement survives before
+# it is settled anyway.
+_PLACEMENT_SETTLE_ATTEMPTS = 3
 
 
 # A placement whose foundation wasn't visually confirmed, awaiting settlement
 # against the HUD wood spend (2026-07-11 run 2, F-11: YOLO can't see foundations,
 # so a fresh rescan reports almost every REAL placement as failed — that false
-# negative caused a duplicate mill).
+# negative caused a duplicate mill). Mutable on purpose: settles_left counts down.
 @dataclass
 class _PendingPlacement:
     building_class: str
     wood_cost: int
     wood_before: int  # wood per the HUD snapshot when the placement was made
-    settles_left: int = 3  # stale-OCR grace: identical readings don't settle it
+    settles_left: int = _PLACEMENT_SETTLE_ATTEMPTS
 
 
-# Wood gathered between the two HUD reads can mask this much of the spend.
-_PLACEMENT_INCOME_SLACK = 20
+@dataclass
+class _BuildGates:
+    """Per-game state behind build_rejection + placement settlement.
 
-_pending_placements: list[_PendingPlacement] = []
-
-
-def set_hud_snapshot(population: int, population_cap: int, resources: Mapping[str, int]) -> None:
-    """Cache this turn's HUD reading (population + resources) for build gates.
-
-    Also the settlement point for pending placements: the fresh wood value is
-    compared against each pending build's cost before the snapshot is replaced.
+    population/resources: this iteration's HUD reading (None = no reading yet —
+    the gates then allow the build rather than blocking on missing data).
+    buildings_confirmed: building classes detection has EVER seen this game —
+    prerequisite evidence. Buildings persist once seen (the camera moves;
+    absence from one frame is not absence from the game); a destroyed
+    prerequisite surfaces as the next build failing settlement.
+    pending_placements: builds awaiting wood-delta settlement.
     """
-    global _population_snapshot, _resources_snapshot
+
+    population: tuple[int, int] | None = None
+    resources: dict[str, int] | None = None
+    buildings_confirmed: set[str] = field(default_factory=set)
+    pending_placements: list[_PendingPlacement] = field(default_factory=list)
+
+
+_build_gates = _BuildGates()
+
+
+def observe_hud(population: int, population_cap: int, resources: Mapping[str, int]) -> None:
+    """Feed this turn's HUD reading into the build gates.
+
+    Not just a cache write: the fresh wood value first SETTLES pending
+    placements (confirming purchases / flagging missing ones) before the
+    snapshot is replaced — the ordering the wood-delta check depends on.
+    """
     _settle_pending_placements(resources.get("wood"))
-    _population_snapshot = (population, population_cap)
-    _resources_snapshot = dict(resources)
+    _build_gates.population = (population, population_cap)
+    _build_gates.resources = dict(resources)
 
 
 def _note_pending_placement(building_key: str) -> None:
     """Queue an unconfirmed placement for wood-delta settlement next snapshot."""
     cls = BUILD_KEY_TO_CLASS.get(building_key)
-    cost = BUILD_WOOD_COST.get(building_key)
-    wood_before = (_resources_snapshot or {}).get("wood")
+    cost = _BUILD_WOOD_COST.get(building_key)
+    wood_before = (_build_gates.resources or {}).get("wood")
     if cls is None or cost is None or wood_before is None:
-        return  # nothing to settle against — leave it unconfirmed
-    _pending_placements.append(
+        # No wood baseline to settle against — the placement stays unconfirmed
+        # for good, despite the caller's "settled next turn" detail. Say so.
+        log.debug("placement_pending_dropped", building_key=building_key)
+        return
+    _build_gates.pending_placements.append(
         _PendingPlacement(building_class=cls, wood_cost=cost, wood_before=wood_before)
     )
 
@@ -173,11 +186,10 @@ def _settle_pending_placements(wood_now: int | None) -> None:
     merely delays the retry by a turn. An unchanged wood reading is treated as
     stale OCR and re-checked next snapshot (up to `settles_left` times).
     """
-    global _pending_placements
-    if not _pending_placements or wood_now is None:
+    if not _build_gates.pending_placements or wood_now is None:
         return
     still_pending: list[_PendingPlacement] = []
-    for pending in _pending_placements:
+    for pending in _build_gates.pending_placements:
         if wood_now == pending.wood_before and pending.settles_left > 0:
             pending.settles_left -= 1
             still_pending.append(pending)
@@ -200,27 +212,35 @@ def _settle_pending_placements(wood_now: int | None) -> None:
                 wood_now=wood_now,
                 cost=pending.wood_cost,
             )
-    _pending_placements = still_pending
+    _build_gates.pending_placements = still_pending
 
 
 def record_confirmed_buildings(classes: Iterable[str]) -> None:
     """Remember gate-relevant building classes seen by detection."""
-    _buildings_confirmed.update(c for c in classes if c in _GATE_BUILDING_CLASSES)
+    _build_gates.buildings_confirmed.update(c for c in classes if c in _GATE_BUILDING_CLASSES)
 
 
 def reset_build_gates() -> None:
-    """Drop all build-gate state (new game / tests)."""
-    global _population_snapshot, _resources_snapshot
-    _population_snapshot = None
-    _resources_snapshot = None
-    _buildings_confirmed.clear()
-    _pending_placements.clear()
+    """Fresh build-gate state (new game / tests)."""
+    global _build_gates
+    _build_gates = _BuildGates()
 
 
-def build_rejection(building_key: str) -> str | None:
-    """Reason this build cannot work right now, or None when it's allowed.
+def build_rejection(building_key: str, intent: str = "") -> str | None:
+    """Reason this build cannot work right now (logged), or None when allowed.
 
-    Three gates: house with ample pop-cap headroom (wasted wood), missing
+    The single log site for `build_rejected` — every caller (single-shot build
+    handler, tool-loop build composite, reassign composite) shapes its own
+    failure return but shares this check + log, so the event schema can't drift.
+    """
+    reason = _rejection_reason(building_key)
+    if reason is not None:
+        log.info("build_rejected", building_key=building_key, reason=reason, intent=intent)
+    return reason
+
+
+def _rejection_reason(building_key: str) -> str | None:
+    """Three gates: house with ample pop-cap headroom (wasted wood), missing
     prerequisite (the menu entry doesn't even exist — the keypress would be a
     silent no-op, how the 2026-07-11 run "built" two farms that never existed),
     and unaffordable cost. The reason string is returned to the LLM as the
@@ -230,25 +250,25 @@ def build_rejection(building_key: str) -> str | None:
     cls = BUILD_KEY_TO_CLASS.get(building_key)
     if cls is None:
         return None
-    if cls == "house" and _population_snapshot is not None:
-        population, cap = _population_snapshot
+    if cls == "house" and _build_gates.population is not None:
+        population, cap = _build_gates.population
         if cap >= _GAME_POP_CAP_LIMIT:
             return f"house skipped: population cap {cap} is already the game maximum"
         headroom = cap - population
-        if headroom > HOUSE_HEADROOM_MAX:
+        if headroom > _HOUSE_HEADROOM_MAX:
             return (
                 f"house skipped: population {population}/{cap} leaves {headroom} headroom "
-                f"(> {HOUSE_HEADROOM_MAX}) — spend the wood on economy buildings instead"
+                f"(> {_HOUSE_HEADROOM_MAX}) — spend the wood on economy buildings instead"
             )
-    prereq = BUILD_PREREQ_CLASS.get(building_key)
-    if prereq is not None and prereq not in _buildings_confirmed:
+    prereq = _BUILD_PREREQ_CLASS.get(building_key)
+    if prereq is not None and prereq not in _build_gates.buildings_confirmed:
         return (
             f"{cls} unavailable: requires a completed {prereq} and none has been "
             f"seen yet — build a {prereq} first"
         )
-    cost = BUILD_WOOD_COST.get(building_key)
-    if cost is not None and _resources_snapshot is not None:
-        wood = _resources_snapshot.get("wood")
+    cost = _BUILD_WOOD_COST.get(building_key)
+    if cost is not None and _build_gates.resources is not None:
+        wood = _build_gates.resources.get("wood")
         if wood is not None and wood < cost:
             return f"{cls} unavailable: costs {cost} wood, you have {wood}"
     return None
@@ -389,7 +409,7 @@ _GATE_BUILDING_CLASSES: frozenset[str] = frozenset(BUILD_KEY_TO_CLASS.values())
 # Wood cost per econ-menu entry (all seven are wood-only). Literals on purpose:
 # packages/data's aoe2.db holds the full cost table, but the build gate must not
 # depend on a DB handle, and these seven haven't changed in years.
-BUILD_WOOD_COST: dict[str, int] = {
+_BUILD_WOOD_COST: dict[str, int] = {
     "q": 25,  # house
     "w": 100,  # mill
     "e": 100,  # mining camp
@@ -402,7 +422,7 @@ BUILD_WOOD_COST: dict[str, int] = {
 # Menu entries that only exist once a prerequisite building is COMPLETED —
 # pressing the key without it selects nothing and the placement click lands as
 # a plain ground click.
-BUILD_PREREQ_CLASS: dict[str, str] = {"a": "mill"}  # farm needs a mill
+_BUILD_PREREQ_CLASS: dict[str, str] = {"a": "mill"}  # farm needs a mill
 
 # Module-level cumulative retry telemetry (resets per process / per game).
 # Surfaced via build_placement_retry log lines so the user can grep
@@ -569,52 +589,64 @@ async def _handle_click(action_dict: dict[str, object], intent: str) -> ActionRe
         intent=intent,
     )
 
-    # Building placement: the anchor is already chosen on open ground
-    # (default_build_placement), so spray a few deterministic compass offsets to
-    # escape small local blockage, then right-click to cancel the leftover ghost.
-    # A build placement consumes at the first valid tile, so extra clicks are inert
-    # ground clicks. If the build carries a building_key, verify it actually landed.
-    intent_lower = intent.lower()
-    if any(word in intent_lower for word in BUILD_PLACEMENT_KEYWORDS):
-        global _build_retry_total_seconds, _build_retry_count
-        retry_start = time.monotonic()
-        await asyncio.sleep(BUILD_SETTLE_DELAY)
-        offsets = _compass_offsets(BUILD_RETRY_RADIUS, BUILD_RETRY_ATTEMPTS)
-        for dx, dy in offsets:
-            pyautogui.click(screen_x + dx, screen_y + dy)
-            await asyncio.sleep(BUILD_RETRY_DELAY)
-        # Cancel any remaining ghost — right-click on the original spot.
-        pyautogui.rightClick(screen_x, screen_y)
-        elapsed = time.monotonic() - retry_start
-        _build_retry_total_seconds += elapsed
-        _build_retry_count += 1
-        log.debug(
-            "build_placement_retry",
-            x=x,
-            y=y,
-            offsets=offsets,
-            elapsed_s=round(elapsed, 3),
-            total_count=_build_retry_count,
-            total_seconds=round(_build_retry_total_seconds, 1),
-        )
-        building_key = action_dict.get("building_key")
-        if isinstance(building_key, str):
-            landed = await _verify_build_placement(building_key, (x, y))
-            if landed is True:
-                # The building is real — usable as prerequisite evidence.
-                record_confirmed_buildings([BUILD_KEY_TO_CLASS[building_key]])
-            elif landed is False:
-                # NOT reported as failure: the model can't see foundations, and a
-                # false "failed" makes the LLM rebuild what already exists (the
-                # run-2 duplicate mill). The wood spend settles it next snapshot.
-                _note_pending_placement(building_key)
-                return ActionResult(
-                    True,
-                    "placement not visually confirmed (foundations aren't detectable); "
-                    "will be settled against the wood spend next turn",
-                )
-            # None = unverifiable (no rescan callback) — benefit of the doubt.
+    if any(word in intent.lower() for word in BUILD_PLACEMENT_KEYWORDS):
+        return await _finish_build_placement(action_dict, (x, y), (screen_x, screen_y))
+    return ActionResult(True, "ok")
 
+
+async def _finish_build_placement(
+    action_dict: dict[str, object],
+    point: tuple[int, int],
+    screen_point: tuple[int, int],
+) -> ActionResult:
+    """Retry-spray a just-clicked building placement, then verify it landed.
+
+    The anchor is already chosen on open ground (default_build_placement), so
+    spray a few deterministic compass offsets to escape small local blockage,
+    then right-click to cancel the leftover ghost. A build placement consumes
+    at the first valid tile, so extra clicks are inert ground clicks. If the
+    action carries a building_key, check whether the building appeared.
+    """
+    global _build_retry_total_seconds, _build_retry_count
+    x, y = point
+    screen_x, screen_y = screen_point
+    retry_start = time.monotonic()
+    await asyncio.sleep(BUILD_SETTLE_DELAY)
+    offsets = _compass_offsets(BUILD_RETRY_RADIUS, BUILD_RETRY_ATTEMPTS)
+    for dx, dy in offsets:
+        pyautogui.click(screen_x + dx, screen_y + dy)
+        await asyncio.sleep(BUILD_RETRY_DELAY)
+    # Cancel any remaining ghost — right-click on the original spot.
+    pyautogui.rightClick(screen_x, screen_y)
+    elapsed = time.monotonic() - retry_start
+    _build_retry_total_seconds += elapsed
+    _build_retry_count += 1
+    log.debug(
+        "build_placement_retry",
+        x=x,
+        y=y,
+        offsets=offsets,
+        elapsed_s=round(elapsed, 3),
+        total_count=_build_retry_count,
+        total_seconds=round(_build_retry_total_seconds, 1),
+    )
+    building_key = action_dict.get("building_key")
+    if isinstance(building_key, str):
+        landed = await _verify_build_placement(building_key, point)
+        if landed is True:
+            # The building is real — usable as prerequisite evidence.
+            record_confirmed_buildings([BUILD_KEY_TO_CLASS[building_key]])
+        elif landed is False:
+            # NOT reported as failure: the model can't see foundations, and a
+            # false "failed" makes the LLM rebuild what already exists (the
+            # run-2 duplicate mill). The wood spend settles it next snapshot.
+            _note_pending_placement(building_key)
+            return ActionResult(
+                True,
+                "placement not visually confirmed (foundations aren't detectable); "
+                "will be settled against the wood spend next turn",
+            )
+        # None = unverifiable (no rescan callback) — benefit of the doubt.
     return ActionResult(True, "ok")
 
 
@@ -795,9 +827,8 @@ async def _handle_build(action_dict: dict[str, object], intent: str) -> ActionRe
     key = action_dict.get("building_key")
     if not isinstance(key, str) or not key:
         return ActionResult(False, "build: missing building_key")
-    rejection = build_rejection(key)
+    rejection = build_rejection(key, intent)
     if rejection is not None:
-        log.info("build_rejected", building_key=key, reason=rejection, intent=intent)
         return ActionResult(False, rejection)
     for step in build_steps(key, intent, default_build_placement()):
         result = await execute_action(step)

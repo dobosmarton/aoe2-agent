@@ -17,6 +17,8 @@ except ImportError:
     log.warning("pygetwindow_not_available", message="Window management disabled")
 
 AOE2_WINDOW_TITLE = "Age of Empires II: Definitive Edition"
+# Pause between minimize and restore in the foreground-lock workaround.
+_MINIMIZE_RESTORE_DELAY_S = 0.1
 
 
 class GameWindow(Protocol):
@@ -92,7 +94,7 @@ def ensure_game_focused(retries: int = 3) -> bool:
                 # while nothing happens). A minimize/restore cycle forces the
                 # shell to re-foreground the window.
                 window.minimize()
-                time.sleep(0.1)
+                time.sleep(_MINIMIZE_RESTORE_DELAY_S)
                 window.restore()
             time.sleep(0.2)  # Wait for focus to take effect
 

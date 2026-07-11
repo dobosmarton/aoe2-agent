@@ -317,31 +317,31 @@ def test_build_rejection_allows_without_snapshot(fake_pyautogui: _FakePyautogui)
 def test_build_rejection_blocks_house_with_ample_headroom(
     fake_pyautogui: _FakePyautogui,
 ) -> None:
-    ex.set_hud_snapshot(10, 30, {})  # 20 headroom — another house is wasted wood
+    ex.observe_hud(10, 30, {})  # 20 headroom — another house is wasted wood
     reason = ex.build_rejection("q")
     assert reason is not None and "headroom" in reason
 
 
 def test_build_rejection_allows_house_near_cap(fake_pyautogui: _FakePyautogui) -> None:
-    ex.set_hud_snapshot(26, 30, {})  # headroom 4 = the gate boundary, allowed
+    ex.observe_hud(26, 30, {})  # headroom 4 = the gate boundary, allowed
     assert ex.build_rejection("q") is None
 
 
 def test_build_rejection_blocks_house_at_game_cap(fake_pyautogui: _FakePyautogui) -> None:
-    ex.set_hud_snapshot(199, 200, {})
+    ex.observe_hud(199, 200, {})
     reason = ex.build_rejection("q")
     assert reason is not None and "maximum" in reason
 
 
 def test_build_rejection_headroom_gate_is_house_only(fake_pyautogui: _FakePyautogui) -> None:
-    ex.set_hud_snapshot(10, 30, {})  # 20 headroom blocks houses, nothing else
+    ex.observe_hud(10, 30, {})  # 20 headroom blocks houses, nothing else
     assert ex.build_rejection("w") is None  # mill
     ex.record_confirmed_buildings(["mill"])
     assert ex.build_rejection("a") is None  # farm (prereq satisfied)
 
 
 def test_handle_build_rejects_house_with_headroom(fake_pyautogui: _FakePyautogui) -> None:
-    ex.set_hud_snapshot(10, 30, {})
+    ex.observe_hud(10, 30, {})
     result = _run(ex._handle_build({"building_key": "q"}, "Build house to increase pop cap"))
     assert result.success is False and "headroom" in result.detail
     assert fake_pyautogui.calls == []  # rejected before any key was pressed
@@ -366,13 +366,13 @@ def test_farm_allowed_once_mill_seen(fake_pyautogui: _FakePyautogui) -> None:
 
 def test_farm_rejected_when_wood_short_even_with_mill(fake_pyautogui: _FakePyautogui) -> None:
     ex.record_confirmed_buildings(["mill"])
-    ex.set_hud_snapshot(10, 15, {"wood": 30})
+    ex.observe_hud(10, 15, {"wood": 30})
     reason = ex.build_rejection("a")
     assert reason is not None and "60 wood" in reason and "30" in reason
 
 
 def test_cost_gate_blocks_unaffordable_mill(fake_pyautogui: _FakePyautogui) -> None:
-    ex.set_hud_snapshot(10, 15, {"wood": 50})
+    ex.observe_hud(10, 15, {"wood": 50})
     reason = ex.build_rejection("w")
     assert reason is not None and "100 wood" in reason
 
@@ -386,12 +386,12 @@ def test_record_confirmed_buildings_ignores_non_gate_classes(
     fake_pyautogui: _FakePyautogui,
 ) -> None:
     ex.record_confirmed_buildings(["sheep", "villager", "town_center"])
-    assert ex._buildings_confirmed == set()
+    assert ex._build_gates.buildings_confirmed == set()
 
 
 def test_reset_build_gates_clears_evidence(fake_pyautogui: _FakePyautogui) -> None:
     ex.record_confirmed_buildings(["mill"])
-    ex.set_hud_snapshot(10, 15, {"wood": 500})
+    ex.observe_hud(10, 15, {"wood": 500})
     ex.reset_build_gates()
     assert ex.build_rejection("a") is not None  # mill evidence gone
 
@@ -414,7 +414,7 @@ def test_place_click_unconfirmed_stays_success_and_goes_pending(
     false 'failed' caused run 2's duplicate mill); it queues for wood-delta
     settlement instead."""
     _zero_build_delays(monkeypatch)
-    ex.set_hud_snapshot(10, 15, {"wood": 200})  # baseline for the pending entry
+    ex.observe_hud(10, 15, {"wood": 200})  # baseline for the pending entry
 
     async def rescan_sees_nothing() -> None:
         ex._detected_entities = []
@@ -424,7 +424,7 @@ def test_place_click_unconfirmed_stays_success_and_goes_pending(
         ex._handle_click({"x": 500, "y": 600, "building_key": "q"}, "Place building (house)")
     )
     assert result.success is True and "not visually confirmed" in result.detail
-    assert [p.building_class for p in ex._pending_placements] == ["house"]
+    assert [p.building_class for p in ex._build_gates.pending_placements] == ["house"]
 
 
 def test_place_click_preexisting_building_does_not_vouch(
@@ -433,7 +433,7 @@ def test_place_click_preexisting_building_does_not_vouch(
     """An old farm inside the radius must not verify a new one — the count has
     to INCREASE."""
     _zero_build_delays(monkeypatch)
-    ex.set_hud_snapshot(10, 15, {"wood": 200})
+    ex.observe_hud(10, 15, {"wood": 200})
     old_farm = {"id": "farm_0", "class": "farm", "center": (505, 610)}
     ex._detected_entities = [old_farm]
 
@@ -442,35 +442,37 @@ def test_place_click_preexisting_building_does_not_vouch(
 
     ex._rescan_fn = rescan_same_farm
     _run(ex._handle_click({"x": 500, "y": 600, "building_key": "a"}, "Place building (farm)"))
-    assert [p.building_class for p in ex._pending_placements] == ["farm"]  # unconfirmed
+    assert [p.building_class for p in ex._build_gates.pending_placements] == ["farm"]  # unconfirmed
 
 
 def test_pending_placement_confirmed_by_wood_spend(fake_pyautogui: _FakePyautogui) -> None:
-    ex.set_hud_snapshot(10, 15, {"wood": 200})
+    ex.observe_hud(10, 15, {"wood": 200})
     ex._note_pending_placement("w")  # mill, 100 wood
     # Next snapshot: wood dropped by ~the cost → the purchase happened.
-    ex.set_hud_snapshot(10, 15, {"wood": 95})
-    assert ex._pending_placements == []
+    ex.observe_hud(10, 15, {"wood": 95})
+    assert ex._build_gates.pending_placements == []
     assert ex.build_rejection("a") is None  # confirmed mill unlocks farms
 
 
 def test_pending_placement_missing_when_wood_kept(fake_pyautogui: _FakePyautogui) -> None:
-    ex.set_hud_snapshot(10, 15, {"wood": 200})
+    ex.observe_hud(10, 15, {"wood": 200})
     ex._note_pending_placement("w")
     # Wood went UP (gathering, nothing spent) → the placement never happened.
-    ex.set_hud_snapshot(10, 15, {"wood": 230})
-    assert ex._pending_placements == []
-    assert "mill" not in ex._buildings_confirmed
+    ex.observe_hud(10, 15, {"wood": 230})
+    assert ex._build_gates.pending_placements == []
+    assert "mill" not in ex._build_gates.buildings_confirmed
 
 
 def test_pending_placement_waits_out_stale_readings(fake_pyautogui: _FakePyautogui) -> None:
-    ex.set_hud_snapshot(10, 15, {"wood": 200})
+    ex.observe_hud(10, 15, {"wood": 200})
     ex._note_pending_placement("w")
     # An identical reading is stale OCR, not evidence — the entry survives.
-    ex.set_hud_snapshot(10, 15, {"wood": 200})
-    assert len(ex._pending_placements) == 1
-    ex.set_hud_snapshot(10, 15, {"wood": 90})  # fresh reading settles it
-    assert ex._pending_placements == [] and "mill" in ex._buildings_confirmed
+    ex.observe_hud(10, 15, {"wood": 200})
+    assert len(ex._build_gates.pending_placements) == 1
+    ex.observe_hud(10, 15, {"wood": 90})  # fresh reading settles it
+    assert (
+        ex._build_gates.pending_placements == [] and "mill" in ex._build_gates.buildings_confirmed
+    )
 
 
 def test_place_click_succeeds_and_records_when_building_lands(

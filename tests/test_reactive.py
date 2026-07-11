@@ -5,6 +5,7 @@ Pure functions over fake entity dicts + GameState. No executor / pyautogui.
 
 from __future__ import annotations
 
+import pytest
 from gameplay_agent.entity_utils import nearest_class_of_kind
 from gameplay_agent.memory import GameState
 from gameplay_agent.reactive import _resolve_idle_target, decide
@@ -66,18 +67,28 @@ def test_age_up_fires_when_food_banked() -> None:
     ]  # banking (pop 18): no villager queue rides along to eat the 500
 
 
-def test_no_age_up_below_cost_or_outside_dark_age() -> None:
-    assert decide([], _state(population=18, food=499), alarm=False) == []  # banking, no age-up
-    feudal = decide([], _state(population=18, age="Feudal Age", food=600), alarm=False)
-    assert all(a.get("key") != "z" for a in feudal)
+@pytest.mark.parametrize(
+    ("age", "food"),
+    [("Dark Age", 499), ("Feudal Age", 600)],
+    ids=["below-cost", "outside-dark-age"],
+)
+def test_no_age_up_when_preconditions_missing(age: str, food: int) -> None:
+    actions = decide([], _state(population=18, age=age, food=food), alarm=False)
+    assert all(a.get("key") != "z" for a in actions)
 
 
-def test_banking_stops_villager_queue_at_pop_threshold() -> None:
-    assert decide([], _state(population=16), alarm=False) == []  # Dark Age, pop ≥ 16 → bank
-    assert _types(decide([], _state(population=15), alarm=False)) == ["press", "press"]
-    # Banking is Dark Age only — Feudal queues again (toward its 35 cap).
-    feudal = decide([], _state(population=16, age="Feudal Age"), alarm=False)
-    assert _types(feudal) == ["press", "press"]
+@pytest.mark.parametrize(
+    ("population", "age", "queues"),
+    [
+        (16, "Dark Age", False),  # established economy → bank for Feudal
+        (15, "Dark Age", True),  # still growing → keep queueing
+        (16, "Feudal Age", True),  # banking is Dark Age only (Feudal cap is 35)
+    ],
+    ids=["dark-age-banks", "below-threshold-queues", "feudal-queues"],
+)
+def test_villager_queue_respects_feudal_banking(population: int, age: str, queues: bool) -> None:
+    actions = decide([], _state(population=population, age=age), alarm=False)
+    assert (_types(actions) == ["press", "press"]) is queues
 
 
 def test_food_crisis_forces_all_idle_slots_to_food() -> None:

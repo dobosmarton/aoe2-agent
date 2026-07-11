@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, cast
 
 import structlog
 
@@ -68,8 +68,8 @@ class GoalManager:
     def __init__(self) -> None:
         self.active_goals: list[Goal] = []
         self.completed_goals: list[Goal] = []
-        self._prev_state: dict | None = None
-        self._resource_readings: dict = {}
+        self._prev_state: dict[str, object] | None = None
+        self._resource_readings: dict[str, object] = {}
         self._alarm_active: bool = False
 
     def set_goals(self, goals: list[Goal]) -> None:
@@ -191,7 +191,7 @@ class GoalManager:
 
         return "\n".join(lines)
 
-    def get_state_snapshot(self, game_state: GameState) -> dict:
+    def get_state_snapshot(self, game_state: GameState) -> dict[str, object]:
         """Get a serializable snapshot of game state for the strategist."""
         return {
             "resources": dict(game_state.resources),
@@ -216,7 +216,9 @@ class GoalManager:
 
     # --- Resource readings cache ---
 
-    def update_resource_readings(self, readings: dict, memory: AgentMemory | None = None) -> None:
+    def update_resource_readings(
+        self, readings: dict[str, object], memory: AgentMemory | None = None
+    ) -> None:
         """Cache resource readings from strategist and update game state."""
         if not readings:
             return
@@ -225,7 +227,7 @@ class GoalManager:
 
         # Also update the memory's game state if provided
         if memory:
-            obs = {}
+            obs: dict[str, object] = {}
             if "food" in readings:
                 obs["resources"] = {
                     "food": readings.get("food", 0),
@@ -246,11 +248,13 @@ class GoalManager:
             # the income counter — deltas telescope, so call frequency is fine.
             if "food" in readings:
                 with contextlib.suppress(TypeError, ValueError):
-                    memory.record_food_reading(int(readings["food"]))
+                    # OCR-boundary cast; int() keeps coercing (and the suppress
+                    # keeps tolerating) junk exactly as before.
+                    memory.record_food_reading(int(cast("int | str", readings["food"])))
             # Age goes through a dedicated channel — the strategist is the only
             # authoritative source for current_age (executor was hallucinating it).
             if "age" in readings:
-                memory.update_age(readings["age"])
+                memory.update_age(cast("str", readings["age"]))
 
     def get_resource_context(self) -> str:
         """Format cached resource readings for executor context."""

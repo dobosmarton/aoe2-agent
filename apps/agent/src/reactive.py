@@ -102,7 +102,12 @@ def decide(entities: list[object], state: GameState, alarm: bool) -> list[dict[s
 
 
 def _food(state: GameState) -> int:
-    """Last-known food reading, defensively coerced (resources is a plain dict)."""
+    """Last-known food reading, defensively coerced.
+
+    The runtime guard stays even though resources is typed dict[str, int]:
+    values arrive across the untyped LLM-observation boundary, so the
+    annotation is a claim the data can't be trusted to honor.
+    """
     try:
         return int(state.resources.get("food", 0))
     except (TypeError, ValueError):
@@ -161,22 +166,11 @@ def _distribute_idle_actions(entities: list[object], state: GameState) -> list[d
     """
     if not state.idle_present:
         return []
-    if state.idle_count is not None:
-        batch = min(state.idle_count, _IDLE_DISPATCH_MAX)
-        if state.idle_streak >= _IDLE_COUNT_SUSPECT_STREAK:
-            # Badge lit for many turns while the digit stays small: the count is
-            # under-reading. Fall back to (at least) the blind presence batch.
-            batch = max(batch, _IDLE_DISPATCH_PER_TURN)
-    else:
-        batch = _IDLE_DISPATCH_PER_TURN
+    batch = _idle_batch_size(state)
     if batch == 0:  # digit says none idle — presence colour was a false positive
         return []
 
-    pattern = _IDLE_PATTERN_BY_AGE.get(state.current_age, _DEFAULT_IDLE_PATTERN)
-    if _food(state) < _FOOD_CRISIS_THRESHOLD:
-        # Famine: every slot goes to food — wood/gold can wait, villager
-        # production (and the Feudal bank) cannot.
-        pattern = ("food",)
+    pattern = _idle_pattern(state)
     origin = _tc_origin(entities)
     actions: list[dict[str, object]] = []
     farm_queued = False
@@ -215,6 +209,30 @@ def _distribute_idle_actions(entities: list[object], state: GameState) -> list[d
             }
         )
     return actions
+
+
+def _idle_batch_size(state: GameState) -> int:
+    """Dispatches this turn: the badge count when trusted, else the blind batch.
+
+    0 means the digit read "none idle" (the presence colour was a false
+    positive). The count is floored at the blind batch once the badge has been
+    lit `_IDLE_COUNT_SUSPECT_STREAK` consecutive turns — a lit badge outliving
+    its own small count means the digit is under-reading.
+    """
+    if state.idle_count is None:
+        return _IDLE_DISPATCH_PER_TURN
+    batch = min(state.idle_count, _IDLE_DISPATCH_MAX)
+    if state.idle_streak >= _IDLE_COUNT_SUSPECT_STREAK:
+        batch = max(batch, _IDLE_DISPATCH_PER_TURN)
+    return batch
+
+
+def _idle_pattern(state: GameState) -> tuple[ResourceKind, ...]:
+    """Age-keyed gather rotation — overridden to all-food during a famine
+    (wood/gold can wait; villager production and the Feudal bank cannot)."""
+    if _food(state) < _FOOD_CRISIS_THRESHOLD:
+        return ("food",)
+    return _IDLE_PATTERN_BY_AGE.get(state.current_age, _DEFAULT_IDLE_PATTERN)
 
 
 def _tc_origin(entities: list[object]) -> tuple[float, float]:

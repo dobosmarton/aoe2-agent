@@ -32,9 +32,9 @@ from .executor import (
     can_resolve,
     clear_detected_entities,
     execute_actions,
+    observe_hud,
     reset_build_gates,
     set_detected_entities,
-    set_hud_snapshot,
 )
 from .goal_logger import GoalLogger
 from .goals import GoalManager
@@ -126,6 +126,36 @@ async def _run_routine_upkeep(
         if routine_actions:
             await execute_actions(routine_actions)
             log.info("routine_executed", iteration=iteration, count=len(routine_actions))
+
+
+def _register_focus_failure(memory: AgentMemory, failures: int) -> tuple[int, bool]:
+    """Count one focus failure; True means give up (lost_focus recorded)."""
+    failures += 1
+    if failures >= _MAX_FOCUS_FAILURES:
+        log.error("focus_lost_giving_up", failures=failures)
+        memory.game_end_reason = "lost_focus"
+        return failures, True
+    log.warning("could_not_focus_game", message="Retrying in 1 second", failures=failures)
+    return failures, False
+
+
+def _sync_turn_state(
+    memory: AgentMemory,
+    goal_manager: GoalManager,
+    hud_readings: dict,
+) -> None:
+    """Once-per-iteration state upkeep from this turn's HUD reading.
+
+    Deliberately NOT in update_from_observations (which fires more than once
+    per turn): the idle-badge streak feeds the reactive tier's count trust
+    gate, and observe_hud feeds the executor's build gates (house headroom,
+    prerequisites, wood cost, placement settlement).
+    """
+    if hud_readings:
+        goal_manager.update_resource_readings(hud_readings, memory)
+    game_state = memory.game_state
+    game_state.idle_streak = (game_state.idle_streak + 1) if game_state.idle_present else 0
+    observe_hud(game_state.population, game_state.population_cap, game_state.resources)
 
 
 async def _drain_pending(
@@ -260,16 +290,9 @@ async def game_loop(
                 # Unplayable time isn't billed against the iteration budget —
                 # this attempt is retried under the same iteration number.
                 iteration -= 1
-                focus_failures += 1
-                if focus_failures >= _MAX_FOCUS_FAILURES:
-                    log.error("focus_lost_giving_up", failures=focus_failures)
-                    memory.game_end_reason = "lost_focus"
+                focus_failures, give_up = _register_focus_failure(memory, focus_failures)
+                if give_up:
                     break
-                log.warning(
-                    "could_not_focus_game",
-                    message="Retrying in 1 second",
-                    failures=focus_failures,
-                )
                 await asyncio.sleep(1)
                 continue
             focus_failures = 0
@@ -295,16 +318,7 @@ async def game_loop(
             # accurate for the alarm check, strategist, and executor — so e.g. the
             # build-house path triggers the turn the agent actually gets housed.
             hud_readings, calib = await read_hud_readings(screenshot)
-            if hud_readings:
-                goal_manager.update_resource_readings(hud_readings, memory)
-            # Once-per-iteration state upkeep (deliberately NOT in
-            # update_from_observations, which fires more than once per turn):
-            # the idle-badge streak feeds the reactive tier's count trust gate,
-            # and the HUD snapshot feeds the executor's build gates (house
-            # headroom, prerequisites, wood cost).
-            game_state = memory.game_state
-            game_state.idle_streak = game_state.idle_streak + 1 if game_state.idle_present else 0
-            set_hud_snapshot(game_state.population, game_state.population_cap, game_state.resources)
+            _sync_turn_state(memory, goal_manager, hud_readings)
             # Show the OCR reading regions on the debug overlay (--overlay only).
             if overlay is not None and calib is not None:
                 overlay.set_ocr_fields(calib.field_rects())

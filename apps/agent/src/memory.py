@@ -3,6 +3,7 @@
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import TypedDict, cast
 
 # AoE2 Dark Age starting values
 INITIAL_RESOURCES = {"food": 200, "wood": 200, "gold": 100, "stone": 200}
@@ -21,11 +22,11 @@ class Turn:
     iteration: int
     timestamp: str
     reasoning: str
-    actions: list[dict]
-    observed_resources: dict | None = None
+    actions: list[dict[str, object]]
+    observed_resources: dict[str, int] | None = None
     observed_events: list[str] = field(default_factory=list)
     verification: str = ""
-    goal_progress: dict = field(default_factory=dict)
+    goal_progress: dict[str, object] = field(default_factory=dict)
     reward: float = 0.0
 
 
@@ -33,7 +34,7 @@ class Turn:
 class GameState:
     """Structured game state extracted from LLM observations."""
 
-    resources: dict = field(default_factory=lambda: dict(INITIAL_RESOURCES))
+    resources: dict[str, int] = field(default_factory=lambda: dict(INITIAL_RESOURCES))
     population: int = INITIAL_POPULATION
     population_cap: int = INITIAL_POPULATION_CAP
     current_age: str = "Dark Age"
@@ -63,6 +64,29 @@ AGE_SCORES = {
     "Castle Age": 0.66,
     "Imperial Age": 1.0,
 }
+
+
+class MetricsSnapshot(TypedDict):
+    """The cumulative-metrics contract autoresearch scores games by.
+
+    A TypedDict (not a plain dict) so a misspelled key in a consumer is a
+    type error, and adding a metric here forces the snapshot literal in
+    `get_metrics_snapshot` to supply it.
+    """
+
+    survival_time: float
+    peak_population: int
+    highest_age: str
+    age_score: float
+    total_food_gathered: int
+    total_actions: int
+    successful_actions: int
+    executed_actions: int
+    action_success_rate: float
+    turn_count: int
+    game_end_reason: str
+    memories_loaded: list[str]
+    memories_used: dict[str, int]
 
 
 class AgentMemory:
@@ -121,7 +145,7 @@ class AgentMemory:
         if turn.observed_resources:
             self.game_state.resources.update(turn.observed_resources)
 
-    def update_from_observations(self, observations: dict) -> None:
+    def update_from_observations(self, observations: dict[str, object]) -> None:
         """Update game state from LLM observations."""
         if not observations:
             return
@@ -129,7 +153,9 @@ class AgentMemory:
         # Update resources. (Gathered-food accounting lives in
         # record_food_reading — OCR frames only, never LLM-echoed values.)
         if "resources" in observations:
-            self.game_state.resources.update(observations["resources"])
+            # Cast, don't validate: observations cross the untyped LLM boundary
+            # and runtime junk must keep failing the same way it always did.
+            self.game_state.resources.update(cast("dict[str, int]", observations["resources"]))
 
         # Update population
         if "population" in observations:
@@ -160,7 +186,8 @@ class AgentMemory:
         # as idle_present (observations come from several sources; only an OCR
         # frame carries the key, others must not clear it).
         if "idle_count" in observations:
-            self.game_state.idle_count = int(observations["idle_count"])
+            # Same boundary cast as resources — int() keeps coercing at runtime.
+            self.game_state.idle_count = int(cast("int | str", observations["idle_count"]))
 
         # Update flags
         if "idle_tc" in observations:
@@ -302,7 +329,7 @@ class AgentMemory:
             return 0.0
         return (datetime.now(UTC) - self.game_start_time).total_seconds()
 
-    def get_metrics_snapshot(self) -> dict:
+    def get_metrics_snapshot(self) -> MetricsSnapshot:
         """Return current cumulative metrics for scoring."""
         return {
             "survival_time": self.get_game_duration_seconds(),
@@ -345,17 +372,22 @@ class AgentMemory:
     def create_turn(
         self,
         reasoning: str,
-        actions: list[dict],
-        observations: dict | None = None,
+        actions: list[dict[str, object]],
+        observations: dict[str, object] | None = None,
     ) -> Turn:
         """Create a new turn and add it to memory."""
+        # Boundary casts (LLM-echoed observations) — runtime behavior unchanged.
         turn = Turn(
             iteration=self.turn_count + 1,
             timestamp=datetime.now(UTC).strftime("%Y%m%d_%H%M%S"),
             reasoning=reasoning,
             actions=actions,
-            observed_resources=observations.get("resources") if observations else None,
-            observed_events=observations.get("events", []) if observations else [],
+            observed_resources=cast(
+                "dict[str, int] | None", observations.get("resources") if observations else None
+            ),
+            observed_events=cast(
+                "list[str]", observations.get("events", []) if observations else []
+            ),
         )
 
         # Update state from observations

@@ -189,6 +189,11 @@ def test_pipeline_executes_previous_plan_head_next_turn(monkeypatch, tmp_path):
     assert len(provider.contexts) == 2  # both turns pre-launched a plan
 
 
+async def _no_sleep(_seconds):
+    """Skip real waiting in loop tests (focus retries sleep 1 s each)."""
+    return
+
+
 def test_focus_loss_aborts_labeled_without_consuming_iterations(monkeypatch, tmp_path):
     """Permanent focus loss must end the run as lost_focus, not burn the
     iteration budget doing nothing (run 1, F-1: 12 of 30 iterations wasted)."""
@@ -196,10 +201,6 @@ def test_focus_loss_aborts_labeled_without_consuming_iterations(monkeypatch, tmp
     _patch_loop_seams(monkeypatch, tmp_path, executed, "routine economy turn")
     monkeypatch.setattr(gl, "ensure_game_focused", lambda: False)
     monkeypatch.setattr(gl, "_MAX_FOCUS_FAILURES", 3)
-
-    async def _no_sleep(_s):
-        return None
-
     monkeypatch.setattr(gl.asyncio, "sleep", _no_sleep)
     provider = _FakePipelineProvider()
     memory = _run(gl.game_loop(provider, max_iterations=5, use_detection=False, use_overlay=False))
@@ -212,10 +213,6 @@ def test_focus_recovery_replays_the_same_iteration(monkeypatch, tmp_path):
     _patch_loop_seams(monkeypatch, tmp_path, executed, "routine economy turn")
     focus_results = iter([False, False, True])
     monkeypatch.setattr(gl, "ensure_game_focused", lambda: next(focus_results, True))
-
-    async def _no_sleep(_s):
-        return None
-
     monkeypatch.setattr(gl.asyncio, "sleep", _no_sleep)
     provider = _FakePipelineProvider()
     memory = _run(gl.game_loop(provider, max_iterations=2, use_detection=False, use_overlay=False))
