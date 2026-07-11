@@ -21,9 +21,10 @@ def _state(
     idle_count: int | None = None,
     idle_streak: int = 0,
     food: int = 200,
+    wood: int = 200,
 ) -> GameState:
     return GameState(
-        resources={"food": food, "wood": 200, "gold": 100, "stone": 200},
+        resources={"food": food, "wood": wood, "gold": 100, "stone": 200},
         population=population,
         population_cap=population_cap,
         current_age=age,
@@ -103,6 +104,54 @@ def test_food_crisis_without_forage_builds_one_farm() -> None:
     entities = [_ent("town_center", (0, 0)), _ent("tree", (20, 20))]
     actions = decide(entities, _state(population=22, idle_present=True, food=40), alarm=False)
     assert [a["building_key"] for a in actions if a["type"] == "build"] == ["a"]
+
+
+def test_food_crisis_with_no_wood_reserves_a_wood_slot() -> None:
+    """Run 4 (F-21): the pure all-food famine override pinned wood at 0 and
+    locked out the farm economy. With wood below a farm's cost, the override
+    routes 2:1 food:wood instead."""
+    entities = [_ent("town_center", (0, 0)), _ent("sheep", (10, 10)), _ent("tree", (20, 20))]
+    actions = decide(
+        entities, _state(population=22, idle_present=True, food=40, wood=0), alarm=False
+    )
+    targets = sorted(a["target_class"] for a in actions if a["type"] == "right_click")
+    assert targets == ["sheep", "sheep", "tree"]  # exactly one wood slot per 3-batch
+
+
+def test_farm_wood_cost_matches_executor_table() -> None:
+    """Drift guard (V-4 seed): the reactive tier duplicates the farm cost to
+    stay dependency-free — this pins the two copies together."""
+    from gameplay_agent import executor as ex
+    from gameplay_agent import reactive
+
+    assert ex._BUILD_WOOD_COST["a"] == reactive._FARM_WOOD_COST
+
+
+# ---------------------------------------------------------------------------
+# Safe huntables (T-515): boar/deer are never gather targets
+# ---------------------------------------------------------------------------
+
+
+def test_boar_never_dispatched_even_when_only_food_nearby() -> None:
+    """Run 4 (F-20): 9 boar dispatches killed 3 villagers — a lone right-click
+    on a boar is an attack. A visible boar must trigger the farm-build path,
+    never a dispatch."""
+    entities = [_ent("town_center", (0, 0)), _ent("boar", (10, 10))]
+    actions = decide(entities, _state(population=22, idle_present=True), alarm=False)
+    assert all(a.get("target_class") != "boar" for a in actions)
+    assert [a["building_key"] for a in actions if a["type"] == "build"] == ["a"]
+
+
+def test_sheep_preferred_boar_and_deer_ignored() -> None:
+    entities = [
+        _ent("town_center", (0, 0)),
+        _ent("boar", (5, 5)),  # nearest, but lethal
+        _ent("deer", (8, 8)),  # unsafe to trust at F1 0.67
+        _ent("sheep", (50, 50)),
+    ]
+    actions = decide(entities, _state(population=20, idle_present=True), alarm=False)
+    targets = {a["target_class"] for a in actions if a["type"] == "right_click"}
+    assert targets == {"sheep"}
 
 
 # ---------------------------------------------------------------------------

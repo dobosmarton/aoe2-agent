@@ -85,9 +85,15 @@ _FARM_BUILD_KEY = "a"
 # also requires are always up by then (houses + mill).
 _FEUDAL_FOOD_COST = 500
 _FEUDAL_BANK_POP = 16
-# Below this food, every idle slot is forced to food: honoring the rotation's
-# wood/gold slots during a famine starves villager production (run 1, F-8).
+# Below this food, the idle rotation is overridden toward food: honoring the
+# normal wood/gold slots during a famine starves villager production (run 1, F-8).
 _FOOD_CRISIS_THRESHOLD = 60
+# A farm's wood cost (mirrors executor._BUILD_WOOD_COST["a"]; duplicated so the
+# reactive tier stays dependency-free — a drift test is the cross-check, V-4).
+# During a famine the override must NOT starve wood below this: run 4 (F-21)
+# showed all-food routing pinning wood at 0, locking out the farm economy the
+# famine needed to end.
+_FARM_WOOD_COST = 60
 
 
 def decide(entities: list[object], state: GameState, alarm: bool) -> list[dict[str, object]]:
@@ -101,15 +107,15 @@ def decide(entities: list[object], state: GameState, alarm: bool) -> list[dict[s
     return actions
 
 
-def _food(state: GameState) -> int:
-    """Last-known food reading, defensively coerced.
+def _resource(state: GameState, kind: ResourceKind) -> int:
+    """Last-known reading for `kind`, defensively coerced.
 
     The runtime guard stays even though resources is typed dict[str, int]:
     values arrive across the untyped LLM-observation boundary, so the
     annotation is a claim the data can't be trusted to honor.
     """
     try:
-        return int(state.resources.get("food", 0))
+        return int(state.resources.get(kind, 0))
     except (TypeError, ValueError):
         return 0
 
@@ -122,7 +128,7 @@ def _age_up_actions(state: GameState) -> list[dict[str, object]]:
     building requirements missing) is a harmless no-op, and once research
     starts the food drops below the threshold, so this doesn't spam.
     """
-    if state.current_age != "Dark Age" or _food(state) < _FEUDAL_FOOD_COST:
+    if state.current_age != "Dark Age" or _resource(state, "food") < _FEUDAL_FOOD_COST:
         return []
     return [
         {"type": "press", "key": "h", "intent": "Select TC (age up)"},
@@ -228,9 +234,17 @@ def _idle_batch_size(state: GameState) -> int:
 
 
 def _idle_pattern(state: GameState) -> tuple[ResourceKind, ...]:
-    """Age-keyed gather rotation — overridden to all-food during a famine
-    (wood/gold can wait; villager production and the Feudal bank cannot)."""
-    if _food(state) < _FOOD_CRISIS_THRESHOLD:
+    """Age-keyed gather rotation, overridden during a food famine.
+
+    Famine with farming affordable → all-food (wood/gold can wait; villager
+    production and the Feudal bank cannot). Famine with wood below a farm's
+    cost → 2:1 food:wood, so the farm economy that ENDS the famine stays
+    reachable — the pure all-food override starved wood to 0 and locked the
+    loop shut (run 4, F-21).
+    """
+    if _resource(state, "food") < _FOOD_CRISIS_THRESHOLD:
+        if _resource(state, "wood") < _FARM_WOOD_COST:
+            return ("food", "food", "wood")
         return ("food",)
     return _IDLE_PATTERN_BY_AGE.get(state.current_age, _DEFAULT_IDLE_PATTERN)
 
