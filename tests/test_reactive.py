@@ -25,6 +25,9 @@ def _state(
     # Default = Feudal prereqs satisfied, so tests about OTHER features aren't
     # polluted by the lumber-camp prep action; prep/age-up tests override it.
     buildings: frozenset[str] = frozenset({"mill", "lumber_camp"}),
+    # Default = villager target reached, so no queue order rides along in
+    # dispatch/age-up tests; queue tests pass explicit lower orders.
+    villagers_ordered: int = 30,
 ) -> GameState:
     return GameState(
         resources={"food": food, "wood": wood, "gold": 100, "stone": 200},
@@ -35,6 +38,7 @@ def _state(
         idle_count=idle_count,
         idle_streak=idle_streak,
         buildings_seen=buildings,
+        villagers_ordered=villagers_ordered,
     )
 
 
@@ -47,15 +51,15 @@ def _types(actions: list[dict]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def test_queues_villager_below_cap() -> None:
-    actions = decide([], _state(population=10), alarm=False)
-    assert _types(actions) == ["press", "press"]
-    assert actions[1] == {"type": "press", "key": "q", "intent": "Queue villager (reactive)"}
+def test_queues_villager_below_target() -> None:
+    actions = decide([], _state(population=10, villagers_ordered=10), alarm=False)
+    assert actions == [{"type": "queue_villager", "intent": "Queue villager (reactive)"}]
 
 
-def test_no_queue_at_dark_age_cap() -> None:
-    # Dark Age cap is 22; pop 22 is not below it → no queue.
-    actions = decide([], _state(population=22), alarm=False)
+def test_no_queue_at_dark_age_order_target() -> None:
+    # 30 villagers ORDERED (user directive, F-38) → bank food, don't queue —
+    # regardless of how few the TC queue has delivered yet.
+    actions = decide([], _state(population=22, villagers_ordered=30), alarm=False)
     assert actions == []
 
 
@@ -130,17 +134,25 @@ def test_no_age_up_when_preconditions_missing(age: str, food: int) -> None:
 
 
 @pytest.mark.parametrize(
-    ("population", "age", "queues"),
+    ("ordered", "age", "queues"),
     [
-        (16, "Dark Age", False),  # established economy → bank for Feudal
-        (15, "Dark Age", True),  # still growing → keep queueing
-        (16, "Feudal Age", True),  # banking is Dark Age only (Feudal cap is 35)
+        (30, "Dark Age", False),  # target ordered → bank for Feudal
+        (29, "Dark Age", True),  # still growing → keep ordering
+        (30, "Feudal Age", True),  # Feudal target is 35 (pop cap 50 here)
+        (35, "Feudal Age", False),
     ],
-    ids=["dark-age-banks", "below-threshold-queues", "feudal-queues"],
+    ids=["dark-age-banks", "below-target-orders", "feudal-orders", "feudal-target"],
 )
-def test_villager_queue_respects_feudal_banking(population: int, age: str, queues: bool) -> None:
-    actions = decide([], _state(population=population, age=age), alarm=False)
-    assert (_types(actions) == ["press", "press"]) is queues
+def test_villager_queue_respects_order_target(ordered: int, age: str, queues: bool) -> None:
+    state = _state(population=15, population_cap=50, age=age, villagers_ordered=ordered)
+    actions = decide([], state, alarm=False)
+    assert (_types(actions) == ["queue_villager"]) is queues
+
+
+def test_orders_capped_by_population_cap() -> None:
+    # Housed: orders never outrun the current housing cap.
+    state = _state(population=10, population_cap=10, villagers_ordered=10)
+    assert decide([], state, alarm=False) == []
 
 
 def test_food_crisis_forces_all_idle_slots_to_food() -> None:
@@ -229,6 +241,8 @@ def test_reactive_build_constants_match_executor_tables() -> None:
     assert ex._BUILD_WOOD_COST["r"] == reactive._LUMBER_CAMP_WOOD_COST
     assert ex.BUILD_KEY_TO_CLASS[reactive._FARM_BUILD_KEY] == "farm"
     assert ex.BUILD_KEY_TO_CLASS[reactive._LUMBER_CAMP_BUILD_KEY] == "lumber_camp"
+    # The executor's order gate backstops the reactive Dark Age target (F-38).
+    assert reactive._VILLAGER_TARGET_BY_AGE["Dark Age"] == ex._VILLAGER_ORDER_TARGET
 
 
 # ---------------------------------------------------------------------------

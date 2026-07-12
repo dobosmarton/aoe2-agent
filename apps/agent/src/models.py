@@ -216,6 +216,18 @@ class BuildAction(BaseModel):
     intent: str = ""
 
 
+class QueueVillagerAction(BaseModel):
+    """Queue one villager at the Town Center (select TC → q).
+
+    A first-class action (not raw presses) so the executor's order ledger and
+    villager-target gate see EVERY queue attempt — run 11 (F-38) over-ordered
+    to 40 villagers because raw h+q presses were invisible to any brake.
+    """
+
+    type: Literal["queue_villager"]
+    intent: str = ""
+
+
 # Discriminated union ensures the JSON schema uses oneOf + discriminator on "type",
 # preventing the model from confusing field names across action types
 # (e.g., using DragAction's x1/y1 for ClickAction instead of x/y).
@@ -224,6 +236,7 @@ Action = Annotated[
     | RightClickAction
     | PressAction
     | BuildAction
+    | QueueVillagerAction
     | DragAction
     | WaitAction
     | ScrollAction
@@ -249,6 +262,7 @@ _ACTION_TYPE_MAP: dict[str, type[Action]] = {
     "right_click": RightClickAction,
     "press": PressAction,
     "build": BuildAction,
+    "queue_villager": QueueVillagerAction,
     "drag": DragAction,
     "wait": WaitAction,
     "scroll": ScrollAction,

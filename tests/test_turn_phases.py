@@ -268,8 +268,8 @@ def test_fallback_actions_housed_builds_a_house():
 
 
 def test_fallback_actions_not_housed_queues_villager():
-    """Room to grow → nudge production (go to TC), never a build placement."""
+    """Room to grow → nudge production (order a villager), never a build placement."""
     memory = AgentMemory()  # defaults to 4/5 → not housed
     actions = _fallback_actions(memory)
     assert not any(a["type"] == "click" for a in actions)
-    assert actions[0] == {"type": "press", "key": "h", "intent": "Go to TC (fallback)"}
+    assert actions[0] == {"type": "queue_villager", "intent": "Queue villager (fallback)"}

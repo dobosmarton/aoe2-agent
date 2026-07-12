@@ -59,6 +59,12 @@ class GameState:
     # (build the lumber camp) and gates the age-up press on the two-building
     # requirement (run 6, F-26).
     buildings_seen: frozenset[str] = frozenset()
+    # Villagers ordered this game (incl. the starting 4) — copied once per
+    # iteration from the executor's order ledger. The reactive queue gates on
+    # this, NOT on population: orders lead the delivered HUD population by the
+    # TC queue depth, and braking on population over-delivered 40 villagers
+    # (run 11, F-38).
+    villagers_ordered: int = INITIAL_POPULATION
     under_attack: bool = False
     enemy_located: bool = False
     enemy_location: str = ""

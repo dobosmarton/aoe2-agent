@@ -366,8 +366,7 @@ def _fallback_actions(memory: AgentMemory) -> list[dict[str, object]]:
     if is_housed:
         return build_steps("q", "Place house to raise pop cap (fallback build)")
     return [
-        {"type": "press", "key": "h", "intent": "Go to TC (fallback)"},
-        {"type": "press", "key": "q", "intent": "Queue villager (fallback)"},
+        {"type": "queue_villager", "intent": "Queue villager (fallback)"},
         {"type": "press", "key": ".", "rescan": True, "intent": "Select idle villager (fallback)"},
     ]
 

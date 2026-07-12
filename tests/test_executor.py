@@ -783,6 +783,45 @@ def test_execute_actions_runs_each_in_order(fake_pyautogui: _FakePyautogui) -> N
 
 
 # ---------------------------------------------------------------------------
+# Villager-order ledger (T-531, F-38)
+# ---------------------------------------------------------------------------
+
+
+def test_queue_villager_orders_and_presses(fake_pyautogui: _FakePyautogui) -> None:
+    ex.observe_hud(10, 15, {"wood": 200, "food": 200})
+    result = _run(ex.execute_action({"type": "queue_villager", "intent": "grow"}))
+    assert result.success
+    assert ex.villagers_ordered() == 5  # the 4 starting villagers + this order
+    press_keys = [c[1][0] for c in fake_pyautogui.calls if c[0] == "press"]
+    assert press_keys == ["h", "q"]
+
+
+def test_queue_villager_rejected_at_order_target(fake_pyautogui: _FakePyautogui) -> None:
+    """Run 11 (F-38): the brake must fire on ORDERS — the delivered population
+    lags by the TC queue depth and over-delivered 40 villagers."""
+    ex._build_gates.villagers_ordered = 30
+    result = _run(ex.execute_action({"type": "queue_villager", "intent": "grow"}))
+    assert not result.success and "target" in result.detail
+    assert all(c[0] != "press" for c in fake_pyautogui.calls)  # no keystrokes spent
+
+
+def test_queue_villager_rejected_without_food(fake_pyautogui: _FakePyautogui) -> None:
+    """A q press with < 50 food no-ops in-game — reject instead, so the ledger
+    never counts an order the TC never received."""
+    ex.observe_hud(10, 15, {"wood": 200, "food": 40})
+    result = _run(ex.execute_action({"type": "queue_villager", "intent": "grow"}))
+    assert not result.success and "food" in result.detail
+    assert ex.villagers_ordered() == 4
+
+
+def test_starting_villagers_match_initial_population(fake_pyautogui: _FakePyautogui) -> None:
+    from gameplay_agent.memory import INITIAL_POPULATION
+
+    assert ex._STARTING_VILLAGERS == INITIAL_POPULATION  # drift guard (V-4)
+    assert ex.villagers_ordered() == INITIAL_POPULATION  # fresh-game ledger
+
+
+# ---------------------------------------------------------------------------
 # Stale-coordinate guard (T-525, F-33)
 # ---------------------------------------------------------------------------
 

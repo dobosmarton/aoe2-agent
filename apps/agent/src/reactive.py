@@ -36,8 +36,14 @@ from .entity_utils import (
 if TYPE_CHECKING:
     from .memory import GameState
 
-# Stop queuing villagers past these per-age caps to bank food for aging up.
-_POP_CAP_BY_AGE: dict[str, int] = {"Dark Age": 22, "Feudal Age": 35}
+# Stop ORDERING villagers past these per-age targets so food banks for aging
+# up. Gated on GameState.villagers_ordered, never on the delivered HUD
+# population: orders lead it by the TC queue depth (~25 s per villager vs a
+# ~10 s turn), and a population brake over-delivered 40 villagers whose cost
+# WAS the Feudal bank (run 11, F-38). Dark Age 30 is the user directive; a
+# drift test pins it to the executor's order gate, which backstops
+# LLM-initiated queues with the same number.
+_VILLAGER_TARGET_BY_AGE: dict[str, int] = {"Dark Age": 30, "Feudal Age": 35}
 
 # Age-keyed repeating target pattern for routing idle villagers. Cycling the
 # pattern yields the per-age gather ratio (e.g. Dark Age 3:2 food:wood). Seeding the
@@ -80,10 +86,9 @@ _FARM_BUILD_KEY = "a"
 # Feudal Age economics. Research costs 500 food and happens at the TC (`h` →
 # `z`, prompts/hotkeys.md). With the villager queue firing every turn, 50 food
 # at a time, 500 can never accumulate (2026-07-11 run 3, F-16) — so once the
-# Dark Age economy is established (`_FEUDAL_BANK_POP` villagers) the queue
-# stops and food BANKS toward the research.
+# age's villager target is ordered the queue stops and food BANKS toward the
+# research.
 _FEUDAL_FOOD_COST = 500
-_FEUDAL_BANK_POP = 16
 # Feudal also requires TWO qualifying Dark Age buildings — and houses don't
 # count (run 6, F-26: 14 age-up presses no-oped against a greyed button with
 # only the mill built while 767 food sat banked). Mirrors
@@ -191,23 +196,21 @@ def _feudal_prep_actions(state: GameState) -> list[dict[str, object]]:
     ]
 
 
-def _banking_for_feudal(state: GameState) -> bool:
-    """Dark Age with an established economy: stop buying villagers, bank 500."""
-    return state.current_age == "Dark Age" and state.population >= _FEUDAL_BANK_POP
-
-
-def _pop_below_cap(state: GameState) -> bool:
-    age_cap = _POP_CAP_BY_AGE.get(state.current_age, state.population_cap)
-    return state.population < min(state.population_cap, age_cap)
+def _orders_below_target(state: GameState) -> bool:
+    """Whether another villager order fits the age target and the pop cap."""
+    target = _VILLAGER_TARGET_BY_AGE.get(state.current_age, state.population_cap)
+    return state.villagers_ordered < min(state.population_cap, target)
 
 
 def _queue_villager_actions(state: GameState) -> list[dict[str, object]]:
-    if _banking_for_feudal(state) or not _pop_below_cap(state):
+    """One villager order per turn while below the age target.
+
+    Emitted as the first-class `queue_villager` action so the executor's
+    order ledger counts it and its gate re-checks target + food (F-38).
+    """
+    if not _orders_below_target(state):
         return []
-    return [
-        {"type": "press", "key": "h", "intent": "Select TC (reactive)"},
-        {"type": "press", "key": "q", "intent": "Queue villager (reactive)"},
-    ]
+    return [{"type": "queue_villager", "intent": "Queue villager (reactive)"}]
 
 
 def _distribute_idle_actions(entities: list[object], state: GameState) -> list[dict[str, object]]:

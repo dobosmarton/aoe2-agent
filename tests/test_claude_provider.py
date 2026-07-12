@@ -452,7 +452,6 @@ def test_queue_villager_step_list_verbatim(
     block = SimpleNamespace(id="tu5", name="queue_villager", input={"intent": "more vils"})
     action_dict, _result = _run(provider._execute_queue_villager(block))
     assert action_dict == {"type": "queue_villager", "intent": "more vils"}
-    assert recorded_steps == [
-        {"type": "press", "key": "h", "intent": "Go to TC (more vils)"},
-        {"type": "press", "key": "q", "intent": "Queue villager (more vils)"},
-    ]
+    # One first-class action, not raw h+q presses — the executor's order
+    # ledger gate must see (and count) every LLM-initiated queue (F-38).
+    assert recorded_steps == [{"type": "queue_villager", "intent": "more vils"}]

@@ -507,12 +507,15 @@ class ClaudeProvider:
         return await self._run_composite(block, "send_all_idle", steps)
 
     async def _execute_queue_villager(self, block: ToolUseBlock) -> tuple[dict, dict]:
-        """Composite: press h → press q."""
+        """Composite: one villager order through the executor's ledger gate.
+
+        A single `queue_villager` action (not raw h+q presses) so the order
+        target and food gate apply to LLM-initiated queues too — raw presses
+        were invisible to the brake and over-ordered 40 villagers (F-38).
+        """
         inp = block.input
-        intent = inp.get("intent", "Queue villager")
         steps: list[dict] = [
-            {"type": "press", "key": "h", "intent": f"Go to TC ({intent})"},
-            {"type": "press", "key": "q", "intent": f"Queue villager ({intent})"},
+            {"type": "queue_villager", "intent": str(inp.get("intent", "Queue villager"))}
         ]
         return await self._run_composite(block, "queue_villager", steps, include_entities=False)
 

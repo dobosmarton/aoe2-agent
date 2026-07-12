@@ -36,6 +36,7 @@ from .executor import (
     observe_hud,
     reset_build_gates,
     set_detected_entities,
+    villagers_ordered,
 )
 from .goal_logger import GoalLogger
 from .goals import GoalManager
@@ -159,6 +160,7 @@ def _sync_turn_state(
     game_state = memory.game_state
     game_state.idle_streak = (game_state.idle_streak + 1) if game_state.idle_present else 0
     game_state.buildings_seen = confirmed_buildings()
+    game_state.villagers_ordered = villagers_ordered()
     observe_hud(game_state.population, game_state.population_cap, game_state.resources)
 
 

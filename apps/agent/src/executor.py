@@ -126,6 +126,17 @@ _SIGHTING_MIN_FRAMES = 3
 # suppression lasts. Run 9: 32 identical farm attempts each burned resources.
 _MISSING_STREAK_LIMIT = 3
 _MISSING_SUPPRESS_SNAPSHOTS = 5
+# Villager-order ledger (T-531). Orders lead the HUD population by the TC
+# queue depth (~25 s per villager vs a ~10 s turn), so a brake on DELIVERED
+# population overshoots: run 11 (F-38) pressed q 36 times, every one at pop
+# ≤ 15, and the queue delivered 40. The game starts with 4 villagers
+# (mirrors memory.INITIAL_POPULATION; drift test pins the two).
+_STARTING_VILLAGERS = 4
+_VILLAGER_FOOD_COST = 50
+# Dark Age villager target (user directive, run 11): enough economy to bank
+# the 500-food Feudal cost; every order past it IS the Feudal bank being
+# spent. Revisit (age-condition) once the agent reliably reaches Feudal.
+_VILLAGER_ORDER_TARGET = 30
 
 
 # A placement whose foundation wasn't visually confirmed, awaiting settlement
@@ -168,6 +179,9 @@ class _BuildGates:
     missing_streaks: dict[str, int] = field(default_factory=dict)
     suppressed_until: dict[str, int] = field(default_factory=dict)
     snapshot_count: int = 0
+    # Villagers ordered so far (T-531) — self-generated ground truth that
+    # leads the delivered HUD population by the TC queue depth.
+    villagers_ordered: int = _STARTING_VILLAGERS
 
 
 _build_gates = _BuildGates()
@@ -300,6 +314,35 @@ def confirmed_buildings() -> frozenset[str]:
     evidence) — copied into GameState each turn so the reactive tier can gate
     Feudal prep and the age-up press on the two-building requirement."""
     return frozenset(_build_gates.buildings_confirmed)
+
+
+def villagers_ordered() -> int:
+    """Villagers ordered this game (incl. the 4 starting ones) — copied into
+    GameState each turn so the reactive tier gates the queue on ORDERS, not
+    the TC-queue-lagged HUD population (run 11, F-38)."""
+    return _build_gates.villagers_ordered
+
+
+def villager_queue_rejection() -> str | None:
+    """Reason a villager can't be queued right now (logged), or None.
+
+    The order target caps TOTAL orders — the HUD population lags by the TC
+    queue depth, so it must never be the brake. The food gate keeps a press
+    that would silently no-op in-game from being counted as an order.
+    """
+    ordered = _build_gates.villagers_ordered
+    if ordered >= _VILLAGER_ORDER_TARGET:
+        reason = (
+            f"villager target reached ({ordered} ordered, incl. the TC queue) — "
+            "keep villagers busy and bank food for the Feudal Age instead"
+        )
+    else:
+        food = (_build_gates.resources or {}).get("food")
+        if food is None or food >= _VILLAGER_FOOD_COST:
+            return None
+        reason = f"villager costs {_VILLAGER_FOOD_COST} food, you have {food}"
+    log.info("villager_queue_rejected", reason=reason, ordered=ordered)
+    return reason
 
 
 def sighted_buildings() -> frozenset[str]:
@@ -976,6 +1019,29 @@ async def _handle_build(action_dict: dict[str, object], intent: str) -> ActionRe
     return ActionResult(True, f"built ({intent})")
 
 
+async def _handle_queue_villager(action_dict: dict[str, object], intent: str) -> ActionResult:
+    """Queue one villager at the TC, through the order ledger (T-531).
+
+    Every queue path (reactive, LLM composite, fallback) funnels here so the
+    order target and food gate can't be bypassed by raw h+q presses — the
+    invisible-queue overshoot that delivered 40 villagers in run 11 (F-38).
+    """
+    rejection = villager_queue_rejection()
+    if rejection is not None:
+        return ActionResult(False, rejection)
+    steps: list[dict[str, object]] = [
+        {"type": "press", "key": "h", "intent": f"Select TC ({intent})"},
+        {"type": "press", "key": "q", "intent": f"Queue villager ({intent})"},
+    ]
+    for step in steps:
+        result = await execute_action(step)
+        if not result.success:
+            return ActionResult(False, f"queue_villager failed at: {step.get('intent', '')}")
+    _build_gates.villagers_ordered += 1
+    log.info("villager_ordered", total=_build_gates.villagers_ordered, intent=intent)
+    return ActionResult(True, f"villager queued ({_build_gates.villagers_ordered} ordered)")
+
+
 # Dispatch table: action type -> handler
 _ACTION_HANDLERS: dict[
     str,
@@ -985,6 +1051,7 @@ _ACTION_HANDLERS: dict[
     "right_click": _handle_right_click,
     "press": _handle_press,
     "build": _handle_build,
+    "queue_villager": _handle_queue_villager,
     "drag": _handle_drag,
     "scroll": _handle_scroll,
     "detect": _handle_detect,
