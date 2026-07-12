@@ -25,16 +25,20 @@ import structlog
 from .entity_utils import extract_attrs
 from .executor import (
     clear_detected_entities,
+    confirmed_buildings,
     default_build_placement,
     execute_actions,
     get_detected_entities,
     get_rescan_fn,
+    pending_placement_counts,
 )
 from .memory import GameState
 from .models import validate_actions
 from .villager_roles import infer_jobs, job_counts
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from .executor import ActionResult
     from .goal_logger import GoalLogger
     from .goals import GoalManager
@@ -115,6 +119,7 @@ def _build_llm_context(
             "Use target_class or target_id to interact with these:\n" + entity_summary + "\n"
         )
         entity_context += _villager_jobs_line(detected_entities)
+        entity_context += known_buildings_line(detected_entities)
         context = entity_context + "\n" + context
 
     return context
@@ -135,6 +140,30 @@ def _villager_jobs_line(detected_entities: list[object] | None) -> str:
         return ""
     breakdown = " ".join(f"{kind}={n}" for kind, n in working.items())
     return f"Villagers by job (approx, from proximity): {breakdown}\n"
+
+
+def known_buildings_line(detected_entities: list[object] | None) -> str:
+    """One-line owned-building ledger so the LLM stops re-building what it has.
+
+    Only CONFIRMED classes are listed — a single-frame phantom must not read
+    as owned (F-29) — with this frame's detected count floored at 1: a
+    confirmed building that's off-screen still exists. Pending placements
+    (awaiting wood-delta settlement) are shown so a build already in flight
+    isn't re-ordered.
+    """
+    confirmed = confirmed_buildings()
+    pending = pending_placement_counts()
+    if not confirmed and not pending:
+        return ""
+    segments: list[str] = []
+    if confirmed:
+        detected = _class_counts(detected_entities or [])
+        segments.append(" ".join(f"{c}={max(detected.get(c, 0), 1)}" for c in sorted(confirmed)))
+    if pending:
+        segments.append(
+            "(pending: " + " ".join(f"{c}={n}" for c, n in sorted(pending.items())) + ")"
+        )
+    return "Known buildings: " + " ".join(segments) + "\n"
 
 
 def _process_response(
@@ -270,7 +299,7 @@ def _any_entity_expectation(actions: list) -> bool:
     return any(_expectation_for(a).kind != "none" for a in actions if isinstance(a, dict))
 
 
-def _class_counts(entities: list[dict]) -> dict[str, int]:
+def _class_counts(entities: Sequence[object]) -> dict[str, int]:
     """Count detected entities by class (robust to bbox jitter)."""
     counts: dict[str, int] = {}
     for e in entities:

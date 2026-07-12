@@ -11,6 +11,7 @@ without much marginal coverage gain.
 from __future__ import annotations
 
 import pytest
+from gameplay_agent import executor as ex
 from gameplay_agent.memory import AgentMemory
 from gameplay_agent.turn_phases import (
     INITIAL_ZOOM_CLICKS,
@@ -18,7 +19,10 @@ from gameplay_agent.turn_phases import (
     _extract_applied_memories,
     _fallback_actions,
     _get_ground_commands,
+    known_buildings_line,
 )
+
+from tests.factories import make_entity as _ent
 
 # ---------------------------------------------------------------------------
 # _extract_applied_memories
@@ -201,6 +205,44 @@ def test_build_llm_context_omits_goal_block_when_empty():
     # Goal text is empty so it shouldn't be glued in (which would add a stray separator)
     # The resource section is still present.
     assert "## Res" in context
+
+
+# ---------------------------------------------------------------------------
+# known_buildings_line (T-512)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def build_gates():
+    ex.reset_build_gates()
+    yield
+    ex.reset_build_gates()
+
+
+def test_known_buildings_line_counts_and_pending(build_gates) -> None:
+    ex.record_confirmed_buildings(["mill", "farm"])
+    ex.observe_hud(10, 15, {"wood": 200})  # wood baseline for the pending entry
+    ex._note_pending_placement("a")
+    entities = [_ent("farm", (0, 0), "farm_0"), _ent("farm", (5, 5), "farm_1")]
+    assert known_buildings_line(entities) == "Known buildings: farm=2 mill=1 (pending: farm=1)\n"
+
+
+def test_known_buildings_line_confirmed_but_offscreen_reads_one(build_gates) -> None:
+    ex.record_confirmed_buildings(["mill"])
+    assert known_buildings_line([]) == "Known buildings: mill=1\n"
+
+
+def test_known_buildings_line_ignores_unconfirmed_detections(build_gates) -> None:
+    # A detected-but-unconfirmed class (single-frame phantom, F-29) is not owned.
+    assert known_buildings_line([_ent("farm", (0, 0))]) == ""
+
+
+def test_build_llm_context_includes_known_buildings(build_gates) -> None:
+    ex.record_confirmed_buildings(["mill"])
+    memory = AgentMemory()
+    gm = _FakeGoalManager()
+    context = _build_llm_context(memory, gm, entity_summary="mill_0: mill at (100,100)")
+    assert "Known buildings: mill=1" in context
 
 
 # ---------------------------------------------------------------------------
