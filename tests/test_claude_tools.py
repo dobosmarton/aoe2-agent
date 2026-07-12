@@ -147,9 +147,12 @@ def _by_name(name: str) -> dict:
         ("wait", {"ms", "intent"}),
         ("scroll", {"clicks", "intent"}),
         ("detect", {"intent"}),
-        # x,y are optional: omitting them auto-places near the Town Center.
+        # build takes no coordinates: the executor places on open ground after
+        # the camera settles (F-33); send composites require target_class for
+        # the same reason — pre-jump x/y land on the wrong terrain.
         ("build", {"building_key", "intent"}),
-        ("send_villager", {"intent"}),
+        ("send_villager", {"target_class", "intent"}),
+        ("send_all_idle", {"target_class", "intent"}),
         ("queue_villager", {"intent"}),
     ],
 )

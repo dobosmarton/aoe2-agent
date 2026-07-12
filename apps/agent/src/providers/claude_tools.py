@@ -126,21 +126,13 @@ _ACTION_TOOLS: list[dict] = [
     # --- Composite tools (multi-step sequences, no intermediate API roundtrips) ---
     {
         "name": "build",
-        "description": "Composite: select idle villager → open economic build menu → press building_key → place the building. Building keys: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm. x,y are OPTIONAL: omit them to auto-place near your Town Center (recommended — you can't see open ground, so let the game place it). Only pass x,y if you have a specific detected location. ALWAYS use this instead of press(.)+press(q)+press(key)+click() separately.",
+        "description": "Composite: select idle villager → open economic build menu → press building_key → place the building on open ground near your Town Center. Building keys: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm. Placement is chosen by the executor AFTER the camera settles — you cannot pass coordinates (selecting the villager moves the camera, so any spot you compute now would be stale). ALWAYS use this instead of press(.)+press(q)+press(key)+click() separately.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "building_key": {
                     "type": "string",
                     "description": "Hotkey for the building: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm",
-                },
-                "x": {
-                    "type": "integer",
-                    "description": "Optional X for placement; omit to auto-place near the Town Center",
-                },
-                "y": {
-                    "type": "integer",
-                    "description": "Optional Y for placement; omit to auto-place near the Town Center",
                 },
                 "intent": {"type": "string", "description": "What you are building and why"},
             },
@@ -150,12 +142,10 @@ _ACTION_TOOLS: list[dict] = [
     },
     {
         "name": "send_villager",
-        "description": "Composite: select idle villager (press .) → right_click target. MUCH faster than press(.)+right_click() separately. Use target_class for resources (e.g. 'sheep', 'tree', 'berry_bush') or x,y for specific locations.",
+        "description": "Composite: select idle villager (press .) → right_click target. MUCH faster than press(.)+right_click() separately. target_class only (e.g. 'sheep', 'tree', 'berry_bush') — selecting the villager moves the camera, so coordinates you compute now would land on the wrong terrain.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "x": {"type": "integer", "description": "X coordinate to right-click"},
-                "y": {"type": "integer", "description": "Y coordinate to right-click"},
                 "target_class": {
                     "type": "string",
                     "description": "Entity class to target (e.g. 'sheep', 'tree', 'berry_bush')",
@@ -165,18 +155,16 @@ _ACTION_TOOLS: list[dict] = [
                     "description": "Where you are sending the villager and why",
                 },
             },
-            "required": ["intent"],
+            "required": ["target_class", "intent"],
             "additionalProperties": False,
         },
     },
     {
         "name": "send_all_idle",
-        "description": "Composite: select ALL idle villagers (Shift-.) → right_click target. Dispatches every idle villager at once in a single action — use this instead of repeating send_villager when several villagers are idle. Use target_class for resources (e.g. 'tree', 'sheep') or x,y for a location.",
+        "description": "Composite: select ALL idle villagers (Shift-.) → right_click target. Dispatches every idle villager at once in a single action — use this instead of repeating send_villager when several villagers are idle. target_class only — the select moves the camera, so pre-computed coordinates would be stale.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "x": {"type": "integer", "description": "X coordinate to right-click"},
-                "y": {"type": "integer", "description": "Y coordinate to right-click"},
                 "target_class": {
                     "type": "string",
                     "description": "Entity class to send all idle villagers to (e.g. 'tree', 'sheep')",
@@ -186,7 +174,7 @@ _ACTION_TOOLS: list[dict] = [
                     "description": "Where you are sending the idle villagers and why",
                 },
             },
-            "required": ["intent"],
+            "required": ["target_class", "intent"],
             "additionalProperties": False,
         },
     },

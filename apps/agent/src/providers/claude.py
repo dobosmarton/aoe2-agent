@@ -16,10 +16,10 @@ if TYPE_CHECKING:
 from ..config import config
 from ..entity_utils import ResourceKind
 from ..executor import (
+    STALE_COORDS_DETAIL,
     build_menu_steps,
     build_rejection,
     build_steps,
-    default_build_placement,
     execute_action,
     get_detected_entities,
 )
@@ -60,19 +60,17 @@ def _tracker_velocities() -> dict[str, tuple[float, float]]:
     return {t.id: (float(t.state[2]), float(t.state[3])) for t in detector.tracker.tracks}
 
 
-def _target_right_click(inp: dict, intent: object) -> dict[str, object]:
-    """Right-click step for a send composite: target_class when given, else raw x/y.
+def _target_right_click(inp: dict, intent: object) -> dict[str, object] | None:
+    """Right-click step for a send composite; None when only raw x/y were given.
 
-    The executor resolves `target_class` against its detected-entity cache; raw
-    coordinates are the LLM's explicit fallback.
+    The executor resolves `target_class` against the post-rescan entity cache.
+    Raw coordinates are refused: the preceding idle-select re-centers the
+    camera, so a spot computed from the previous frame lands on arbitrary
+    terrain (run 8, F-33 — villagers walked to random places).
     """
-    rc_action: dict[str, object] = {"type": "right_click", "intent": intent}
-    if "target_class" in inp:
-        rc_action["target_class"] = inp["target_class"]
-    else:
-        rc_action["x"] = inp["x"]
-        rc_action["y"] = inp["y"]
-    return rc_action
+    if "target_class" not in inp:
+        return None
+    return {"type": "right_click", "target_class": inp["target_class"], "intent": intent}
 
 
 # Pricing per million tokens (claude-sonnet-4-6)
@@ -440,12 +438,12 @@ class ClaudeProvider:
         return action_dict, tool_result
 
     async def _execute_build(self, block: ToolUseBlock) -> tuple[dict, dict]:
-        """Composite: press . → q (econ menu) → building_key → click(x,y).
+        """Composite: press . (rescan) → q (econ menu) → building_key → place.
 
-        Uses the LLM-provided coordinates directly.  The executor's
-        built-in retry logic (_handle_click) tries 4 nearby offsets
-        (±80px) if placement fails.  If the spot is truly blocked,
-        the LLM will choose a different position next turn.
+        Placement is resolved by the executor AT CLICK TIME, after the "."
+        select has re-centered the camera — LLM coordinates are not accepted
+        because they were computed from the pre-jump frame (run 8, F-33: the
+        mill rose wherever the idle villager stood).
         """
         inp = block.input
         intent = str(inp.get("intent", "Build"))
@@ -454,25 +452,26 @@ class ClaudeProvider:
         if rejection is not None:
             action_dict = {"type": "build", **inp}
             return action_dict, self._make_tool_result(block, False, rejection)
-        # x,y are optional: the text-only model can't see open ground, so when it
-        # omits them we auto-place near the town centre. See default_build_placement.
-        x, y = inp.get("x"), inp.get("y")
-        placement = (
-            (cast("int", x), cast("int", y))
-            if x is not None and y is not None
-            else default_build_placement()
-        )
-        steps = build_steps(building_key, intent, placement)
+        steps = build_steps(building_key, intent)
         return await self._run_composite(block, "build", steps)
+
+    def _refuse_raw_send(self, block: ToolUseBlock, name: str) -> tuple[dict, dict]:
+        """Failure result for a send composite that gave only raw coordinates."""
+        return {"type": name, **block.input}, self._make_tool_result(
+            block, False, STALE_COORDS_DETAIL
+        )
 
     async def _execute_send_villager(self, block: ToolUseBlock) -> tuple[dict, dict]:
         """Composite: press . (with rescan) → right_click target.
 
         The "." press moves the camera, so we rescan to get fresh entity
-        positions before right-clicking.
+        positions before right-clicking. Raw x/y are refused (F-33).
         """
         inp = block.input
         intent = inp.get("intent", "Send villager")
+        right_click = _target_right_click(inp, intent)
+        if right_click is None:
+            return self._refuse_raw_send(block, "send_villager")
         steps: list[dict] = [
             {
                 "type": "press",
@@ -480,7 +479,7 @@ class ClaudeProvider:
                 "rescan": True,
                 "intent": f"Select idle villager ({intent})",
             },
-            _target_right_click(inp, intent),
+            right_click,
         ]
         return await self._run_composite(block, "send_villager", steps)
 
@@ -492,6 +491,9 @@ class ClaudeProvider:
         """
         inp = block.input
         intent = inp.get("intent", "Send all idle villagers")
+        right_click = _target_right_click(inp, intent)
+        if right_click is None:
+            return self._refuse_raw_send(block, "send_all_idle")
         steps: list[dict] = [
             {
                 "type": "press",
@@ -500,7 +502,7 @@ class ClaudeProvider:
                 "rescan": True,
                 "intent": f"Select ALL idle villagers ({intent})",
             },
-            _target_right_click(inp, intent),
+            right_click,
         ]
         return await self._run_composite(block, "send_all_idle", steps)
 
@@ -580,7 +582,6 @@ class ClaudeProvider:
             *build_menu_steps(
                 building_key,
                 intent,
-                default_build_placement(),
                 menu_intent=f"Open economic build menu ({intent})",
             ),
         ]

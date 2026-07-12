@@ -67,11 +67,11 @@ def test_no_queue_at_dark_age_cap() -> None:
 def test_age_up_fires_when_food_banked_and_buildings_qualify() -> None:
     actions = decide([], _state(population=18, food=520), alarm=False)
     assert actions == [
-        {"type": "press", "key": "escape", "intent": "Clear UI state (age up)"},
         {"type": "press", "key": "h", "intent": "Select TC (age up)"},
         {"type": "press", "key": "z", "intent": "Research Feudal Age (reactive)"},
     ]  # banking (pop 18): no villager queue rides along to eat the 500;
-    # escape first so `z` can't land in an open build menu (F-27's outposts)
+    # selecting the TC first clears any open build menu so `z` can't land in
+    # it (F-27's outposts) — and never opens the game menu (F-32)
 
 
 def test_age_up_waits_for_two_qualifying_buildings() -> None:
@@ -178,34 +178,42 @@ def test_food_crisis_wood_floor_includes_margin() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Farm-affordability wood bias (T-518)
+# Goal-driven wood bank target (T-518 → T-527)
 # ---------------------------------------------------------------------------
 
 
-def test_near_miss_wood_gets_extra_wood_slot() -> None:
+def test_wood_below_farm_target_gets_extra_wood_slot() -> None:
     pattern = _idle_pattern(_state(population=20, wood=50))
     assert pattern[0] == "wood"
     assert pattern.count("wood") == 3  # vs 2 in the plain Dark Age rotation
 
 
+def test_lumber_camp_goal_raises_the_wood_target() -> None:
+    """Run 8 (F-34): wood plateaued at 65 while the camp cost 100 — the bias
+    must keep pulling wood until the CAMP is affordable, not just a farm."""
+    needs_camp = _state(population=20, wood=110, buildings=frozenset({"mill"}))
+    assert _idle_pattern(needs_camp)[0] == "wood"  # 110 < 100 + margin
+    banked = _state(population=20, wood=125, buildings=frozenset({"mill"}))
+    assert _idle_pattern(banked) == ("food", "food", "food", "wood", "wood")
+
+
 @pytest.mark.parametrize(
     ("wood", "buildings"),
     [
-        (50, frozenset()),  # no mill → no farm to save up for
-        (39, frozenset({"mill"})),  # below the band → normal rotation reaches it
-        (85, frozenset({"mill"})),  # farm comfortably affordable
+        (50, frozenset({"lumber_camp"})),  # camp stands, no mill → no farm goal
+        (85, frozenset({"mill", "lumber_camp"})),  # farm comfortably affordable
     ],
-    ids=["no-mill", "below-band", "above-band"],
+    ids=["no-wood-goal", "farm-banked"],
 )
-def test_no_wood_bias_outside_near_miss_band(wood: int, buildings: frozenset[str]) -> None:
+def test_no_wood_bias_without_pending_wood_goal(wood: int, buildings: frozenset[str]) -> None:
     state = _state(population=20, wood=wood, buildings=buildings)
     assert _idle_pattern(state) == ("food", "food", "food", "wood", "wood")
 
 
-def test_near_miss_band_sends_an_idle_to_wood() -> None:
+def test_wood_bank_bias_sends_an_idle_to_wood() -> None:
     entities = [_ent("town_center", (0, 0)), _ent("sheep", (10, 10)), _ent("tree", (20, 20))]
     # pop 20 with plain rotation is all-food (see spread test below); the
-    # near-miss bias must route at least one dispatch to wood.
+    # bank bias must route at least one dispatch to wood.
     actions = decide(entities, _state(population=20, idle_present=True, wood=50), alarm=False)
     targets = [a["target_class"] for a in actions if a["type"] == "right_click"]
     assert "tree" in targets
@@ -218,6 +226,7 @@ def test_reactive_build_constants_match_executor_tables() -> None:
     from gameplay_agent import reactive
 
     assert ex._BUILD_WOOD_COST["a"] == reactive._FARM_WOOD_COST
+    assert ex._BUILD_WOOD_COST["r"] == reactive._LUMBER_CAMP_WOOD_COST
     assert ex.BUILD_KEY_TO_CLASS[reactive._FARM_BUILD_KEY] == "farm"
     assert ex.BUILD_KEY_TO_CLASS[reactive._LUMBER_CAMP_BUILD_KEY] == "lumber_camp"
 

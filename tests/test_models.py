@@ -146,8 +146,6 @@ def test_press_single_character_keys(key: str) -> None:
         "return",
         "space",
         "tab",
-        "escape",
-        "esc",
         "backspace",
         "delete",
         "up",
@@ -168,6 +166,14 @@ def test_press_special_keys_normalized_to_lower(key: str) -> None:
 def test_press_function_keys_accepted(key: str) -> None:
     a = PressAction(type="press", key=key, intent="x")
     assert a.key == key
+
+
+@pytest.mark.parametrize("key", ["escape", "ESC", "f10", "f3"])
+def test_press_menu_pausing_keys_rejected(key: str) -> None:
+    # Escape with nothing to cancel opens the game menu and pauses the game
+    # (run 8, F-32); F10 is the menu, F3 is pause. 'h' clears UI state instead.
+    with pytest.raises(ValidationError, match="opens the game menu"):
+        PressAction(type="press", key=key, intent="x")
 
 
 def test_press_invalid_key_rejected() -> None:

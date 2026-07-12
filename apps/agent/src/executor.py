@@ -364,10 +364,15 @@ def _to_int(value: object) -> int:
 
 
 def _resolve_coords(action_dict: dict[str, object]) -> tuple[str, tuple[int, int] | None]:
-    """Resolve action coordinates from target_id, target_class, or x/y fields.
+    """Resolve action coordinates from auto_placement, targets, or x/y fields.
 
     Returns (error_detail, coords). error_detail is non-empty on failure.
+    auto_placement resolves NOW — against the entity cache as it is at click
+    time, after any camera move earlier in the sequence (run 8, F-33).
     """
+    if action_dict.get("auto_placement"):
+        return ("", default_build_placement())
+
     target_id = action_dict.get("target_id")
     if target_id:
         coords = _resolve_target_id(str(target_id))
@@ -418,6 +423,13 @@ def _translate(x: int, y: int) -> tuple[int, int]:
 # ---------------------------------------------------------------------------
 
 BUILD_PLACEMENT_KEYWORDS = ("place", "build")
+# Hotkeys that re-center the camera — coordinates computed before one of these
+# no longer point at the same terrain (run 8, F-33).
+CAMERA_KEYS: frozenset[str] = frozenset({"h", ".", ","})
+STALE_COORDS_DETAIL = (
+    "raw x/y coordinates go stale once the camera moves (a '.'/'h'/',' press "
+    "re-centers the view) — use target_class or target_id instead"
+)
 # Local retry offsets sprayed around an already-open anchor — systematic compass
 # points (not random) so coverage is deterministic. The anchor itself is now
 # chosen on empty ground (see default_build_placement), so these only need to
@@ -587,49 +599,52 @@ def default_build_placement() -> tuple[int, int]:
 def build_menu_steps(
     building_key: str,
     intent: str,
-    placement: tuple[int, int],
     *,
     menu_intent: str = "Open economic build menu",
 ) -> list[dict[str, object]]:
-    """Menu → building → place → escape sequence, for an ALREADY-selected villager.
+    """Menu → building → place → select-TC sequence, for an ALREADY-selected villager.
 
     The tail every build shares: open the economic build menu (q), pick the
     building, click the placement (with `building_key` attached so `_handle_click`
-    verifies the structure landed), then escape so no menu is left open to
-    re-map later keystrokes. `build_steps` prepends the idle-villager select;
+    verifies the structure landed), then select the TC so no menu is left open
+    to re-map later keystrokes. The placement is resolved AT CLICK TIME
+    (`auto_placement`) so a camera move earlier in the sequence can't strand it
+    on stale coordinates (run 8, F-33: the mill rose wherever the idle villager
+    stood). `build_steps` prepends the idle-villager select;
     `claude.ClaudeProvider._execute_reassign_villager` prepends its own
     worker-click instead — the menu/place sequence lives in exactly one place.
     """
-    place_x, place_y = placement
     return [
         {"type": "press", "key": "q", "intent": menu_intent},
         {"type": "press", "key": building_key, "intent": f"Select building ({intent})"},
         {
             "type": "click",
-            "x": place_x,
-            "y": place_y,
+            "auto_placement": True,
             "building_key": building_key,  # lets _handle_click verify the placement landed
             "intent": f"Place building ({intent})",
         },
         # Always leave the UI in a clean state: a menu left open re-maps later
         # keystrokes (runs 6-7 built phantom outposts through leaked menus).
-        {"type": "press", "key": "escape", "intent": f"Close build menu ({intent})"},
+        # Selecting the TC clears menu/ghost by switching selection; `escape`
+        # here OPENED the game menu whenever nothing was left to cancel and
+        # paused the game (run 8, F-32).
+        {"type": "press", "key": "h", "intent": f"Select TC to clear build UI ({intent})"},
     ]
 
 
-def build_steps(
-    building_key: str, intent: str, placement: tuple[int, int]
-) -> list[dict[str, object]]:
+def build_steps(building_key: str, intent: str) -> list[dict[str, object]]:
     """Press/click sequence for a build: select idle villager → open the economic
     build menu → pick the building → place it.
 
-    Shared by the single-shot build handler (`_handle_build`) and the tool-loop
-    build composite (`claude.ClaudeProvider._execute_build`) so the steps live in
-    exactly one place.
+    Shared by the single-shot build handler (`_handle_build`), the tool-loop
+    build composite (`claude.ClaudeProvider._execute_build`), and the housed
+    fallback, so the steps live in exactly one place. The `.` select re-centers
+    the camera on the villager, so it rescans and the placement resolves after
+    the jump (F-33).
     """
     return [
-        {"type": "press", "key": ".", "intent": f"Select idle villager ({intent})"},
-        *build_menu_steps(building_key, intent, placement),
+        {"type": "press", "key": ".", "rescan": True, "intent": f"Select idle villager ({intent})"},
+        *build_menu_steps(building_key, intent),
     ]
 
 
@@ -893,7 +908,7 @@ async def _handle_build(action_dict: dict[str, object], intent: str) -> ActionRe
     rejection = build_rejection(key, intent)
     if rejection is not None:
         return ActionResult(False, rejection)
-    for step in build_steps(key, intent, default_build_placement()):
+    for step in build_steps(key, intent):
         result = await execute_action(step)
         if not result.success:
             return ActionResult(False, f"build failed at: {step.get('intent', '')}")
@@ -975,11 +990,51 @@ async def execute_action(action: dict[str, object] | Action) -> ActionResult:
         return ActionResult(False, f"execution error: {e}")
 
 
+def _as_dict(action: dict[str, object] | Action) -> dict[str, object]:
+    """Plain-dict view of an action for inspection (models are dumped)."""
+    if isinstance(action, BaseModel):
+        return cast("dict[str, object]", action.model_dump())
+    return action
+
+
+def _moves_camera(action_dict: dict[str, object]) -> bool:
+    return action_dict.get("type") == "press" and (
+        bool(action_dict.get("rescan")) or str(action_dict.get("key", "")).lower() in CAMERA_KEYS
+    )
+
+
+def _uses_raw_coords_only(action_dict: dict[str, object]) -> bool:
+    """A click resolved purely from literal x/y — the form camera moves break."""
+    return (
+        action_dict.get("type") in ("click", "right_click")
+        and action_dict.get("x") is not None
+        and not action_dict.get("target_id")
+        and not action_dict.get("target_class")
+        and not action_dict.get("auto_placement")
+    )
+
+
 async def execute_actions(actions: Sequence[dict[str, object] | Action]) -> list[ActionResult]:
-    """Execute a list of actions sequentially."""
+    """Execute a list of actions sequentially.
+
+    A raw-coordinate click after a camera-moving press in the same batch is
+    refused instead of executed: its x/y were computed from the pre-move frame
+    and land on arbitrary terrain (run 8, F-33 — villagers walked to nothing).
+    The failure detail teaches the LLM to name targets instead.
+    """
     if not ensure_game_focused():
         log.warning("could_not_focus_before_actions")
         await asyncio.sleep(0.5)
         ensure_game_focused()
 
-    return [await execute_action(action) for action in actions]
+    results: list[ActionResult] = []
+    camera_moved = False
+    for action in actions:
+        preview = _as_dict(action)
+        if camera_moved and _uses_raw_coords_only(preview):
+            log.warning("stale_coords_rejected", intent=preview.get("intent", ""))
+            results.append(ActionResult(False, STALE_COORDS_DETAIL))
+            continue
+        results.append(await execute_action(action))
+        camera_moved = camera_moved or _moves_camera(preview)
+    return results

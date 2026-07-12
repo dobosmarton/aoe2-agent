@@ -32,13 +32,15 @@ class PointTargetAction(BaseModel):
     )
     intent: str = ""
 
+    def _targeting_provided(self) -> bool:
+        """Whether the action names a point (subclasses may add other modes)."""
+        has_coords = self.x is not None and self.y is not None
+        return has_coords or self.target_id is not None or self.target_class is not None
+
     @model_validator(mode="after")
     def check_coords_or_target(self) -> "PointTargetAction":
-        """Ensure either coordinates, target_id, or target_class is provided."""
-        has_coords = self.x is not None and self.y is not None
-        has_target = self.target_id is not None
-        has_class = self.target_class is not None
-        if not has_coords and not has_target and not has_class:
+        """Ensure the action can be resolved to a point at execution time."""
+        if not self._targeting_provided():
             raise ValueError("Must provide (x, y) coordinates, target_id, or target_class")
         return self
 
@@ -52,12 +54,26 @@ class ClickAction(PointTargetAction):
         description="Econ build-menu key when this click places a building — carried "
         "through validation so the executor can verify the placement landed",
     )
+    auto_placement: bool = Field(
+        default=False,
+        description="Resolve the placement to open ground AT CLICK TIME — coordinates "
+        "computed before a camera move land on arbitrary terrain (run 8, F-33)",
+    )
+
+    def _targeting_provided(self) -> bool:
+        return self.auto_placement or super()._targeting_provided()
 
 
 class RightClickAction(PointTargetAction):
     """Right click action."""
 
     type: Literal["right_click"]
+
+
+# Keys that open the game menu or pause the game — never what the agent means:
+# Escape with nothing to cancel OPENS the menu (run 8, F-32), F10 IS the menu,
+# F3 is pause. UI state is cleared by selecting the TC ('h') instead.
+_GAME_PAUSING_KEYS: frozenset[str] = frozenset({"escape", "esc", "f10", "f3"})
 
 
 class PressAction(BaseModel):
@@ -123,6 +139,12 @@ class PressAction(BaseModel):
         }
 
         key_lower = v.lower()
+
+        if key_lower in _GAME_PAUSING_KEYS:
+            raise ValueError(
+                f"key '{v}' opens the game menu / pauses the game — "
+                "press 'h' (select TC) to clear UI state instead"
+            )
 
         # Single character keys are always valid (letters, numbers, symbols)
         if len(v) == 1:

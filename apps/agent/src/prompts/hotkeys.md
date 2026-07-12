@@ -1,6 +1,12 @@
 ## Hotkey Reference
 
 ### Navigation & Selection
+- NEVER press Escape: with nothing to cancel it OPENS the game menu and pauses
+  the game. To clear an open build menu or placement ghost, press H (select
+  TC) instead — switching selection cancels them.
+- Coordinates go stale when the camera moves: after pressing `.`, `,` or H,
+  never click x/y computed from the previous frame — name a target_class or
+  target_id instead (the executor resolves it against the fresh view).
 - H: Go to Town Center
 - .: Select next idle villager (moves camera)
 - ,: Select next idle military unit (moves camera)

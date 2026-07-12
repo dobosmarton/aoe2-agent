@@ -737,12 +737,62 @@ def test_execute_actions_runs_each_in_order(fake_pyautogui: _FakePyautogui) -> N
     assert press_keys == ["h", "q"]
 
 
+# ---------------------------------------------------------------------------
+# Stale-coordinate guard (T-525, F-33)
+# ---------------------------------------------------------------------------
+
+
+def test_raw_coords_click_after_camera_move_refused(fake_pyautogui: _FakePyautogui) -> None:
+    """A literal-x/y click after a camera-moving press points at pre-jump
+    terrain (run 8: villagers walked to random places) — refused, not clicked."""
+    results = _run(
+        ex.execute_actions(
+            [
+                {"type": "press", "key": ".", "intent": "select idle"},
+                {"type": "right_click", "x": 500, "y": 500, "intent": "send"},
+            ]
+        )
+    )
+    assert results[0].success and not results[1].success
+    assert "target_class" in results[1].detail  # teaches the fix
+    assert all(c[0] != "rightClick" for c in fake_pyautogui.calls)
+
+
+def test_targeted_click_after_camera_move_executes(fake_pyautogui: _FakePyautogui) -> None:
+    ex._detected_entities = [{"id": "sheep_0", "class": "sheep", "center": (400, 300)}]
+    results = _run(
+        ex.execute_actions(
+            [
+                {"type": "press", "key": ".", "intent": "select idle"},
+                {"type": "right_click", "target_class": "sheep", "intent": "send"},
+            ]
+        )
+    )
+    assert all(r.success for r in results)  # resolved from the (fresh) cache
+
+
+def test_raw_coords_click_without_camera_move_executes(fake_pyautogui: _FakePyautogui) -> None:
+    results = _run(ex.execute_actions([{"type": "click", "x": 500, "y": 500, "intent": "ui"}]))
+    assert results[0].success
+
+
+def test_resolve_coords_auto_placement_resolves_at_click_time(
+    fake_pyautogui: _FakePyautogui, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ex, "default_build_placement", lambda: (321, 654))
+    detail, coords = ex._resolve_coords({"auto_placement": True})
+    assert (detail, coords) == ("", (321, 654))
+
+
 def test_build_steps_sequence() -> None:
-    """build_steps: select villager -> econ menu -> building key -> placement
-    click -> escape (leave the UI clean so later keys can't land in a leaked
-    menu — runs 6-7 built phantom outposts that way)."""
-    steps = ex.build_steps("w", "build mill", (700, 400))
+    """build_steps: select villager (rescan) -> econ menu -> building key ->
+    auto-placed click -> select TC (leave the UI clean so later keys can't land
+    in a leaked menu — runs 6-7 built phantom outposts that way; escape here
+    opened the game menu when nothing needed canceling, run 8 F-32)."""
+    steps = ex.build_steps("w", "build mill")
     assert [s["type"] for s in steps] == ["press", "press", "press", "click", "press"]
+    assert steps[0]["rescan"] is True  # '.' moves the camera → refresh entities
     assert steps[2]["key"] == "w"  # building_key selects the structure
-    assert (steps[3]["x"], steps[3]["y"]) == (700, 400)  # placement passed through
-    assert steps[4]["key"] == "escape"  # UI-state hygiene
+    assert steps[3]["auto_placement"] is True  # placement resolved at click time (F-33)
+    assert "x" not in steps[3]  # no pre-computed spot survives the camera jump
+    assert steps[4]["key"] == "h"  # UI-state hygiene without the game menu

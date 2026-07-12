@@ -24,9 +24,10 @@ import structlog
 
 from .entity_utils import extract_attrs
 from .executor import (
+    CAMERA_KEYS,
+    build_steps,
     clear_detected_entities,
     confirmed_buildings,
-    default_build_placement,
     execute_actions,
     get_detected_entities,
     get_rescan_fn,
@@ -267,9 +268,6 @@ _BUILDING_CLASSES: frozenset[str] = frozenset(
     }
 )
 
-# Camera-moving hotkeys whose press should change what's on screen.
-_CAMERA_KEYS: frozenset[str] = frozenset({"h", ".", ","})
-
 
 @dataclass(frozen=True, slots=True)
 class _Expectation:
@@ -289,7 +287,7 @@ def _expectation_for(action: dict) -> _Expectation:
         return _Expectation("new_building", "build/place should add a building")
     if a_type == "press":
         key = str(action.get("key", "")).lower()
-        if action.get("rescan") or key in _CAMERA_KEYS:
+        if action.get("rescan") or key in CAMERA_KEYS:
             return _Expectation("selection_change", f"press {key} should change the view")
     return _Expectation("none", "")
 
@@ -361,24 +359,7 @@ def _fallback_actions(memory: AgentMemory) -> list[dict[str, object]]:
     state = memory.game_state
     is_housed = state.population_cap > 0 and state.population >= state.population_cap
     if is_housed:
-        place_x, place_y = default_build_placement()
-        return [
-            {
-                "type": "press",
-                "key": ".",
-                "rescan": True,
-                "intent": "Select idle villager (fallback build)",
-            },
-            {"type": "press", "key": "q", "intent": "Open economic build menu (fallback)"},
-            {"type": "press", "key": "q", "intent": "Select house (fallback)"},
-            {
-                "type": "click",
-                "x": place_x,
-                "y": place_y,
-                "building_key": "q",  # lets _handle_click verify the house landed
-                "intent": "Place house to raise pop cap (fallback build)",
-            },
-        ]
+        return build_steps("q", "Place house to raise pop cap (fallback build)")
     return [
         {"type": "press", "key": "h", "intent": "Go to TC (fallback)"},
         {"type": "press", "key": "q", "intent": "Queue villager (fallback)"},

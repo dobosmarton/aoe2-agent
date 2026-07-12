@@ -269,7 +269,6 @@ def test_reassign_villager_sequences_camp_select_build(
     ]
     monkeypatch.setattr(claude_mod, "execute_action", _record)
     monkeypatch.setattr(claude_mod, "get_detected_entities", lambda: entities)
-    monkeypatch.setattr(claude_mod, "default_build_placement", lambda: (500, 500))
     monkeypatch.setattr(claude_mod, "_tracker_velocities", lambda: {})
     monkeypatch.setattr(provider, "_entity_snapshot", lambda: [])
     _allow_farm(monkeypatch)  # a mill has been seen → the farm gate passes
@@ -290,6 +289,7 @@ def test_reassign_villager_sequences_camp_select_build(
     assert kinds[2] == ("press", "q", None)
     assert kinds[3] == ("press", "a", None)
     assert steps[4]["type"] == "click" and steps[4]["building_key"] == "a"
+    assert steps[4]["auto_placement"] is True  # placement resolved at click time (F-33)
 
 
 def test_reassign_villager_rejected_when_farm_gate_fails(
@@ -335,7 +335,6 @@ def test_reassign_villager_falls_back_to_villager_class(
 
     monkeypatch.setattr(claude_mod, "execute_action", _record)
     monkeypatch.setattr(claude_mod, "get_detected_entities", lambda: [])  # no worker found
-    monkeypatch.setattr(claude_mod, "default_build_placement", lambda: (500, 500))
     monkeypatch.setattr(claude_mod, "_tracker_velocities", lambda: {})
     monkeypatch.setattr(provider, "_entity_snapshot", lambda: [])
     _allow_farm(monkeypatch)  # a mill has been seen → the farm gate passes
@@ -392,10 +391,10 @@ def test_send_all_idle_step_list_verbatim(
     provider: ClaudeProvider, recorded_steps: list[dict]
 ) -> None:
     block = SimpleNamespace(
-        id="tu4", name="send_all_idle", input={"x": 100, "y": 200, "intent": "regroup"}
+        id="tu4", name="send_all_idle", input={"target_class": "tree", "intent": "regroup"}
     )
     action_dict, _result = _run(provider._execute_send_all_idle(block))
-    assert action_dict == {"type": "send_all_idle", "x": 100, "y": 200, "intent": "regroup"}
+    assert action_dict == {"type": "send_all_idle", "target_class": "tree", "intent": "regroup"}
     assert recorded_steps == [
         {
             "type": "press",
@@ -404,8 +403,23 @@ def test_send_all_idle_step_list_verbatim(
             "rescan": True,
             "intent": "Select ALL idle villagers (regroup)",
         },
-        {"type": "right_click", "intent": "regroup", "x": 100, "y": 200},
+        {"type": "right_click", "intent": "regroup", "target_class": "tree"},
     ]
+
+
+@pytest.mark.parametrize("composite", ["send_villager", "send_all_idle"])
+def test_send_composites_refuse_raw_coordinates(
+    provider: ClaudeProvider, recorded_steps: list[dict], composite: str
+) -> None:
+    """F-33: the '.' select re-centers the camera, so literal x/y computed from
+    the pre-jump frame land on arbitrary terrain — the composite fails with a
+    teaching detail instead of spending keystrokes."""
+    block = SimpleNamespace(id="tu5", name=composite, input={"x": 100, "y": 200, "intent": "go"})
+    handler = getattr(provider, f"_execute_{composite}")
+    action_dict, result = _run(handler(block))
+    assert action_dict["type"] == composite
+    assert recorded_steps == []  # refused before any keystroke
+    assert "target_class" in str(result)
 
 
 def test_build_house_rejected_by_headroom_gate(

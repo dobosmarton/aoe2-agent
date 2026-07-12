@@ -102,15 +102,16 @@ _FOOD_CRISIS_THRESHOLD = 60
 # showed all-food routing pinning wood at 0, locking out the farm economy the
 # famine needed to end.
 _FARM_WOOD_COST = 60
-# Headroom above the farm cost the wood routing aims for. Run 5 (F-23): six
-# farm attempts failed at wood 48-59 — the economy hovered exactly at the cost
-# boundary, losing every farm to the next purchase. A separate constant so the
-# V-4 drift test keeps pinning _FARM_WOOD_COST to the executor's table.
-_FARM_WOOD_MARGIN = 20
-# Below this, wood is far from a farm anyway and the age pattern's own wood
-# slots are the right tool; the near-miss bias targets only the observed
-# just-under-a-farm plateau.
-_FARM_WOOD_NEAR_MISS_FLOOR = 40
+# A lumber camp's wood cost (mirrors executor._BUILD_WOOD_COST["r"], same
+# drift-test arrangement as the farm cost above). Run 8 (F-34): the wood bank
+# targeted only the farm, so the camp — the second Feudal prerequisite — was
+# rejected 19 times at 37-79 wood and Feudal stayed unreachable.
+_LUMBER_CAMP_WOOD_COST = 100
+# Headroom above a bank target so a purchase doesn't leave the stock exactly
+# at the cost boundary. Run 5 (F-23): six farm attempts failed at wood 48-59.
+# A separate constant so the V-4 drift tests keep pinning the raw costs to the
+# executor's table.
+_WOOD_BANK_MARGIN = 20
 
 
 def decide(entities: list[object], state: GameState, alarm: bool) -> list[dict[str, object]]:
@@ -145,8 +146,10 @@ def _age_up_actions(state: GameState) -> list[dict[str, object]]:
     villager. Gated on the two-building requirement being visibly met, so the
     press fires once when it can succeed instead of spamming no-ops (run 6:
     14 presses against a greyed button — and each press was a chance for the
-    F-27 UI-context leak). The escape press first clears any open build menu /
-    placement ghost, so `z` can't land in the econ menu (where Z = Outpost).
+    F-27 UI-context leak). Selecting the TC (`h`) itself clears any open build
+    menu / placement ghost by switching selection, so `z` can't land in the
+    econ menu (where Z = Outpost); an escape prefix here OPENED the game menu
+    when nothing needed canceling (run 8, F-32).
     """
     if (
         state.current_age != "Dark Age"
@@ -155,10 +158,18 @@ def _age_up_actions(state: GameState) -> list[dict[str, object]]:
     ):
         return []
     return [
-        {"type": "press", "key": "escape", "intent": "Clear UI state (age up)"},
         {"type": "press", "key": "h", "intent": "Select TC (age up)"},
         {"type": "press", "key": "z", "intent": "Research Feudal Age (reactive)"},
     ]
+
+
+def _needs_lumber_camp(state: GameState) -> bool:
+    """Feudal prep pending: Dark Age economy established, no camp standing."""
+    return (
+        state.current_age == "Dark Age"
+        and state.population >= _FEUDAL_PREP_POP
+        and "lumber_camp" not in state.buildings_seen
+    )
 
 
 def _feudal_prep_actions(state: GameState) -> list[dict[str, object]]:
@@ -169,11 +180,7 @@ def _feudal_prep_actions(state: GameState) -> list[dict[str, object]]:
     once a lumber camp is confirmed or pending, and its cost gate waits out
     the 100 wood. Doubles as a wood-income boost (closer drop-off).
     """
-    if (
-        state.current_age != "Dark Age"
-        or state.population < _FEUDAL_PREP_POP
-        or "lumber_camp" in state.buildings_seen
-    ):
+    if not _needs_lumber_camp(state):
         return []
     return [
         {
@@ -281,12 +288,19 @@ def _idle_batch_size(state: GameState) -> int:
     return batch
 
 
-def _farm_wood_near_miss(state: GameState) -> bool:
-    """Wood hovering just under a farm's cost while a mill stands ready."""
-    if "mill" not in state.buildings_seen:
-        return False
-    wood = _resource(state, "wood")
-    return _FARM_WOOD_NEAR_MISS_FLOOR <= wood < _FARM_WOOD_COST + _FARM_WOOD_MARGIN
+def _wood_bank_target(state: GameState) -> int | None:
+    """Wood the rotation should bank toward: the binding build goal's cost.
+
+    The lumber camp (Feudal prerequisite) outranks farms; each target carries
+    the margin so a purchase doesn't leave the stock exactly at the boundary.
+    Run 8 (F-34): a farm-only target let wood plateau at 65 while the camp
+    cost 100. None when no wood-gated goal is pending.
+    """
+    if _needs_lumber_camp(state):
+        return _LUMBER_CAMP_WOOD_COST + _WOOD_BANK_MARGIN
+    if "mill" in state.buildings_seen:
+        return _FARM_WOOD_COST + _WOOD_BANK_MARGIN
+    return None
 
 
 def _idle_pattern(state: GameState) -> tuple[ResourceKind, ...]:
@@ -296,15 +310,18 @@ def _idle_pattern(state: GameState) -> tuple[ResourceKind, ...]:
     production and the Feudal bank cannot). Famine with wood below a farm's
     cost plus margin → 2:1 food:wood, so the farm economy that ENDS the famine
     stays reachable — the pure all-food override starved wood to 0 and locked
-    the loop shut (run 4, F-21). Outside a famine, a near-miss wood stock gets
-    one extra wood slot so farms stop losing the affordability race (F-23).
+    the loop shut (run 4, F-21). Outside a famine, wood below the binding
+    goal's bank target gets one extra wood slot in the rotation (F-23, F-34).
     """
     if _resource(state, "food") < _FOOD_CRISIS_THRESHOLD:
-        if _resource(state, "wood") < _FARM_WOOD_COST + _FARM_WOOD_MARGIN:
+        if _resource(state, "wood") < _FARM_WOOD_COST + _WOOD_BANK_MARGIN:
             return ("food", "food", "wood")
         return ("food",)
     pattern = _IDLE_PATTERN_BY_AGE.get(state.current_age, _DEFAULT_IDLE_PATTERN)
-    return ("wood", *pattern) if _farm_wood_near_miss(state) else pattern
+    target = _wood_bank_target(state)
+    if target is not None and _resource(state, "wood") < target:
+        return ("wood", *pattern)
+    return pattern
 
 
 def _tc_origin(entities: list[object]) -> tuple[float, float]:
