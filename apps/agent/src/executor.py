@@ -6,6 +6,7 @@ Dispatches validated actions to per-type handler functions.
 import asyncio
 import math
 import time
+from collections import Counter
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import cast
@@ -192,21 +193,29 @@ def _settle_pending_placements(wood_now: int | None) -> None:
 
     A placement that consumed its wood cost DID succeed regardless of what
     detection saw (the resource bar is authoritative; the vision model can't
-    see foundations). Judged per-entry, erring toward confirmation: a false
+    see foundations). Judged FIFO, erring toward confirmation: a false
     "failed" report is what caused the duplicate mill, while a false success
     merely delays the retry by a turn. An unchanged wood reading is treated as
     stale OCR and re-checked next snapshot (up to `settles_left` times).
+    Confirmed spend is deducted per shared baseline before judging the next
+    entry, so one wood drop confirms at most one pending of a given cost —
+    run 3 (F-17) settled two mills off a single purchase.
     """
     if not _build_gates.pending_placements or wood_now is None:
         return
     still_pending: list[_PendingPlacement] = []
+    spend_by_baseline: dict[int, int] = {}
     for pending in _build_gates.pending_placements:
         if wood_now == pending.wood_before and pending.settles_left > 0:
             pending.settles_left -= 1
             still_pending.append(pending)
             continue
-        purchased = wood_now <= pending.wood_before - pending.wood_cost + _PLACEMENT_INCOME_SLACK
+        spent = spend_by_baseline.get(pending.wood_before, 0)
+        purchased = (
+            wood_now <= pending.wood_before - spent - pending.wood_cost + _PLACEMENT_INCOME_SLACK
+        )
         if purchased:
+            spend_by_baseline[pending.wood_before] = spent + pending.wood_cost
             record_confirmed_buildings([pending.building_class])
             log.info(
                 "build_purchase_confirmed",
@@ -251,6 +260,11 @@ def confirmed_buildings() -> frozenset[str]:
     evidence) — copied into GameState each turn so the reactive tier can gate
     Feudal prep and the age-up press on the two-building requirement."""
     return frozenset(_build_gates.buildings_confirmed)
+
+
+def pending_placement_counts() -> Counter[str]:
+    """Building classes awaiting wood-delta settlement, by count."""
+    return Counter(p.building_class for p in _build_gates.pending_placements)
 
 
 def reset_build_gates() -> None:

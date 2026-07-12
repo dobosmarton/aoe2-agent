@@ -423,6 +423,15 @@ def test_confirmed_buildings_accessor(fake_pyautogui: _FakePyautogui) -> None:
     assert ex.confirmed_buildings() == frozenset({"mill"})
 
 
+def test_pending_placement_counts_accessor(fake_pyautogui: _FakePyautogui) -> None:
+    ex.observe_hud(10, 15, {"wood": 200})
+    ex._note_pending_placement("a")
+    ex._note_pending_placement("a")
+    assert ex.pending_placement_counts() == {"farm": 2}
+    ex.observe_hud(10, 15, {"wood": 70})  # both spends visible → both settle
+    assert ex.pending_placement_counts() == {}
+
+
 def test_reset_build_gates_clears_evidence(fake_pyautogui: _FakePyautogui) -> None:
     ex.record_confirmed_buildings(["mill"])
     ex.observe_hud(10, 15, {"wood": 500})
@@ -507,6 +516,38 @@ def test_pending_placement_waits_out_stale_readings(fake_pyautogui: _FakePyautog
     assert (
         ex._build_gates.pending_placements == [] and "mill" in ex._build_gates.buildings_confirmed
     )
+
+
+def test_one_wood_drop_confirms_at_most_one_pending(fake_pyautogui: _FakePyautogui) -> None:
+    """Run 3 (F-17): one 160→8 drop settled BOTH pending entries. Confirmed
+    spend is deducted per shared baseline, so the second pending is judged
+    against what the drop has left."""
+    ex.observe_hud(10, 15, {"wood": 160})
+    ex._note_pending_placement("w")  # mill, 100 wood
+    ex._note_pending_placement("r")  # lumber camp, 100 wood — same baseline
+    ex.observe_hud(10, 15, {"wood": 8})  # a single purchase's drop
+    assert ex._build_gates.buildings_confirmed == {"mill"}  # FIFO winner only
+    assert ex._build_gates.pending_placements == []
+
+
+def test_budget_covers_two_genuine_purchases(fake_pyautogui: _FakePyautogui) -> None:
+    ex.observe_hud(10, 15, {"wood": 200})
+    ex._note_pending_placement("w")  # mill, 100 wood
+    ex._note_pending_placement("a")  # farm, 60 wood — same baseline
+    ex.observe_hud(10, 15, {"wood": 30})  # both spends landed (+income slack)
+    assert {"mill", "farm"} <= ex._build_gates.buildings_confirmed
+    assert ex._build_gates.pending_placements == []
+
+
+def test_pendings_with_different_baselines_settle_independently(
+    fake_pyautogui: _FakePyautogui,
+) -> None:
+    ex.observe_hud(10, 15, {"wood": 200})
+    ex._note_pending_placement("w")
+    ex.observe_hud(10, 15, {"wood": 95})  # settles the mill
+    ex._note_pending_placement("r")  # fresh baseline 95 — no deduction carryover
+    ex.observe_hud(10, 15, {"wood": 0})
+    assert {"mill", "lumber_camp"} <= ex._build_gates.buildings_confirmed
 
 
 def test_place_click_succeeds_and_records_when_building_lands(
