@@ -102,6 +102,15 @@ _FOOD_CRISIS_THRESHOLD = 60
 # showed all-food routing pinning wood at 0, locking out the farm economy the
 # famine needed to end.
 _FARM_WOOD_COST = 60
+# Headroom above the farm cost the wood routing aims for. Run 5 (F-23): six
+# farm attempts failed at wood 48-59 — the economy hovered exactly at the cost
+# boundary, losing every farm to the next purchase. A separate constant so the
+# V-4 drift test keeps pinning _FARM_WOOD_COST to the executor's table.
+_FARM_WOOD_MARGIN = 20
+# Below this, wood is far from a farm anyway and the age pattern's own wood
+# slots are the right tool; the near-miss bias targets only the observed
+# just-under-a-farm plateau.
+_FARM_WOOD_NEAR_MISS_FLOOR = 40
 
 
 def decide(entities: list[object], state: GameState, alarm: bool) -> list[dict[str, object]]:
@@ -272,20 +281,30 @@ def _idle_batch_size(state: GameState) -> int:
     return batch
 
 
+def _farm_wood_near_miss(state: GameState) -> bool:
+    """Wood hovering just under a farm's cost while a mill stands ready."""
+    if "mill" not in state.buildings_seen:
+        return False
+    wood = _resource(state, "wood")
+    return _FARM_WOOD_NEAR_MISS_FLOOR <= wood < _FARM_WOOD_COST + _FARM_WOOD_MARGIN
+
+
 def _idle_pattern(state: GameState) -> tuple[ResourceKind, ...]:
     """Age-keyed gather rotation, overridden during a food famine.
 
     Famine with farming affordable → all-food (wood/gold can wait; villager
     production and the Feudal bank cannot). Famine with wood below a farm's
-    cost → 2:1 food:wood, so the farm economy that ENDS the famine stays
-    reachable — the pure all-food override starved wood to 0 and locked the
-    loop shut (run 4, F-21).
+    cost plus margin → 2:1 food:wood, so the farm economy that ENDS the famine
+    stays reachable — the pure all-food override starved wood to 0 and locked
+    the loop shut (run 4, F-21). Outside a famine, a near-miss wood stock gets
+    one extra wood slot so farms stop losing the affordability race (F-23).
     """
     if _resource(state, "food") < _FOOD_CRISIS_THRESHOLD:
-        if _resource(state, "wood") < _FARM_WOOD_COST:
+        if _resource(state, "wood") < _FARM_WOOD_COST + _FARM_WOOD_MARGIN:
             return ("food", "food", "wood")
         return ("food",)
-    return _IDLE_PATTERN_BY_AGE.get(state.current_age, _DEFAULT_IDLE_PATTERN)
+    pattern = _IDLE_PATTERN_BY_AGE.get(state.current_age, _DEFAULT_IDLE_PATTERN)
+    return ("wood", *pattern) if _farm_wood_near_miss(state) else pattern
 
 
 def _tc_origin(entities: list[object]) -> tuple[float, float]:

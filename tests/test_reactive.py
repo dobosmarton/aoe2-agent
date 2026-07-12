@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 from gameplay_agent.entity_utils import nearest_class_of_kind
 from gameplay_agent.memory import GameState
-from gameplay_agent.reactive import _resolve_idle_target, decide
+from gameplay_agent.reactive import _idle_pattern, _resolve_idle_target, decide
 
 from tests.factories import make_entity as _ent
 
@@ -167,6 +167,48 @@ def test_food_crisis_with_no_wood_reserves_a_wood_slot() -> None:
     )
     targets = sorted(a["target_class"] for a in actions if a["type"] == "right_click")
     assert targets == ["sheep", "sheep", "tree"]  # exactly one wood slot per 3-batch
+
+
+def test_food_crisis_wood_floor_includes_margin() -> None:
+    # Famine wood routing banks a farm's cost PLUS margin: at exactly the cost
+    # (run 5, F-23: six attempts failed at 48-59 wood) farms lose the race
+    # against the next purchase.
+    assert _idle_pattern(_state(population=22, food=40, wood=65)) == ("food", "food", "wood")
+    assert _idle_pattern(_state(population=22, food=40, wood=85)) == ("food",)
+
+
+# ---------------------------------------------------------------------------
+# Farm-affordability wood bias (T-518)
+# ---------------------------------------------------------------------------
+
+
+def test_near_miss_wood_gets_extra_wood_slot() -> None:
+    pattern = _idle_pattern(_state(population=20, wood=50))
+    assert pattern[0] == "wood"
+    assert pattern.count("wood") == 3  # vs 2 in the plain Dark Age rotation
+
+
+@pytest.mark.parametrize(
+    ("wood", "buildings"),
+    [
+        (50, frozenset()),  # no mill → no farm to save up for
+        (39, frozenset({"mill"})),  # below the band → normal rotation reaches it
+        (85, frozenset({"mill"})),  # farm comfortably affordable
+    ],
+    ids=["no-mill", "below-band", "above-band"],
+)
+def test_no_wood_bias_outside_near_miss_band(wood: int, buildings: frozenset[str]) -> None:
+    state = _state(population=20, wood=wood, buildings=buildings)
+    assert _idle_pattern(state) == ("food", "food", "food", "wood", "wood")
+
+
+def test_near_miss_band_sends_an_idle_to_wood() -> None:
+    entities = [_ent("town_center", (0, 0)), _ent("sheep", (10, 10)), _ent("tree", (20, 20))]
+    # pop 20 with plain rotation is all-food (see spread test below); the
+    # near-miss bias must route at least one dispatch to wood.
+    actions = decide(entities, _state(population=20, idle_present=True, wood=50), alarm=False)
+    targets = [a["target_class"] for a in actions if a["type"] == "right_click"]
+    assert "tree" in targets
 
 
 def test_reactive_build_constants_match_executor_tables() -> None:
