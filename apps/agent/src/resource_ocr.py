@@ -92,6 +92,20 @@ _GLYPH_HW: tuple[int, int] = (28, 20)
 
 Backend = Literal["template", "tesseract", "rapidocr"]
 
+
+class ResourceReadings(TypedDict, total=False):
+    """One frame's cleaned HUD readings — a key is present only when read."""
+
+    food: int
+    wood: int
+    gold: int
+    stone: int
+    population: str
+    age: str
+    idle_present: bool
+    idle_count: int
+
+
 # Per-field character sets — used as the Tesseract whitelist and to filter the
 # RapidOCR output (which has no whitelist option).
 _DIGITS = "0123456789"
@@ -274,7 +288,11 @@ def load_templates(template_dir: Path, *, include_slash: bool) -> dict[str, np.n
         if not p.exists():
             raise FileNotFoundError(f"missing glyph template: {p}")
         gray = np.asarray(Image.open(p).convert("L"), dtype=np.uint8)
-        templates[char] = _normalize_glyph(_binarize_digits(gray))
+        # Fixed polarity, NOT _binarize_digits: templates are saved white-on-black
+        # by the harvest scripts, and Otsu's minority-foreground auto-invert FLIPS
+        # a tight crop whose glyph fills most of its own image (8 of 11 digits at
+        # 3024x1672 loaded inverted and everything classified as '3'/'7').
+        templates[char] = _normalize_glyph(np.where(gray > 127, 255, 0).astype(np.uint8))
     return templates
 
 
@@ -334,14 +352,23 @@ def _classify_bank(
     return best_char, best_score
 
 
-def _classify(glyph: np.ndarray, templates: dict[str, np.ndarray]) -> str:
-    return _classify_bank(glyph, {char: (tmpl,) for char, tmpl in templates.items()})[0]
+# Reject a field read when any glyph's best template match falls below this.
+# Touching digits merge into one unfamiliar blob (best NCC ≤ 0.31 on the logged
+# frames) while correct matches measured ≥ 0.49 — "" keeps the last-known value
+# instead of guessing a wrong number.
+_FIELD_MIN_NCC = 0.4
 
 
 def _read_field(field_img: np.ndarray, templates: dict[str, np.ndarray]) -> str:
     binary = _binarize_digits(field_img)
-    glyphs = _segment_glyphs(binary)
-    return "".join(_classify(g, templates) for _x, g in glyphs)
+    bank = {char: (tmpl,) for char, tmpl in templates.items()}
+    chars: list[str] = []
+    for _x, glyph in _segment_glyphs(binary):
+        char, score = _classify_bank(glyph, bank)
+        if score < _FIELD_MIN_NCC:  # unfamiliar shape (e.g. merged digits) — don't guess
+            return ""
+        chars.append(char)
+    return "".join(chars)
 
 
 # ---------------------------------------------------------------------------
@@ -831,6 +858,21 @@ def read_resource_bar(
         out["age"] = ""
 
     return out
+
+
+def read_age(screenshot_bytes: bytes, calibration: Calibration) -> str:
+    """Read the age field alone via RapidOCR (the template backend can't).
+
+    Sampled by the caller every few ticks — age changes ~3x/game and an empty
+    read keeps the last-known age downstream. "" when the field isn't
+    calibrated or unreadable.
+    """
+    age_box = calibration.fields.get("age")
+    if age_box is None:
+        return ""
+    crop = age_box.crop(_decode_gray(screenshot_bytes))
+    # Age is large text — OCR the raw crop (binarize corrupts the bigger letters).
+    return _map_age(_read_field_rapidocr(crop, whitelist=_LETTERS, binarize=False))
 
 
 # ---------------------------------------------------------------------------
