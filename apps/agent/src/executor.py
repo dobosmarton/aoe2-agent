@@ -116,9 +116,16 @@ _PLACEMENT_INCOME_SLACK = 20
 # Stale-OCR grace: identical wood readings a pending placement survives before
 # it is settled anyway.
 _PLACEMENT_SETTLE_ATTEMPTS = 3
-# Distinct detection frames a building class must appear in before it counts
-# as build-gate evidence. 1 frame = a phantom can poison the gates (run 7).
-_BUILDING_CONFIRM_SIGHTINGS = 3
+# Distinct detection frames before a building class is REPORTED as sighted
+# (context line only — sightings never gate builds: run 9, F-36, a persistent
+# phantom mill beat any count threshold and 14 outposts got built through the
+# unlocked farm slot).
+_SIGHTING_MIN_FRAMES = 3
+# Circuit breaker (T-530): consecutive missing settlements for one building
+# class before its builds are suppressed, and how many HUD snapshots the
+# suppression lasts. Run 9: 32 identical farm attempts each burned resources.
+_MISSING_STREAK_LIMIT = 3
+_MISSING_SUPPRESS_SNAPSHOTS = 5
 
 
 # A placement whose foundation wasn't visually confirmed, awaiting settlement
@@ -139,23 +146,28 @@ class _BuildGates:
 
     population/resources: this iteration's HUD reading (None = no reading yet —
     the gates then allow the build rather than blocking on missing data).
-    buildings_confirmed: building classes detection has EVER seen this game —
-    prerequisite evidence. Buildings persist once seen (the camera moves;
-    absence from one frame is not absence from the game); a destroyed
-    prerequisite surfaces as the next build failing settlement.
+    buildings_confirmed: PURCHASE-GRADE evidence only — building classes the
+    agent provably bought (wood-delta settlement) or visually verified placing.
+    Detection sightings never enter here: run 7's flickering phantom poisoned
+    the gates at 1 frame, and run 9's PERSISTENT phantom beat the 3-frame
+    threshold too (F-36) — a mill-less econ menu then builds OUTPOSTS through
+    the unlocked farm slot, so gate evidence must be self-generated.
     pending_placements: builds awaiting wood-delta settlement.
     """
 
     population: tuple[int, int] | None = None
     resources: dict[str, int] | None = None
     buildings_confirmed: set[str] = field(default_factory=set)
-    # Frames each gate-relevant building class has been detected in. A class
-    # only graduates to buildings_confirmed after _BUILDING_CONFIRM_SIGHTINGS
-    # distinct frames: a single-frame phantom (run 7: a misdetected "mill" at
-    # minute 2) both unlocked impossible farm builds AND blocked the real mill
-    # via the unique-building gate. Phantoms flicker; real buildings persist.
+    # Frames each gate-relevant building class has been detected in —
+    # informational only (the context line reports classes past
+    # _SIGHTING_MIN_FRAMES as unverified sightings).
     building_sightings: dict[str, int] = field(default_factory=dict)
     pending_placements: list[_PendingPlacement] = field(default_factory=list)
+    # Circuit breaker (T-530): consecutive missing settlements per class, and
+    # the snapshot count until which a repeatedly-missing class stays blocked.
+    missing_streaks: dict[str, int] = field(default_factory=dict)
+    suppressed_until: dict[str, int] = field(default_factory=dict)
+    snapshot_count: int = 0
 
 
 _build_gates = _BuildGates()
@@ -168,6 +180,7 @@ def observe_hud(population: int, population_cap: int, resources: Mapping[str, in
     placements (confirming purchases / flagging missing ones) before the
     snapshot is replaced — the ordering the wood-delta check depends on.
     """
+    _build_gates.snapshot_count += 1
     _settle_pending_placements(resources.get("wood"))
     _build_gates.population = (population, population_cap)
     _build_gates.resources = dict(resources)
@@ -217,6 +230,7 @@ def _settle_pending_placements(wood_now: int | None) -> None:
         if purchased:
             spend_by_baseline[pending.wood_before] = spent + pending.wood_cost
             record_confirmed_buildings([pending.building_class])
+            _clear_missing_streak(pending.building_class)
             log.info(
                 "build_purchase_confirmed",
                 building=pending.building_class,
@@ -225,6 +239,7 @@ def _settle_pending_placements(wood_now: int | None) -> None:
                 cost=pending.wood_cost,
             )
         else:
+            _note_missing_settlement(pending.building_class)
             log.warning(
                 "build_purchase_missing",
                 building=pending.building_class,
@@ -235,31 +250,66 @@ def _settle_pending_placements(wood_now: int | None) -> None:
     _build_gates.pending_placements = still_pending
 
 
-def record_building_sightings(classes: Iterable[str]) -> None:
-    """Count one detection frame's building sightings toward confirmation.
+def _clear_missing_streak(building_class: str) -> None:
+    """A real purchase proves the build path works — lift any suppression."""
+    _build_gates.missing_streaks.pop(building_class, None)
+    _build_gates.suppressed_until.pop(building_class, None)
 
-    Detection evidence is thresholded (see building_sightings); direct
-    evidence — a wood-delta-confirmed purchase or a verified placement — goes
-    through record_confirmed_buildings instead and confirms immediately.
+
+def _note_missing_settlement(building_class: str) -> None:
+    """Count a vanished placement; suppress the class after a streak (T-530).
+
+    Run 9 (F-37): 32 consecutive missing farm settlements were retried blindly
+    — each one buying an unintended outpost. A streak means something is
+    systematically wrong (phantom prerequisite, blocked ground), so stop
+    paying for retries and force a pause the LLM can reason about.
+    """
+    streak = _build_gates.missing_streaks.get(building_class, 0) + 1
+    _build_gates.missing_streaks[building_class] = streak
+    if streak >= _MISSING_STREAK_LIMIT:
+        until = _build_gates.snapshot_count + _MISSING_SUPPRESS_SNAPSHOTS
+        _build_gates.suppressed_until[building_class] = until
+        log.warning(
+            "build_suppressed",
+            building=building_class,
+            missing_streak=streak,
+            until_snapshot=until,
+        )
+
+
+def record_building_sightings(classes: Iterable[str]) -> None:
+    """Count one detection frame's building sightings — informational ONLY.
+
+    Sightings never enter buildings_confirmed: a persistent misdetection beats
+    any frame-count threshold (run 9, F-36 — a phantom mill unlocked 14
+    outposts). Purchase-grade evidence goes through record_confirmed_buildings.
     """
     for cls in set(classes) & _GATE_BUILDING_CLASSES:
-        seen = _build_gates.building_sightings.get(cls, 0) + 1
-        _build_gates.building_sightings[cls] = seen
-        if seen >= _BUILDING_CONFIRM_SIGHTINGS:
-            _build_gates.buildings_confirmed.add(cls)
+        _build_gates.building_sightings[cls] = _build_gates.building_sightings.get(cls, 0) + 1
 
 
 def record_confirmed_buildings(classes: Iterable[str]) -> None:
-    """Remember gate-relevant building classes proven to exist (ledger or
-    verified placement — NOT raw detection; that goes through sightings)."""
+    """Remember gate-relevant building classes the agent PROVABLY owns —
+    a wood-delta-confirmed purchase or a visually verified placement. The only
+    writers of buildings_confirmed (detection sightings stay informational)."""
     _build_gates.buildings_confirmed.update(set(classes) & _GATE_BUILDING_CLASSES)
 
 
 def confirmed_buildings() -> frozenset[str]:
-    """Building classes known to exist this game (detection or wood-delta
+    """Building classes the agent provably built this game (purchase-grade
     evidence) — copied into GameState each turn so the reactive tier can gate
     Feudal prep and the age-up press on the two-building requirement."""
     return frozenset(_build_gates.buildings_confirmed)
+
+
+def sighted_buildings() -> frozenset[str]:
+    """Building classes detection has seen persistently but nothing proved —
+    context-line information only, never gate evidence (F-36)."""
+    return frozenset(
+        cls
+        for cls, frames in _build_gates.building_sightings.items()
+        if frames >= _SIGHTING_MIN_FRAMES
+    )
 
 
 def pending_placement_counts() -> Counter[str]:
@@ -287,16 +337,27 @@ def build_rejection(building_key: str, intent: str = "") -> str | None:
 
 
 def _rejection_reason(building_key: str) -> str | None:
-    """Four gates: unique building already standing, house with ample pop-cap
-    headroom (wasted wood), missing prerequisite (without a mill the farm key
-    selects the OUTPOST — runs 6-7 built phantom towers this way), and
-    unaffordable cost. The reason string is returned to the LLM as the
-    action's failure detail so the next turn plans around it instead of
-    re-issuing the same doomed build.
+    """Five gates: suppressed after a missing-settlement streak, unique
+    building already standing, house with ample pop-cap headroom (wasted
+    wood), missing prerequisite (without a mill the farm key selects the
+    OUTPOST — runs 6-7 and 9 built phantom towers this way), and unaffordable
+    cost. The reason string is returned to the LLM as the action's failure
+    detail so the next turn plans around it instead of re-issuing the same
+    doomed build.
     """
     cls = BUILD_KEY_TO_CLASS.get(building_key)
     if cls is None:
         return None
+    suppressed_until = _build_gates.suppressed_until.get(cls, 0)
+    if _build_gates.snapshot_count < suppressed_until:
+        streak = _build_gates.missing_streaks.get(cls, 0)
+        return (
+            f"{cls} builds suppressed for "
+            f"{suppressed_until - _build_gates.snapshot_count} more turns: "
+            f"{streak} placements in a row vanished without the wood being spent — "
+            "something is systematically wrong (blocked ground, or the "
+            "prerequisite isn't really standing)"
+        )
     if cls in _UNIQUE_BUILDING_CLASSES:
         if cls in _build_gates.buildings_confirmed:
             return f"{cls} already built — one is enough; spend the wood on farms"

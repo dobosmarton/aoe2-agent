@@ -237,6 +237,15 @@ def test_known_buildings_line_ignores_unconfirmed_detections(build_gates) -> Non
     assert known_buildings_line([_ent("farm", (0, 0))]) == ""
 
 
+def test_known_buildings_line_flags_persistent_sightings_as_unverified(build_gates) -> None:
+    """F-36: a persistently-detected mill is information, never ownership —
+    the line must say so explicitly so the LLM doesn't build farms on it."""
+    for _ in range(3):
+        ex.record_building_sightings(["mill"])
+    line = known_buildings_line([])
+    assert line == "Known buildings: (unverified sightings, NOT owned: mill)\n"
+
+
 def test_build_llm_context_includes_known_buildings(build_gates) -> None:
     ex.record_confirmed_buildings(["mill"])
     memory = AgentMemory()

@@ -358,21 +358,21 @@ def test_farm_rejected_without_mill(fake_pyautogui: _FakePyautogui) -> None:
     assert reason is not None and "mill" in reason
 
 
-def test_farm_allowed_once_mill_seen_repeatedly(fake_pyautogui: _FakePyautogui) -> None:
+def test_detection_sightings_never_unlock_farms(fake_pyautogui: _FakePyautogui) -> None:
+    """Run 9 (F-36): a PERSISTENT phantom mill beat the old 3-frame threshold
+    and 14 outposts got built through the unlocked farm slot. No sighting
+    count is proof — only a purchase (ledger / verified placement) gates."""
     mill_frame = [{"id": "mill_0", "class": "mill", "center": (100, 100)}]
-    for _ in range(3):  # _BUILDING_CONFIRM_SIGHTINGS distinct frames
+    for _ in range(10):  # persists far past any plausible threshold
         ex.set_detected_entities(mill_frame)
-    ex.set_detected_entities([])  # camera moved away — evidence must persist
-    assert ex.build_rejection("a") is None
-
-
-def test_single_frame_phantom_does_not_unlock_farms(fake_pyautogui: _FakePyautogui) -> None:
-    """Run 7: a one-frame misdetected mill unlocked farm builds (whose `a` key
-    is the OUTPOST without a real mill → phantom towers) and simultaneously
-    blocked the real mill via the unique-building gate. One frame is not proof."""
-    ex.set_detected_entities([{"id": "mill_0", "class": "mill", "center": (100, 100)}])
     assert ex.build_rejection("a") is not None  # farm still gated
     assert ex.build_rejection("w") is None  # and the REAL mill is still buildable
+    assert ex.sighted_buildings() == frozenset({"mill"})  # reported, not trusted
+
+
+def test_purchase_confirmed_mill_unlocks_farms(fake_pyautogui: _FakePyautogui) -> None:
+    ex.record_confirmed_buildings(["mill"])
+    assert ex.build_rejection("a") is None
 
 
 def test_farm_rejected_when_wood_short_even_with_mill(fake_pyautogui: _FakePyautogui) -> None:
@@ -548,6 +548,51 @@ def test_pendings_with_different_baselines_settle_independently(
     ex._note_pending_placement("r")  # fresh baseline 95 — no deduction carryover
     ex.observe_hud(10, 15, {"wood": 0})
     assert {"mill", "lumber_camp"} <= ex._build_gates.buildings_confirmed
+
+
+def _observe_wood(wood: int) -> None:
+    ex.observe_hud(10, 15, {"wood": wood})
+
+
+def _run_missing_settlements(building_key: str, count: int, wood: int) -> int:
+    """Note `count` placements that each vanish (wood only rises); returns wood."""
+    for _ in range(count):
+        ex._note_pending_placement(building_key)
+        wood += 5  # income, no spend → the placement never happened
+        _observe_wood(wood)
+    return wood
+
+
+def test_missing_streak_suppresses_the_build(fake_pyautogui: _FakePyautogui) -> None:
+    """T-530 (run 9, F-37): a vanishing farm was retried 32 times, each attempt
+    buying an unintended outpost — a streak of missing settlements now blocks
+    the class with a teaching reason instead."""
+    ex.record_confirmed_buildings(["mill"])
+    _observe_wood(200)
+    _run_missing_settlements("a", count=3, wood=200)
+    reason = ex.build_rejection("a")
+    assert reason is not None and "suppressed" in reason
+
+
+def test_suppression_expires_after_window(fake_pyautogui: _FakePyautogui) -> None:
+    ex.record_confirmed_buildings(["mill"])
+    _observe_wood(200)
+    wood = _run_missing_settlements("a", count=3, wood=200)
+    for _ in range(5):  # _MISSING_SUPPRESS_SNAPSHOTS quiet turns pass
+        wood += 5
+        _observe_wood(wood)
+    assert ex.build_rejection("a") is None  # one retry allowed again
+
+
+def test_confirmed_purchase_clears_missing_streak(fake_pyautogui: _FakePyautogui) -> None:
+    ex.record_confirmed_buildings(["mill"])
+    _observe_wood(200)
+    wood = _run_missing_settlements("a", count=2, wood=200)
+    ex._note_pending_placement("a")
+    wood -= 60
+    _observe_wood(wood)  # a real purchase settles → streak resets
+    _run_missing_settlements("a", count=2, wood=wood)
+    assert ex.build_rejection("a") is None  # 2 misses after a success ≠ streak of 3
 
 
 def test_place_click_succeeds_and_records_when_building_lands(

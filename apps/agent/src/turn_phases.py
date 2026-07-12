@@ -32,6 +32,7 @@ from .executor import (
     get_detected_entities,
     get_rescan_fn,
     pending_placement_counts,
+    sighted_buildings,
 )
 from .memory import GameState
 from .models import validate_actions
@@ -146,15 +147,17 @@ def _villager_jobs_line(detected_entities: list[object] | None) -> str:
 def known_buildings_line(detected_entities: list[object] | None) -> str:
     """One-line owned-building ledger so the LLM stops re-building what it has.
 
-    Only CONFIRMED classes are listed — a single-frame phantom must not read
-    as owned (F-29) — with this frame's detected count floored at 1: a
-    confirmed building that's off-screen still exists. Pending placements
-    (awaiting wood-delta settlement) are shown so a build already in flight
-    isn't re-ordered.
+    Only PURCHASE-confirmed classes count as owned — detection can't vouch for
+    ownership (F-29/F-36: phantom mills) — with this frame's detected count
+    floored at 1: a confirmed building that's off-screen still exists. Pending
+    placements (awaiting wood-delta settlement) are shown so a build already
+    in flight isn't re-ordered; persistent detections nothing proved are
+    flagged unverified so the LLM doesn't mistake them for owned.
     """
     confirmed = confirmed_buildings()
     pending = pending_placement_counts()
-    if not confirmed and not pending:
+    unverified = sighted_buildings() - confirmed
+    if not confirmed and not pending and not unverified:
         return ""
     segments: list[str] = []
     if confirmed:
@@ -164,6 +167,8 @@ def known_buildings_line(detected_entities: list[object] | None) -> str:
         segments.append(
             "(pending: " + " ".join(f"{c}={n}" for c, n in sorted(pending.items())) + ")"
         )
+    if unverified:
+        segments.append("(unverified sightings, NOT owned: " + " ".join(sorted(unverified)) + ")")
     return "Known buildings: " + " ".join(segments) + "\n"
 
 
