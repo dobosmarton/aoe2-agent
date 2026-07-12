@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from .goals import GoalManager
     from .memory import AgentMemory
     from .providers.strategist import StrategistProvider
+    from .resource_ocr import ResourceReadings
 
 log = structlog.stdlib.get_logger()
 
@@ -33,23 +34,24 @@ async def _run_strategist_async(
     memory: AgentMemory,
     goal_manager: GoalManager,
     entity_summary: str,
-    screenshot: bytes,
+    hud_readings: ResourceReadings,
+    known_buildings: str,
     goal_logger: GoalLogger,
 ) -> None:
     """Invoke the strategist to create/update goals (runs as background task)."""
     try:
         prev_goals = list(goal_manager.active_goals)
-        # Resource readings are owned by the game loop's per-turn HUD OCR
-        # (read_hud_readings → update_resource_readings); the strategist only sets
-        # goals. We discard its returned readings so a late async run can't clobber
-        # game_state with an older frame.
+        # The game loop's per-turn HUD reading is passed in — the strategist
+        # never re-OCRs the frame. Its returned readings are the same object,
+        # so nothing is written back to game_state from here.
         new_goals, _readings = await strategist.generate_goals(
             memory.game_state,
             goal_manager.get_goals_summary(),
             entity_summary,
             iteration,
-            screenshot_bytes=screenshot,
             alarm=alarm,
+            readings=hud_readings,
+            known_buildings=known_buildings,
         )
         goal_manager.set_goals(new_goals)
         goal_logger.log_goals_created(iteration, new_goals)
@@ -67,7 +69,8 @@ def _maybe_launch_strategist(
     memory: AgentMemory,
     goal_manager: GoalManager,
     entity_summary: str,
-    screenshot: bytes,
+    hud_readings: ResourceReadings,
+    known_buildings: str,
     goal_logger: GoalLogger,
     pending_task: asyncio.Task | None,
 ) -> asyncio.Task | None:
@@ -90,7 +93,8 @@ def _maybe_launch_strategist(
             memory,
             goal_manager,
             entity_summary,
-            screenshot,
+            hud_readings,
+            known_buildings,
             goal_logger,
         ),
         name=f"strategist_turn_{iteration}",

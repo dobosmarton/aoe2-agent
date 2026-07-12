@@ -50,6 +50,7 @@ from .turn_phases import (
     _execute_turn_actions,
     _get_ground_commands,
     _process_response,
+    known_buildings_line,
 )
 from .window import ensure_game_focused, get_game_window_rect, is_game_running
 
@@ -320,7 +321,7 @@ async def game_loop(
             # resources current is what makes the housed/pop/resource signals
             # accurate for the alarm check, strategist, and executor — so e.g. the
             # build-house path triggers the turn the agent actually gets housed.
-            hud_readings, calib = await read_hud_readings(screenshot)
+            hud_readings, calib = await read_hud_readings(screenshot, turn=iteration)
             _sync_turn_state(memory, goal_manager, hud_readings)
             # Show the OCR reading regions on the debug overlay (--overlay only).
             if overlay is not None and calib is not None:
@@ -354,7 +355,8 @@ async def game_loop(
                 memory,
                 goal_manager,
                 entity_summary,
-                screenshot,
+                hud_readings,
+                known_buildings_line(detected_entities),
                 goal_logger,
                 strategist_task,
             )

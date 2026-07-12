@@ -29,6 +29,8 @@ from gameplay_agent.resource_ocr import (
     _map_age,
     _render_digit_image,
     autodetect_calibration,
+    calibration_for,
+    read_age,
     read_resource_bar,
 )
 from gameplay_agent.strategist_eval import (
@@ -285,11 +287,88 @@ def test_read_hud_readings_precedence(monkeypatch):
     assert calls["read"] == reads_before
 
 
+def _patch_hud_seams(monkeypatch, *, backend: str, age_reads: list) -> None:
+    """Wire read_hud_readings to fakes: fixed calibration/bar, recorded age reads."""
+    from types import SimpleNamespace
+
+    from gameplay_agent.providers import strategist as strat_mod
+
+    monkeypatch.setattr(strat_mod.config, "ocr_backend", backend)
+    monkeypatch.setattr(
+        strat_mod, "calibration_for", lambda w, h: SimpleNamespace(fields={"food": None})
+    )
+    monkeypatch.setattr(
+        strat_mod,
+        "read_resource_bar",
+        lambda *_a, **_k: {"food": 1, "wood": 2, "gold": 3, "stone": 4, "age": ""},
+    )
+
+    def fake_read_age(_bytes, _calib):
+        age_reads.append(True)
+        return "Feudal Age"
+
+    monkeypatch.setattr(strat_mod, "read_age", fake_read_age)
+
+
+def test_read_hud_readings_samples_age_on_template_backend(monkeypatch):
+    """T-202: the template backend can't read age text — a RapidOCR age read
+    fills it every _AGE_OCR_INTERVAL turns; off-cadence ticks omit age so the
+    last-known value is kept downstream."""
+    from gameplay_agent.providers import strategist as strat_mod
+
+    png = _png_bytes(np.zeros((10, 20, 3), dtype=np.uint8))
+    age_reads = []
+    _patch_hud_seams(monkeypatch, backend="template", age_reads=age_reads)
+
+    out, _ = asyncio.run(strat_mod.read_hud_readings(png, turn=5))  # sampled tick
+    assert out["age"] == "Feudal Age"
+    out, _ = asyncio.run(strat_mod.read_hud_readings(png, turn=6))  # off-cadence
+    assert "age" not in out
+    out, _ = asyncio.run(strat_mod.read_hud_readings(png))  # unknown turn → read
+    assert out["age"] == "Feudal Age"
+    assert len(age_reads) == 2
+
+
+def test_read_hud_readings_no_age_sampling_on_ocr_backends(monkeypatch):
+    from gameplay_agent.providers import strategist as strat_mod
+
+    png = _png_bytes(np.zeros((10, 20, 3), dtype=np.uint8))
+    age_reads = []
+    _patch_hud_seams(monkeypatch, backend="rapidocr", age_reads=age_reads)
+
+    out, _ = asyncio.run(strat_mod.read_hud_readings(png, turn=5))
+    assert age_reads == [] and "age" not in out  # bar read owns age here
+
+
 # ---------------------------------------------------------------------------
 # Runtime auto-calibration: real-frame parity (needs the RapidOCR engine)
 # ---------------------------------------------------------------------------
 
 _REAL_FIXTURES = [p for p in all_vision_fixtures() if p.stem.startswith("real_")]
+
+
+def _live_resolution_fixture() -> tuple[bytes, dict, Calibration]:
+    """The first 3024x1672 fixture (the VM's live resolution) + hand calibration."""
+    fixture_path = next(p for p in _REAL_FIXTURES if p.stem == "real_1672_dark_midgame")
+    fixture = load_vision_fixture(fixture_path)
+    data = resolve_screenshot_path(fixture_path, fixture["screenshot"]).read_bytes()
+    calib = calibration_for(3024, 1672)
+    assert calib is not None
+    return data, dict(fixture["expected"]), calib
+
+
+def test_template_backend_reads_live_resolution_fixture():
+    """T-202: the harvested 3024x1672 templates read the VM's live resolution."""
+    data, expected, calib = _live_resolution_fixture()
+    readings = read_resource_bar(data, calib, backend="template")
+    expected.pop("age")  # the template backend leaves age "" (read_age covers it)
+    assert {k: readings[k] for k in expected} == expected
+
+
+def test_read_age_on_live_resolution_fixture():
+    pytest.importorskip("rapidocr_onnxruntime")
+    data, expected, calib = _live_resolution_fixture()
+    assert read_age(data, calib) == expected["age"]
 
 
 def _expected_without_lone_digits(expected: dict) -> dict:
@@ -328,9 +407,15 @@ _EXPECTED_IDLE_COUNT: dict[str, int] = {
     "real_060_imperial": 0,
     "real_090_castle": 0,
     "real_160_imperial": 18,
+    "real_1672_dark_midgame": 2,
     "real_180_low_pop": 0,
     "real_215_imperial": 0,
 }
+
+# The live-resolution (3024x1672) badge digit under-reads — the exact pinned-at-1
+# failure every VM run showed (F-4/T-302). This fixture pins it; the xfail below
+# clears itself the day T-302's geometry fix lands.
+_IDLE_COUNT_KNOWN_MISREADS = frozenset({"real_1672_dark_midgame"})
 
 
 @pytest.mark.parametrize("fixture_path", _REAL_FIXTURES, ids=lambda p: p.stem)
@@ -346,7 +431,10 @@ def test_read_idle_count_real_fixtures(fixture_path):
     assert calib is not None
     rgb = np.asarray(Image.open(io.BytesIO(data)).convert("RGB"))
     got = read_idle_count(rgb, calib.fields["population"])
-    assert got == _EXPECTED_IDLE_COUNT[fixture_path.stem], f"{fixture_path.stem}: got {got}"
+    expected = _EXPECTED_IDLE_COUNT[fixture_path.stem]
+    if fixture_path.stem in _IDLE_COUNT_KNOWN_MISREADS and got != expected:
+        pytest.xfail(f"T-302 badge under-read: got {got}, badge shows {expected}")
+    assert got == expected, f"{fixture_path.stem}: got {got}"
 
 
 def test_autodetect_no_template_path_reads_multidigit():

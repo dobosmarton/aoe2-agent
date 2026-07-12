@@ -189,6 +189,24 @@ def test_pipeline_executes_previous_plan_head_next_turn(monkeypatch, tmp_path):
     assert len(provider.contexts) == 2  # both turns pre-launched a plan
 
 
+def test_strategist_receives_the_loop_hud_reading(monkeypatch, tmp_path):
+    """T-203: the loop's per-turn reading is forwarded to the strategist — the
+    frame is OCR'd exactly once per iteration."""
+    executed = []
+    _patch_loop_seams(monkeypatch, tmp_path, executed, "routine economy turn")
+    reading = {"food": 123, "wood": 45}
+
+    async def _fixed_reading(_screenshot, *, turn=None):
+        return reading, None
+
+    forwarded = []
+    monkeypatch.setattr(gl, "read_hud_readings", _fixed_reading)
+    monkeypatch.setattr(gl, "_maybe_launch_strategist", lambda *args: forwarded.append(args[6]))
+    provider = _FakePipelineProvider()
+    _run(gl.game_loop(provider, max_iterations=1, use_detection=False, use_overlay=False))
+    assert forwarded == [reading]
+
+
 async def _no_sleep(_seconds):
     """Skip real waiting in loop tests (focus retries sleep 1 s each)."""
     return

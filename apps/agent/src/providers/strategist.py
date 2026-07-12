@@ -17,8 +17,10 @@ from ..memory import GameState
 from ..resource_ocr import (
     Backend,
     Calibration,
+    ResourceReadings,
     autodetect_calibration,
     calibration_for,
+    read_age,
     read_resource_bar,
 )
 
@@ -49,19 +51,21 @@ class StrategistResponse(BaseModel):
     goals: list[StrategistGoal]
 
 
-def _clean_readings(ocr: dict) -> dict:
+def _clean_readings(ocr: dict[str, object]) -> ResourceReadings:
     """Shape `read_resource_bar` output into a readings dict.
 
     Drops an empty age so a failed age read keeps the last-known age rather than
     overwriting it; resource/population keys are present only when read.
     """
-    readings: dict = {}
-    for key in ("food", "wood", "gold", "stone", "population", "idle_present", "idle_count"):
-        if key in ocr:
-            readings[key] = ocr[key]
+    readings: dict[str, object] = {
+        key: ocr[key]
+        for key in ("food", "wood", "gold", "stone", "population", "idle_present", "idle_count")
+        if key in ocr
+    }
     if ocr.get("age"):
         readings["age"] = ocr["age"]
-    return readings
+    # Per-key value types are enforced where read_resource_bar builds them.
+    return cast("ResourceReadings", readings)
 
 
 # A frame is trusted only when OCR decoded most of the core resources. A frame that
@@ -71,12 +75,31 @@ _CORE_RESOURCE_FIELDS: tuple[str, ...] = ("food", "wood", "gold", "stone")
 _MIN_CORE_FIELDS: int = 3
 
 
-def _is_reliable_frame(readings: dict) -> bool:
+def _is_reliable_frame(readings: ResourceReadings) -> bool:
     """Whether enough core resource fields decoded to trust this OCR frame."""
     return sum(1 for key in _CORE_RESOURCE_FIELDS if key in readings) >= _MIN_CORE_FIELDS
 
 
-async def read_hud_readings(screenshot_bytes: bytes) -> tuple[dict, Calibration | None]:
+# Turns between RapidOCR age reads on the template backend (which can't read
+# text itself). Age changes ~3x/game; between samples the empty age keeps the
+# last-known value downstream (_clean_readings drops it, memory ignores falsy).
+_AGE_OCR_INTERVAL = 5
+
+
+def _age_read_due(turn: int | None) -> bool:
+    """Whether this tick pays for the slow RapidOCR age read.
+
+    Only the template backend needs it (the OCR backends read age inline);
+    an unknown turn (standalone/eval callers) always reads.
+    """
+    if config.ocr_backend != "template":
+        return False
+    return turn is None or turn % _AGE_OCR_INTERVAL == 0
+
+
+async def read_hud_readings(
+    screenshot_bytes: bytes, *, turn: int | None = None
+) -> tuple[ResourceReadings, Calibration | None]:
     """Read resources/population/age off the resource bar via local OCR.
 
     Resolution precedence: a hand-tuned ``calibration.<W>x<H>.yaml`` wins; else
@@ -111,6 +134,10 @@ async def read_hud_readings(screenshot_bytes: bytes) -> tuple[dict, Calibration 
         if not _is_reliable_frame(readings):
             log.warning("ocr_frame_discarded", fields=sorted(readings))
             return {}, calib
+        if _age_read_due(turn):
+            age = await asyncio.to_thread(read_age, screenshot_bytes, calib)
+            if age:
+                readings["age"] = age
         log.info("ocr_readings", **readings)
         return readings, calib
     except Exception as e:  # a bad frame must not crash the loop — keep last-known
@@ -225,22 +252,25 @@ class StrategistProvider:
         turn: int,
         screenshot_bytes: bytes | None = None,
         alarm: bool = False,
-    ) -> tuple[list[Goal], dict]:
-        """Read the resource bar locally (OCR) and ask the LLM (text-only) for goals.
+        readings: ResourceReadings | None = None,
+        known_buildings: str = "",
+    ) -> tuple[list[Goal], ResourceReadings]:
+        """Ask the LLM (text-only) for goals from a HUD reading.
 
         Claude vision is not used: resources/population/age come from
         ``read_resource_bar``; the model only reasons over them to set goals.
 
         Returns:
-            Tuple of (goals, resource_readings_dict)
+            Tuple of (goals, resource_readings)
         """
-        # 1. Perception — resources/population/age from the resource bar via local
-        #    OCR; no screenshot is sent to the model. game_state is the fallback
-        #    (the game loop keeps it fresh every turn with the same OCR).
-        # Strategist only needs the numbers; the calibration is for the overlay.
-        readings, _calib = (
-            await read_hud_readings(screenshot_bytes) if screenshot_bytes else ({}, None)
-        )
+        # 1. Perception — the game loop passes its per-turn HUD reading (one OCR
+        #    pass per frame); only the standalone/eval path (readings=None) OCRs
+        #    the screenshot itself. An empty reading is a bad frame, not a reason
+        #    to re-OCR — game_state fills the gaps below.
+        if readings is None:
+            readings, _calib = (
+                await read_hud_readings(screenshot_bytes) if screenshot_bytes else ({}, None)
+            )
 
         # 2. Reasoning — text-only prompt populated with the locally-read state
         #    (falls back to last-known game_state when a field wasn't read).
@@ -268,7 +298,7 @@ class StrategistProvider:
 
 ## Detected Entities on Screen
 {detected_entities_summary or "No entities detected"}
-
+{known_buildings}
 ## Current Goals
 {current_goals_summary}
 

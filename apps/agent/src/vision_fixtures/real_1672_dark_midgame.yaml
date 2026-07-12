@@ -1,0 +1,9 @@
+name: real_1672_dark_midgame
+screenshot: real_1672_dark_midgame.jpg
+expected:
+  wood: 178
+  food: 46
+  gold: 50
+  stone: 200
+  population: 19/30
+  age: Dark Age
