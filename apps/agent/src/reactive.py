@@ -97,6 +97,7 @@ _FEUDAL_PREREQ_CLASSES = frozenset({"mill", "lumber_camp"})
 # Start building the prerequisites a bit before the banking phase (pop 16) so
 # they're standing by the time 500 food is.
 _FEUDAL_PREP_POP = 12
+_MILL_BUILD_KEY = "w"  # econ menu: Mill (100 wood)
 _LUMBER_CAMP_BUILD_KEY = "r"  # econ menu: Lumber Camp (100 wood)
 # Below this food, the idle rotation is overridden toward food: honoring the
 # normal wood/gold slots during a famine starves villager production (run 1, F-8).
@@ -112,6 +113,11 @@ _FARM_WOOD_COST = 60
 # targeted only the farm, so the camp — the second Feudal prerequisite — was
 # rejected 19 times at 37-79 wood and Feudal stayed unreachable.
 _LUMBER_CAMP_WOOD_COST = 100
+# A mill's wood cost (mirrors executor._BUILD_WOOD_COST["w"], same drift test).
+# The mill is the OTHER Feudal prerequisite AND the farm unlock, so the wood
+# bank must reach it too — run 12 (F-41) starved because the reactive tier had
+# no mill rule at all and the executor (its only mill-builder) was down.
+_MILL_WOOD_COST = 100
 # Headroom above a bank target so a purchase doesn't leave the stock exactly
 # at the cost boundary. Run 5 (F-23): six farm attempts failed at wood 48-59.
 # A separate constant so the V-4 drift tests keep pinning the raw costs to the
@@ -168,6 +174,22 @@ def _age_up_actions(state: GameState) -> list[dict[str, object]]:
     ]
 
 
+def _needs_mill(state: GameState) -> bool:
+    """Feudal prep pending: Dark Age economy established, no mill standing.
+
+    The mill is BOTH a Feudal prerequisite and the farm unlock — the entire
+    late-Dark-Age food engine hangs off it. Run 12 (F-41) had the executor
+    down for 85/95 turns and starved, because a mill had only ever been built
+    by the LLM; the reactive tier knew the lumber camp but not the mill. This
+    gives the fast tier its own path to the food engine.
+    """
+    return (
+        state.current_age == "Dark Age"
+        and state.population >= _FEUDAL_PREP_POP
+        and "mill" not in state.buildings_seen
+    )
+
+
 def _needs_lumber_camp(state: GameState) -> bool:
     """Feudal prep pending: Dark Age economy established, no camp standing."""
     return (
@@ -178,22 +200,33 @@ def _needs_lumber_camp(state: GameState) -> bool:
 
 
 def _feudal_prep_actions(state: GameState) -> list[dict[str, object]]:
-    """Ensure the second qualifying Dark Age building (lumber camp) exists.
+    """Ensure both qualifying Dark Age buildings exist — MILL FIRST, then camp.
 
-    Emitted every turn from `_FEUDAL_PREP_POP` until evidence shows one — the
-    executor's unique-building gate rejects re-emits at zero keystroke cost
-    once a lumber camp is confirmed or pending, and its cost gate waits out
-    the 100 wood. Doubles as a wood-income boost (closer drop-off).
+    The mill leads when neither stands: it unlocks farms (the food engine) on
+    top of counting toward Feudal, so a reactive-only game (executor down, run
+    12 F-41) can still feed itself. One build per turn — the executor's
+    unique-building gate rejects re-emits once the class is confirmed or
+    pending, its cost gate waits out the 100 wood, and the circuit breaker
+    suppresses a placement that keeps vanishing. The lumber camp doubles as a
+    wood-income boost (closer drop-off).
     """
-    if not _needs_lumber_camp(state):
-        return []
-    return [
-        {
-            "type": "build",
-            "building_key": _LUMBER_CAMP_BUILD_KEY,
-            "intent": "Build lumber camp (Feudal prerequisite + wood income)",
-        }
-    ]
+    if _needs_mill(state):
+        return [
+            {
+                "type": "build",
+                "building_key": _MILL_BUILD_KEY,
+                "intent": "Build mill (Feudal prerequisite + farm/food unlock)",
+            }
+        ]
+    if _needs_lumber_camp(state):
+        return [
+            {
+                "type": "build",
+                "building_key": _LUMBER_CAMP_BUILD_KEY,
+                "intent": "Build lumber camp (Feudal prerequisite + wood income)",
+            }
+        ]
+    return []
 
 
 def _orders_below_target(state: GameState) -> bool:
@@ -294,11 +327,14 @@ def _idle_batch_size(state: GameState) -> int:
 def _wood_bank_target(state: GameState) -> int | None:
     """Wood the rotation should bank toward: the binding build goal's cost.
 
-    The lumber camp (Feudal prerequisite) outranks farms; each target carries
-    the margin so a purchase doesn't leave the stock exactly at the boundary.
-    Run 8 (F-34): a farm-only target let wood plateau at 65 while the camp
-    cost 100. None when no wood-gated goal is pending.
+    The Feudal prerequisites (mill first, then lumber camp) outrank farms; each
+    target carries the margin so a purchase doesn't leave the stock exactly at
+    the boundary. Run 8 (F-34): a farm-only target let wood plateau at 65 while
+    the camp cost 100. Ordered to match `_feudal_prep_actions` (mill leads, it
+    unlocks farms). None when no wood-gated goal is pending.
     """
+    if _needs_mill(state):
+        return _MILL_WOOD_COST + _WOOD_BANK_MARGIN
     if _needs_lumber_camp(state):
         return _LUMBER_CAMP_WOOD_COST + _WOOD_BANK_MARGIN
     if "mill" in state.buildings_seen:

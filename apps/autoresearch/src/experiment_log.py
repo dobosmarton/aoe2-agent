@@ -43,6 +43,10 @@ HEADER = [
     "candidate_id",
     "round",
     "game_in_round",
+    # Executor health (T-533): fraction of turns where every LLM path failed.
+    # Near 1.0 = the game was played by the reactive tier alone, so the row's
+    # score reflects the fallback policy, not the executor under test (run 12).
+    "llm_error_rate",
 ]
 
 
@@ -156,6 +160,7 @@ def log_experiment(
         candidate_id,
         round_num,
         game_in_round,
+        f"{float(score.raw_metrics.get('llm_error_rate', 0.0)):.4f}",
     ]
 
     with RESULTS_FILE.open("a", newline="") as f:

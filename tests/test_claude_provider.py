@@ -129,6 +129,47 @@ def test_single_shot_gives_up_after_one_retry(provider: ClaudeProvider) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Single-shot 400 → tool-loop fallback (T-533; de-risks the F-40 grammar fix)
+# ---------------------------------------------------------------------------
+
+
+def _bad_request(message: str) -> object:
+    """An anthropic.BadRequestError with a minimal (non-network) 400 response."""
+    import anthropic
+    import httpx
+
+    response = httpx.Response(400, request=httpx.Request("POST", "http://test"))
+    return anthropic.BadRequestError(message, response=response, body=None)
+
+
+def test_single_shot_falls_back_to_tool_loop_on_400(provider: ClaudeProvider) -> None:
+    """A 400 on the structured-output path (e.g. "compiled grammar is too
+    large") must retry THIS turn via the tool loop, not burn it (run 12, F-40)."""
+    parse = AsyncMock(side_effect=_bad_request("compiled grammar is too large"))
+    create = AsyncMock(side_effect=[_end_turn_response()])
+    provider.client = SimpleNamespace(messages=SimpleNamespace(parse=parse, create=create))
+
+    out = _run(provider._single_shot_or_tool_loop([{"type": "text", "text": "ctx"}], "Dark Age"))
+
+    assert parse.await_count == 1  # single-shot attempted
+    assert create.await_count == 1  # then fell through to the tool loop
+    assert out["actions_already_executed"] is True  # tool-loop serialization, not a wait no-op
+
+
+def test_single_shot_non_400_error_propagates(provider: ClaudeProvider) -> None:
+    """Only 400s fall back — other API errors surface to get_actions' handler."""
+    import anthropic
+
+    parse = AsyncMock(side_effect=anthropic.APITimeoutError(request=None))  # type: ignore[arg-type]
+    create = AsyncMock(side_effect=[_end_turn_response()])
+    provider.client = SimpleNamespace(messages=SimpleNamespace(parse=parse, create=create))
+
+    with pytest.raises(anthropic.APIError):
+        _run(provider._single_shot_or_tool_loop([{"type": "text", "text": "ctx"}], "Dark Age"))
+    assert create.await_count == 0  # no tool-loop fallback for non-400s
+
+
+# ---------------------------------------------------------------------------
 # S3 — prompt caching across the tool loop
 # ---------------------------------------------------------------------------
 

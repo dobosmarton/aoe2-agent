@@ -10,15 +10,19 @@ without much marginal coverage gain.
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import pytest
 from gameplay_agent import executor as ex
 from gameplay_agent.memory import AgentMemory
 from gameplay_agent.turn_phases import (
+    _EXECUTOR_OUTAGE_STREAK,
     INITIAL_ZOOM_CLICKS,
     _build_llm_context,
     _extract_applied_memories,
     _fallback_actions,
     _get_ground_commands,
+    _process_response,
     known_buildings_line,
 )
 
@@ -273,3 +277,58 @@ def test_fallback_actions_not_housed_queues_villager():
     actions = _fallback_actions(memory)
     assert not any(a["type"] == "click" for a in actions)
     assert actions[0] == {"type": "queue_villager", "intent": "Queue villager (fallback)"}
+
+
+# ---------------------------------------------------------------------------
+# _process_response — executor-outage accounting (T-533)
+# ---------------------------------------------------------------------------
+
+
+class _StubGoalManager:
+    """The slice of GoalManager that _process_response touches."""
+
+    active_goals: ClassVar[list] = []
+    completed_goals: ClassVar[list] = []
+
+    def evaluate_progress(self, state: object, iteration: int) -> None: ...
+
+    def compute_turn_reward(self, prev: object, cur: object) -> dict:
+        return {"total": 0.0}
+
+
+class _StubGoalLogger:
+    def log_progress(self, iteration: int, goals: object, reward: object) -> None: ...
+
+    def log_goal_completed(self, iteration: int, goal: object) -> None: ...
+
+
+def _err_response() -> dict:
+    """An executor no-op response as get_actions returns on total LLM failure."""
+    return {
+        "reasoning": "API error: compiled grammar is too large",
+        "actions": [{"type": "wait", "ms": 1000, "intent": "Error recovery"}],
+        "error": True,
+    }
+
+
+def test_process_response_counts_executor_errors_into_metrics():
+    """An error response bumps llm_errors so llm_error_rate reflects the outage —
+    the signal missing from run 12's accepted=true, 90-error ledger row."""
+    memory = AgentMemory()
+    gm, gl = _StubGoalManager(), _StubGoalLogger()
+    for _ in range(_EXECUTOR_OUTAGE_STREAK):
+        _process_response(_err_response(), memory, gm, 1, gl, None)
+    assert memory.llm_errors == _EXECUTOR_OUTAGE_STREAK
+    assert memory.get_metrics_snapshot()["llm_error_rate"] == 1.0
+
+
+def test_process_response_success_response_is_not_an_error():
+    """A normal (error-absent) response counts as a healthy executor turn."""
+    memory = AgentMemory()
+    gm, gl = _StubGoalManager(), _StubGoalLogger()
+    ok = {"reasoning": "queue a villager", "actions": [{"type": "queue_villager"}]}
+    _process_response(ok, memory, gm, 1, gl, None)
+    snap = memory.get_metrics_snapshot()
+    assert snap["llm_calls"] == 1
+    assert snap["llm_errors"] == 0
+    assert snap["llm_error_rate"] == 0.0

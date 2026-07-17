@@ -12,6 +12,34 @@ from pydantic import (
     model_validator,
 )
 
+# Screen-coordinate and wait ceilings. These are enforced by field_validators
+# (below) rather than Field(ge=, le=) ON PURPOSE: a bounded integer in a
+# pydantic Field emits minimum/maximum into the JSON schema, and the executor's
+# single-shot path feeds that schema to Anthropic structured output as a
+# constrained-decoding grammar. Each numeric range compiles to a large
+# digit-by-digit automaton, and 22 such bounds across the Action union pushed
+# the compiled grammar over Anthropic's size limit — every executor turn 400'd
+# with "compiled grammar is too large" (run 12, F-40). A field_validator
+# enforces the SAME range at parse time (dict validation and structured-output
+# parsing both run it) while keeping the field an unbounded int in the schema,
+# so the grammar stays small. The real on-screen bound is enforced downstream
+# anyway (the executor rejects off-map clicks); these ceilings are the 8K-screen
+# outer sanity limit.
+_MAX_X = 7680
+_MAX_Y = 4320
+_MAX_WAIT_MS = 5000
+
+
+def _in_range(value: int | None, hi: int, name: str) -> int | None:
+    """Enforce 0 <= value <= hi for a coordinate/duration; pass None through.
+
+    Kept schema-free (a validator, not Field bounds) so the constrained-decoding
+    grammar stays small — see the module note above (F-40).
+    """
+    if value is not None and not (0 <= value <= hi):
+        raise ValueError(f"{name} must be in [0, {hi}]")
+    return value
+
 
 class PointTargetAction(BaseModel):
     """Base for actions that target a point via coordinates, entity ID, or class.
@@ -22,8 +50,8 @@ class PointTargetAction(BaseModel):
     - target_class to target the nearest entity of that class
     """
 
-    x: int | None = Field(default=None, ge=0, le=7680)
-    y: int | None = Field(default=None, ge=0, le=4320)
+    x: int | None = Field(default=None, description="Screen x pixel, 0.._MAX_X")
+    y: int | None = Field(default=None, description="Screen y pixel, 0.._MAX_Y")
     target_id: str | None = Field(
         default=None, description="Entity ID from detection, e.g. 'sheep_0'"
     )
@@ -31,6 +59,16 @@ class PointTargetAction(BaseModel):
         default=None, description="Entity class to target nearest of, e.g. 'sheep'"
     )
     intent: str = ""
+
+    @field_validator("x")
+    @classmethod
+    def _check_x(cls, v: int | None) -> int | None:
+        return _in_range(v, _MAX_X, "x")
+
+    @field_validator("y")
+    @classmethod
+    def _check_y(cls, v: int | None) -> int | None:
+        return _in_range(v, _MAX_Y, "y")
 
     def _targeting_provided(self) -> bool:
         """Whether the action names a point (subclasses may add other modes)."""
@@ -165,19 +203,35 @@ class DragAction(BaseModel):
     """Mouse drag action."""
 
     type: Literal["drag"]
-    start_x: int = Field(ge=0, le=7680)
-    start_y: int = Field(ge=0, le=4320)
-    end_x: int = Field(ge=0, le=7680)
-    end_y: int = Field(ge=0, le=4320)
+    start_x: int
+    start_y: int
+    end_x: int
+    end_y: int
     intent: str = ""
+
+    # Range-enforced via validators (not Field bounds) to keep the grammar small — F-40.
+    @field_validator("start_x", "end_x")
+    @classmethod
+    def _check_x(cls, v: int) -> int:
+        return _in_range(v, _MAX_X, "x")  # type: ignore[return-value]
+
+    @field_validator("start_y", "end_y")
+    @classmethod
+    def _check_y(cls, v: int) -> int:
+        return _in_range(v, _MAX_Y, "y")  # type: ignore[return-value]
 
 
 class WaitAction(BaseModel):
     """Wait/delay action."""
 
     type: Literal["wait"]
-    ms: int = Field(ge=0, le=5000)  # Max 5 second wait
+    ms: int  # Max 5 second wait; range-enforced below (schema-free, F-40)
     intent: str = ""
+
+    @field_validator("ms")
+    @classmethod
+    def _check_ms(cls, v: int) -> int:
+        return _in_range(v, _MAX_WAIT_MS, "ms")  # type: ignore[return-value]
 
 
 class ScrollAction(BaseModel):
@@ -187,9 +241,19 @@ class ScrollAction(BaseModel):
     clicks: int = Field(
         description="Positive = scroll up (zoom in), negative = scroll down (zoom out)"
     )
-    x: int | None = Field(default=None, ge=0, le=7680)
-    y: int | None = Field(default=None, ge=0, le=4320)
+    x: int | None = Field(default=None, description="Screen x pixel, 0.._MAX_X")
+    y: int | None = Field(default=None, description="Screen y pixel, 0.._MAX_Y")
     intent: str = ""
+
+    @field_validator("x")
+    @classmethod
+    def _check_x(cls, v: int | None) -> int | None:
+        return _in_range(v, _MAX_X, "x")
+
+    @field_validator("y")
+    @classmethod
+    def _check_y(cls, v: int | None) -> int | None:
+        return _in_range(v, _MAX_Y, "y")
 
 
 class DetectAction(BaseModel):

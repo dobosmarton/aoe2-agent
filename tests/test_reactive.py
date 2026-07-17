@@ -100,6 +100,28 @@ def test_feudal_prep_builds_lumber_camp_once_economy_established() -> None:
     ]
 
 
+def test_feudal_prep_builds_mill_first_when_neither_stands() -> None:
+    """Run 12 (F-41): with the executor down, the reactive tier had no mill
+    path and starved. The mill (farm unlock) must lead when neither prereq
+    stands — one build per turn, so the camp waits its turn."""
+    state = _state(population=12, buildings=frozenset())
+    builds = [a for a in decide([], state, alarm=False) if a["type"] == "build"]
+    assert builds == [
+        {
+            "type": "build",
+            "building_key": "w",
+            "intent": "Build mill (Feudal prerequisite + farm/food unlock)",
+        }
+    ]
+
+
+def test_feudal_prep_builds_camp_after_mill_stands() -> None:
+    """Once the mill is confirmed, prep moves on to the lumber camp."""
+    state = _state(population=12, buildings=frozenset({"mill"}))
+    keys = [a.get("building_key") for a in decide([], state, alarm=False) if a["type"] == "build"]
+    assert keys == ["r"]  # mill satisfied → camp next, never a second mill
+
+
 @pytest.mark.parametrize(
     ("population", "age", "buildings"),
     [
@@ -210,16 +232,29 @@ def test_lumber_camp_goal_raises_the_wood_target() -> None:
 
 
 @pytest.mark.parametrize(
-    ("wood", "buildings"),
+    ("population", "wood", "buildings"),
     [
-        (50, frozenset({"lumber_camp"})),  # camp stands, no mill → no farm goal
-        (85, frozenset({"mill", "lumber_camp"})),  # farm comfortably affordable
+        # Below prep pop: no Feudal-prereq wood goal has opened yet.
+        (11, 50, frozenset()),
+        # Both prereqs standing and wood comfortably covers a farm.
+        (20, 85, frozenset({"mill", "lumber_camp"})),
     ],
-    ids=["no-wood-goal", "farm-banked"],
+    ids=["below-prep-pop", "farm-banked"],
 )
-def test_no_wood_bias_without_pending_wood_goal(wood: int, buildings: frozenset[str]) -> None:
-    state = _state(population=20, wood=wood, buildings=buildings)
+def test_no_wood_bias_without_pending_wood_goal(
+    population: int, wood: int, buildings: frozenset[str]
+) -> None:
+    state = _state(population=population, wood=wood, buildings=buildings)
     assert _idle_pattern(state) == ("food", "food", "food", "wood", "wood")
+
+
+def test_missing_mill_raises_the_wood_target() -> None:
+    """The mill is a Feudal prereq AND the farm unlock, so once the economy is
+    established a missing mill banks wood toward it — like the camp (F-41)."""
+    needs_mill = _state(population=20, wood=110, buildings=frozenset())
+    assert _idle_pattern(needs_mill)[0] == "wood"  # 110 < 100 + margin
+    banked = _state(population=20, wood=125, buildings=frozenset())
+    assert _idle_pattern(banked) == ("food", "food", "food", "wood", "wood")
 
 
 def test_wood_bank_bias_sends_an_idle_to_wood() -> None:
@@ -231,6 +266,62 @@ def test_wood_bank_bias_sends_an_idle_to_wood() -> None:
     assert "tree" in targets
 
 
+def _gamestate_from_world(w: object) -> GameState:
+    """Project a WorldState into the GameState slice reactive.decide reads.
+
+    Idle dispatch and the villager queue are suppressed (idle_present=False,
+    villagers_ordered high) so the closed loop below isolates the Feudal-prep
+    BUILD path — the concern F-41 is about.
+    """
+    return GameState(
+        resources={
+            "food": int(w.food),  # type: ignore[attr-defined]
+            "wood": int(w.wood),  # type: ignore[attr-defined]
+            "gold": int(w.gold),  # type: ignore[attr-defined]
+            "stone": int(w.stone),  # type: ignore[attr-defined]
+        },
+        population=w.population,  # type: ignore[attr-defined]
+        population_cap=w.pop_cap,  # type: ignore[attr-defined]
+        current_age=w.age,  # type: ignore[attr-defined]
+        idle_present=False,
+        idle_count=None,
+        buildings_seen=frozenset(w.buildings),  # type: ignore[attr-defined]
+        villagers_ordered=99,
+    )
+
+
+def test_reactive_tier_alone_builds_both_feudal_prereqs() -> None:
+    """F-41 closed loop: with NO LLM in the loop, the reactive tier must reach
+    BOTH a mill and a lumber camp standing. Run 12 played 85/95 turns with the
+    executor down and never built a mill (only the LLM ever did), so the food
+    engine — farms, which need the mill — never started. This drives
+    reactive.decide against the world_sim economy to prove the fast tier now
+    gets there on its own."""
+    from core import WorldState
+    from evaluation.world_sim import apply_actions, tick
+
+    state = WorldState(
+        food=200.0,
+        wood=100.0,
+        gold=100.0,
+        stone=200.0,
+        population=12,  # economy established → prep gate open
+        pop_cap=30,
+        age="Dark Age",
+        buildings=[],
+        villager_queue=[],
+        age_up_ticks_remaining=0,
+    )
+    for _ in range(15):
+        actions = decide([], _gamestate_from_world(state), alarm=False)
+        state = tick(apply_actions(state, actions))
+        if {"mill", "lumber_camp"}.issubset(set(state.buildings)):
+            break
+    assert "mill" in state.buildings, f"no mill after {state.turn} turns: {state.buildings}"
+    assert "lumber_camp" in state.buildings
+    assert state.buildings.count("mill") == 1  # prep never double-builds a prereq
+
+
 def test_reactive_build_constants_match_executor_tables() -> None:
     """Drift guard (V-4 seed): the reactive tier duplicates build keys/costs to
     stay dependency-free — this pins every copy to the executor's tables."""
@@ -239,8 +330,10 @@ def test_reactive_build_constants_match_executor_tables() -> None:
 
     assert ex._BUILD_WOOD_COST["a"] == reactive._FARM_WOOD_COST
     assert ex._BUILD_WOOD_COST["r"] == reactive._LUMBER_CAMP_WOOD_COST
+    assert ex._BUILD_WOOD_COST["w"] == reactive._MILL_WOOD_COST
     assert ex.BUILD_KEY_TO_CLASS[reactive._FARM_BUILD_KEY] == "farm"
     assert ex.BUILD_KEY_TO_CLASS[reactive._LUMBER_CAMP_BUILD_KEY] == "lumber_camp"
+    assert ex.BUILD_KEY_TO_CLASS[reactive._MILL_BUILD_KEY] == "mill"
     # The executor's order gate backstops the reactive Dark Age target (F-38).
     assert reactive._VILLAGER_TARGET_BY_AGE["Dark Age"] == ex._VILLAGER_ORDER_TARGET
 

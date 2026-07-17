@@ -99,6 +99,14 @@ class MetricsSnapshot(TypedDict):
     game_end_reason: str
     memories_loaded: list[str]
     memories_used: dict[str, int]
+    # Executor health (T-533). llm_calls = turns the executor was asked to plan;
+    # llm_errors = turns where every LLM path failed (see LLMResult.error).
+    # llm_error_rate near 1.0 means the game was played by the reactive tier
+    # alone — a dead-executor run that must NOT read as a valid experiment
+    # (run 12: 90 errors, still accepted=true).
+    llm_calls: int
+    llm_errors: int
+    llm_error_rate: float
 
 
 class AgentMemory:
@@ -128,6 +136,12 @@ class AgentMemory:
         # composite executions never enter turn.actions), which is why the old
         # successful/total rate exceeded 1.0 (runs 1 and 3).
         self.executed_actions: int = 0
+        # Executor-outage tracking (T-533). llm_calls/llm_errors feed
+        # llm_error_rate; _llm_error_streak is the current run of consecutive
+        # failed executor turns, which the game loop alarms on.
+        self.llm_calls: int = 0
+        self.llm_errors: int = 0
+        self._llm_error_streak: int = 0
         self.highest_age: str = "Dark Age"
         self.game_start_time: datetime | None = None
         self.game_end_reason: str = ""  # "victory", "defeat", "timeout", ""
@@ -308,6 +322,22 @@ class AgentMemory:
         self.successful_actions += success_count
         self.executed_actions += total
 
+    def record_llm_outcome(self, *, errored: bool) -> int:
+        """Record one executor turn's success/failure; return the failure streak.
+
+        Every executor call funnels through here (T-533). `errored` is the
+        LLMResult.error flag — True only when every LLM path failed and the
+        turn is a safe-wait no-op. The returned consecutive-failure streak lets
+        the game loop raise a loud outage alarm; a success resets it to 0.
+        """
+        self.llm_calls += 1
+        if errored:
+            self.llm_errors += 1
+            self._llm_error_streak += 1
+        else:
+            self._llm_error_streak = 0
+        return self._llm_error_streak
+
     def record_food_reading(self, food: int) -> None:
         """Accumulate gathered food from consecutive HUD (OCR) readings.
 
@@ -361,6 +391,9 @@ class AgentMemory:
             "game_end_reason": self.game_end_reason,
             "memories_loaded": list(self.memories_loaded),
             "memories_used": dict(self.memories_applied_count),
+            "llm_calls": self.llm_calls,
+            "llm_errors": self.llm_errors,
+            "llm_error_rate": (self.llm_errors / self.llm_calls if self.llm_calls > 0 else 0.0),
         }
 
     def reset(self) -> None:
@@ -375,6 +408,9 @@ class AgentMemory:
         self.total_actions = 0
         self.successful_actions = 0
         self.executed_actions = 0
+        self.llm_calls = 0
+        self.llm_errors = 0
+        self._llm_error_streak = 0
         self.highest_age = "Dark Age"
         self.game_start_time = None
         self.game_end_reason = ""

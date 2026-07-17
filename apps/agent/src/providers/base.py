@@ -17,3 +17,9 @@ class LLMResult(TypedDict, total=False):
     observations: dict[str, object] | None
     actions_already_executed: bool
     success_count: int
+    # True when the executor produced NO usable turn — every LLM path (single-
+    # shot and its tool-loop fallback) failed and this is a safe-wait no-op.
+    # Drives the executor-outage alarm and the llm_error_rate metric (T-533):
+    # run 12 logged 90 such turns yet still wrote accepted=true, so the outage
+    # was invisible in results.tsv.
+    error: bool

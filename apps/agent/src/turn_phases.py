@@ -57,6 +57,12 @@ log = structlog.stdlib.get_logger()
 # turns' context.
 _APPLIED_RE = re.compile(r"^\s*\[applied:\s*([^\]]+)\]", re.IGNORECASE)
 
+# Consecutive failed executor turns before raising the outage alarm (T-533).
+# One-off API blips shouldn't shout; a systemic outage (run 12: 90 in a row,
+# the schema-grammar 400) must. Alarm fires once on the transition through the
+# threshold so a long outage produces one loud line, not one per turn.
+_EXECUTOR_OUTAGE_STREAK = 3
+
 
 def _extract_applied_memories(
     reasoning: str, loaded_titles: set[str]
@@ -187,6 +193,21 @@ def _process_response(
     reasoning = response.get("reasoning", "")
     observations = response.get("observations", {})
     actions = response.get("actions", [])
+
+    # Executor-health accounting (T-533). response["error"] is True only when
+    # every LLM path failed and the turn is a safe-wait no-op; count it and
+    # alarm on a sustained outage so a dead-executor run (run 12: 90 grammar
+    # 400s, still accepted=true) is loud in the log and in llm_error_rate.
+    errored = bool(response.get("error", False))
+    streak = memory.record_llm_outcome(errored=errored)
+    if errored and streak == _EXECUTOR_OUTAGE_STREAK:
+        log.error(
+            "executor_outage",
+            iteration=iteration,
+            consecutive_failures=streak,
+            detail=reasoning[:200],
+            hint="every LLM path is failing; the reactive tier alone cannot build a mill",
+        )
 
     loaded = set(memory.memories_loaded)
     known_titles, unknown_titles, reasoning = _extract_applied_memories(reasoning, loaded)

@@ -338,6 +338,9 @@ def test_metrics_snapshot_keys() -> None:
         "memories_loaded",
         "memories_used",
         "executed_actions",
+        "llm_calls",
+        "llm_errors",
+        "llm_error_rate",
     }
     assert set(snap.keys()) == expected_keys
 
@@ -367,6 +370,32 @@ def test_metrics_snapshot_age_score_uses_age_scores_table() -> None:
     m.update_age("Feudal Age")
     snap = m.get_metrics_snapshot()
     assert snap["age_score"] == AGE_SCORES["Feudal Age"]
+
+
+def test_llm_error_rate_counts_failed_executor_turns() -> None:
+    """llm_error_rate is failed executor turns / total — the metric that would
+    have flagged run 12's dead executor (90/95 errors, still accepted)."""
+    m = AgentMemory()
+    for errored in (False, True, True, False):  # 2 of 4 failed
+        m.record_llm_outcome(errored=errored)
+    snap = m.get_metrics_snapshot()
+    assert snap["llm_calls"] == 4
+    assert snap["llm_errors"] == 2
+    assert snap["llm_error_rate"] == 0.5
+
+
+def test_llm_error_rate_zero_when_no_calls() -> None:
+    assert AgentMemory().get_metrics_snapshot()["llm_error_rate"] == 0.0
+
+
+def test_record_llm_outcome_streak_resets_on_success() -> None:
+    """The returned streak counts CONSECUTIVE failures and a success zeroes it —
+    this is what the game loop alarms on."""
+    m = AgentMemory()
+    assert m.record_llm_outcome(errored=True) == 1
+    assert m.record_llm_outcome(errored=True) == 2
+    assert m.record_llm_outcome(errored=False) == 0  # success breaks the streak
+    assert m.record_llm_outcome(errored=True) == 1  # counts up again from zero
 
 
 def test_metrics_snapshot_survival_time_from_first_turn() -> None:

@@ -324,3 +324,38 @@ def test_click_action_preserves_building_key() -> None:
     )
     assert action is not None
     assert action.model_dump()["building_key"] == "q"
+
+
+# ---------------------------------------------------------------------------
+# Layer 7 — grammar-size regression guard (F-40)
+# ---------------------------------------------------------------------------
+# The single-shot executor path feeds LLMResponse's JSON schema to Anthropic
+# structured output as a constrained-decoding grammar. Bounded integers
+# (Field(ge=, le=)) emit minimum/maximum, each of which compiles to a large
+# numeric automaton; 22 such bounds across the Action union pushed the compiled
+# grammar over Anthropic's size limit and 400'd every executor turn for a whole
+# game (run 12). Ranges are now enforced by field_validators, which validate but
+# emit no schema bounds. These tests fail the moment a Field(ge=/le=) creeps
+# back — catching the regression here instead of on a burned VM run.
+
+
+def test_action_schema_has_no_numeric_bounds() -> None:
+    """No minimum/maximum anywhere in the single-shot schema — they are the
+    constrained-decoding heavyweight that blew the grammar limit (F-40)."""
+    import json
+
+    schema_text = json.dumps(LLMResponse.model_json_schema())
+    assert '"minimum"' not in schema_text, "a Field(ge=) bound regressed — see F-40"
+    assert '"maximum"' not in schema_text, "a Field(le=) bound regressed — see F-40"
+
+
+def test_coordinate_ranges_still_enforced_by_validator() -> None:
+    """Dropping schema bounds must NOT drop enforcement — validators still reject
+    out-of-range coords/drags/waits (the contract the bounds used to hold)."""
+    with pytest.raises(ValidationError):
+        DragAction(type="drag", start_x=1, start_y=2, end_x=99999, end_y=4, intent="oob")
+    with pytest.raises(ValidationError):
+        WaitAction(type="wait", ms=999999, intent="too long")
+    # and valid values still pass through unchanged
+    assert DragAction(type="drag", start_x=1, start_y=2, end_x=3, end_y=4).end_x == 3
+    assert WaitAction(type="wait", ms=1000).ms == 1000

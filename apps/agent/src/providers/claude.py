@@ -844,7 +844,7 @@ class ClaudeProvider:
 
         try:
             if self._use_single_shot(context):
-                payload = await self._call_single_shot(content, age=age)
+                payload = await self._single_shot_or_tool_loop(content, age)
             else:
                 result = await self._call_api(content, age=age)
                 log.debug("claude_response", age=age, reasoning=result.reasoning[:200])
@@ -859,10 +859,36 @@ class ClaudeProvider:
             log.error("claude_error", error=str(e))
             return self._error_response(f"Error: {e}")
 
+    async def _single_shot_or_tool_loop(self, content: list[dict], age: str) -> LLMResult:
+        """Single-shot fast path, falling back to the tool loop on a 400.
+
+        The single-shot path sends LLMResponse's schema to Anthropic structured
+        output as a constrained-decoding grammar; if that grammar exceeds the
+        server's size limit, every call 400s with "compiled grammar is too
+        large" and the turn is otherwise lost (run 12, F-40: 85/95 turns burned
+        this way). The tool-loop path uses a smaller schema surface
+        (_ACTION_TOOLS) that stayed under the limit that entire run, so on a
+        BadRequestError we retry THIS turn there instead of returning a no-op
+        wait. Non-400 API errors propagate to the caller's handler unchanged.
+        """
+        try:
+            return await self._call_single_shot(content, age=age)
+        except anthropic.BadRequestError as e:
+            log.warning("single_shot_bad_request_fallback_tool_loop", error=str(e))
+            result = await self._call_api(content, age=age)
+            return self._serialize_response(result)
+
     def _error_response(self, message: str) -> LLMResult:
-        """Return a safe error response with a wait action."""
+        """Return a safe error response with a wait action.
+
+        error=True marks the turn as an executor no-op so the game loop can
+        alarm on an outage and count it in llm_error_rate (T-533) — otherwise a
+        run where every executor call 400s looks identical to a healthy one in
+        results.tsv (run 12, F-40).
+        """
         return LLMResult(
             reasoning=message,
             observations={},
             actions=[{"type": "wait", "ms": 1000, "intent": "Error recovery"}],
+            error=True,
         )
