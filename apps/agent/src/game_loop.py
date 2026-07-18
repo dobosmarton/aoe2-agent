@@ -423,11 +423,17 @@ async def game_loop(
                 await ocr_warmup_task
         if overlay:
             overlay.close()
+        # Exits that bypass both except clauses (e.g. CancelledError, a
+        # BaseException) reach here with no reason set — run 13 logged
+        # game_end_reason="" on a manual stop (T-543). This is the one choke
+        # point every exit passes through, so enforce the invariant here.
+        if not memory.game_end_reason:
+            memory.game_end_reason = "interrupted"
         metrics = memory.get_metrics_snapshot()
         log.info("game_metrics_final", **metrics)
         goal_logger.log_game_end(
             iteration,
-            memory.game_end_reason or "unknown",
+            memory.game_end_reason,
             len(goal_manager.completed_goals),
         )
 

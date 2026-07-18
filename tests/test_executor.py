@@ -595,6 +595,62 @@ def test_confirmed_purchase_clears_missing_streak(fake_pyautogui: _FakePyautogui
     assert ex.build_rejection("a") is None  # 2 misses after a success ≠ streak of 3
 
 
+def test_income_masked_house_purchase_still_confirms(fake_pyautogui: _FakePyautogui) -> None:
+    """Run 13 (F-45/T-537): a 30-villager economy gathered +140 wood across a
+    25-wood house settlement, so the raw delta judged every real purchase
+    MISSING and the breaker locked out five building classes. Estimated
+    income is deducted from the observed delta before judging."""
+    _observe_wood(0)
+    _observe_wood(140)  # clean window → income estimate 140/snapshot
+    ex._note_pending_placement("q")  # house, 25 wood, baseline 140
+    ex.observe_hud(28, 30, {"wood": 255})  # +115 observed = +140 income, -25 spend
+    assert "house" in ex._build_gates.buildings_confirmed
+
+
+def test_income_alone_does_not_confirm_a_vanished_placement(
+    fake_pyautogui: _FakePyautogui,
+) -> None:
+    _observe_wood(0)
+    _observe_wood(140)
+    ex._note_pending_placement("q")
+    ex.observe_hud(28, 30, {"wood": 285})  # income only — nothing was spent
+    assert "house" not in ex._build_gates.buildings_confirmed
+
+
+def test_income_estimate_frozen_while_placement_pending(fake_pyautogui: _FakePyautogui) -> None:
+    """A window containing a spend would drag the estimate down and re-open
+    the false-missing hole — only clean windows update the EMA."""
+    _observe_wood(0)
+    _observe_wood(10)  # clean window → estimate 10
+    ex._note_pending_placement("w")
+    _observe_wood(300)  # polluted window: the pending settles here
+    assert ex._build_gates.wood_income_per_snapshot == 10
+
+
+def test_income_credit_scales_with_stale_snapshots(fake_pyautogui: _FakePyautogui) -> None:
+    """Stale-OCR retries accumulate several windows of income before the
+    reading moves; the eventual delta must be credited for all of them."""
+    _observe_wood(0)
+    _observe_wood(50)  # estimate 50/snapshot
+    ex._note_pending_placement("w")  # mill, 100 wood, baseline 50
+    _observe_wood(50)  # stale reading — entry survives
+    _observe_wood(50)  # stale again
+    _observe_wood(100)  # 3 windows x 50 income, -100 spend
+    assert "mill" in ex._build_gates.buildings_confirmed
+
+
+def test_verified_placement_lifts_suppression(fake_pyautogui: _FakePyautogui) -> None:
+    """T-537 amnesty (run 13, F-45): visual verification proves the build
+    path works, so it must clear the T-530 streak exactly like a wood-delta
+    confirmation — a class stayed suppressed after it was seen standing."""
+    ex.record_confirmed_buildings(["mill"])
+    _observe_wood(200)
+    _run_missing_settlements("a", count=3, wood=200)
+    assert ex.build_rejection("a") is not None  # suppressed
+    ex.record_confirmed_buildings(["farm"])  # the verified-placement path
+    assert ex.build_rejection("a") is None
+
+
 def test_place_click_succeeds_and_records_when_building_lands(
     fake_pyautogui: _FakePyautogui, monkeypatch: pytest.MonkeyPatch
 ) -> None:

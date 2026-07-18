@@ -111,8 +111,16 @@ def clear_detected_entities() -> None:
 _HOUSE_HEADROOM_MAX = 4
 # The game's population-cap maximum: houses past it add nothing.
 _GAME_POP_CAP_LIMIT = 200
-# Wood gathered between two HUD reads can mask this much of a purchase.
+# Residual noise a settlement tolerates AFTER estimated gather income is
+# deducted (OCR jitter, income-estimate error). The income itself is modeled,
+# not slack-covered: run 13 (F-45/T-537) had a 30-villager economy gathering
+# +140 wood across a 25-wood house settlement — no fixed slack survives both
+# that and a 4-villager opening.
 _PLACEMENT_INCOME_SLACK = 20
+# EMA weight for the per-snapshot wood-income estimate (updated only on
+# windows with no pending spend). 0.5 tracks the fast income ramp of a
+# growing villager count while smoothing single-frame OCR blips.
+_INCOME_EMA_WEIGHT = 0.5
 # Stale-OCR grace: identical wood readings a pending placement survives before
 # it is settled anyway.
 _PLACEMENT_SETTLE_ATTEMPTS = 3
@@ -148,6 +156,7 @@ class _PendingPlacement:
     building_class: str
     wood_cost: int
     wood_before: int  # wood per the HUD snapshot when the placement was made
+    noted_at_snapshot: int  # snapshot_count the wood_before reading belongs to
     settles_left: int = _PLACEMENT_SETTLE_ATTEMPTS
 
 
@@ -174,6 +183,10 @@ class _BuildGates:
     # _SIGHTING_MIN_FRAMES as unverified sightings).
     building_sightings: dict[str, int] = field(default_factory=dict)
     pending_placements: list[_PendingPlacement] = field(default_factory=list)
+    # Estimated wood gathered per snapshot window (EMA over windows with no
+    # pending spend; None until the first clean window). Settlement deducts it
+    # from the observed delta so gather income can't mask a purchase (T-537).
+    wood_income_per_snapshot: float | None = None
     # Circuit breaker (T-530): consecutive missing settlements per class, and
     # the snapshot count until which a repeatedly-missing class stays blocked.
     missing_streaks: dict[str, int] = field(default_factory=dict)
@@ -190,14 +203,52 @@ _build_gates = _BuildGates()
 def observe_hud(population: int, population_cap: int, resources: Mapping[str, int]) -> None:
     """Feed this turn's HUD reading into the build gates.
 
-    Not just a cache write: the fresh wood value first SETTLES pending
-    placements (confirming purchases / flagging missing ones) before the
-    snapshot is replaced — the ordering the wood-delta check depends on.
+    Not just a cache write: the fresh wood value first updates the gather-income
+    estimate, then SETTLES pending placements (confirming purchases / flagging
+    missing ones) before the snapshot is replaced — the ordering the wood-delta
+    check depends on.
     """
     _build_gates.snapshot_count += 1
+    _observe_wood_income(resources.get("wood"))
     _settle_pending_placements(resources.get("wood"))
     _build_gates.population = (population, population_cap)
     _build_gates.resources = dict(resources)
+
+
+def _observe_wood_income(wood_now: int | None) -> None:
+    """Update the per-snapshot wood-income EMA from a clean window.
+
+    Only windows with NO pending placements count — a window containing a
+    spend would drag the estimate down and re-open the false-missing hole the
+    estimate exists to close. Negative deltas (OCR blips) clamp to 0, which
+    pulls the estimate toward the safe direction (under-crediting income).
+    """
+    wood_before = (_build_gates.resources or {}).get("wood")
+    if wood_now is None or wood_before is None or _build_gates.pending_placements:
+        return
+    delta = max(wood_now - wood_before, 0)
+    previous = _build_gates.wood_income_per_snapshot
+    if previous is None:
+        _build_gates.wood_income_per_snapshot = float(delta)
+    else:
+        _build_gates.wood_income_per_snapshot = (
+            _INCOME_EMA_WEIGHT * delta + (1 - _INCOME_EMA_WEIGHT) * previous
+        )
+
+
+def _expected_income(noted_at_snapshot: int) -> float:
+    """Wood the economy likely gathered since a placement's baseline reading.
+
+    Scales with elapsed snapshots so stale-OCR retries (which accumulate
+    several windows of income before the reading moves) are credited fully.
+    0.0 while no clean window has been observed yet — settlement then behaves
+    exactly as before the income model existed.
+    """
+    ema = _build_gates.wood_income_per_snapshot
+    if ema is None:
+        return 0.0
+    elapsed = max(_build_gates.snapshot_count - noted_at_snapshot, 1)
+    return ema * elapsed
 
 
 def _note_pending_placement(building_key: str) -> None:
@@ -211,7 +262,12 @@ def _note_pending_placement(building_key: str) -> None:
         log.debug("placement_pending_dropped", building_key=building_key)
         return
     _build_gates.pending_placements.append(
-        _PendingPlacement(building_class=cls, wood_cost=cost, wood_before=wood_before)
+        _PendingPlacement(
+            building_class=cls,
+            wood_cost=cost,
+            wood_before=wood_before,
+            noted_at_snapshot=_build_gates.snapshot_count,
+        )
     )
 
 
@@ -220,13 +276,17 @@ def _settle_pending_placements(wood_now: int | None) -> None:
 
     A placement that consumed its wood cost DID succeed regardless of what
     detection saw (the resource bar is authoritative; the vision model can't
-    see foundations). Judged FIFO, erring toward confirmation: a false
-    "failed" report is what caused the duplicate mill, while a false success
-    merely delays the retry by a turn. An unchanged wood reading is treated as
-    stale OCR and re-checked next snapshot (up to `settles_left` times).
-    Confirmed spend is deducted per shared baseline before judging the next
-    entry, so one wood drop confirms at most one pending of a given cost —
-    run 3 (F-17) settled two mills off a single purchase.
+    see foundations). Estimated gather income since the baseline reading is
+    deducted from the observed delta first — run 13 (F-45) gathered +140 wood
+    across a 25-wood house settlement, so the raw delta alone judged every
+    real purchase MISSING and the circuit breaker locked out five building
+    classes. Judged FIFO, erring toward confirmation: a false "failed" report
+    is what caused the duplicate mill, while a false success merely delays
+    the retry by a turn. An unchanged wood reading is treated as stale OCR
+    and re-checked next snapshot (up to `settles_left` times). Confirmed
+    spend is deducted per shared baseline before judging the next entry, so
+    one wood drop confirms at most one pending of a given cost — run 3
+    (F-17) settled two mills off a single purchase.
     """
     if not _build_gates.pending_placements or wood_now is None:
         return
@@ -238,19 +298,21 @@ def _settle_pending_placements(wood_now: int | None) -> None:
             still_pending.append(pending)
             continue
         spent = spend_by_baseline.get(pending.wood_before, 0)
+        income = _expected_income(pending.noted_at_snapshot)
         purchased = (
-            wood_now <= pending.wood_before - spent - pending.wood_cost + _PLACEMENT_INCOME_SLACK
+            wood_now - income
+            <= pending.wood_before - spent - pending.wood_cost + _PLACEMENT_INCOME_SLACK
         )
         if purchased:
             spend_by_baseline[pending.wood_before] = spent + pending.wood_cost
             record_confirmed_buildings([pending.building_class])
-            _clear_missing_streak(pending.building_class)
             log.info(
                 "build_purchase_confirmed",
                 building=pending.building_class,
                 wood_before=pending.wood_before,
                 wood_now=wood_now,
                 cost=pending.wood_cost,
+                income_estimate=round(income, 1),
             )
         else:
             _note_missing_settlement(pending.building_class)
@@ -260,6 +322,7 @@ def _settle_pending_placements(wood_now: int | None) -> None:
                 wood_before=pending.wood_before,
                 wood_now=wood_now,
                 cost=pending.wood_cost,
+                income_estimate=round(income, 1),
             )
     _build_gates.pending_placements = still_pending
 
@@ -305,8 +368,14 @@ def record_building_sightings(classes: Iterable[str]) -> None:
 def record_confirmed_buildings(classes: Iterable[str]) -> None:
     """Remember gate-relevant building classes the agent PROVABLY owns —
     a wood-delta-confirmed purchase or a visually verified placement. The only
-    writers of buildings_confirmed (detection sightings stay informational)."""
-    _build_gates.buildings_confirmed.update(set(classes) & _GATE_BUILDING_CLASSES)
+    writers of buildings_confirmed (detection sightings stay informational).
+    Proof the build path works also lifts any T-530 suppression: run 13
+    (F-45) kept a class suppressed after it was verified standing because
+    only the wood-delta path cleared the streak."""
+    proven = set(classes) & _GATE_BUILDING_CLASSES
+    _build_gates.buildings_confirmed.update(proven)
+    for cls in proven:
+        _clear_missing_streak(cls)
 
 
 def confirmed_buildings() -> frozenset[str]:

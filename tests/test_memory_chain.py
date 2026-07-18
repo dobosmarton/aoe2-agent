@@ -334,3 +334,26 @@ def test_whitespace_only_content_is_dropped(memories_dir: Path):
     )
     assert "do something" in rendered
     assert _bullet_count(rendered) == 1
+
+
+# ---------------------------------------------------------------------------
+# Encoding tolerance (T-536)
+# ---------------------------------------------------------------------------
+
+
+def test_non_utf8_byte_does_not_break_loading(memories_dir: Path):
+    """T-536 (run 12 F-44): one cp1252 em-dash (0x97) in a single file raised
+    on load and zeroed the whole memory feature for 13 straight VM runs.
+    The corrupt file degrades to a replacement character; healthy files
+    still load."""
+    from gameplay_agent.memory_chain import MemoryChain
+
+    _write_memory(memories_dir, file_num=1, title="healthy", content="I should keep loading.")
+    corrupt = _write_memory(memories_dir, file_num=2, title="corrupt", content="placeholder")
+    corrupt.write_bytes(corrupt.read_bytes().replace(b"placeholder", b"broken \x97 dash"))
+
+    rendered = MemoryChain(memories_dir=memories_dir).load_memories(
+        max_tokens=GENEROUS_TOKEN_BUDGET,
+    )
+    assert "keep loading" in rendered
+    assert _bullet_count(rendered) == 2

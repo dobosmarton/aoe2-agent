@@ -11,6 +11,7 @@ import asyncio
 import time
 
 import gameplay_agent.game_loop as gl
+import pytest
 from gameplay_agent.executor import clear_detected_entities, set_detected_entities
 from gameplay_agent.providers.base import LLMResult
 from gameplay_agent.providers.claude import ClaudeProvider
@@ -254,3 +255,26 @@ def test_loop_exit_survives_pending_ocr_warmup(monkeypatch, tmp_path):
     # Must return normally, not raise CancelledError.
     memory = _run(gl.game_loop(provider, max_iterations=1, use_detection=False, use_overlay=False))
     assert memory.game_end_reason == "iterations_exhausted"
+
+
+def test_cancelled_loop_labels_end_reason_interrupted(monkeypatch, tmp_path):
+    """T-543 (run 13): a stop that bypasses both except clauses (CancelledError
+    is a BaseException) logged game_metrics_final with game_end_reason="" —
+    the finally now enforces the never-empty invariant at the one choke point
+    every exit passes through."""
+    executed = []
+    _patch_loop_seams(monkeypatch, tmp_path, executed, "routine economy turn")
+
+    async def _cancelled_capture(*_a, **_k):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(gl, "_capture_screenshot", _cancelled_capture)
+    memory = gl.AgentMemory()
+    provider = _FakePipelineProvider()
+    with pytest.raises(asyncio.CancelledError):
+        _run(
+            gl.game_loop(
+                provider, max_iterations=1, memory=memory, use_detection=False, use_overlay=False
+            )
+        )
+    assert memory.game_end_reason == "interrupted"

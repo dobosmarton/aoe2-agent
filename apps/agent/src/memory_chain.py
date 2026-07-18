@@ -30,6 +30,17 @@ MEMORIES_DIR = Path(__file__).parent.parent / "memories"
 _NUMBERED_FILENAME_RE = re.compile(r"\d+_(.+)\.md$")
 
 
+def _read_memory_file(path: Path) -> str:
+    """Read a memory file, tolerating stray non-UTF-8 bytes.
+
+    One cp1252 em-dash (0x97) in a single file made every load raise and
+    silently zeroed the whole memory feature for 13 straight VM runs (T-536,
+    run 12 F-44). Bad bytes become U+FFFD instead of an exception — one
+    mangled character beats losing every memory.
+    """
+    return path.read_text(encoding="utf-8", errors="replace")
+
+
 def _resolve_memory_title(meta: dict, file: Path) -> str:
     """Resolve the snake_case title used in `[applied: title]` reasoning tags.
 
@@ -197,7 +208,7 @@ class MemoryChain:
 
         entries: list[_MemoryEntry] = []
         for f in files:
-            text = f.read_text(encoding="utf-8")
+            text = _read_memory_file(f)
             meta = self._parse_frontmatter(text)
             content = self._strip_frontmatter(text).strip()
             if not content:
@@ -264,7 +275,7 @@ class MemoryChain:
         """List all memory fragments with metadata."""
         result = []
         for f in sorted(self.memories_dir.glob("*.md")):
-            text = f.read_text(encoding="utf-8")
+            text = _read_memory_file(f)
             meta = self._parse_frontmatter(text)
             content = self._strip_frontmatter(text).strip()
             title = _resolve_memory_title(meta, f)
@@ -352,7 +363,7 @@ class MemoryChain:
         """
         titles: set[str] = set()
         for f in self.memories_dir.glob("*.md"):
-            meta = self._parse_frontmatter(f.read_text(encoding="utf-8"))
+            meta = self._parse_frontmatter(_read_memory_file(f))
             title = meta.get("title")
             if not title:
                 # Filename pattern: NNN_<title>.md
@@ -391,12 +402,12 @@ created: {now}
 
 {content}
 """
-        path.write_text(file_content)
+        path.write_text(file_content, encoding="utf-8")
         return path
 
     def _read_memory(self, path: Path) -> str | None:
         """Read a memory file and return just the content (no frontmatter)."""
-        text = path.read_text(encoding="utf-8")
+        text = _read_memory_file(path)
         content = self._strip_frontmatter(text).strip()
         return content if content else None
 
