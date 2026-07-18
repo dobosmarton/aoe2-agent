@@ -861,6 +861,28 @@ def test_queue_villager_rejected_at_order_target(fake_pyautogui: _FakePyautogui)
     assert all(c[0] != "press" for c in fake_pyautogui.calls)  # no keystrokes spent
 
 
+def test_villager_target_and_message_follow_the_age(fake_pyautogui: _FakePyautogui) -> None:
+    """T-538 (run 13): the flat Dark Age 30 overruled the reactive Feudal 35
+    and the rejection kept teaching "bank for the Feudal Age" while IN it."""
+    ex.observe_age("Feudal Age")
+    ex.observe_hud(30, 45, {"wood": 200, "food": 200})
+    ex._build_gates.villagers_ordered = 30
+    result = _run(ex.execute_action({"type": "queue_villager", "intent": "grow"}))
+    assert result.success  # 30 < the Feudal target of 35
+    ex._build_gates.villagers_ordered = 35
+    result = _run(ex.execute_action({"type": "queue_villager", "intent": "grow"}))
+    assert not result.success and "Castle Age" in result.detail
+
+
+def test_villager_target_uncapped_past_the_age_map(fake_pyautogui: _FakePyautogui) -> None:
+    # Castle+ has no order target — only the food gate applies.
+    ex.observe_age("Castle Age")
+    ex.observe_hud(40, 60, {"wood": 200, "food": 200})
+    ex._build_gates.villagers_ordered = 50
+    result = _run(ex.execute_action({"type": "queue_villager", "intent": "grow"}))
+    assert result.success
+
+
 def test_queue_villager_rejected_without_food(fake_pyautogui: _FakePyautogui) -> None:
     """A q press with < 50 food no-ops in-game — reject instead, so the ledger
     never counts an order the TC never received."""

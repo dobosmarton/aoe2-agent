@@ -141,10 +141,17 @@ _MISSING_SUPPRESS_SNAPSHOTS = 5
 # (mirrors memory.INITIAL_POPULATION; drift test pins the two).
 _STARTING_VILLAGERS = 4
 _VILLAGER_FOOD_COST = 50
-# Dark Age villager target (user directive, run 11): enough economy to bank
-# the 500-food Feudal cost; every order past it IS the Feudal bank being
-# spent. Revisit (age-condition) once the agent reliably reaches Feudal.
-_VILLAGER_ORDER_TARGET = 30
+# Villager order targets by age (T-538 — run 13 reached Feudal and the flat
+# Dark Age 30 overruled the reactive tier's Feudal 35 while the rejection
+# message kept teaching "bank for the Feudal Age" IN Feudal). Dark Age 30 is
+# the user directive (run 11): enough economy to bank the 500-food Feudal
+# cost — every order past a target IS that age's bank being spent. Ages past
+# the map (Castle+) have no order cap; only the food gate applies. The
+# reactive tier's _VILLAGER_TARGET_BY_AGE mirrors this map (drift test).
+_VILLAGER_ORDER_TARGET_BY_AGE: dict[str, int] = {"Dark Age": 30, "Feudal Age": 35}
+# What the banked resources are FOR, per age — keeps the rejection message's
+# teaching age-correct. Same keys as the target map (the drift test pins it).
+_NEXT_AGE: dict[str, str] = {"Dark Age": "Feudal Age", "Feudal Age": "Castle Age"}
 
 
 # A placement whose foundation wasn't visually confirmed, awaiting settlement
@@ -195,6 +202,9 @@ class _BuildGates:
     # Villagers ordered so far (T-531) — self-generated ground truth that
     # leads the delivered HUD population by the TC queue depth.
     villagers_ordered: int = _STARTING_VILLAGERS
+    # Validated age from GameState (strategist OCR), synced once per turn —
+    # selects the villager order target and the rejection message (T-538).
+    current_age: str = "Dark Age"
 
 
 _build_gates = _BuildGates()
@@ -213,6 +223,17 @@ def observe_hud(population: int, population_cap: int, resources: Mapping[str, in
     _settle_pending_placements(resources.get("wood"))
     _build_gates.population = (population, population_cap)
     _build_gates.resources = dict(resources)
+
+
+def observe_age(age: str) -> None:
+    """Sync the validated age (GameState, strategist OCR) into the gates.
+
+    Selects the villager order target and the rejection message's teaching
+    (T-538). Falsy input (age not yet read this game) keeps the last value —
+    the gates start at Dark Age, which is always correct at game start.
+    """
+    if age:
+        _build_gates.current_age = age
 
 
 def _observe_wood_income(wood_now: int | None) -> None:
@@ -395,15 +416,18 @@ def villagers_ordered() -> int:
 def villager_queue_rejection() -> str | None:
     """Reason a villager can't be queued right now (logged), or None.
 
-    The order target caps TOTAL orders — the HUD population lags by the TC
-    queue depth, so it must never be the brake. The food gate keeps a press
-    that would silently no-op in-game from being counted as an order.
+    The age-keyed order target caps TOTAL orders — the HUD population lags by
+    the TC queue depth, so it must never be the brake. An age past the target
+    map has no cap. The food gate keeps a press that would silently no-op
+    in-game from being counted as an order.
     """
     ordered = _build_gates.villagers_ordered
-    if ordered >= _VILLAGER_ORDER_TARGET:
+    target = _VILLAGER_ORDER_TARGET_BY_AGE.get(_build_gates.current_age)
+    if target is not None and ordered >= target:
         reason = (
             f"villager target reached ({ordered} ordered, incl. the TC queue) — "
-            "keep villagers busy and bank food for the Feudal Age instead"
+            f"keep villagers busy and bank resources for the "
+            f"{_NEXT_AGE[_build_gates.current_age]} instead"
         )
     else:
         food = (_build_gates.resources or {}).get("food")

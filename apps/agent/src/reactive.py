@@ -124,6 +124,27 @@ _MILL_WOOD_COST = 100
 # executor's table.
 _WOOD_BANK_MARGIN = 20
 
+# Castle-prep economics (T-538, run 13 F-46). Castle research costs 800 food +
+# 200 gold; gold is the scarce half — run 13 sat at 90 gold with 1833 wood
+# banked idle because nothing built a mining camp or spent the wood after
+# Feudal. The gold bank target biases the idle rotation until 200 is banked.
+_CASTLE_GOLD_COST = 200
+# A mining camp's key and wood cost (mirrors executor._BUILD_WOOD_COST["e"],
+# same drift-test arrangement as the mill/camp costs above). The camp is the
+# gold drop-off — without one, run 13's late gold dispatch trickled through
+# the distant TC and Castle prep never got off the ground.
+_MINING_CAMP_BUILD_KEY = "e"
+_MINING_CAMP_WOOD_COST = 100
+# House rule: build when delivered headroom shrinks to this. Kept BELOW the
+# executor's _HOUSE_HEADROOM_MAX reject threshold (4) so the emit always
+# passes the gate. Run 13 stalled housed at 5/5 and 10/10 while house builds
+# sat suppressed — the reactive tier had no house rule of its own.
+_HOUSE_BUILD_KEY = "q"
+_HOUSE_HEADROOM_TRIGGER = 2
+# The game's population-cap maximum (mirrors executor._GAME_POP_CAP_LIMIT):
+# houses past it add nothing.
+_GAME_POP_CAP_LIMIT = 200
+
 
 def decide(entities: list[object], state: GameState, alarm: bool) -> list[dict[str, object]]:
     """Return routine action dicts for this turn (empty on alarm)."""
@@ -131,8 +152,10 @@ def decide(entities: list[object], state: GameState, alarm: bool) -> list[dict[s
         return []
     actions: list[dict[str, object]] = []
     actions.extend(_age_up_actions(state))
+    actions.extend(_house_actions(state))
     actions.extend(_queue_villager_actions(state))
     actions.extend(_feudal_prep_actions(state))
+    actions.extend(_castle_prep_actions(state))
     actions.extend(_distribute_idle_actions(entities, state))
     return actions
 
@@ -227,6 +250,58 @@ def _feudal_prep_actions(state: GameState) -> list[dict[str, object]]:
             }
         ]
     return []
+
+
+def _needs_mining_camp(state: GameState) -> bool:
+    """Castle prep pending: in Feudal Age with no gold drop-off standing.
+
+    Absence-gated on buildings_seen like the Feudal preps, so the rule stops
+    re-emitting once the camp is purchase-confirmed; a second camp at another
+    gold pile stays the LLM's call (mining_camp is deliberately not in the
+    executor's unique-building gate).
+    """
+    return state.current_age == "Feudal Age" and "mining_camp" not in state.buildings_seen
+
+
+def _castle_prep_actions(state: GameState) -> list[dict[str, object]]:
+    """Ensure the gold economy exists once Feudal is reached (T-538).
+
+    Castle Age needs 200 gold and run 13 (F-46) showed the gap: 25 minutes in
+    Feudal, 1833 wood banked, gold parked at 90 — no tier ever built the
+    mining camp. Same one-build-per-turn contract as `_feudal_prep_actions`;
+    the executor's cost gate waits out the 100 wood.
+    """
+    if _needs_mining_camp(state):
+        return [
+            {
+                "type": "build",
+                "building_key": _MINING_CAMP_BUILD_KEY,
+                "intent": "Build mining camp (gold drop-off for the Castle Age bank)",
+            }
+        ]
+    return []
+
+
+def _house_actions(state: GameState) -> list[dict[str, object]]:
+    """One house build when population headroom runs out — any age.
+
+    Runs before the villager queue in `decide` because housed IS a blocked
+    queue. Run 13 stalled housed at 5/5 and 10/10 with the LLM's house builds
+    suppressed; this gives the fast tier its own un-stall path. Affordability
+    and the already-ample-headroom case are the executor's gates to reject
+    (zero keystroke cost), same arrangement as the farm rule.
+    """
+    if state.population_cap >= _GAME_POP_CAP_LIMIT:
+        return []
+    if state.population_cap - state.population > _HOUSE_HEADROOM_TRIGGER:
+        return []
+    return [
+        {
+            "type": "build",
+            "building_key": _HOUSE_BUILD_KEY,
+            "intent": f"Build house (headroom {state.population}/{state.population_cap})",
+        }
+    ]
 
 
 def _orders_below_target(state: GameState) -> bool:
@@ -337,6 +412,8 @@ def _wood_bank_target(state: GameState) -> int | None:
         return _MILL_WOOD_COST + _WOOD_BANK_MARGIN
     if _needs_lumber_camp(state):
         return _LUMBER_CAMP_WOOD_COST + _WOOD_BANK_MARGIN
+    if _needs_mining_camp(state):
+        return _MINING_CAMP_WOOD_COST + _WOOD_BANK_MARGIN
     if "mill" in state.buildings_seen:
         return _FARM_WOOD_COST + _WOOD_BANK_MARGIN
     return None
@@ -350,7 +427,10 @@ def _idle_pattern(state: GameState) -> tuple[ResourceKind, ...]:
     cost plus margin → 2:1 food:wood, so the farm economy that ENDS the famine
     stays reachable — the pure all-food override starved wood to 0 and locked
     the loop shut (run 4, F-21). Outside a famine, wood below the binding
-    goal's bank target gets one extra wood slot in the rotation (F-23, F-34).
+    goal's bank target gets one extra wood slot in the rotation (F-23, F-34);
+    else in Feudal an extra gold slot leads until the Castle gold is banked
+    (T-538 — wood bias outranks it: the buildings the gold bank needs come
+    first).
     """
     if _resource(state, "food") < _FOOD_CRISIS_THRESHOLD:
         if _resource(state, "wood") < _FARM_WOOD_COST + _WOOD_BANK_MARGIN:
@@ -360,6 +440,8 @@ def _idle_pattern(state: GameState) -> tuple[ResourceKind, ...]:
     target = _wood_bank_target(state)
     if target is not None and _resource(state, "wood") < target:
         return ("wood", *pattern)
+    if state.current_age == "Feudal Age" and _resource(state, "gold") < _CASTLE_GOLD_COST:
+        return ("gold", *pattern)
     return pattern
 
 

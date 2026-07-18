@@ -33,6 +33,7 @@ from .executor import (
     clear_detected_entities,
     confirmed_buildings,
     execute_actions,
+    observe_age,
     observe_hud,
     reset_build_gates,
     set_detected_entities,
@@ -162,6 +163,7 @@ def _sync_turn_state(
     game_state.buildings_seen = confirmed_buildings()
     game_state.villagers_ordered = villagers_ordered()
     observe_hud(game_state.population, game_state.population_cap, game_state.resources)
+    observe_age(game_state.current_age)
 
 
 async def _drain_pending(
