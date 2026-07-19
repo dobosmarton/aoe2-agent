@@ -22,6 +22,11 @@ flowchart LR
     MODEL -->|copy| PT["aoe2_yolo_v6.pt"]
 ```
 
+> The `aoe2_yolo_v6` name here is illustrative — it matches `train_yolo.py`'s
+> default `--name`, which lags the served version. The **current served model is
+> v9** (§8.4 has the v9 metrics); the detector resolves the newest bundled
+> `aoe2_yolo_v*`, so a new export is picked up by version number.
+
 ## 8.2 Synthetic Data Generation
 
 `packages/detection/src/training/generate_training_data.py` generates labeled training images by compositing sprites onto backgrounds.

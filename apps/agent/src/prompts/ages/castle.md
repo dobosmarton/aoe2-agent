@@ -4,9 +4,11 @@ Castle Age is the power spike. You need to boom your economy with additional Tow
 
 ## Castle Age Checklist (in addition to universal checklist)
 
-**Villager queuing:**
+**Villager queuing:** past Feudal there is no fixed order target — only the food gate caps queuing, so treat the numbers below as a heuristic, not a hard stop.
 - **Population < 80**: Keep producing villagers from ALL Town Centers. Build 1-2 additional TCs.
 - **Population 80+**: Slow down. Focus military production. Only replace lost villagers.
+
+> **Build execution:** the `build` composite (`building_key=…`) only drives the economic (Q) menu. Town Centers, University, Castle, Towers, and walls are on the **V (advanced) menu** — build them with a manual press sequence (`.` → `v` → key → click), not `build`. These V-menu sequences are not yet VM-verified.
 
 **Villager allocation:** 15-18 on food, 10-12 on wood, 6-8 on gold, 3-4 on stone (if building Castles/TCs).
 

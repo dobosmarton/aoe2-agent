@@ -31,14 +31,15 @@ The executor never sees screenshots. All visual information comes from YOLO enti
 Each iteration (~3-5 seconds):
 
 1. **Capture** — Screenshot the game window via `mss`
-2. **Detect** — Run YOLO v5 on screenshot → list of entities with IDs, classes, positions
+2. **Detect** — Run YOLO v9 (single-pass @1280) on screenshot → list of entities with IDs, classes, positions
 3. **Classify ownership** — Color-based blue-dominance check on military units (own vs enemy)
 4. **Alarm check** — Scan for enemy military → inject emergency defense goals if found
 5. **Strategist** (periodic) — reads resources from the bar via local OCR (RapidOCR), then Sonnet creates/updates goals from that text
-6. **Build context** — Assemble text: entities + goals + resources + memory + game knowledge
-7. **Execute** — Haiku reads text context, returns structured actions (Pydantic-validated)
-8. **Act** — Execute mouse clicks / keyboard presses via pyautogui
-9. **Remember** — Update memory, evaluate goal progress, compute rewards
+6. **Reactive tier** — a deterministic, no-LLM rule layer handles routine upkeep first: villager queuing to the age's order target (30 Dark / 35 Feudal), Feudal prep (mill + lumber camp), the mining camp in Feudal, house building at low headroom, and the age-up press. Many turns need no LLM call at all.
+7. **Build context** — Assemble text: entities + goals + resources + memory + game knowledge
+8. **Execute** — Sonnet reads text context, returns structured actions (Pydantic-validated)
+9. **Act** — Execute mouse clicks / keyboard presses via pyautogui
+10. **Remember** — Update memory, evaluate goal progress, compute rewards
 
 ## Requirements
 
@@ -69,7 +70,7 @@ uv run --package arena aoe2-arena race
 uv run --package detection-server aoe2-server --model <path>
 ```
 
-Per-package optional extras (e.g. `aoe2_yolo_v5.mlpackage` builds need CoreML,
+Per-package optional extras (e.g. `.mlpackage` CoreML builds need CoreML,
 detection training needs ultralytics) are declared on each package's own
 `pyproject.toml`. Reach them via `uv sync --all-extras`.
 
@@ -235,7 +236,7 @@ just agent --iterations 20
 just agent --test
 
 # Run the detection server (macOS host)
-just server --model packages/detection/src/inference/models/aoe2_yolo_v5.onnx
+just server --model packages/detection/src/inference/models/aoe2_yolo_v9.onnx
 
 # Frontend dev servers (workspace-wide install happens once at repo root)
 bun install
@@ -299,7 +300,7 @@ Scans YOLO detections for 21 enemy military classes. Uses color-based ownership 
 
 ### Entity Detection (`detection/`)
 
-60-class YOLO v5 model with 92.2% mAP50 accuracy. Entities persist across frames via IoU tracking (e.g., `sheep_0` stays `sheep_0`). The executor supports 7 action types (click, right_click, press, drag, wait, scroll, detect) and can target entities by class (`target_class: "sheep"`) or by ID (`target_id: "sheep_0"`).
+60-class YOLO v9 model served single-pass @1280 (real micro-F1 ≈ 0.67; the older 92.2% mAP50 was a synthetic v5-lineage figure). Entities persist across frames via IoU tracking (e.g., `sheep_0` stays `sheep_0`). The executor supports 9 base action types (click, right_click, press, build, queue_villager, drag, wait, scroll, detect) and can target entities by class (`target_class: "sheep"`) or by ID (`target_id: "sheep_0"`).
 
 ### Remote Detection Server (`server/`)
 

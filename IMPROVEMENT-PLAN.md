@@ -21,6 +21,8 @@
 
 The architecture itself is sound and already matches the stated goals (local perception, text-only LLM, cached prompts, reactive layer for reflexes). The gaps are **recall on units, global map awareness, villager-level precision, per-turn LLM cost, and the missing measurement loop**. The plan below attacks those in priority order.
 
+> **Note (2026-07-19):** the table above is the 2026-07-09 snapshot. Several rows have since moved: the idle badge is now read as a **digit** (not just presence), the version drift is largely closed (v9 everywhere; `get_detector()` picks the newest bundled model), and the reactive tier now handles most routine turns with **no LLM call** (villager orders, Feudal/Castle prep, houses, age-up) — so "executor every turn" no longer holds. See the per-item **Status** callouts below and the run-review doc for the T-5xx work.
+
 ---
 
 ## P0 — Fix the measurement loop first
@@ -44,6 +46,8 @@ The architecture itself is sound and already matches the stated goals (local per
 **Improves:** Trustworthy per-class P/R, meaningful threshold sweeps, and a stable go/no-go gate for every future model version.
 
 ### P0.3 Resolve model-version drift (30 minutes, do it now)
+
+> **Status (2026-07-19): largely resolved.** `config.py` is the source of truth (v9); `get_detector()`/`resolve_model_path()` now pick the **newest bundled** `aoe2_yolo_v*` (not v6); `packages/detection/README.md` and `TRAINING_GUIDE.md` read v9. The root `README.md` + detection-server/VM-bringup residuals were the last stragglers and are fixed in the 2026-07-19 docs refresh.
 
 **What:** Make `apps/agent/src/config.py` the single source of truth for the served model; update `packages/detection/README.md` (says v7), `get_detector()` default (resolves v6), and `TRAINING_GUIDE.md` (quotes v5 metrics, says "no v6 yet"). Also commit or discard the 16 modified files in the working tree.
 
@@ -135,6 +139,8 @@ Emit a compact text summary: `"minimap: enemy red blob NE (~grid F7), 62% explor
 
 ### P2.3 Read idle-villager *count*, not just presence
 
+> **Status (2026-07-19): DONE.** `resource_ocr.read_idle_count` reads the badge digit via a template-NCC bank; `GameState.idle_count` / `idle_streak` exist and size the reactive dispatch (with a trust gate). Note the count still mis-reads in some states (pinned-1, and pinned-41 in Feudal) — that's the open **T-302** instrumentation item, tracked in the run-review doc, not this one.
+
 **What:** The idle badge digit is a tiny fixed-font number at a calibrated HUD position. RapidOCR fails on it, but a 10-glyph template-match (the `template` backend already exists in `resource_ocr.py` for exactly this style of problem) will read it near-perfectly.
 
 **Why:** `reactive.py` currently dispatches up to 3 idle villagers *when the badge exists* — it can't tell 1 idle from 9 idle, so mass-idle events (post-combat, TC rally mistakes) drain slowly over many turns.
@@ -180,6 +186,8 @@ The perception stack is already local and free. Nearly all recurring cost is the
 ## P4 — Learning loop: make games make the agent better
 
 ### P4.1 Actually populate the cross-game memory chain
+
+> **Status (2026-07-19): unblocked, still to populate.** The chain was a silent no-op on the VM for ~13 runs because one cp1252 byte made every load/save raise (`utf-8` decode error). That's fixed (T-536: tolerant reads + explicit-utf-8 writes), so the mechanism now runs — but `memories/` is still empty. Remaining: clean the corrupt VM file, then wire extraction into the baseline runs.
 
 **What:** The pipeline (post-game Haiku extraction → ranked notes → cached system block, with `[applied: ...]` attribution) is fully built, but `memories/` is **empty** — it has never run against real games. Wire it into the P0.1 baseline runs and every game thereafter; review the first few extractions by hand to tune the extraction prompt.
 

@@ -10,7 +10,7 @@ The agent's output is a list of actions that must be validated, resolved to scre
 
 ## 3.1 Action Types
 
-The agent has **eight base action types** (Pydantic-validated in `apps/agent/src/models.py`) and **two composite tools** (defined in `apps/agent/src/providers/claude.py`) that bundle multi-step sequences to eliminate API roundtrips.
+The agent has **nine base action types** (Pydantic-validated in `apps/agent/src/models.py`) plus **composite tools** (defined in `apps/agent/src/providers/claude.py`) that bundle multi-step sequences to eliminate API roundtrips. Two of the base actions — `build` and `queue_villager` — are *also* exposed as composite tools on the tool-loop path, so a routine single-shot turn can emit them directly; `send_villager` remains composite-only.
 
 ### Base Actions
 
@@ -120,7 +120,7 @@ The executor's `_handle_build` expands this into the same press/click sequence a
 ### Union Type
 
 ```python
-Action = ClickAction | RightClickAction | PressAction | BuildAction | DragAction | WaitAction | ScrollAction | DetectAction
+Action = ClickAction | RightClickAction | PressAction | BuildAction | QueueVillagerAction | DragAction | WaitAction | ScrollAction | DetectAction
 ```
 
 ### LLMResponse
@@ -138,11 +138,11 @@ Field order matters: `actions` first ensures structured output generates them be
 
 ### Composite Tools
 
-Composite tools execute multi-step hotkey sequences locally without intermediate API roundtrips. They are defined as Claude tool_use tools in `_ACTION_TOOLS` and handled by dedicated methods in `ClaudeProvider`. Each composite calls `_run_steps()` which executes sub-actions sequentially via `execute_action()`, stopping on the first failure. (`build` used to be a composite tool but is now a first-class base action — see above — so routine single-shot turns can build directly; the tool loop still exposes a `build` tool that runs the same shared `build_steps()` sequence.)
+Composite tools execute multi-step hotkey sequences locally without intermediate API roundtrips. They are defined as Claude tool_use tools in `_ACTION_TOOLS` and handled by dedicated methods in `ClaudeProvider`. Each composite calls `_run_steps()` which executes sub-actions sequentially via `execute_action()`, stopping on the first failure. (`build` and `queue_villager` used to be composite-only but are now first-class base actions — see the union above — so routine single-shot turns can emit them directly; the tool loop still exposes matching tools that run the same shared sequences.)
 
 **`send_villager(target_class or x, y)`** — Select idle villager → right_click target. Accepts `target_class` (e.g. "sheep", "tree") or raw coordinates. Saves 1 roundtrip (~3s).
 
-**`queue_villager()`** — Go to TC (press h) → queue villager (press q). Saves 1 roundtrip (~3s).
+**`queue_villager()`** — Go to TC (press h) → queue villager (press q). Saves 1 roundtrip (~3s). Also a first-class base action now, funneled through the executor's order ledger (T-531).
 
 Composite actions bypass Pydantic validation (they are already executed by the time `_call_api` returns). The `_COMPOSITE_NAMES` set ensures they pass through `validate_actions()` unchanged.
 
@@ -310,8 +310,8 @@ All coordinate fields enforce bounds: `ge=0, le=7680` for x, `ge=0, le=4320` for
 
 ## Summary
 
-- 8 base action types with Pydantic validation: click, right_click, press, build, drag, wait, scroll, detect — `build` is coordinate-free (executor auto-places near the TC) and works on both the single-shot path and the tool loop
-- 2 composite tools: send_villager, queue_villager — bundle multi-step sequences to eliminate API roundtrips
+- 9 base action types with Pydantic validation: click, right_click, press, build, queue_villager, drag, wait, scroll, detect — `build` is coordinate-free (executor auto-places near the TC) and works on both the single-shot path and the tool loop
+- Composite tools: send_villager (composite-only), plus build and queue_villager which are also base actions — all bundle multi-step sequences to eliminate API roundtrips
 - `PointTargetAction` base class for shared triple-targeting logic (coordinates, target_id, target_class)
 - Unified `_resolve_coords()` resolver tries target_id → target_class → (x, y)
 - `_ACTION_HANDLERS` dispatch pattern maps base action types to async handler functions

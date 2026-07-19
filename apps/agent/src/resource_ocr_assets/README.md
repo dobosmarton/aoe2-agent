@@ -1,7 +1,7 @@
 # Resource-bar OCR — assets & how to run
 
 This directory holds the **resolution-specific** inputs the local resource-bar
-reader (`gameplay_agent/resource_ocr.py`) can use: per-field pixel geometry
+reader (`apps/agent/src/resource_ocr.py`) can use: per-field pixel geometry
 (*calibration*) and per-digit *glyph templates*. These are data; the reader is
 code. They're kept out of `vision_fixtures/` on purpose (that dir is globbed as
 strategist fixtures and shared with the strategist vision test).

@@ -2,7 +2,9 @@
 
 End-to-end checklist to produce `aoe2_yolo_v6.pt` / `aoe2_yolo_v6.onnx` — the YOLO26n (NMS-free) model the refactored detector now resolves. Annotation is done on **cvat.ai** (hosted); training on a cloud GPU — the **tested path is RunPod** (RTX 4090, ~$0.7/hr). Lambda Cloud (A100) steps are kept as an alternative, but Lambda rejects prepaid/most debit cards (incl. Revolut), so RunPod is the working default.
 
-> **Why this is needed:** `get_detector()` ([detector.py:835](../../packages/detection/src/inference/detector.py)) resolves `aoe2_yolo_v6.onnx → aoe2_yolo_v6.pt → mock`. Without the v6 files the agent runs in **mock detection**. This runbook produces them.
+> **Why this is needed:** `get_detector()` ([detector.py](../../packages/detection/src/inference/detector.py)) resolves the **newest bundled** `aoe2_yolo_v*` weights (`.onnx` preferred, else `.pt`, else mock). Without any such weights the agent runs in **mock detection**. This runbook produces a model.
+>
+> **Version note:** the current served model is **v9**. The `v6` names below are the original worked example — when you train a fresh model, bump the version (v10, …) and it is picked up automatically (no code change), since resolution is newest-version-wins.
 
 > **Latest run (water-scene + real data).** Synthetic-only v6 hit 82.7% mAP50 overall but **`fish` collapsed to 0.146** — fish/naval sprites were composited on *land* (a scene that never occurs in-game). The fix: a **water-scene mode** (Phase A) that composites fish/naval only on real water textures and removes them from land scenes, plus merging **187 real CVAT screenshots**. Result: **`fish` 0.146 → 0.545 mAP50** (recall 0.079 → 0.512), overall **0.827 → 0.834** (held). The diagnosis generalizes — *if a class only exists in a specific scene, the synthetic generator must place it only in that scene.*
 
@@ -325,7 +327,7 @@ Same flow with `ubuntu@<IP>`, key `~/.ssh/lambda-aoe2-training.pem`, and home `/
        packages/detection/src/training_data_v8/eval_real_summary.json --write
    ```
    The tuned block is a plain literal between `# BEGIN/END GENERATED CLASS_THRESHOLDS` markers, so the change lands as a reviewable git diff.
-5. **Deploy the ONNX to the Windows VM** per [windows-vm-agent-bringup.md](./windows-vm-agent-bringup.md) (already points at `aoe2_yolo_v6.onnx`).
+5. **Deploy the ONNX to the Windows VM** per [windows-vm-agent-bringup.md](./windows-vm-agent-bringup.md) (points at `aoe2_yolo_v9.onnx` — update the version in the `just server --model` flag when you deploy a newer one).
 6. **Commit** the new model snapshot + any label/data tooling changes (no `Co-Authored-By: Claude` trailer, per project convention).
 
 ---
@@ -346,7 +348,7 @@ After a training run, feed the model's mistakes back in: re-run `active_learning
 
 ## Troubleshooting
 
-- **Agent still detects nothing / "Using mock detection":** the v6 files aren't where `get_detector()` looks — confirm `models/aoe2_yolo_v6.onnx` (or `.pt`) exists; ONNX is preferred.
+- **Agent still detects nothing / "Using mock detection":** no `aoe2_yolo_v*` weights are where `get_detector()` looks — confirm a `models/aoe2_yolo_v*.onnx` (or `.pt`) exists; ONNX is preferred and the newest version wins.
 - **`fish` (or any naval class) mAP collapses:** the synthetic generator placed it on land. Re-check the scene-separation invariant (Phase A) and that you passed `--water-backgrounds` + `--water-fraction`.
 - **`Permission denied (publickey)` on RunPod after it was working:** the pod restarted and wiped `authorized_keys` — re-add your key via the Web Terminal (Phase D1). `ssh -v` shows the offered key's fingerprint if you suspect a key mismatch.
 - **`libGL.so.1: cannot open shared object file`:** `apt-get install -y libgl1 libglib2.0-0` on the pod (Phase D3).

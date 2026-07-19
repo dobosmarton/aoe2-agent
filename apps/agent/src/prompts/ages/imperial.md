@@ -4,7 +4,7 @@ Imperial Age is the endgame. You have access to all units and technologies. Focu
 
 ## Imperial Age Checklist (in addition to universal checklist)
 
-**Villager queuing:**
+**Villager queuing:** past Feudal there is no fixed order target — only the food gate caps queuing, so the numbers below are a heuristic, not a hard stop.
 - **Population < 130**: Keep producing villagers to replace losses and maintain economy.
 - **Population 130+**: Stop producing. Focus entirely on military production and upgrades.
 

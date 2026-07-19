@@ -72,11 +72,11 @@ The trained artifact is **YOLO26n** (NMS-free), shipped as `aoe2_yolo_v9.onnx` /
 - **PyTorch (.pt)** -- loaded via ultralytics YOLO library. Requires `torch` and `ultralytics` packages. At load time, `_load_pytorch()` reads `model.names` from the model file to set `self.class_names` — this is authoritative and overrides the YAML-loaded defaults.
 - **ONNX (.onnx)** -- loaded via `onnxruntime`. Cross-platform, works on ARM64 Windows where PyTorch may not be available. Uses `DEFAULT_CLASSES` loaded from `classes.yaml`. Session options: `ORT_ENABLE_ALL` graph optimization, 4 intra-op threads, auto-detected execution provider (DML or CPU).
 
-If `model_path` is not specified, `get_detector()` resolves the model in this order (there is no multi-version fallback ladder — old model files were dropped, so there's no backward compatibility to maintain):
+If `model_path` is not specified, `resolve_model_path()` globs `models/aoe2_yolo_v*` and picks the **highest-versioned** weights present (currently v9), preferring `.onnx` over `.pt` — a newly trained, higher-numbered model is picked up automatically without a code change:
 
-1. `models/aoe2_yolo_v6.onnx` -- preferred; this is the ARM64 deploy path (YOLO26, NMS-free)
-2. `models/aoe2_yolo_v6.pt` -- used only if the ONNX export is absent
-3. Mock mode -- if neither model file is found
+1. Newest `models/aoe2_yolo_v*.onnx` -- preferred; the ARM64 deploy path (YOLO26, NMS-free)
+2. Newest `models/aoe2_yolo_v*.pt` -- used only if the ONNX export is absent
+3. Mock mode -- if no `aoe2_yolo_v*` weights are found
 
 ### Detection Modes
 
@@ -293,7 +293,7 @@ _instance: Optional[EntityDetector] = None
 def get_detector(model_path=None, use_mock=False, imgsz=1280) -> EntityDetector:
     global _instance
     if _instance is None:
-        # Resolve model file: aoe2_yolo_v6.onnx, else aoe2_yolo_v6.pt, else mock...
+        # Resolve model file: newest aoe2_yolo_v* (.onnx preferred, else .pt), else mock...
         _instance = EntityDetector(model_path=path, use_mock=use_mock, imgsz=imgsz)
     return _instance
 ```

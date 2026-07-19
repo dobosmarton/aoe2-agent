@@ -44,7 +44,7 @@ graph TD
 
     subgraph "Autoresearch (prompt evolution)"
         AR[autoresearch/orchestrator.py] --> MUT[prompt_mutator.py]
-        MUT --> SYSP[prompts/system.md]
+        MUT --> SYSP[prompts/core.md]
         AR --> RUN[game_runner.py]
         RUN --> LOOP
         AR --> MEM[memory_chain.py]
@@ -89,7 +89,7 @@ See also the [Glossary](./glossary.md) for one-line definitions of terms used th
 | # | Chapter | Description | Key files |
 |---|---|---|---|
 | 04 | [Provider Pattern](./part2-llm-integration/04-provider-pattern.md) | Abstract base, Claude executor (text-only), strategist (text + local OCR) | `providers/base.py`, `providers/claude.py`, `providers/strategist.py` |
-| 05 | [Prompt Engineering](./part2-llm-integration/05-prompt-engineering.md) | Executor + strategist prompt design | `prompts/system.md`, `prompts/strategist.md` |
+| 05 | [Prompt Engineering](./part2-llm-integration/05-prompt-engineering.md) | Executor + strategist prompt design | `prompts/core.md`, `prompts/strategist.md`, `prompts/ages/*.md` |
 | 06 | [Context Injection](./part2-llm-integration/06-context-injection.md) | Memory system, goals, resources, dynamic game knowledge | `memory.py`, `goals.py`, `providers/claude.py` |
 
 ### Part 3: Entity detection
@@ -186,7 +186,7 @@ Speculative scratch documents that haven't crystallized into shipped designs.
 ## Quick links
 
 - [Game loop entry point](./part1-architecture/02-game-loop-pipeline.md#the-iteration-cycle) — the capture-detect-think-act cycle.
-- [Action types reference](./part1-architecture/03-action-model-and-execution.md#the-five-action-types).
+- [Action types reference](./part1-architecture/03-action-model-and-execution.md#31-action-types).
 - [System prompt](./part2-llm-integration/05-prompt-engineering.md) — what the executor LLM knows.
 - [60-class taxonomy](./part3-entity-detection/07-detector-architecture.md#the-60-class-taxonomy).
 - [Arena CLI cheatsheet](./part6-evaluation-arena/14-arena-overview.md#the-three-subcommands).

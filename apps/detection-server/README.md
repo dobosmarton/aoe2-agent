@@ -17,22 +17,22 @@ packages/detection-server/src/
 ## Common entry points
 
 ```bash
-just server --model packages/detection/src/inference/models/aoe2_yolo_v5.onnx
-just server --model packages/detection/src/inference/models/aoe2_yolo_v5.mlpackage
+just server --model packages/detection/src/inference/models/aoe2_yolo_v9.onnx
+just server --model packages/detection/src/inference/models/aoe2_yolo_v5.mlpackage  # CoreML build (only v5 is exported to .mlpackage; v9 serves via ONNX)
 ```
 
 Or directly:
 
 ```bash
 uv run --package detection-server aoe2-server --host 0.0.0.0 --port 8420 \
-    --model packages/detection/src/inference/models/aoe2_yolo_v5.onnx
+    --model packages/detection/src/inference/models/aoe2_yolo_v9.onnx
 ```
 
 Health check from a peer machine (replace with your Mac's IP):
 
 ```bash
 curl http://192.168.64.1:8420/health
-# {"backend": "onnx_cpu", "classes": 60, "model": "aoe2_yolo_v5.onnx"}
+# {"backend": "onnx_cpu", "classes": 60, "model": "aoe2_yolo_v9.onnx"}
 ```
 
 ## Conventions

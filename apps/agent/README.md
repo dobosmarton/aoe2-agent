@@ -1,23 +1,28 @@
 # `gameplay-agent/` — Real-Game Agent + Scenario Runner
 
 The Windows VM tier: the loop that screenshots AoE2:DE, sends frames to a
-detection server, asks Claude what to do, and clicks. Also home to the
-scenario runner and its test helpers (the same Pydantic action model and
-providers are exercised by both real-game and synth-tier scenario tests).
+detection server, and clicks. A deterministic **reactive tier** handles routine
+upkeep with no LLM call; Claude is asked what to do on the turns that need
+judgement. Also home to the scenario runner and its test helpers (the same
+Pydantic action model and providers are exercised by both real-game and
+synth-tier scenario tests).
 
 ## What's here
 
 ```
-packages/gameplay-agent/src/
+apps/agent/src/            # importable as `gameplay_agent`
 ├── main.py                # CLI entry: `aoe2-agent`
 ├── game_loop.py           # Real-game capture → detect → think → act cycle
+├── reactive.py            # Deterministic no-LLM tier: villager orders, Feudal/Castle prep, houses, age-up
+├── villager_roles.py      # Villager job inference (what each detected villager is gathering)
 ├── synth_game_loop.py     # Stripped-down loop arena uses (talks to WorldState, no pyautogui)
 ├── executor.py            # Action dispatch + execution (pyautogui)
-├── models.py              # Pydantic action types (click, drag, press, etc.)
+├── models.py              # Pydantic action types (click, press, build, queue_villager, etc.)
 ├── memory.py              # AgentMemory + working_memory + metrics snapshot
 ├── memory_chain.py        # Cross-game persistent memory (loads + saves notes-to-self)
 ├── goals.py               # Goal manager + alarm system + reward tracking
 ├── entity_utils.py        # DetectedEntity formatting helpers
+├── resource_ocr.py        # Local resource-bar + idle-badge OCR (RapidOCR / template backend; replaced Claude vision)
 ├── detection_phase.py     # YOLO call + ownership classification per loop iteration
 ├── strategist_phase.py    # Periodic Sonnet text call (resources via local OCR) → goal updates
 ├── turn_phases.py         # Glue between detection / strategist / executor per turn
@@ -48,7 +53,7 @@ just agent --test                                # One iteration, no clicks
 just eval-all                                    # Run every scenario fixture
 uv run --package gameplay-agent \
     python -m gameplay_agent.scenario_runner \
-    packages/gameplay-agent/src/scenarios/age_up_gate_fires.yaml
+    apps/agent/src/scenarios/age_up_gate_fires.yaml
 ```
 
 ## Where to read more

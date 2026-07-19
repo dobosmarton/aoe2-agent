@@ -71,9 +71,9 @@ class ClaudeProvider(BaseLLMProvider):
 - Lazily loads the system prompt on first access
 - Optionally initializes the game knowledge database for dynamic context injection
 
-### System Prompt Loading (`claude.py:65-98`)
+### System Prompt Loading (`claude.py:148-189`)
 
-Loads from `prompts/system.md` on disk. If the file doesn't exist, falls back to a minimal inline prompt that teaches the JSON output format and basic action types. See [Chapter 5](./05-prompt-engineering.md) for prompt content.
+Loads and concatenates `prompts/core.md` + `prompts/hotkeys.md`, then layers the age-specific `prompts/ages/<age>.md` at request time. If a file doesn't exist, falls back to a minimal inline prompt that teaches the JSON output format and basic action types. See [Chapter 5](./05-prompt-engineering.md) for prompt content.
 
 ### Content Building (`claude.py:_build_content`)
 

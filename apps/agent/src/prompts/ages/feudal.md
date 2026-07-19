@@ -20,9 +20,9 @@ Missing Castle Age leaves you with no knights, no monks, no unique units, and no
 
 ## Feudal Age Checklist (in addition to universal checklist)
 
-**Villager queuing:**
-- **Population < 35**: Resume queuing every turn. If 150+ food, queue 2–3.
-- **Population 35+**: Slow down — save for Castle Age (800 food + 200 gold). Only queue if food > 900.
+**Villager queuing:** the reactive tier queues villagers up to the Feudal **order target of 35** automatically, then banks food + gold for Castle. You rarely need to queue by hand.
+- **Fewer than 35 ordered**: queuing is fine. If 150+ food, 2–3 is fine.
+- **35 ordered**: STOP — save for Castle Age (800 food + 200 gold). Only queue if food > 900.
 
 **Villager allocation:** 10–12 on food, 6–8 on wood, 3–4 on gold. Start mining gold IMMEDIATELY — Castle Age needs 200.
 
@@ -32,7 +32,7 @@ Missing Castle Age leaves you with no knights, no monks, no unique units, and no
 - Farms need a drop-off building nearby (TC or Mill).
 
 **Gold mining (CRITICAL — gates Castle Age):**
-1. Within the FIRST 2 turns of Feudal: build a Mining Camp next to the nearest gold_mine (`build` with `building_key="e"`).
+1. Within the FIRST 2 turns of Feudal: build a Mining Camp next to the nearest gold_mine (`build` with `building_key="e"`). The reactive tier now also auto-builds this once you reach Feudal — you're a backstop if it hasn't landed.
 2. Keep **at least 4 villagers permanently on gold** from Feudal onward. Use `send_villager target_class=gold_mine`.
 3. Set TC gather point to gold for new villagers: H → right_click gold_mine → Q, Q, Q.
 4. **If gold < 100, halt new buildings and divert at least 2 villagers from food/wood to gold immediately.** Past games stalled at 50–110 gold because villagers kept being pulled back to food/wood.

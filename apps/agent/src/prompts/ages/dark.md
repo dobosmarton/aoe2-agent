@@ -14,9 +14,9 @@ By turn 5–8, NOT turn 15+. Sheep deplete around turn 10–12; the farm pipelin
 
 ## Dark Age Checklist (in addition to universal checklist)
 
-**Villager queuing:**
-- **Population < 22**: Use `queue_villager` EVERY turn. If 150+ food, call it 2–3 times.
-- **Population 22+**: STOP queuing villagers — save food for Feudal (500). Each queued villager delays Feudal research by 25 s.
+**Villager queuing:** the reactive tier queues villagers up to the Dark Age **order target of 30** automatically, then banks food — you rarely need to queue by hand.
+- **Fewer than 30 villagers ordered**: queuing is fine (the reactive tier is already doing it; call `queue_villager` yourself only if the TC is sitting idle). If 150+ food, 2–3 is fine.
+- **30 ordered**: STOP queuing — save food for Feudal (500). Each extra villager delays Feudal research by 25 s.
 
 **Villager allocation:** 6–8 on food, 3–4 on wood initially. Never have 0 food gatherers.
 
@@ -26,7 +26,7 @@ By turn 5–8, NOT turn 15+. Sheep deplete around turn 10–12; the farm pipelin
 
 **Berries:** `berry_bush` detected but no Mill nearby? → Build a Mill (`build` with `building_key="w"`) and send 3–4 villagers via `send_villager target_class=berry_bush`.
 
-**Feudal Age transition:** see the **Age-up Gate** in core.md. Two notes specific to Dark Age: (a) qualifying prereq buildings are Lumber Camp, Mill, Mining Camp, Barracks, or Dock — Mill + Lumber Camp is the easiest path; (b) wait for the TC queue to drain before pressing Z (each queued villager delays the research by 25 s).
+**Feudal Age transition:** see the **Age-up Gate** in core.md. Two notes specific to Dark Age: (a) the qualifying prereq pair is **Mill AND Lumber Camp** — build exactly those two (the reactive auto age-up only fires on that pair, so don't substitute another building); (b) wait for the TC queue to drain before pressing Z (each queued villager delays the research by 25 s).
 
 **Mill + Farms emergency:** NO sheep AND no berry_bush in entity list AND food < 100? → P10 EMERGENCY. Drop everything else and get farms running this turn (template below). Do NOT keep sending villagers to wood when food is the bottleneck.
 
@@ -69,10 +69,10 @@ In Dark Age, ONLY use the Q build menu (economic: House, Mill, Mining Camp, Lumb
   {"type": "press", "key": "h", "rescan": true, "intent": "Go to TC"},
   {"type": "right_click", "target_class": "sheep", "intent": "Set gather point to sheep"},
   {"type": "queue_villager", "intent": "Queue villager (auto-gathers)"},
-  {"type": "queue_villager", "intent": "Queue another villager"},
-  {"type": "send_all_idle", "target_class": "tree", "intent": "Sweep ALL idle villagers to wood"}
+  {"type": "queue_villager", "intent": "Queue another villager"}
 ]
 ```
+(Idle villagers are auto-distributed each turn — do NOT add `send_all_idle`; it dumps everyone on one tile. See the universal checklist in core.md.)
 
 **FOOD EMERGENCY — pick the template by what you detect** (when NO sheep/berry_bush AND food < 100):
 

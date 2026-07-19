@@ -45,7 +45,7 @@ agent/
 │   │   ├── ownership.py       # Blue-dominance ownership classifier
 │   │   ├── thresholds.py      # Per-class confidence thresholds
 │   │   ├── frame_diff.py      # Frame differencing for rescan optimization
-│   │   └── models/            # YOLO26 (v6) model weights (.pt/.onnx)
+│   │   └── models/            # YOLO26 (v9) model weights (.pt/.onnx)
 │   ├── training/              # Synthetic data gen + YOLO training
 │   ├── labeling/              # CVAT integration + class definitions
 │   └── extraction/            # SLD sprite extraction from game files

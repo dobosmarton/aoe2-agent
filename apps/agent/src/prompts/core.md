@@ -29,10 +29,9 @@ Your strategic goals are provided in the context below (under "Active Goals"). F
 
 Read the **strategist's Resource Status** block in context — that is the authoritative reading. Do NOT use your own age estimate.
 
-**If ALL of these are true, your first two actions this turn MUST be `press key=h` then `press key=z` — nothing else before them:**
+**The reactive tier presses `h` then `z` automatically** once you are in Dark Age with food ≥ 500 and both a Mill and a Lumber Camp built — you normally do not age up by hand. As a backstop, if that state holds and the research still hasn't started, your first two actions this turn MUST be `press key=h` then `press key=z` — nothing else before them:
 - Strategist's Age reads `Dark Age`
 - Food ≥ 500
-- Population ≥ 22
 - Both **Lumber Camp** AND **Mill** appear in the Detected Entities list (Feudal Age prereq: 2 Dark Age buildings)
 
 Research takes ~2 minutes and runs in the background — resume farming / queueing villagers on the NEXT turn, after the research is in flight.
@@ -45,10 +44,10 @@ Missing Feudal Age is the #1 ranking killer against real opponents. If this gate
 
 Before choosing actions, check these in order:
 1. **Idle villagers are AUTO-DISTRIBUTED for you.** A background system reads the idle-villager badge each turn and spreads idle villagers across resources (food/wood/gold) by the age's ratio — you do NOT need to sweep them, and you should NOT use `send_all_idle` (it dumps everyone onto one tile, unbalancing the economy). Only send villagers yourself for a *deliberate* move: `send_villager` to put one on a specific resource, or `reassign_villager` to pull a worker off one job and build/gather something else (see the food-emergency rule).
-2. **Should I queue a villager?** → TC should never be idle unless you are actively saving for the next age-up. Check the age-specific section for population caps.
+2. **Should I queue a villager?** → The reactive tier queues villagers up to the age's **order target** (30 in Dark Age, 35 in Feudal) automatically, then banks food for the next age. TC should never be idle unless you are saving for the age-up — but you rarely need to queue by hand.
 3. **Am I housed (pop = pop cap)?** → **BUILD A HOUSE IMMEDIATELY** using `build` with `building_key="q"` (omit x,y — the executor auto-places on open ground).
    You CANNOT queue villagers while housed. This is the #1 game-losing mistake.
-4. **Do I need houses soon?** → Build ONE house when **population ≥ pop_cap − 5** (any age). Do NOT wait until pop_cap — house construction takes ~25 s, and once housed the TC stops producing villagers entirely. Do NOT build multiple houses per turn — one house adds 5 pop slots, that's enough.
+4. **Do I need houses soon?** → The reactive tier auto-builds a house when headroom runs low; as a backstop, build ONE house when **population ≥ pop_cap − 3** (any age). Do NOT wait until pop_cap — house construction takes ~25 s, and once housed the TC stops producing villagers entirely. (The executor rejects a house built with more than 4 headroom, so don't build them earlier than this.) Do NOT build multiple houses per turn — one house adds 5 pop slots, that's enough.
 5. **FOOD EMERGENCY: Is food < 50?** →
    **Dedicate the ENTIRE turn to farms.** Do nothing else — no houses, no queuing, just farms.
    Each farm costs 60 wood. If you have 300+ wood, build several this turn.
@@ -164,15 +163,15 @@ Use the resource readings from context (provided by strategist) — do NOT try t
 
 ## Telemetry: Tag Applied Memories
 
-If a memory rule from "Notes to Myself from Previous Games" directly influenced your action this turn, your `reasoning` field MUST start with `[applied: title1, title2]` — before any heading, list, or other text. The titles are the snake_case identifiers shown in `[brackets]` at the start of each memory bullet — for example a bullet rendered as `- [build_house_at_pop_cap_minus_5] (when: Dark Age AND pop >= pop_cap - 5) I should...` has the title `build_house_at_pop_cap_minus_5`, so you'd write `[applied: build_house_at_pop_cap_minus_5]`.
+If a memory rule from "Notes to Myself from Previous Games" directly influenced your action this turn, your `reasoning` field MUST start with `[applied: title1, title2]` — before any heading, list, or other text. The titles are the snake_case identifiers shown in `[brackets]` at the start of each memory bullet — for example a bullet rendered as `- [build_house_near_pop_cap] (when: Dark Age AND pop >= pop_cap - 3) I should...` has the title `build_house_near_pop_cap`, so you'd write `[applied: build_house_near_pop_cap]`.
 
 Example:
 
-> reasoning: "[applied: build_house_at_pop_cap_minus_5] Population is at 26/30, building a house now to avoid the cap stall."
+> reasoning: "[applied: build_house_near_pop_cap] Population is at 26/30, building a house now to avoid the cap stall."
 
 Counter-example — do NOT bury the tag inside a list or after a header:
 
-> reasoning: "**Plan:**\n1. [applied: build_house_at_pop_cap_minus_5] ..."  ← wrong, not at the start
+> reasoning: "**Plan:**\n1. [applied: build_house_near_pop_cap] ..."  ← wrong, not at the start
 
 This is **telemetry only**. Do NOT change your behavior to mention or avoid memories — just tag honestly when a rule did drive your decision. If no memory rule applied this turn, omit the tag entirely. Multiple memories: comma-separate them inside the same brackets.
 
@@ -217,7 +216,7 @@ The full hotkey reference is appended below this prompt. Key shortcuts to rememb
 - H: Go to TC. Then Q to queue villager, V to ungarrison all, Z to age up
 - .: Select idle villager (moves camera). Use to sweep all idles.
 - ,: Select idle military (moves camera)
-- Villager selected + Q: Economic build menu (Q=House, W=Mill, E=Mining Camp, R=Lumber Camp, A=Farm)
+- Villager selected + Q: Economic build menu (Q=House, W=Mill, E=Mining Camp, R=Lumber Camp, A=Farm, S=Blacksmith, T=Dock)
 - Press Q multiple times at TC to queue multiple villagers: H, Q, Q, Q = 3 villagers
 
 Play to win!

@@ -32,8 +32,8 @@ from detection import EntityDetector, get_detector
 # Get singleton detector instance
 detector = get_detector()
 
-# Detect entities — adaptive SAHI is the default
-entities = detector.detect_adaptive(screenshot_bytes)
+# Detect entities — the deployed default is fast single-pass @1280
+entities = detector.detect_fast(screenshot_bytes)
 
 for entity in entities:
     print(f"{entity.entity_id}: {entity.class_name} at {entity.center} (conf: {entity.confidence:.2f})")
@@ -48,14 +48,14 @@ from detection.inference.detector import EntityDetector, get_detector
 
 detector = get_detector(imgsz=1280)
 
-# Adaptive SAHI (default) — fast scan + targeted SAHI on entity regions
+# Fast single-pass @1280 — the DEPLOYED default (config.adaptive_sahi=False)
+entities = detector.detect_fast(screenshot_bytes)
+
+# Adaptive SAHI — fast scan + targeted SAHI on entity regions (only when adaptive_sahi=True)
 entities = detector.detect_adaptive(screenshot_bytes, force_full=False)
 
-# Full SAHI — tiles entire image, used on first turn and periodically
+# Full SAHI — tiles entire image (used on first turn and periodically when SAHI is on)
 entities = detector.detect(screenshot_bytes)
-
-# Fast single-pass — used for mid-turn rescans
-entities = detector.detect_fast(screenshot_bytes)
 
 # Tracker prediction — extrapolate positions without inference
 predicted = detector.tracker.predict()
@@ -65,12 +65,12 @@ predicted = detector.tracker.predict()
 
 | Mode | Method | Tiles | Latency | When Used |
 |------|--------|-------|---------|-----------|
-| Full SAHI | `detect()` | ~18 | ~234ms | First turn, every N turns, alarm |
-| Adaptive SAHI | `detect_adaptive()` | ~3-8 | ~100-200ms | Default (most turns) |
-| Fast | `detect_fast()` | 1 | ~50ms | Mid-turn rescans |
+| Fast single-pass | `detect_fast()` | 1 | ~50ms | **Deployed default** (`config.adaptive_sahi=False`) — every turn @1280 |
+| Full SAHI | `detect()` | ~18 | ~234ms | Available; used when SAHI is enabled (first turn, every N turns, alarm) |
+| Adaptive SAHI | `detect_adaptive()` | ~3-8 | ~100-200ms | Available when `adaptive_sahi=True` |
 | Prediction | `tracker.predict()` | 0 | ~0ms | Rescan skip (confidence > 80%) |
 
-**Adaptive SAHI** is the default mode. It runs a fast single-pass scan at `imgsz=1280`, clusters detected entities into ROI regions, then runs SAHI only on those regions. Falls back to full SAHI on the first turn, every `full_sahi_interval` turns (default 5), and when an alarm is triggered.
+**The deployed agent runs fast single-pass at `imgsz=1280`** — `config.adaptive_sahi` defaults to `False` because SAHI hurt v9's accuracy at retina resolution (scale mismatch; single-pass @1280 wins on real micro-F1). Adaptive and full SAHI remain in the library for when a model benefits from tiling: adaptive runs a fast single-pass scan, clusters detected entities into ROI regions, then runs SAHI only on those regions, falling back to full SAHI on the first turn, every `full_sahi_interval` turns (default 5), and on alarm. The latency figures above predate v9 and are indicative only.
 
 ## Directory Structure
 
