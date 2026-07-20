@@ -14,7 +14,14 @@ export function JsonPrimitive({
       return <span className="text-gold tabular-nums">{String(value)}</span>;
     case "boolean":
       return <span className="text-event-llm-prompt">{String(value)}</span>;
+    case "bigint":
+      return <span className="text-gold tabular-nums">{value.toString()}</span>;
+    case "undefined":
+      return <span className="text-muted-foreground">undefined</span>;
+    // Symbols and functions have no JSON form, and an object reaching a
+    // *primitive* renderer means JsonNode mis-dispatched. Naming the kind beats
+    // rendering "[object Object]" and pretending it was data.
     default:
-      return <span className="text-foreground">{String(value)}</span>;
+      return <span className="text-muted-foreground">[{typeof value}]</span>;
   }
 }

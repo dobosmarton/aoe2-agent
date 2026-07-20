@@ -8,7 +8,7 @@ import type { RunSeries } from "@/lib/events";
 
 export type ResourceKey = "food" | "wood" | "gold" | "stone" | "population";
 
-export interface ProfileSeries {
+export type ProfileSeries = {
   /** Stable key used both as the chart series key and the React key. */
   readonly key: string;
   /** Display label (profile name, or a short run_id when unlabelled). */
@@ -23,7 +23,7 @@ export interface ProfileSeries {
   }>;
 }
 
-interface Acc {
+type Acc = {
   food: number;
   wood: number;
   gold: number;
@@ -34,9 +34,9 @@ interface Acc {
 
 /** Group runs by profile and mean each resource per turn. Profiles appear in
  * first-seen order; turns are sorted ascending. */
-export function aggregateByProfile(
+export const aggregateByProfile = (
   series: readonly RunSeries[],
-): readonly ProfileSeries[] {
+): readonly ProfileSeries[] => {
   const groups = new Map<string, RunSeries[]>();
   for (const run of series) {
     const label = run.profile_name ?? shortRunId(run.run_id);
@@ -83,16 +83,16 @@ export function aggregateByProfile(
     result.push({ key: label, label, points });
   }
   return result;
-}
+};
 
 /** Pivot the per-profile curves into wide rows for one resource, keyed by turn
  * with one column per profile — the shape `TimeSeriesChart` consumes. The
  * `Record<string, number>` is intentional: the columns are profile labels,
  * which are runtime-dynamic, so the key set is genuinely open here. */
-export function resourceRows(
+export const resourceRows = (
   profiles: readonly ProfileSeries[],
   resource: ResourceKey,
-): ReadonlyArray<Record<string, number>> {
+): ReadonlyArray<Record<string, number>> => {
   const turns = new Set<number>();
   for (const p of profiles) {
     for (const pt of p.points) {
@@ -115,4 +115,4 @@ export function resourceRows(
       }
       return row;
     });
-}
+};

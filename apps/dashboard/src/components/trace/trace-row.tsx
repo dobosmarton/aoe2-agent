@@ -1,13 +1,16 @@
 import { useState } from "react";
 import { ChevronRight } from "lucide-react";
-import { Collapsible } from "radix-ui";
-
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { JsonView } from "@/components/trace/json-view";
 import { eventKindMeta, eventMetaTag, summarise } from "@/lib/event-meta";
 import type { ArenaEvent } from "@/lib/events";
 import { cn } from "@/lib/utils";
 
-interface TraceRowProps {
+type TraceRowProps = {
   readonly event: ArenaEvent;
 }
 
@@ -21,13 +24,13 @@ export function TraceRow({ event }: TraceRowProps): React.ReactElement {
   const tag = eventMetaTag(event);
 
   return (
-    <Collapsible.Root
-      open={open}
-      onOpenChange={setOpen}
+    <Collapsible
+      isExpanded={open}
+      onExpandedChange={setOpen}
       className="border-border/60 border-l-2"
       style={{ borderLeftColor: meta.colorVar }}
     >
-      <Collapsible.Trigger className="hover:bg-accent/40 group flex w-full items-center gap-2 px-2 py-1 text-left text-xs">
+      <CollapsibleTrigger className="hover:bg-accent/40 group flex w-full items-center gap-2 px-2 py-1 text-left text-xs">
         <ChevronRight
           className={cn(
             "text-muted-foreground size-3 shrink-0 transition-transform",
@@ -49,12 +52,12 @@ export function TraceRow({ event }: TraceRowProps): React.ReactElement {
             {tag}
           </span>
         )}
-      </Collapsible.Trigger>
-      <Collapsible.Content>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
         <div className="bg-muted/30 mx-2 mb-1.5 overflow-x-auto rounded-md p-2">
           <JsonView value={event} />
         </div>
-      </Collapsible.Content>
-    </Collapsible.Root>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }

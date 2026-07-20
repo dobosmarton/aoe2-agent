@@ -1,7 +1,7 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-interface OptionalNumberFieldProps {
+type OptionalNumberFieldProps = {
   readonly label: string;
   readonly value: number | null;
   readonly colorVar?: string | undefined;

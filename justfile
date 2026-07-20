@@ -50,6 +50,14 @@ arena-rank profile="apps/arena/src/profiles/ranking-v1.yaml":
 arena-web-dev port="8000":
     uv run --package arena-web aoe2-arena-web --port {{port}}
 
+# Detection training tracker API (annotation/dataset visibility).
+training-api-dev port="8100":
+    uv run --package training-api aoe2-training-api --port {{port}}
+
+# Seed the tracker DB from real_screenshots/raw + a dataset version (idempotent).
+training-seed:
+    uv run --package training-api python -m training_api.ingest
+
 # ── Quality gate ───────────────────────────────────────────────────────────
 
 lint:

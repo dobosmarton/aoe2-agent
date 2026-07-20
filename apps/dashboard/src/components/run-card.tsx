@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { formatRelative, shortRunId } from "@/lib/run-format";
 import type { RunSummary } from "@/lib/events";
 
-interface RunCardProps {
+type RunCardProps = {
   readonly run: RunSummary;
   readonly selected: boolean;
   /** Trailing label slot — standalone cards pass the operation badge; cards

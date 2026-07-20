@@ -1,7 +1,7 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-interface NumberFieldProps {
+type NumberFieldProps = {
   readonly label: string;
   readonly value: number;
   readonly min?: number;

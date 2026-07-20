@@ -7,12 +7,12 @@ import { GroupHeader } from "@/components/group-header";
 import { RunCard } from "@/components/run-card";
 import { groupRuns } from "@/lib/run-grouping";
 import { labelVariant } from "@/lib/run-format";
-import type { RunsStatus } from "@/hooks/use-runs";
+import type { LoadStatus } from "@/lib/load-status";
 import type { RunSummary } from "@/lib/events";
 
-interface RunListProps {
+type RunListProps = {
   readonly runs: readonly RunSummary[];
-  readonly status: RunsStatus;
+  readonly status: LoadStatus;
   readonly error: string | null;
   readonly selected: string | null;
   readonly onSelect: (runId: string) => void;

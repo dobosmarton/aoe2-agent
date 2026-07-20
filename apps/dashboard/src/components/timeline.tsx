@@ -1,6 +1,6 @@
 import { Slider } from "@/components/ui/slider";
 
-interface TimelineProps {
+type TimelineProps = {
   readonly maxTurn: number | null;
   readonly selectedTurn: number | null;
   readonly onSelect: (turn: number) => void;
@@ -44,12 +44,12 @@ export function Timeline({
       </span>
       <div className="flex-1">
         <Slider
-          min={1}
-          max={maxTurn}
+          minValue={1}
+          maxValue={maxTurn}
           step={1}
           value={[current]}
-          onValueChange={(values) => {
-            const next = values[0];
+          onChange={(values: number | number[]) => {
+            const next = Array.isArray(values) ? values[0] : values;
             if (next !== undefined) {
               onSelect(next);
             }

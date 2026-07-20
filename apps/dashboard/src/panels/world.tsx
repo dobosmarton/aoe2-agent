@@ -7,14 +7,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { EmptyState } from "@/components/empty-state";
 import { seriesFromStates } from "@/lib/event-utils";
+import { SECTION_TITLE } from "@/lib/styles";
 import type { WorldStateSnapshot } from "@/lib/events";
 
-interface WorldPanelProps {
+type WorldPanelProps = {
   readonly states: ReadonlyMap<number, WorldStateSnapshot>;
   readonly selectedTurn: number | null;
 }
-
-const SECTION_TITLE = "text-muted-foreground text-xs font-semibold uppercase tracking-wide";
 
 export function WorldPanel({
   states,
@@ -74,6 +73,7 @@ export function WorldPanel({
             </div>
             <Progress
               value={popPercent}
+              aria-label="population versus cap"
               className="[&>[data-slot=progress-indicator]]:bg-population"
             />
             <div className="text-muted-foreground text-xs">

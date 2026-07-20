@@ -8,7 +8,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-interface JsonNodeProps {
+type JsonNodeProps = {
   readonly name?: string;
   readonly value: unknown;
   readonly depth: number;

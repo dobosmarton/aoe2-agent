@@ -7,7 +7,7 @@ import { JsonNode } from "@/components/trace/json-node";
 // are shallow, so no virtualization is needed.
 // ---------------------------------------------------------------------------
 
-interface JsonViewProps {
+type JsonViewProps = {
   readonly value: unknown;
   readonly defaultExpanded?: boolean;
 }

@@ -1,11 +1,11 @@
 import type { ChartSeriesBase } from "@/components/charts/chart-types";
 
-interface TooltipPayloadEntry {
+type TooltipPayloadEntry = {
   readonly dataKey?: string | number;
   readonly value?: number | string;
 }
 
-interface TimeSeriesTooltipProps {
+type TimeSeriesTooltipProps = {
   readonly active?: boolean;
   readonly payload?: readonly TooltipPayloadEntry[];
   readonly label?: string | number;

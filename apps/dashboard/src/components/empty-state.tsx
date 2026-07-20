@@ -1,4 +1,4 @@
-interface EmptyStateProps {
+type EmptyStateProps = {
   readonly title: string;
   readonly hint?: string;
 }

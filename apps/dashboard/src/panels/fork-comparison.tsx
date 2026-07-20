@@ -3,14 +3,13 @@ import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { StateSummary } from "@/components/state-summary";
 import { useEvents } from "@/hooks/use-events";
-import { forksIn, statesByTurn } from "@/lib/event-utils";
+import type { forksIn} from "@/lib/event-utils";
+import { statesByTurn } from "@/lib/event-utils";
 import { cn } from "@/lib/utils";
+import { SECTION_TITLE } from "@/lib/styles";
 import type { ArenaEvent } from "@/lib/events";
 
-const SECTION_TITLE =
-  "text-muted-foreground text-xs font-semibold uppercase tracking-wide";
-
-interface ForkComparisonProps {
+type ForkComparisonProps = {
   readonly currentEvents: readonly ArenaEvent[];
   readonly currentRunId: string;
   readonly fork: ReturnType<typeof forksIn>[number];

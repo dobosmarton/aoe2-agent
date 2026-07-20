@@ -1,0 +1,23 @@
+[project]
+name = "training-api"
+version = "0.1.0"
+description = "Detection training tracker — FastAPI service for annotation/dataset visibility."
+requires-python = ">=3.11"
+dependencies = [
+    "detection",
+    "fastapi>=0.115.0",
+    "pydantic>=2.5.0",
+    "uvicorn>=0.30.0",
+    "pillow>=10.0.0",
+]
+
+[project.scripts]
+aoe2-training-api = "training_api.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = { "training_api" = "src" }
+packages = ["training_api"]

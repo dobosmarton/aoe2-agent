@@ -6,7 +6,7 @@ import { operationRuns } from "@/lib/run-grouping";
 import { shortRunId } from "@/lib/run-format";
 import type { RunSummary } from "@/lib/events";
 
-interface SiblingStripProps {
+type SiblingStripProps = {
   readonly runs: readonly RunSummary[];
   readonly selectedRunId: string | null;
   readonly onSelect: (runId: string) => void;

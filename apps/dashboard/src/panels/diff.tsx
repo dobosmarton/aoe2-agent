@@ -13,12 +13,10 @@ import { EmptyState } from "@/components/empty-state";
 import { ForkComparison } from "@/panels/fork-comparison";
 import { forksIn } from "@/lib/event-utils";
 import { cn } from "@/lib/utils";
+import { SECTION_TITLE } from "@/lib/styles";
 import type { ArenaEvent } from "@/lib/events";
 
-const SECTION_TITLE =
-  "text-muted-foreground text-xs font-semibold uppercase tracking-wide";
-
-interface DiffPanelProps {
+type DiffPanelProps = {
   readonly events: readonly ArenaEvent[];
   readonly currentRunId: string | null;
   readonly onOpenRun: (runId: string) => void;

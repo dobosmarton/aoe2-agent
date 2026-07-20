@@ -20,7 +20,7 @@ import { ComparisonTooltip } from "@/components/charts/comparison-tooltip";
 // The tooltip lives in `comparison-tooltip.tsx`.
 // ---------------------------------------------------------------------------
 
-interface ComparisonChartProps {
+type ComparisonChartProps = {
   readonly data: readonly ComparisonDatum[];
   readonly colorVar: string;
   /** Metric name shown in the tooltip header. */
