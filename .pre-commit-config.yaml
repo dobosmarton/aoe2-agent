@@ -9,9 +9,12 @@ repos:
     hooks:
       - id: trailing-whitespace
         # In a TSV, trailing tabs ARE data (empty trailing columns) — stripping
-        # them silently truncates ledger rows.
-        exclude: '\.tsv$'
+        # them silently truncates ledger rows. routeTree.gen.ts is written by
+        # the TanStack Router Vite plugin; reformatting it here would just be
+        # undone on the next dev/build run.
+        exclude: '(\.tsv$|routeTree\.gen\.ts$)'
       - id: end-of-file-fixer
+        exclude: 'routeTree\.gen\.ts$'
       - id: check-yaml
         # --unsafe so compose-spec custom tags (!reset, !override) parse cleanly.
         args: ["--unsafe"]

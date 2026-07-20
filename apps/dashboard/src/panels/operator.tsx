@@ -1,4 +1,6 @@
-import { useEffect, useReducer, useState } from "react";
+import { useEffect, useReducer } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { GitBranch, Loader2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -81,11 +83,6 @@ function initialState(parent_t: number): FormState {
 // Submit state
 // ---------------------------------------------------------------------------
 
-type SubmitState =
-  | { kind: "idle" }
-  | { kind: "submitting" }
-  | { kind: "error"; message: string };
-
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -93,21 +90,39 @@ type SubmitState =
 interface OperatorPanelProps {
   readonly currentRunId: string | null;
   readonly initialParentT: number | null;
-  readonly onOpenRun: (runId: string) => void;
 }
 
 export function OperatorPanel({
   currentRunId,
   initialParentT,
-  onOpenRun,
 }: OperatorPanelProps): React.ReactElement {
   const [form, dispatch] = useReducer(reducer, initialState(initialParentT ?? 1));
-  const [submit, setSubmit] = useState<SubmitState>({ kind: "idle" });
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+
+  // Spawning a fork adds a run server-side, so the cached run list is stale the
+  // moment it succeeds. Invalidating ["runs"] is what makes the child appear in
+  // the sidebar without a page reload — the old code navigated to a run the
+  // list did not yet know about.
+  const fork = useMutation({
+    mutationFn: createFork,
+    onSuccess: async (result) => {
+      await queryClient.invalidateQueries({ queryKey: ["runs"] });
+      await navigate({
+        to: "/runs/$runId",
+        params: { runId: result.child_run_id },
+        search: {},
+      });
+    },
+  });
 
   // Reset the form when the user picks a different run.
   useEffect(() => {
     dispatch({ type: "reset", parent_t: initialParentT ?? 1 });
-    setSubmit({ kind: "idle" });
+    fork.reset();
+    // `fork` is a stable mutation object; depending on it would reset the form
+    // on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentRunId, initialParentT]);
 
   if (currentRunId === null) {
@@ -119,27 +134,17 @@ export function OperatorPanel({
     );
   }
 
-  async function onSubmit(): Promise<void> {
+  function onSubmit(): void {
     if (currentRunId === null) {
       return;
     }
-    setSubmit({ kind: "submitting" });
-    try {
-      const result = await createFork({
-        parent_run_id: currentRunId,
-        parent_t: form.parent_t,
-        mutation: form.mutation,
-        n_turns: form.n_turns,
-        reason: form.reason,
-      });
-      setSubmit({ kind: "idle" });
-      onOpenRun(result.child_run_id);
-    } catch (error) {
-      setSubmit({
-        kind: "error",
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
+    fork.mutate({
+      parent_run_id: currentRunId,
+      parent_t: form.parent_t,
+      mutation: form.mutation,
+      n_turns: form.n_turns,
+      reason: form.reason,
+    });
   }
 
   return (
@@ -223,12 +228,12 @@ export function OperatorPanel({
 
       <div className="flex items-center justify-between gap-3">
         <Button
-          isDisabled={submit.kind === "submitting"}
+          isDisabled={fork.isPending}
           onClick={() => {
             void onSubmit();
           }}
         >
-          {submit.kind === "submitting" ? (
+          {fork.isPending ? (
             <>
               <Loader2 className="size-4 animate-spin" />
               Spawning…
@@ -240,9 +245,9 @@ export function OperatorPanel({
             </>
           )}
         </Button>
-        {submit.kind === "error" ? (
+        {fork.isError ? (
           <Badge variant="destructive" className="text-xs">
-            {submit.message}
+            {fork.error instanceof Error ? fork.error.message : String(fork.error)}
           </Badge>
         ) : null}
       </div>

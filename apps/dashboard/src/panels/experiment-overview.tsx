@@ -14,10 +14,11 @@ import {
   resourceRows,
   type ResourceKey,
 } from "@/lib/series-aggregate";
-import { useOperationSeries } from "@/hooks/use-operation-series";
+import { useQuery } from "@tanstack/react-query";
+import { runSeriesQueryOptions } from "@/lib/queries";
 import type { RunMetrics, RunSummary } from "@/lib/events";
 import type { RunGroup } from "@/lib/run-grouping";
-import type { SummariesStatus } from "@/hooks/use-run-summaries";
+import type { LoadStatus } from "@/lib/load-status";
 
 // Distinct hues for per-profile lines, independent of the resource color tokens
 // (a profile keeps the same color across all four resource charts).
@@ -42,7 +43,7 @@ const RESOURCE_CHARTS: ReadonlyArray<{ key: ResourceKey; label: string }> = [
 interface ExperimentOverviewProps {
   readonly group: RunGroup;
   readonly metricsByRunId: ReadonlyMap<string, RunMetrics>;
-  readonly metricsStatus: SummariesStatus;
+  readonly metricsStatus: LoadStatus;
   readonly onOpenRun: (runId: string) => void;
 }
 
@@ -104,7 +105,8 @@ export function ExperimentOverview({
 
   // Per-turn resource curves: all runs of this operation share one DuckDB file.
   const dbPath = group.runs[0]?.db_path ?? "";
-  const { series } = useOperationSeries(dbPath);
+  const seriesQuery = useQuery(runSeriesQueryOptions(dbPath));
+  const series = seriesQuery.data ?? [];
   const profiles = useMemo(() => aggregateByProfile(series), [series]);
   const resourceSeries: readonly ChartSeries[] = useMemo(
     () =>

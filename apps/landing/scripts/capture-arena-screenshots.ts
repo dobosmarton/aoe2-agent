@@ -94,33 +94,30 @@ async function main(): Promise<void> {
   const browser: Browser = await chromium.launch({ headless: true });
   try {
     const page: Page = await browser.newPage({ viewport: VIEWPORT });
-    await page.goto(DASHBOARD_BASE, { waitUntil: "networkidle" });
 
-    // 3. Pick the first run from the sidebar. RunList renders each run as a
-    //    clickable shadcn Card (a div, not a button) inside <ol><li>. The
-    //    first <li> on the page is the first run.
-    console.log("→ Selecting first run from sidebar …");
-    const firstRun = page.locator("ol > li").first();
-    await firstRun.waitFor({ state: "visible", timeout: 15_000 });
-    await firstRun.click();
+    // 3. Ask the API which run to show. Every panel is addressable as
+    //    /runs/<id>?tab=<panel>, so the capture navigates straight to each one
+    //    instead of clicking the sidebar and then the tab strip — no dependence
+    //    on DOM structure that a UI refactor can silently break.
+    console.log("→ Resolving first run id from the API …");
+    const runs = (await (await fetch(`${API_BASE}/runs`)).json()) as { run_id: string }[];
+    const runId = runs[0]?.run_id;
+    if (runId === undefined) {
+      throw new Error("No runs available to screenshot");
+    }
 
-    // Wait for events to start streaming — the status badge text contains
-    // "events" once useEvents subscribes. Cold DuckDB fixtures load fast, so
-    // the status often goes straight from "Connecting…" to "Complete".
-    await page
-      .getByText(/\d+ events/)
-      .first()
-      .waitFor({ state: "visible", timeout: 15_000 });
-    await page.waitForTimeout(1500); // let a few turns paint
-
-    // 4. Screenshot each panel. Tabs are Radix TabsTrigger; their visible
-    //    text matches the panel name (capitalized), which is the most robust
-    //    selector since Radix doesn't expose `value` as a DOM attribute.
+    // 4. Screenshot each panel by URL.
     for (const panel of PANELS) {
       console.log(`→ Capturing ${panel} panel …`);
-      const tabName = panel.charAt(0).toUpperCase() + panel.slice(1);
-      await page.getByRole("tab", { name: tabName, exact: true }).click();
-      await page.waitForTimeout(750); // tab content transition + initial paint
+      await page.goto(`${DASHBOARD_BASE}/runs/${runId}?tab=${panel}`, {
+        waitUntil: "networkidle",
+      });
+      // The event count only renders once the stream has produced events.
+      await page
+        .getByText(/\d+ events/)
+        .first()
+        .waitFor({ state: "visible", timeout: 15_000 });
+      await page.waitForTimeout(1000); // let the panel paint
 
       const out = resolve(SCREENSHOTS_DIR, `${panel}.png`);
       await page.screenshot({ path: out, fullPage: false });

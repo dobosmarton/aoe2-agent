@@ -3,7 +3,9 @@ import { X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useImageDetail } from "@/hooks/use-tracker";
+import { useQuery } from "@tanstack/react-query";
+import { errorMessage } from "@/lib/load-status";
+import { trackerImageDetailQueryOptions } from "@/lib/queries";
 import { trackerAssetUrl, type AnnotationDto, type ImageRecordDto } from "@/lib/training-api";
 
 /** Golden-angle hue rotation: consecutive class ids land far apart on the wheel,
@@ -67,7 +69,11 @@ export function ImageLightbox(props: {
   readonly onClose: () => void;
 }): React.ReactElement | null {
   const { imageId, onClose } = props;
-  const { data, status, error } = useImageDetail(imageId);
+  const query = useQuery({
+    ...trackerImageDetailQueryOptions(imageId ?? 0),
+    enabled: imageId !== null,
+  });
+  const data = query.data ?? null;
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
@@ -116,11 +122,11 @@ export function ImageLightbox(props: {
         </header>
 
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4">
-          {status === "loading" ? (
+          {query.isPending ? (
             <p className="text-muted-foreground text-sm">Loading image…</p>
-          ) : status === "error" || data === null ? (
+          ) : query.isError || data === null ? (
             <p className="text-destructive text-sm">
-              Failed to load image: {error ?? "unknown error"}
+              Failed to load image: {errorMessage(query.error) ?? "unknown error"}
             </p>
           ) : (
             // Shrink-wraps the image so the percentage-positioned boxes align.

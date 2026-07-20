@@ -3,7 +3,12 @@ import { AlertTriangle, Database, ImageIcon, Tags } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { useDatasets, useTrackerStats } from "@/hooks/use-tracker";
+import { useQuery } from "@tanstack/react-query";
+import {
+  trackerDatasetsQueryOptions,
+  trackerStatsQueryOptions,
+} from "@/lib/queries";
+import { errorMessage } from "@/lib/load-status";
 import type { ClassCoverageDto } from "@/lib/training-api";
 
 function StatTile(props: {
@@ -55,23 +60,24 @@ function ClassRow(props: {
 }
 
 export function CoverageStats(): React.ReactElement {
-  const { data: stats, status, error } = useTrackerStats();
-  const { data: datasets } = useDatasets();
+  const statsQuery = useQuery(trackerStatsQueryOptions());
+  const datasetsQuery = useQuery(trackerDatasetsQueryOptions());
+  const stats = statsQuery.data;
 
-  if (status === "loading") {
+  if (statsQuery.isPending) {
     return <p className="text-muted-foreground p-6 text-sm">Loading coverage…</p>;
   }
-  if (status === "error" || stats === null) {
+  if (statsQuery.isError || stats === undefined) {
     return (
       <p className="text-destructive p-6 text-sm">
-        Failed to load coverage: {error ?? "unknown error"}
+        Failed to load coverage: {errorMessage(statsQuery.error) ?? "unknown error"}
       </p>
     );
   }
 
   const sorted = [...stats.classes].sort((a, b) => b.real_instances - a.real_instances);
   const maxReal = sorted[0]?.real_instances ?? 0;
-  const latestDataset = datasets?.[0] ?? null;
+  const latestDataset = datasetsQuery.data?.[0] ?? null;
 
   return (
     <div className="flex min-h-0 flex-col gap-4 overflow-auto p-6">

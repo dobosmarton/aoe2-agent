@@ -1,10 +1,16 @@
-import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { getRouteApi } from "@tanstack/react-router";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useTrackerImages } from "@/hooks/use-tracker";
+import { errorMessage } from "@/lib/load-status";
+import { trackerImagesQueryOptions } from "@/lib/queries";
 import { ImageLightbox } from "@/panels/training/image-lightbox";
 import { trackerAssetUrl, type ImageListingDto, type LabeledFilter } from "@/lib/training-api";
+
+// getRouteApi rather than importing the Route object: the route file already
+// imports this component, so importing back would be a cycle.
+const route = getRouteApi("/training/images");
 
 const FILTERS: readonly { readonly label: string; readonly value: LabeledFilter }[] = [
   { label: "All", value: null },
@@ -55,16 +61,40 @@ function ImageCard(props: {
 }
 
 export function DatasetTable(): React.ReactElement {
-  const [labeled, setLabeled] = useState<LabeledFilter>(null);
-  const [page, setPage] = useState(0);
-  const [openImageId, setOpenImageId] = useState<number | null>(null);
-  const { data, status, error } = useTrackerImages(labeled, page);
+  const { labeled, page, image } = route.useSearch();
+  const navigate = route.useNavigate();
+  const filter: LabeledFilter = labeled ?? null;
+  const query = useQuery(trackerImagesQueryOptions(filter, page));
 
+  // Search updaters build the next object explicitly rather than spreading and
+  // deleting — omitting a key is how a param is cleared, and the project's
+  // exactOptionalPropertyTypes forbids writing `key: undefined`.
   const selectFilter = (value: LabeledFilter): void => {
-    setLabeled(value);
-    setPage(0);
+    void navigate({
+      search: () => (value === null ? { page: 0 } : { labeled: value, page: 0 }),
+      replace: true,
+    });
+  };
+  const goToPage = (next: number): void => {
+    void navigate({
+      search: (prev) => ({
+        ...(prev.labeled === undefined ? {} : { labeled: prev.labeled }),
+        page: next,
+      }),
+    });
+  };
+  const setOpenImage = (next: number | null): void => {
+    void navigate({
+      search: (prev) => ({
+        ...(prev.labeled === undefined ? {} : { labeled: prev.labeled }),
+        page: prev.page,
+        ...(next === null ? {} : { image: next }),
+      }),
+      replace: true,
+    });
   };
 
+  const data = query.data;
   const total = data?.total ?? 0;
   const pageSize = data?.page_size ?? 60;
   const lastPage = Math.max(0, Math.ceil(total / pageSize) - 1);
@@ -77,7 +107,7 @@ export function DatasetTable(): React.ReactElement {
             <Button
               key={f.label}
               size="sm"
-              variant={f.value === labeled ? "default" : "outline"}
+              variant={f.value === filter ? "default" : "outline"}
               onClick={() => {
                 selectFilter(f.value);
               }}
@@ -91,11 +121,11 @@ export function DatasetTable(): React.ReactElement {
         </span>
       </div>
 
-      {status === "loading" ? (
+      {query.isPending ? (
         <p className="text-muted-foreground p-6 text-sm">Loading images…</p>
-      ) : status === "error" || data === null ? (
+      ) : query.isError || data === undefined ? (
         <p className="text-destructive p-6 text-sm">
-          Failed to load images: {error ?? "unknown error"}
+          Failed to load images: {errorMessage(query.error) ?? "unknown error"}
         </p>
       ) : (
         <>
@@ -105,7 +135,11 @@ export function DatasetTable(): React.ReactElement {
               card to ~40px and clipping the thumbnail via overflow-hidden. */}
           <div className="grid min-h-0 flex-1 auto-rows-max content-start grid-cols-2 gap-3 overflow-auto p-6 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
             {data.items.map((listing) => (
-              <ImageCard key={listing.image.id} listing={listing} onOpen={setOpenImageId} />
+              <ImageCard
+                key={listing.image.id}
+                listing={listing}
+                onOpen={setOpenImage}
+              />
             ))}
           </div>
           {lastPage > 0 ? (
@@ -115,7 +149,7 @@ export function DatasetTable(): React.ReactElement {
                 variant="outline"
                 isDisabled={page === 0}
                 onClick={() => {
-                  setPage((p) => Math.max(0, p - 1));
+                  goToPage(Math.max(0, page - 1));
                 }}
               >
                 Prev
@@ -128,7 +162,7 @@ export function DatasetTable(): React.ReactElement {
                 variant="outline"
                 isDisabled={page >= lastPage}
                 onClick={() => {
-                  setPage((p) => Math.min(lastPage, p + 1));
+                  goToPage(Math.min(lastPage, page + 1));
                 }}
               >
                 Next
@@ -139,9 +173,9 @@ export function DatasetTable(): React.ReactElement {
       )}
 
       <ImageLightbox
-        imageId={openImageId}
+        imageId={image ?? null}
         onClose={() => {
-          setOpenImageId(null);
+          setOpenImage(null);
         }}
       />
     </div>
