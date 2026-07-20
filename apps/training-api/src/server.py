@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import tempfile
 from contextlib import asynccontextmanager, closing
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -201,13 +202,35 @@ def _image_path(repo: TrackerReader, image_id: int) -> Path:
 
 
 def _ensure_thumbnail(repo: TrackerReader, config: TrackerConfig, image_id: int) -> Path:
+    """Return the cached thumbnail path, rendering it first if absent.
+
+    The render is written to a private temp file and then `os.replace`d into
+    place. Two concurrent requests for the same image both see "missing" and
+    both render — without the atomic swap they would interleave writes to the
+    same path and a reader could be handed a half-written JPEG. `os.replace` is
+    atomic on POSIX and Windows, so a reader sees either the old file or the
+    complete new one, never a partial. The loser of the race simply overwrites
+    with a byte-identical render.
+    """
     source_path = _image_path(repo, image_id)
     config.thumb_cache_dir.mkdir(parents=True, exist_ok=True)
     thumb_path = config.thumb_cache_dir / f"{image_id}.jpg"
     if thumb_path.exists():
         return thumb_path
-    with Image.open(source_path) as image:
-        rgb = image.convert("RGB")
-        rgb.thumbnail((_THUMB_MAX_EDGE, _THUMB_MAX_EDGE))
-        rgb.save(thumb_path, format="JPEG", quality=80)
+
+    # Same directory as the target so the replace stays on one filesystem.
+    fd, tmp_name = tempfile.mkstemp(
+        dir=config.thumb_cache_dir, prefix=f".{image_id}.", suffix=".jpg.tmp"
+    )
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        with Image.open(source_path) as image:
+            rgb = image.convert("RGB")
+            rgb.thumbnail((_THUMB_MAX_EDGE, _THUMB_MAX_EDGE))
+            rgb.save(tmp_path, format="JPEG", quality=80)
+        tmp_path.replace(thumb_path)  # atomic swap; wraps os.replace
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
     return thumb_path

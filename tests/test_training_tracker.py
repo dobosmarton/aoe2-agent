@@ -7,6 +7,7 @@ one synthetic image, a 6-class schema) exercises the whole read path end-to-end.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -21,7 +22,6 @@ from training_api.repository import SqliteTrackerRepository
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-    from pathlib import Path
 
 _DATASET_DIRNAME = "training_data_test"
 _VERSION_NAME = "vtest"
@@ -200,6 +200,41 @@ def test_api_images_survives_concurrent_requests(client: TestClient) -> None:
             for future in [pool.submit(client.get, "/images") for _ in range(16)]
         ]
     assert set(codes) == {200}
+
+
+def test_thumbnail_never_renders_into_the_served_path(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The render must land on a temp file, never on the path being served.
+
+    Two concurrent requests for the same image both see a cache miss and both
+    render; if either writes straight to the destination, a reader can be handed
+    a half-written JPEG. Asserting *where the bytes are written* tests that
+    invariant deterministically — racing the threads instead would only fail on
+    an unlucky interleaving, and with a 40x30 fixture it never would.
+    """
+    written: list[Path] = []
+    real_save = Image.Image.save
+
+    def spy(self: Image.Image, fp: object, *args: object, **kwargs: object) -> None:
+        written.append(Path(str(fp)))
+        real_save(self, fp, *args, **kwargs)  # pyright: ignore[reportUnknownArgumentType]
+
+    monkeypatch.setattr(Image.Image, "save", spy)
+
+    image_id = client.get("/images").json()["items"][0]["image"]["id"]
+    thumbs = tmp_path / "thumbs"
+    (thumbs / f"{image_id}.jpg").unlink(missing_ok=True)
+
+    response = client.get(f"/thumbs/{image_id}")
+
+    assert response.status_code == 200
+    assert response.content.startswith(b"\xff\xd8")  # complete JPEG
+    assert written, "the thumbnail was never rendered"
+    assert all(p.suffix == ".tmp" for p in written), (
+        f"rendered directly into a served path: {written}"
+    )
+    assert list(thumbs.glob("*.tmp")) == [], "temp file left behind"
 
 
 def test_api_thumbnail_and_raw(client: TestClient) -> None:
