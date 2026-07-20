@@ -1,7 +1,13 @@
 import * as React from "react";
-import { Command } from "cmdk";
-import { Dialog, Heading, Modal, ModalOverlay } from "react-aria-components";
-import { Search, X } from "lucide-react";
+
+import {
+  Command,
+  CommandDialog,
+  CommandEmpty,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 
 /**
  * Command-K search palette backed by Pagefind.
@@ -99,78 +105,60 @@ export default function SearchPalette(): React.ReactElement {
   }, [query, pagefindReady]);
 
   return (
-    // react-aria's ModalOverlay is both the portal and the backdrop, so the
-    // Radix Portal/Overlay pair collapses into it; Modal carries what used to
-    // be Dialog.Content. isDismissable restores Radix's click-outside-to-close
-    // (Escape already closes by default).
-    <ModalOverlay
-      isOpen={open}
+    <CommandDialog
+      open={open}
       onOpenChange={setOpen}
-      isDismissable
-      className="fixed inset-0 z-50 bg-black/60"
+      title="Search documentation"
+      description="Search the AoE2 LLM Arena docs"
+      showCloseButton
     >
-      <Modal className="fixed left-1/2 top-[15%] z-50 w-[min(92vw,640px)] -translate-x-1/2 overflow-hidden rounded-lg border bg-popover shadow-2xl">
-        <Dialog aria-describedby={undefined} className="outline-none">
-          <Heading slot="title" className="sr-only">
-            Search documentation
-          </Heading>
-          <Command shouldFilter={false} className="flex flex-col">
-            <div className="flex items-center gap-2 border-b px-3 py-2">
-              <Search className="h-4 w-4 text-muted-foreground" />
-              <Command.Input
-                autoFocus
-                value={query}
-                onValueChange={setQuery}
-                placeholder="Search docs..."
-                className="h-9 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  setOpen(false);
-                }}
-                className="rounded-md p-1 hover:bg-accent"
-                aria-label="Close"
-              >
-                <X className="h-4 w-4 text-muted-foreground" />
-              </button>
-            </div>
-            <Command.List className="max-h-[60vh] overflow-y-auto p-2">
-              {hits.length === 0 && query !== "" && (
-                <Command.Empty className="px-3 py-6 text-center text-sm text-muted-foreground">
-                  {pagefindReady
-                    ? "No results."
-                    : "Search index not built yet — run `pnpm build` to enable."}
-                </Command.Empty>
-              )}
-              {hits.map((hit) => (
-                <Command.Item
-                  key={hit.url}
-                  value={hit.url}
-                  onSelect={() => {
-                    window.location.href = hit.url;
-                  }}
-                  className="cursor-pointer rounded-md px-3 py-2 text-sm aria-selected:bg-accent aria-selected:text-accent-foreground"
-                >
-                  <p className="font-medium">{hit.title}</p>
-                  <p
-                    className="mt-0.5 line-clamp-2 text-xs text-muted-foreground"
-                    dangerouslySetInnerHTML={{ __html: hit.excerpt }}
-                  />
-                </Command.Item>
-              ))}
-            </Command.List>
-            <div className="border-t bg-muted/30 px-3 py-1.5 text-[10px] text-muted-foreground">
-              <kbd className="rounded border bg-background px-1 py-0.5 font-mono">↵</kbd>{" "}
-              open ·{" "}
-              <kbd className="rounded border bg-background px-1 py-0.5 font-mono">esc</kbd>{" "}
-              close ·{" "}
-              <kbd className="rounded border bg-background px-1 py-0.5 font-mono">⌘K</kbd>{" "}
-              toggle
-            </div>
-          </Command>
-        </Dialog>
-      </Modal>
-    </ModalOverlay>
+      {/* Results come from Pagefind, which has already ranked them, so the
+          client-side filter is disabled — otherwise react-aria's Autocomplete
+          would filter the server's hits a second time by input text. */}
+      {/* Uncontrolled on purpose: Autocomplete owns the input's value through
+          FieldInputContext, so also passing `inputValue` pins the field to our
+          state and swallows keystrokes. We only observe the value to drive the
+          Pagefind query. */}
+      <Command filter={() => true} onInputChange={setQuery}>
+        <CommandInput placeholder="Search docs..." />
+        {/* The Menu must stay mounted even with no hits: Autocomplete wires the
+            input to its collection via aria-controls, and unmounting the list
+            breaks that link so the input stops accepting keystrokes. Empty and
+            loading states go through renderEmptyState instead. */}
+        <CommandList
+          aria-label="Search results"
+          items={hits}
+          onAction={(key) => {
+            window.location.href = String(key);
+          }}
+          renderEmptyState={() => (
+            <CommandEmpty>
+              {query === ""
+                ? "Type to search the docs."
+                : pagefindReady
+                  ? "No results."
+                  : "Search index not built yet — run `bun run build` to enable."}
+            </CommandEmpty>
+          )}
+        >
+          {(hit: Hit) => (
+            <CommandItem id={hit.url} textValue={hit.title}>
+              <div className="min-w-0">
+                <p className="font-medium">{hit.title}</p>
+                <p
+                  className="mt-0.5 line-clamp-2 text-xs text-muted-foreground"
+                  dangerouslySetInnerHTML={{ __html: hit.excerpt }}
+                />
+              </div>
+            </CommandItem>
+          )}
+        </CommandList>
+      </Command>
+      <div className="border-t bg-muted/30 px-3 py-1.5 text-[10px] text-muted-foreground">
+        <kbd className="rounded border bg-background px-1 py-0.5 font-mono">↵</kbd> open ·{" "}
+        <kbd className="rounded border bg-background px-1 py-0.5 font-mono">esc</kbd> close ·{" "}
+        <kbd className="rounded border bg-background px-1 py-0.5 font-mono">⌘K</kbd> toggle
+      </div>
+    </CommandDialog>
   );
 }
