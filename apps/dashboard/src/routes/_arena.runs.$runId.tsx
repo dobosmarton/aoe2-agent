@@ -22,7 +22,7 @@ export type TabId = (typeof TABS)[number];
 /** Both params are optional so `search: {}` is a valid navigation target and
  * the URL stays clean until the user actually changes something. Defaults are
  * applied at read time, not written into the URL. */
-interface RunSearch {
+type RunSearch = {
   /** Absent means "pinned to the newest turn" — see selectedTurn below. */
   readonly turn?: number;
   readonly tab?: TabId;

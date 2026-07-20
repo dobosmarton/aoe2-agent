@@ -10,7 +10,7 @@ import { eventKindMeta, eventMetaTag, summarise } from "@/lib/event-meta";
 import type { ArenaEvent } from "@/lib/events";
 import { cn } from "@/lib/utils";
 
-interface TraceRowProps {
+type TraceRowProps = {
   readonly event: ArenaEvent;
 }
 

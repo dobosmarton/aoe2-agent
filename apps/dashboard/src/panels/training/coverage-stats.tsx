@@ -1,78 +1,19 @@
+import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, Database, ImageIcon, Tags } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
+import { QueryFallback } from "@/components/query-fallback";
 import { Card, CardContent } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
-import { useQuery } from "@tanstack/react-query";
-import {
-  trackerDatasetsQueryOptions,
-  trackerStatsQueryOptions,
-} from "@/lib/queries";
-import { errorMessage } from "@/lib/load-status";
-import type { ClassCoverageDto } from "@/lib/training-api";
-
-function StatTile(props: {
-  readonly icon: React.ReactNode;
-  readonly label: string;
-  readonly value: string;
-}): React.ReactElement {
-  return (
-    <Card className="gap-1 py-4">
-      <CardContent className="flex items-center gap-3 px-4">
-        <div className="text-muted-foreground">{props.icon}</div>
-        <div className="min-w-0">
-          <div className="text-2xl font-semibold tabular-nums">{props.value}</div>
-          <div className="text-muted-foreground text-xs">{props.label}</div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function ClassRow(props: {
-  readonly klass: ClassCoverageDto;
-  readonly maxReal: number;
-}): React.ReactElement {
-  const { klass, maxReal } = props;
-  const pct = maxReal === 0 ? 0 : Math.round((klass.real_instances / maxReal) * 100);
-  return (
-    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-1.5">
-      <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="truncate font-mono text-xs">{klass.name}</span>
-          {klass.real_instances === 0 ? (
-            <Badge variant="destructive" className="gap-1 text-[10px]">
-              <AlertTriangle className="size-3" />0 real
-            </Badge>
-          ) : null}
-        </div>
-        {/* react-aria's ProgressBar has no visible label here, so it needs an
-            explicit accessible name — it warns at runtime otherwise. */}
-        <Progress value={pct} aria-label={`${klass.name} coverage`} className="mt-1 h-1.5" />
-      </div>
-      <div className="text-muted-foreground text-right font-mono text-xs tabular-nums">
-        <span className="text-foreground">{klass.real_instances}</span>
-        <span className="mx-1">real</span>
-        <span>/ {klass.synth_instances} synth</span>
-      </div>
-    </div>
-  );
-}
+import { trackerDatasetsQueryOptions, trackerStatsQueryOptions } from "@/lib/queries";
+import { ClassRow } from "@/panels/training/class-row";
+import { StatTile } from "@/panels/training/stat-tile";
 
 export function CoverageStats(): React.ReactElement {
   const statsQuery = useQuery(trackerStatsQueryOptions());
   const datasetsQuery = useQuery(trackerDatasetsQueryOptions());
   const stats = statsQuery.data;
 
-  if (statsQuery.isPending) {
-    return <p className="text-muted-foreground p-6 text-sm">Loading coverage…</p>;
-  }
-  if (statsQuery.isError || stats === undefined) {
-    return (
-      <p className="text-destructive p-6 text-sm">
-        Failed to load coverage: {errorMessage(statsQuery.error) ?? "unknown error"}
-      </p>
-    );
+  if (stats === undefined) {
+    return <QueryFallback noun="coverage" query={statsQuery} className="p-6" />;
   }
 
   const sorted = [...stats.classes].sort((a, b) => b.real_instances - a.real_instances);
@@ -80,7 +21,10 @@ export function CoverageStats(): React.ReactElement {
   const latestDataset = datasetsQuery.data?.[0] ?? null;
 
   return (
-    <div className="flex min-h-0 flex-col gap-4 overflow-auto p-6">
+    // Block, not flex-col: a flex child shrinks by default, and Card is
+    // `overflow-hidden`, so in a bounded flex column the class list gets
+    // squashed and clipped instead of scrolling the pane.
+    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-6">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile
           icon={<ImageIcon className="size-5" />}
@@ -110,7 +54,8 @@ export function CoverageStats(): React.ReactElement {
             <Database className="text-muted-foreground size-4" />
             <span className="font-semibold">{latestDataset.name}</span>
             <span className="text-muted-foreground">
-              {latestDataset.n_real_images} real · {latestDataset.n_synth_images} synthetic images
+              {latestDataset.n_real_images} real · {latestDataset.n_synth_images} synthetic
+              images
             </span>
           </CardContent>
         </Card>

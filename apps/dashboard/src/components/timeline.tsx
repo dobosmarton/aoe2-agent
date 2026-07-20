@@ -1,6 +1,6 @@
 import { Slider } from "@/components/ui/slider";
 
-interface TimelineProps {
+type TimelineProps = {
   readonly maxTurn: number | null;
   readonly selectedTurn: number | null;
   readonly onSelect: (turn: number) => void;

@@ -8,7 +8,7 @@ import { allEventKinds, eventsByTurn } from "@/lib/event-utils";
 import type { ArenaEvent, EventKind } from "@/lib/events";
 import { cn } from "@/lib/utils";
 
-interface TracePanelProps {
+type TracePanelProps = {
   readonly events: readonly ArenaEvent[];
   readonly selectedTurn: number | null;
 }
@@ -54,7 +54,7 @@ export function TracePanel({
       );
       target?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 150);
-    return () => {
+    return (): void => {
       window.clearTimeout(timer);
     };
   }, [selectedTurn]);

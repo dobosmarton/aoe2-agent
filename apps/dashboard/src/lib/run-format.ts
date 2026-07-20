@@ -9,21 +9,21 @@ const _LABEL_VARIANT: Record<string, LabelVariant> = {
   smoke: "outline",
 };
 
-export function labelVariant(label: string): LabelVariant {
+export const labelVariant = (label: string): LabelVariant => {
   return _LABEL_VARIANT[label] ?? "outline";
-}
+};
 
 /** Number of leading hex chars shown for an abbreviated run_id. */
 const SHORT_RUN_ID_LEN = 8;
 
 /** Abbreviate a run_id for display (e.g. "fd509730…"). Single source of the
  * truncation length, shared by the run list, sibling strip, and overview. */
-export function shortRunId(runId: string): string {
+export const shortRunId = (runId: string): string => {
   return `${runId.slice(0, SHORT_RUN_ID_LEN)}…`;
-}
+};
 
 /** Compact relative time ("3m ago"); keep the full ISO in a tooltip. */
-export function formatRelative(iso: string): string {
+export const formatRelative = (iso: string): string => {
   const then = Date.parse(iso);
   if (Number.isNaN(then)) {
     return iso;
@@ -41,4 +41,4 @@ export function formatRelative(iso: string): string {
     return `${String(hr)}h ago`;
   }
   return `${String(Math.round(hr / 24))}d ago`;
-}
+};

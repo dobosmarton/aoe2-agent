@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import { formatRelative, labelVariant } from "@/lib/run-format";
 import type { RunGroup } from "@/lib/run-grouping";
 
-interface GroupHeaderProps {
+type GroupHeaderProps = {
   readonly group: RunGroup;
   readonly expanded: boolean;
   readonly active: boolean;

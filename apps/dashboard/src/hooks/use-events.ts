@@ -9,7 +9,7 @@ import type { ArenaEvent } from "@/lib/events";
 
 export type SseStatus = "idle" | "connecting" | "open" | "closed" | "error";
 
-interface UseEventsResult {
+type UseEventsResult = {
   events: readonly ArenaEvent[];
   status: SseStatus;
 }
@@ -33,7 +33,7 @@ async function* eventStream(
   const pending: ArenaEvent[] = [];
   let wake: (() => void) | null = null;
   let finished = false;
-  let failure: Error | null = null;
+  let failureMessage: string | null = null;
   let opened = false;
 
   const nudge = (): void => {
@@ -42,17 +42,17 @@ async function* eventStream(
     resume?.();
   };
 
-  source.onopen = () => {
+  source.onopen = (): void => {
     opened = true;
     nudge();
   };
-  source.onmessage = (message: MessageEvent<string>) => {
+  source.onmessage = (message: MessageEvent<string>): void => {
     pending.push(JSON.parse(message.data) as ArenaEvent);
     nudge();
   };
-  source.onerror = () => {
+  source.onerror = (): void => {
     if (!opened) {
-      failure = new Error(`Event stream for ${runId} failed to open`);
+      failureMessage = `Event stream for ${runId} failed to open`;
     }
     finished = true;
     source.close();
@@ -74,8 +74,15 @@ async function* eventStream(
         }
       }
       if (finished) {
-        if (failure !== null) {
-          throw failure;
+        // The failure is carried as a message and the Error built here, not in
+        // onerror, for two reasons: an Error captures its stack at construction,
+        // so building it in the callback would point the trace at the event
+        // handler instead of the awaiting consumer; and TypeScript's flow
+        // analysis ignores assignments made inside that callback, so a
+        // `let failure: Error | null` still reads as `null` at this line —
+        // making the whole throw path invisible to the type checker.
+        if (failureMessage !== null) {
+          throw new Error(failureMessage);
         }
         return;
       }

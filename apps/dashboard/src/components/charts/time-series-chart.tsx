@@ -21,7 +21,7 @@ import { TimeSeriesTooltip } from "@/components/charts/time-series-tooltip";
 // (`TimeSeriesTooltip`) live in sibling files; compose them as needed.
 // ---------------------------------------------------------------------------
 
-interface TimeSeriesChartProps<Row> {
+type TimeSeriesChartProps<Row> = {
   readonly data: readonly Row[];
   readonly series: readonly ChartSeries<Row>[];
   readonly selectedTurn?: number | null | undefined;

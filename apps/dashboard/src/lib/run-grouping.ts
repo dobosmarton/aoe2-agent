@@ -15,11 +15,11 @@ import type { RunSummary } from "@/lib/events";
  *   single `started_at` identically as `first_ts` for every sibling
  *   (`server.py:_live_summaries`), so `label:first_ts` groups them.
  */
-export function groupKey(run: RunSummary): string {
+export const groupKey = (run: RunSummary): string => {
   return run.db_path !== "" ? run.db_path : `${run.label}:${run.first_ts}`;
-}
+};
 
-export interface RunGroup {
+export type RunGroup = {
   /** `groupKey` of the member runs; unique per operation. */
   readonly key: string;
   /** Shared operation label (`rank` / `race` / `smoke`). */
@@ -38,7 +38,7 @@ export interface RunGroup {
  * their incoming order within a group. A `Map` preserves insertion order, so
  * no re-sorting is needed.
  */
-export function groupRuns(runs: readonly RunSummary[]): readonly RunGroup[] {
+export const groupRuns = (runs: readonly RunSummary[]): readonly RunGroup[] => {
   const byKey = new Map<string, RunSummary[]>();
   for (const run of runs) {
     const key = groupKey(run);
@@ -73,17 +73,17 @@ export function groupRuns(runs: readonly RunSummary[]): readonly RunGroup[] {
     });
   }
   return groups;
-}
+};
 
 /**
  * Every run from `runId`'s operation, in list order (the selected run
  * included). Empty if the run is unknown or has no parallel siblings — callers
  * use that to decide whether a sibling switcher is worth showing.
  */
-export function operationRuns(
+export const operationRuns = (
   runs: readonly RunSummary[],
   runId: string,
-): readonly RunSummary[] {
+): readonly RunSummary[] => {
   const target = runs.find((r) => r.run_id === runId);
   if (target === undefined) {
     return [];
@@ -91,4 +91,4 @@ export function operationRuns(
   const key = groupKey(target);
   const members = runs.filter((r) => groupKey(r) === key);
   return members.length > 1 ? members : [];
-}
+};

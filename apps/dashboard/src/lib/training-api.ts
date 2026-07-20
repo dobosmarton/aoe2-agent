@@ -3,21 +3,21 @@
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 
-function apiUrl(path: string): string {
+const apiUrl = (path: string): string => {
   return `${API_BASE}${path}`;
-}
+};
 
 /** Resolve a server-relative asset path (thumb_url / raw_url) against the base. */
-export function trackerAssetUrl(path: string): string {
+export const trackerAssetUrl = (path: string): string => {
   return apiUrl(path);
-}
+};
 
-export interface ClassDto {
+export type ClassDto = {
   readonly id: number;
   readonly name: string;
 }
 
-export interface ClassCoverageDto {
+export type ClassCoverageDto = {
   readonly class_id: number;
   readonly name: string;
   readonly real_instances: number;
@@ -25,7 +25,7 @@ export interface ClassCoverageDto {
   readonly labeled_images: number;
 }
 
-export interface CoverageDto {
+export type CoverageDto = {
   readonly total_images: number;
   readonly labeled_images: number;
   readonly unlabeled_images: number;
@@ -33,7 +33,7 @@ export interface CoverageDto {
   readonly zero_real_class_ids: readonly number[];
 }
 
-export interface ImageRecordDto {
+export type ImageRecordDto = {
   readonly id: number;
   readonly filename: string;
   readonly source: string;
@@ -43,14 +43,14 @@ export interface ImageRecordDto {
   readonly raw_url: string;
 }
 
-export interface ImageListingDto {
+export type ImageListingDto = {
   readonly image: ImageRecordDto;
   readonly labeled: boolean;
   readonly annotation_count: number;
   readonly class_ids: readonly number[];
 }
 
-interface AnnotationBase {
+type AnnotationBase = {
   readonly id: number | null;
   readonly class_id: number;
   readonly class_name: string;
@@ -71,19 +71,19 @@ export type AnnotationDto =
       readonly coords: readonly (readonly [number, number])[];
     });
 
-export interface ImageDetailDto {
+export type ImageDetailDto = {
   readonly image: ImageRecordDto;
   readonly annotations: readonly AnnotationDto[];
 }
 
-export interface ImagePageDto {
+export type ImagePageDto = {
   readonly items: readonly ImageListingDto[];
   readonly total: number;
   readonly page: number;
   readonly page_size: number;
 }
 
-export interface DatasetSummaryDto {
+export type DatasetSummaryDto = {
   readonly id: number;
   readonly name: string;
   readonly created_at: string;

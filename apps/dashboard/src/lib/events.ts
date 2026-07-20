@@ -1,7 +1,7 @@
 // Discriminated union mirroring `evaluation/event_log.py`'s payload kinds.
 // Each new payload kind on the Python side needs a matching variant here.
 
-export interface WorldStateSnapshot {
+export type WorldStateSnapshot = {
   food: number;
   wood: number;
   gold: number;
@@ -54,7 +54,7 @@ export type ArenaEvent =
 
 export type EventKind = ArenaEvent["kind"];
 
-export interface RunSummary {
+export type RunSummary = {
   run_id: string;
   db_path: string;
   label: string;
@@ -70,7 +70,7 @@ export interface RunSummary {
 // `final_age` in the backend's AGE_SEQUENCE, so we sort by the same
 // lexicographic score (age → population → economy) without duplicating the
 // age order here. Fields are null for runs missing a final snapshot/profile.
-export interface RunMetrics {
+export type RunMetrics = {
   run_id: string;
   profile_name: string | null;
   total_cost_usd: number;
@@ -83,7 +83,7 @@ export interface RunMetrics {
 
 // Mirrors `RunSeriesPoint` / `RunSeries` in apps/api/src/server.py — per-turn
 // resource trajectories for the overview's per-resource curves.
-export interface RunSeriesPoint {
+export type RunSeriesPoint = {
   turn: number;
   food: number;
   wood: number;
@@ -92,7 +92,7 @@ export interface RunSeriesPoint {
   population: number;
 }
 
-export interface RunSeries {
+export type RunSeries = {
   run_id: string;
   profile_name: string | null;
   points: RunSeriesPoint[];

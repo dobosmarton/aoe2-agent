@@ -5,9 +5,9 @@ import type { RunMetrics, RunSeries, RunSummary } from "@/lib/events";
 // the dev SPA at a remote/non-proxied backend.
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 
-function apiUrl(path: string): string {
+const apiUrl = (path: string): string => {
   return `${API_BASE}${path}`;
-}
+};
 
 export async function fetchRuns(signal?: AbortSignal): Promise<readonly RunSummary[]> {
   const init = signal === undefined ? {} : { signal };
@@ -48,9 +48,9 @@ export async function fetchRunSeries(
   return (await response.json()) as readonly RunSeries[];
 }
 
-export function eventsUrl(runId: string): string {
+export const eventsUrl = (runId: string): string => {
   return apiUrl(`/events?run_id=${encodeURIComponent(runId)}`);
-}
+};
 
 // ---------------------------------------------------------------------------
 // POST /forks
@@ -68,7 +68,7 @@ export type MutationPatch = Partial<{
   age: Age;
 }>;
 
-export interface ForkSpec {
+export type ForkSpec = {
   readonly parent_run_id: string;
   readonly parent_t: number;
   readonly mutation: MutationPatch;
@@ -76,7 +76,7 @@ export interface ForkSpec {
   readonly reason: string;
 }
 
-export interface ForkResult {
+export type ForkResult = {
   readonly child_run_id: string;
   readonly db_path: string;
   readonly profile_used: string;

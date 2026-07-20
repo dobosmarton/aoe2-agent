@@ -2,7 +2,7 @@ import { Label } from "@/components/ui/label";
 import { AGES } from "@/panels/operator-fields";
 import type { Age } from "@/lib/api";
 
-interface AgeFieldProps {
+type AgeFieldProps = {
   readonly value: Age | null;
   readonly onChange: (value: Age | null) => void;
 }

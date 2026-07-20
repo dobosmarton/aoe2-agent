@@ -5,7 +5,7 @@ import type { QueryStatus } from "@tanstack/react-query";
  * SummariesStatus, …); now there is one, mapped from Query. */
 export type LoadStatus = "loading" | "ready" | "error";
 
-export function toLoadStatus(status: QueryStatus): LoadStatus {
+export const toLoadStatus = (status: QueryStatus): LoadStatus => {
   switch (status) {
     case "pending":
       return "loading";
@@ -14,12 +14,23 @@ export function toLoadStatus(status: QueryStatus): LoadStatus {
     case "success":
       return "ready";
   }
-}
+};
 
-/** Query exposes errors as `Error | null`; the components want a message. */
-export function errorMessage(error: unknown): string | null {
+/** Query exposes errors as `Error | null`; the components want a message.
+ *
+ * A rejected value need not be an Error — a thrown plain object would stringify
+ * to a useless "[object Object]", so those are serialised instead. */
+export const errorMessage = (error: unknown): string | null => {
   if (error === null || error === undefined) {
     return null;
   }
-  return error instanceof Error ? error.message : String(error);
-}
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === "string") {
+    return error;
+  }
+  // Covers thrown objects, numbers and booleans; returns undefined for values
+  // JSON cannot represent (symbol, function), hence the fallback.
+  return JSON.stringify(error) ?? "Unknown error";
+};

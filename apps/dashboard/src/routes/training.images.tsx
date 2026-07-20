@@ -4,7 +4,7 @@ import { trackerImagesQueryOptions } from "@/lib/queries";
 import { DatasetTable } from "@/panels/training/dataset-table";
 import type { LabeledFilter } from "@/lib/training-api";
 
-export interface ImagesSearch {
+export type ImagesSearch = {
   /** Absent = show all; true/false filter by labeled state. */
   readonly labeled?: boolean;
   readonly page: number;

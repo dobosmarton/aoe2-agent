@@ -20,18 +20,17 @@ import { NumberField } from "@/panels/number-field";
 import { OptionalNumberField } from "@/panels/optional-number-field";
 import { RESOURCE_COLORS } from "@/panels/operator-fields";
 import { createFork } from "@/lib/api";
+import { errorMessage } from "@/lib/load-status";
+import { SECTION_TITLE } from "@/lib/styles";
 import type { Age, MutationPatch } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
 // Form state machine
 // ---------------------------------------------------------------------------
 
-const SECTION_TITLE =
-  "text-muted-foreground text-xs font-semibold uppercase tracking-wide";
-
 type NumericField = Exclude<keyof MutationPatch, "age">;
 
-interface FormState {
+type FormState = {
   parent_t: number;
   n_turns: number;
   reason: string;
@@ -87,7 +86,7 @@ function initialState(parent_t: number): FormState {
 // Component
 // ---------------------------------------------------------------------------
 
-interface OperatorPanelProps {
+type OperatorPanelProps = {
   readonly currentRunId: string | null;
   readonly initialParentT: number | null;
 }
@@ -134,10 +133,9 @@ export function OperatorPanel({
     );
   }
 
-  function onSubmit(): void {
-    if (currentRunId === null) {
-      return;
-    }
+  // Declared after the early return above, which already guarantees a non-null
+  // currentRunId — so no second check here.
+  const onSubmit = (): void => {
     fork.mutate({
       parent_run_id: currentRunId,
       parent_t: form.parent_t,
@@ -145,7 +143,7 @@ export function OperatorPanel({
       n_turns: form.n_turns,
       reason: form.reason,
     });
-  }
+  };
 
   return (
     <div className="mx-auto flex h-full w-full max-w-3xl flex-col gap-3 overflow-auto p-4">
@@ -229,9 +227,7 @@ export function OperatorPanel({
       <div className="flex items-center justify-between gap-3">
         <Button
           isDisabled={fork.isPending}
-          onClick={() => {
-            void onSubmit();
-          }}
+          onClick={onSubmit}
         >
           {fork.isPending ? (
             <>
@@ -247,7 +243,7 @@ export function OperatorPanel({
         </Button>
         {fork.isError ? (
           <Badge variant="destructive" className="text-xs">
-            {fork.error instanceof Error ? fork.error.message : String(fork.error)}
+            {errorMessage(fork.error) ?? "unknown error"}
           </Badge>
         ) : null}
       </div>

@@ -12,18 +12,18 @@ const _EVENT_KINDS: readonly EventKind[] = [
   "metric",
 ] as const;
 
-export function allEventKinds(): readonly EventKind[] {
+export const allEventKinds = (): readonly EventKind[] => {
   return _EVENT_KINDS;
-}
+};
 
 /**
  * `turn_start` events carry the canonical state-at-start-of-turn.
  * We sweep the stream and index by turn_num so the World panel can render
  * any turn the scrubber lands on.
  */
-export function statesByTurn(
+export const statesByTurn = (
   events: readonly ArenaEvent[],
-): ReadonlyMap<number, WorldStateSnapshot> {
+): ReadonlyMap<number, WorldStateSnapshot> => {
   const result = new Map<number, WorldStateSnapshot>();
   for (const event of events) {
     if (event.kind === "turn_start" && event.state !== null) {
@@ -31,13 +31,13 @@ export function statesByTurn(
     }
   }
   return result;
-}
+};
 
 /**
  * Flat per-turn row for charting. One entry per turn that carries a snapshot,
  * sorted ascending by turn so recharts renders a left-to-right timeline.
  */
-export interface TurnSeriesRow {
+export type TurnSeriesRow = {
   readonly turn: number;
   readonly food: number;
   readonly wood: number;
@@ -51,9 +51,9 @@ export interface TurnSeriesRow {
  * Projects the `statesByTurn` map into an ordered array of flat rows the
  * chart components can consume directly.
  */
-export function seriesFromStates(
+export const seriesFromStates = (
   states: ReadonlyMap<number, WorldStateSnapshot>,
-): readonly TurnSeriesRow[] {
+): readonly TurnSeriesRow[] => {
   return [...states.entries()]
     .sort(([a], [b]) => a - b)
     .map(([turn, s]) => ({
@@ -65,13 +65,13 @@ export function seriesFromStates(
       population: s.population,
       pop_cap: s.pop_cap,
     }));
-}
+};
 
 /**
  * Returns the highest turn_num seen on any `turn_start` event.
  * Used by the Timeline to bound the slider; returns null if no turns yet.
  */
-export function lastTurn(events: readonly ArenaEvent[]): number | null {
+export const lastTurn = (events: readonly ArenaEvent[]): number | null => {
   let maxTurn: number | null = null;
   for (const event of events) {
     if (event.kind === "turn_start") {
@@ -81,19 +81,19 @@ export function lastTurn(events: readonly ArenaEvent[]): number | null {
     }
   }
   return maxTurn;
-}
+};
 
 /**
  * Group events into ordered buckets by their turn. Events between
  * `turn_start(t)` (inclusive) and `turn_start(t+1)` (exclusive) belong
  * to turn `t`. Events before the first `turn_start` go to turn 0.
  */
-export interface TurnGroup {
+export type TurnGroup = {
   readonly turn: number;
   readonly events: readonly ArenaEvent[];
 }
 
-export function eventsByTurn(events: readonly ArenaEvent[]): readonly TurnGroup[] {
+export const eventsByTurn = (events: readonly ArenaEvent[]): readonly TurnGroup[] => {
   const groups = new Map<number, ArenaEvent[]>();
   let currentTurn = 0;
   for (const event of events) {
@@ -110,19 +110,19 @@ export function eventsByTurn(events: readonly ArenaEvent[]): readonly TurnGroup[
   return [...groups.entries()]
     .sort(([a], [b]) => a - b)
     .map(([turn, items]) => ({ turn, events: items }));
-}
+};
 
 /**
  * For the Diff panel: find any `fork` events in the stream.
  * Each tells us this run was created from a parent run at parent_t.
  */
-export interface ForkInfo {
+export type ForkInfo = {
   readonly parent_run_id: string;
   readonly parent_t: number;
   readonly mutation_summary: string;
 }
 
-export function forksIn(events: readonly ArenaEvent[]): readonly ForkInfo[] {
+export const forksIn = (events: readonly ArenaEvent[]): readonly ForkInfo[] => {
   return events
     .filter((event): event is Extract<ArenaEvent, { kind: "fork" }> => event.kind === "fork")
     .map((event) => ({
@@ -130,4 +130,4 @@ export function forksIn(events: readonly ArenaEvent[]): readonly ForkInfo[] {
       parent_t: event.parent_t,
       mutation_summary: event.mutation_summary,
     }));
-}
+};

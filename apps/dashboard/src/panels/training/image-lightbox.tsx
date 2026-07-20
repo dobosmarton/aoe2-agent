@@ -1,97 +1,66 @@
-import { useEffect } from "react";
-import { X } from "lucide-react";
-
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { errorMessage } from "@/lib/load-status";
+
+import { QueryFallback } from "@/components/query-fallback";
 import { trackerImageDetailQueryOptions } from "@/lib/queries";
-import { trackerAssetUrl, type AnnotationDto, type ImageRecordDto } from "@/lib/training-api";
+import { trackerAssetUrl } from "@/lib/training-api";
+import { AnnotationBox } from "@/panels/training/annotation-box";
+import { LightboxLegend } from "@/panels/training/lightbox-legend";
+import { LightboxToolbar } from "@/panels/training/lightbox-toolbar";
+import { useZoomPan } from "@/panels/training/use-zoom-pan";
 
-/** Golden-angle hue rotation: consecutive class ids land far apart on the wheel,
- * so neighbouring classes stay distinguishable without a hand-picked palette. */
-function classColor(classId: number): string {
-  return `hsl(${String((classId * 137.508) % 360)} 90% 60%)`;
-}
-
-/** Percentage box for one annotation, relative to the image's natural size.
- * Percentages (not pixels) mean the overlay tracks whatever size the browser
- * settles on for the image — no measuring, no resize listener. */
-function boxPercent(
-  ann: AnnotationDto,
-  record: ImageRecordDto,
-): { left: string; top: string; width: string; height: string } {
-  const pct = (value: number, extent: number): string => `${String((value / extent) * 100)}%`;
-  if (ann.geom_type === "bbox") {
-    const [x, y, w, h] = ann.coords;
-    return {
-      left: pct(x, record.width),
-      top: pct(y, record.height),
-      width: pct(w, record.width),
-      height: pct(h, record.height),
-    };
-  }
-  const xs = ann.coords.map(([x]) => x);
-  const ys = ann.coords.map(([, y]) => y);
-  const minX = Math.min(...xs);
-  const minY = Math.min(...ys);
-  return {
-    left: pct(minX, record.width),
-    top: pct(minY, record.height),
-    width: pct(Math.max(...xs) - minX, record.width),
-    height: pct(Math.max(...ys) - minY, record.height),
-  };
-}
-
-function AnnotationBox(props: {
-  readonly annotation: AnnotationDto;
-  readonly record: ImageRecordDto;
-}): React.ReactElement {
-  const { annotation, record } = props;
-  const color = classColor(annotation.class_id);
-  return (
-    <div
-      className="pointer-events-none absolute border-2"
-      style={{ ...boxPercent(annotation, record), borderColor: color }}
-    >
-      <span
-        className="absolute left-0 top-0 -translate-y-full whitespace-nowrap px-1 font-mono text-[10px] leading-tight text-black"
-        style={{ backgroundColor: color }}
-      >
-        {annotation.class_name}
-      </span>
-    </div>
-  );
-}
-
+/**
+ * Full-screen image detail with its annotation overlay.
+ *
+ * Mounted only while an image is open, and keyed by image id by the caller, so
+ * switching images remounts this and zoom/focus start fresh — no reset effect.
+ */
 export function ImageLightbox(props: {
-  readonly imageId: number | null;
+  readonly imageId: number;
   readonly onClose: () => void;
-}): React.ReactElement | null {
+}): React.ReactElement {
   const { imageId, onClose } = props;
-  const query = useQuery({
-    ...trackerImageDetailQueryOptions(imageId ?? 0),
-    enabled: imageId !== null,
-  });
-  const data = query.data ?? null;
+  const query = useQuery(trackerImageDetailQueryOptions(imageId));
+  const detail = query.data ?? null;
+
+  const viewport = useRef<HTMLDivElement | null>(null);
+  const content = useRef<HTMLDivElement | null>(null);
+  const { zoom, offset, reset, zoomBy, onWheel, onPointerDown } = useZoomPan(
+    viewport,
+    content,
+  );
+  const [focus, setFocus] = useState<string | null>(null);
+
+  // Attached by hand because React registers `wheel` passively at the root,
+  // where preventDefault is a no-op.
+  useEffect(() => {
+    const node = viewport.current;
+    if (node === null) {
+      return;
+    }
+    node.addEventListener("wheel", onWheel, { passive: false });
+    return (): void => {
+      node.removeEventListener("wheel", onWheel);
+    };
+  }, [onWheel]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
       if (event.key === "Escape") {
         onClose();
+      } else if (event.key === "+" || event.key === "=") {
+        zoomBy(1.3);
+      } else if (event.key === "-" || event.key === "_") {
+        zoomBy(1 / 1.3);
+      } else if (event.key === "0") {
+        reset();
       }
     };
     window.addEventListener("keydown", onKey);
-    return () => {
+    return (): void => {
       window.removeEventListener("keydown", onKey);
     };
-  }, [onClose]);
-
-  if (imageId === null) {
-    return null;
-  }
-
-  const classNames = data === null ? [] : [...new Set(data.annotations.map((a) => a.class_name))];
+  }, [onClose, reset, zoomBy]);
 
   return (
     <div
@@ -107,55 +76,66 @@ export function ImageLightbox(props: {
           event.stopPropagation();
         }}
       >
-        <header className="border-border flex items-center gap-3 border-b px-4 py-2">
-          <span className="truncate font-mono text-xs" title={data?.image.filename}>
-            {data?.image.filename ?? "Loading…"}
-          </span>
-          {data !== null ? (
-            <span className="text-muted-foreground shrink-0 font-mono text-[11px] tabular-nums">
-              {data.image.width}×{data.image.height} · {data.annotations.length} boxes
-            </span>
-          ) : null}
-          <Button variant="ghost" size="sm" className="ml-auto shrink-0" onClick={onClose}>
-            <X className="size-4" />
-          </Button>
-        </header>
+        <LightboxToolbar
+          detail={detail}
+          zoom={zoom}
+          onZoomBy={zoomBy}
+          onReset={reset}
+          onClose={onClose}
+        />
 
-        <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4">
-          {query.isPending ? (
-            <p className="text-muted-foreground text-sm">Loading image…</p>
-          ) : query.isError || data === null ? (
-            <p className="text-destructive text-sm">
-              Failed to load image: {errorMessage(query.error) ?? "unknown error"}
-            </p>
+        <div
+          ref={viewport}
+          className="flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4"
+          style={{ cursor: zoom > 1 ? "grab" : "default", touchAction: "none" }}
+          onPointerDown={onPointerDown}
+          onDoubleClick={() => {
+            if (zoom > 1) {
+              reset();
+            } else {
+              zoomBy(2.5);
+            }
+          }}
+        >
+          {detail === null ? (
+            <QueryFallback noun="image" query={query} />
           ) : (
-            // Shrink-wraps the image so the percentage-positioned boxes align.
-            <div className="relative inline-block">
+            // Shrink-wraps the image so the percentage-positioned boxes align;
+            // scaling this wrapper zooms image and overlay as one unit.
+            <div
+              ref={content}
+              className="relative inline-block"
+              style={{
+                transform: `translate(${String(offset.x)}px, ${String(offset.y)}px) scale(${String(zoom)})`,
+                transformOrigin: "0 0",
+                // No `will-change: transform`: that hint makes Chrome rasterise
+                // the layer once and stretch the bitmap, which blurs the labels.
+              }}
+            >
               <img
-                src={trackerAssetUrl(data.image.raw_url)}
-                alt={data.image.filename}
-                className="block max-h-[70vh] max-w-full object-contain"
+                src={trackerAssetUrl(detail.image.raw_url)}
+                alt={detail.image.filename}
+                draggable={false}
+                className="block max-h-[70vh] max-w-full select-none object-contain"
               />
-              {data.annotations.map((ann, index) => (
+              {detail.annotations.map((ann) => (
                 <AnnotationBox
-                  key={ann.id ?? index}
+                  key={`${String(ann.class_id)}:${ann.coords.toString()}`}
                   annotation={ann}
-                  record={data.image}
+                  record={detail.image}
+                  zoom={zoom}
+                  focus={focus}
                 />
               ))}
             </div>
           )}
         </div>
 
-        {classNames.length > 0 ? (
-          <footer className="border-border flex flex-wrap gap-1 border-t px-4 py-2">
-            {classNames.map((name) => (
-              <Badge key={name} variant="secondary" className="text-[10px]">
-                {name}
-              </Badge>
-            ))}
-          </footer>
-        ) : null}
+        <LightboxLegend
+          annotations={detail?.annotations ?? []}
+          focus={focus}
+          onFocusChange={setFocus}
+        />
       </div>
     </div>
   );

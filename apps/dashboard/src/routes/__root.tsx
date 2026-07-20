@@ -3,7 +3,7 @@ import { Outlet, createRootRouteWithContext } from "@tanstack/react-router";
 
 /** Injected in main.tsx so route loaders can call
  * `context.queryClient.ensureQueryData(...)`. */
-export interface RouterContext {
+export type RouterContext = {
   readonly queryClient: QueryClient;
 }
 

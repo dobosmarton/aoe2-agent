@@ -1,12 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
 
-import { Badge } from "@/components/ui/badge";
+import { QueryFallback } from "@/components/query-fallback";
 import { Button } from "@/components/ui/button";
-import { errorMessage } from "@/lib/load-status";
 import { trackerImagesQueryOptions } from "@/lib/queries";
+import { ImageCard } from "@/panels/training/image-card";
 import { ImageLightbox } from "@/panels/training/image-lightbox";
-import { trackerAssetUrl, type ImageListingDto, type LabeledFilter } from "@/lib/training-api";
+import type { LabeledFilter } from "@/lib/training-api";
 
 // getRouteApi rather than importing the Route object: the route file already
 // imports this component, so importing back would be a cycle.
@@ -17,48 +17,6 @@ const FILTERS: readonly { readonly label: string; readonly value: LabeledFilter 
   { label: "Labeled", value: true },
   { label: "Unlabeled", value: false },
 ];
-
-function ImageCard(props: {
-  readonly listing: ImageListingDto;
-  readonly onOpen: (imageId: number) => void;
-}): React.ReactElement {
-  const { listing } = props;
-  return (
-    <figure className="border-border bg-card hover:border-primary focus-within:border-primary overflow-hidden rounded-md border transition-colors">
-      {/* A real <button> rather than a click handler on the figure: keyboard
-          focus and Enter/Space come for free, and the card stays a figure. */}
-      <button
-        type="button"
-        title={`Open ${listing.image.filename}`}
-        className="bg-muted flex aspect-video w-full cursor-pointer items-center justify-center overflow-hidden"
-        onClick={() => {
-          props.onOpen(listing.image.id);
-        }}
-      >
-        <img
-          src={trackerAssetUrl(listing.image.thumb_url)}
-          alt={listing.image.filename}
-          loading="lazy"
-          className="h-full w-full object-cover"
-        />
-      </button>
-      <figcaption className="flex items-center justify-between gap-2 px-2 py-1.5">
-        <span className="text-muted-foreground truncate font-mono text-[11px]" title={listing.image.filename}>
-          {listing.image.filename}
-        </span>
-        {listing.labeled ? (
-          <Badge variant="secondary" className="shrink-0 text-[10px]">
-            {listing.annotation_count} boxes
-          </Badge>
-        ) : (
-          <Badge variant="outline" className="text-muted-foreground shrink-0 text-[10px]">
-            unlabeled
-          </Badge>
-        )}
-      </figcaption>
-    </figure>
-  );
-}
 
 export function DatasetTable(): React.ReactElement {
   const { labeled, page, image } = route.useSearch();
@@ -100,7 +58,7 @@ export function DatasetTable(): React.ReactElement {
   const lastPage = Math.max(0, Math.ceil(total / pageSize) - 1);
 
   return (
-    <div className="flex min-h-0 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col">
       <div className="border-border flex items-center justify-between gap-3 border-b px-6 py-3">
         <div className="flex gap-1">
           {FILTERS.map((f) => (
@@ -121,12 +79,8 @@ export function DatasetTable(): React.ReactElement {
         </span>
       </div>
 
-      {query.isPending ? (
-        <p className="text-muted-foreground p-6 text-sm">Loading images…</p>
-      ) : query.isError || data === undefined ? (
-        <p className="text-destructive p-6 text-sm">
-          Failed to load images: {errorMessage(query.error) ?? "unknown error"}
-        </p>
+      {data === undefined ? (
+        <QueryFallback noun="images" query={query} className="p-6" />
       ) : (
         <>
           {/* auto-rows-max + content-start: without them the row tracks are
@@ -172,12 +126,19 @@ export function DatasetTable(): React.ReactElement {
         </>
       )}
 
-      <ImageLightbox
-        imageId={image ?? null}
-        onClose={() => {
-          setOpenImage(null);
-        }}
-      />
+      {/* Mounted only while open, and keyed by image id: that makes opening a
+          different image a remount, so the lightbox gets fresh zoom/focus state
+          without an effect that resets it. While closed it runs no query and
+          binds no key handlers. */}
+      {image === undefined ? null : (
+        <ImageLightbox
+          key={image}
+          imageId={image}
+          onClose={() => {
+            setOpenImage(null);
+          }}
+        />
+      )}
     </div>
   );
 }

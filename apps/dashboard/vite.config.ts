@@ -20,7 +20,11 @@ export default defineConfig({
     // `tsc -b` before vite — a missing tree would fail the build on a fresh
     // clone, before the plugin ever had a chance to write it.
     tanstackRouter({ target: "react", autoCodeSplitting: true }),
-    react(),
+    // React Compiler memoises components and hooks automatically, which is why
+    // the panels below carry almost no useMemo/useCallback by hand. Where it
+    // cannot compile a component it bails out silently at build time — the
+    // react-hooks lint rules surface those bail-outs so they stay visible.
+    react({ babel: { plugins: ["babel-plugin-react-compiler"] } }),
     tailwindcss(),
   ],
   resolve: {

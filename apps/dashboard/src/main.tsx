@@ -22,6 +22,10 @@ const router = createRouter({
 // Makes every <Link to="..."> and useSearch() call typed against this app's
 // actual route tree.
 declare module "@tanstack/react-router" {
+  // Must stay an `interface`: this merges into the router's own Register
+  // declaration, and a `type` alias cannot merge — it collapses every
+  // Link/useSearch/useParams type in the app back to `any`.
+  // eslint-disable-next-line @typescript-eslint/consistent-type-definitions
   interface Register {
     router: typeof router;
   }

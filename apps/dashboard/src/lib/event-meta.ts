@@ -20,7 +20,7 @@ import type { ArenaEvent, EventKind } from "@/lib/events";
 // is for inline SVG/border styling where a token reference is more convenient.
 // ---------------------------------------------------------------------------
 
-export interface EventKindMeta {
+export type EventKindMeta = {
   readonly label: string;
   readonly icon: LucideIcon;
   readonly colorVar: string;
@@ -85,7 +85,7 @@ export const eventKindMeta: Record<EventKind, EventKindMeta> = {
 };
 
 /** One-line human summary of an event for the collapsed trace row. */
-export function summarise(event: ArenaEvent): string {
+export const summarise = (event: ArenaEvent): string => {
   switch (event.kind) {
     case "turn_start":
       return `turn ${event.turn_num}`;
@@ -106,13 +106,13 @@ export function summarise(event: ArenaEvent): string {
     case "metric":
       return `${event.name} = ${event.value}`;
   }
-}
+};
 
 /**
  * Optional right-aligned meta shown on the collapsed row (cost, action count).
  * Returns null when the kind carries no such signal.
  */
-export function eventMetaTag(event: ArenaEvent): string | null {
+export const eventMetaTag = (event: ArenaEvent): string | null => {
   switch (event.kind) {
     case "llm_response":
       return `$${event.cost_usd.toFixed(5)}`;
@@ -121,4 +121,4 @@ export function eventMetaTag(event: ArenaEvent): string | null {
     default:
       return null;
   }
-}
+};

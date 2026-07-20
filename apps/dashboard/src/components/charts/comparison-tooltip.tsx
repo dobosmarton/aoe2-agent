@@ -1,11 +1,11 @@
 import type { ComparisonDatum } from "@/components/charts/chart-types";
 
-interface TooltipPayloadEntry {
+type TooltipPayloadEntry = {
   readonly value?: number | string;
   readonly payload?: ComparisonDatum;
 }
 
-interface ComparisonTooltipProps {
+type ComparisonTooltipProps = {
   readonly active?: boolean;
   readonly payload?: readonly TooltipPayloadEntry[];
   readonly label?: string | number;

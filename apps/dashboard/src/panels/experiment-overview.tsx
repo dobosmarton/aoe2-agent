@@ -40,14 +40,14 @@ const RESOURCE_CHARTS: ReadonlyArray<{ key: ResourceKey; label: string }> = [
   { key: "stone", label: "Stone" },
 ];
 
-interface ExperimentOverviewProps {
+type ExperimentOverviewProps = {
   readonly group: RunGroup;
   readonly metricsByRunId: ReadonlyMap<string, RunMetrics>;
   readonly metricsStatus: LoadStatus;
   readonly onOpenRun: (runId: string) => void;
 }
 
-interface Row {
+type Row = {
   readonly run: RunSummary;
   readonly metrics: RunMetrics | undefined;
 }

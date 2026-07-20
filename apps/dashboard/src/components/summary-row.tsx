@@ -1,4 +1,4 @@
-interface SummaryRowProps {
+type SummaryRowProps = {
   readonly label: string;
   readonly value: string | number;
   readonly colorVar?: string;

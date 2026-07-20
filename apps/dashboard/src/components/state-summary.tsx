@@ -2,7 +2,7 @@ import { Badge } from "@/components/ui/badge";
 import { SummaryRow } from "@/components/summary-row";
 import type { WorldStateSnapshot } from "@/lib/events";
 
-interface StateSummaryProps {
+type StateSummaryProps = {
   readonly state: WorldStateSnapshot | null;
   readonly label: string;
   readonly sublabel?: string;

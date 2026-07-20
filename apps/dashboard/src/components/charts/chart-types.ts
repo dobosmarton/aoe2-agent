@@ -14,7 +14,7 @@ export type NumberKeys<Row> = Extract<
 /** The presentational shape of a chart series (key/label/color), independent of
  * the row type — what the legend and tooltip consume. Using this non-generic
  * supertype there sidesteps variance issues with `ChartSeries<Row>`. */
-export interface ChartSeriesBase {
+export type ChartSeriesBase = {
   /** Key into each data row. */
   readonly key: string;
   /** Human label shown in the tooltip/legend. */
@@ -25,11 +25,11 @@ export interface ChartSeriesBase {
 
 /** A chart series whose `key` is narrowed to `Row`'s numeric columns, so a
  * series can only point at a real numeric chart column. */
-export interface ChartSeries<Row = Record<string, number>> extends ChartSeriesBase {
+export type ChartSeries<Row = Record<string, number>> = {
   readonly key: NumberKeys<Row>;
-}
+} & ChartSeriesBase
 
-export interface ComparisonDatum {
+export type ComparisonDatum = {
   /** Category label on the X axis (e.g. a profile name or short run_id). */
   readonly name: string;
   readonly value: number;

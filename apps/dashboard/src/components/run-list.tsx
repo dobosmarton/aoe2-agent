@@ -10,7 +10,7 @@ import { labelVariant } from "@/lib/run-format";
 import type { LoadStatus } from "@/lib/load-status";
 import type { RunSummary } from "@/lib/events";
 
-interface RunListProps {
+type RunListProps = {
   readonly runs: readonly RunSummary[];
   readonly status: LoadStatus;
   readonly error: string | null;
