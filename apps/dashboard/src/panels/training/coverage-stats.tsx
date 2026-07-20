@@ -41,7 +41,9 @@ function ClassRow(props: {
             </Badge>
           ) : null}
         </div>
-        <Progress value={pct} className="mt-1 h-1.5" />
+        {/* react-aria's ProgressBar has no visible label here, so it needs an
+            explicit accessible name — it warns at runtime otherwise. */}
+        <Progress value={pct} aria-label={`${klass.name} coverage`} className="mt-1 h-1.5" />
       </div>
       <div className="text-muted-foreground text-right font-mono text-xs tabular-nums">
         <span className="text-foreground">{klass.real_instances}</span>

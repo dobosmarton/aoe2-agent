@@ -74,6 +74,7 @@ export function WorldPanel({
             </div>
             <Progress
               value={popPercent}
+              aria-label="population versus cap"
               className="[&>[data-slot=progress-indicator]]:bg-population"
             />
             <div className="text-muted-foreground text-xs">

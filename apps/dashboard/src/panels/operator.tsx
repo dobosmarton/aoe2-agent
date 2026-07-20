@@ -223,7 +223,7 @@ export function OperatorPanel({
 
       <div className="flex items-center justify-between gap-3">
         <Button
-          disabled={submit.kind === "submitting"}
+          isDisabled={submit.kind === "submitting"}
           onClick={() => {
             void onSubmit();
           }}

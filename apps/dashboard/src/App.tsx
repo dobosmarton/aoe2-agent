@@ -121,7 +121,6 @@ function ArenaView(props: { readonly onOpenTraining: () => void }): React.ReactE
             variant="ghost"
             size="sm"
             className="shrink-0"
-            title="Detection training tracker"
             onClick={props.onOpenTraining}
           >
             <ScanEye className="size-4" />
@@ -190,40 +189,40 @@ function ArenaView(props: { readonly onOpenTraining: () => void }): React.ReactE
               onSelect={selectRun}
             />
 
-            <Tabs defaultValue="world" className="flex min-h-0 flex-1 flex-col">
+            <Tabs defaultSelectedKey="world" className="flex min-h-0 flex-1 flex-col">
               <TabsList variant="line" className="mx-4 mt-3 self-start">
-                <TabsTrigger value="world">
+                <TabsTrigger id="world">
                   <Globe2 />
                   World
                 </TabsTrigger>
-                <TabsTrigger value="trace">
+                <TabsTrigger id="trace">
                   <ListTree />
                   Trace
                 </TabsTrigger>
-                <TabsTrigger value="diff">
+                <TabsTrigger id="diff">
                   <GitCompare />
                   Diff
                 </TabsTrigger>
-                <TabsTrigger value="operator">
+                <TabsTrigger id="operator">
                   <SlidersHorizontal />
                   Operator
                 </TabsTrigger>
               </TabsList>
 
-              <TabsContent value="world" className="min-h-0 flex-1 overflow-auto">
+              <TabsContent id="world" className="min-h-0 flex-1 overflow-auto">
                 <WorldPanel states={states} selectedTurn={selectedTurn} />
               </TabsContent>
-              <TabsContent value="trace" className="min-h-0 flex-1">
+              <TabsContent id="trace" className="min-h-0 flex-1">
                 <TracePanel events={events} selectedTurn={selectedTurn} />
               </TabsContent>
-              <TabsContent value="diff" className="min-h-0 flex-1 overflow-auto">
+              <TabsContent id="diff" className="min-h-0 flex-1 overflow-auto">
                 <DiffPanel
                   events={events}
                   currentRunId={selectedRunId}
                   onOpenRun={selectRun}
                 />
               </TabsContent>
-              <TabsContent value="operator" className="min-h-0 flex-1 overflow-auto">
+              <TabsContent id="operator" className="min-h-0 flex-1 overflow-auto">
                 <OperatorPanel
                   currentRunId={selectedRunId}
                   initialParentT={selectedTurn}

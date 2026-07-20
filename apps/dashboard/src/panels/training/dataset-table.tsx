@@ -113,7 +113,7 @@ export function DatasetTable(): React.ReactElement {
               <Button
                 size="sm"
                 variant="outline"
-                disabled={page === 0}
+                isDisabled={page === 0}
                 onClick={() => {
                   setPage((p) => Math.max(0, p - 1));
                 }}
@@ -126,7 +126,7 @@ export function DatasetTable(): React.ReactElement {
               <Button
                 size="sm"
                 variant="outline"
-                disabled={page >= lastPage}
+                isDisabled={page >= lastPage}
                 onClick={() => {
                   setPage((p) => Math.min(lastPage, p + 1));
                 }}
