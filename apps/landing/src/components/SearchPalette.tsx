@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Command } from "cmdk";
-import * as Dialog from "@radix-ui/react-dialog";
+import { Dialog, Heading, Modal, ModalOverlay } from "react-aria-components";
 import { Search, X } from "lucide-react";
 
 /**
@@ -99,14 +99,21 @@ export default function SearchPalette(): React.ReactElement {
   }, [query, pagefindReady]);
 
   return (
-    <Dialog.Root open={open} onOpenChange={setOpen}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/60" />
-        <Dialog.Content
-          aria-describedby={undefined}
-          className="fixed left-1/2 top-[15%] z-50 w-[min(92vw,640px)] -translate-x-1/2 overflow-hidden rounded-lg border bg-popover shadow-2xl"
-        >
-          <Dialog.Title className="sr-only">Search documentation</Dialog.Title>
+    // react-aria's ModalOverlay is both the portal and the backdrop, so the
+    // Radix Portal/Overlay pair collapses into it; Modal carries what used to
+    // be Dialog.Content. isDismissable restores Radix's click-outside-to-close
+    // (Escape already closes by default).
+    <ModalOverlay
+      isOpen={open}
+      onOpenChange={setOpen}
+      isDismissable
+      className="fixed inset-0 z-50 bg-black/60"
+    >
+      <Modal className="fixed left-1/2 top-[15%] z-50 w-[min(92vw,640px)] -translate-x-1/2 overflow-hidden rounded-lg border bg-popover shadow-2xl">
+        <Dialog aria-describedby={undefined} className="outline-none">
+          <Heading slot="title" className="sr-only">
+            Search documentation
+          </Heading>
           <Command shouldFilter={false} className="flex flex-col">
             <div className="flex items-center gap-2 border-b px-3 py-2">
               <Search className="h-4 w-4 text-muted-foreground" />
@@ -117,9 +124,16 @@ export default function SearchPalette(): React.ReactElement {
                 placeholder="Search docs..."
                 className="h-9 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
               />
-              <Dialog.Close className="rounded-md p-1 hover:bg-accent" aria-label="Close">
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                }}
+                className="rounded-md p-1 hover:bg-accent"
+                aria-label="Close"
+              >
                 <X className="h-4 w-4 text-muted-foreground" />
-              </Dialog.Close>
+              </button>
             </div>
             <Command.List className="max-h-[60vh] overflow-y-auto p-2">
               {hits.length === 0 && query !== "" && (
@@ -155,8 +169,8 @@ export default function SearchPalette(): React.ReactElement {
               toggle
             </div>
           </Command>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+        </Dialog>
+      </Modal>
+    </ModalOverlay>
   );
 }

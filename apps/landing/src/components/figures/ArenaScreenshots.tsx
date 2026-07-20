@@ -1,5 +1,5 @@
 import * as React from "react";
-import * as Dialog from "@radix-ui/react-dialog";
+import { Dialog, Heading, Modal, ModalOverlay } from "react-aria-components";
 import { ExternalLink, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -57,7 +57,9 @@ const SHOTS: Shot[] = [
 export default function ArenaScreenshots(): React.ReactElement {
   const [openIdx, setOpenIdx] = React.useState<number | null>(null);
   return (
-    <Dialog.Root open={openIdx !== null} onOpenChange={(v) => !v && setOpenIdx(null)}>
+    // Radix needed the grid inside Dialog.Root; react-aria's ModalOverlay is
+    // self-contained, so the trigger grid and the modal are plain siblings.
+    <>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {SHOTS.map((shot, i) => (
           <button
@@ -79,26 +81,39 @@ export default function ArenaScreenshots(): React.ReactElement {
         ))}
       </div>
 
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/70" />
-        <Dialog.Content
-          aria-describedby={undefined}
-          className="fixed left-1/2 top-1/2 z-50 w-[min(90vw,1100px)] max-h-[90vh] -translate-x-1/2 -translate-y-1/2 overflow-auto rounded-lg border bg-popover p-4 shadow-xl"
-        >
+      <ModalOverlay
+        isOpen={openIdx !== null}
+        onOpenChange={(v) => {
+          if (!v) {
+            setOpenIdx(null);
+          }
+        }}
+        isDismissable
+        className="fixed inset-0 z-50 bg-black/70"
+      >
+        <Modal className="fixed left-1/2 top-1/2 z-50 w-[min(90vw,1100px)] max-h-[90vh] -translate-x-1/2 -translate-y-1/2 overflow-auto rounded-lg border bg-popover p-4 shadow-xl">
+          <Dialog aria-describedby={undefined} className="outline-none">
           {openIdx !== null && (
             <div>
               <div className="mb-3 flex items-start justify-between gap-4">
                 <div>
-                  <Dialog.Title className="text-lg font-semibold">
+                  <Heading slot="title" className="text-lg font-semibold">
                     {SHOTS[openIdx]!.panel} panel
-                  </Dialog.Title>
+                  </Heading>
                   <p className="mt-1 text-sm text-muted-foreground">
                     {SHOTS[openIdx]!.caption}
                   </p>
                 </div>
-                <Dialog.Close className="rounded-md p-1 hover:bg-accent" aria-label="Close">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpenIdx(null);
+                  }}
+                  className="rounded-md p-1 hover:bg-accent"
+                  aria-label="Close"
+                >
                   <X className="h-4 w-4" />
-                </Dialog.Close>
+                </button>
               </div>
               <ScreenshotPlaceholder
                 src={SHOTS[openIdx]!.src}
@@ -114,9 +129,10 @@ export default function ArenaScreenshots(): React.ReactElement {
               </a>
             </div>
           )}
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+          </Dialog>
+        </Modal>
+      </ModalOverlay>
+    </>
   );
 }
 

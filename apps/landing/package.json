@@ -32,6 +32,7 @@
     "cmdk": "^1.0.4",
     "lucide-react": "^0.476.0",
     "react": "^19.1.0",
+    "react-aria-components": "^1.19.0",
     "react-dom": "^19.1.0",
     "rehype-autolink-headings": "^7.1.0",
     "rehype-mermaid": "^3.0.0",
