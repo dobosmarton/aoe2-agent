@@ -23,6 +23,13 @@ export default defineConfig({
       "/events": "http://localhost:8000",
       "/forks": "http://localhost:8000",
       "/health": "http://localhost:8000",
+      // Training tracker API (apps/training-api on :8100).
+      "/classes": "http://localhost:8100",
+      "/images": "http://localhost:8100",
+      "/datasets": "http://localhost:8100",
+      "/stats": "http://localhost:8100",
+      "/thumbs": "http://localhost:8100",
+      "/raw": "http://localhost:8100",
     },
   },
 });

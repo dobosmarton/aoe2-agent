@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { GitCompare, Globe2, ListTree, SlidersHorizontal, Swords } from "lucide-react";
+import {
+  GitCompare,
+  Globe2,
+  ListTree,
+  ScanEye,
+  SlidersHorizontal,
+  Swords,
+} from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TrainingView } from "@/panels/training/training-view";
 import { RunList } from "@/components/run-list";
 import { SiblingStrip } from "@/components/sibling-strip";
 import { StatusBadge } from "@/components/status-badge";
@@ -24,6 +33,26 @@ type Selection =
   | { readonly kind: "operation"; readonly key: string };
 
 export function App(): React.ReactElement {
+  const [view, setView] = useState<"arena" | "training">("arena");
+  if (view === "training") {
+    return (
+      <TrainingView
+        onExit={() => {
+          setView("arena");
+        }}
+      />
+    );
+  }
+  return (
+    <ArenaView
+      onOpenTraining={() => {
+        setView("training");
+      }}
+    />
+  );
+}
+
+function ArenaView(props: { readonly onOpenTraining: () => void }): React.ReactElement {
   const { runs, status: runsStatus, error: runsError } = useRuns();
   const { metricsByRunId, status: summariesStatus } = useRunSummaries();
   const [selection, setSelection] = useState<Selection | null>(null);
@@ -82,12 +111,22 @@ export function App(): React.ReactElement {
       <aside className="border-border bg-card flex flex-col overflow-hidden border-r">
         <header className="border-border flex items-center gap-2 border-b px-4 py-3">
           <Swords className="text-primary size-4 shrink-0" />
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <h1 className="text-sm font-semibold leading-none">AoE2 Arena</h1>
             <p className="text-muted-foreground mt-0.5 text-[11px]">
               Event log replay
             </p>
           </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="shrink-0"
+            title="Detection training tracker"
+            onClick={props.onOpenTraining}
+          >
+            <ScanEye className="size-4" />
+            Training
+          </Button>
         </header>
         <div className="min-h-0 flex-1">
           <RunList

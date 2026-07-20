@@ -34,6 +34,7 @@ gameplay-agent   = { workspace = true }
 arena            = { workspace = true }
 arena-web        = { workspace = true }
 detection-server = { workspace = true }
+training-api     = { workspace = true }
 autoresearch     = { workspace = true }
 data             = { workspace = true }
 
