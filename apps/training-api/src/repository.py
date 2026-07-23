@@ -9,6 +9,7 @@ confined to `_sql`; this module works with concrete types throughout.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import TYPE_CHECKING, Protocol
 
 from ._sql import col_int, col_opt_str, col_str, loads_dict, query_all, query_one
@@ -47,6 +48,21 @@ class TrackerReader(Protocol):
     def list_datasets(self) -> list[DatasetSummary]: ...
     def get_dataset(self, dataset_id: int) -> DatasetDetail | None: ...
     def coverage(self) -> CoverageReport: ...
+
+
+class TrackerWriter(Protocol):
+    """Write surface consumed by the annotation-review routes and the prelabeler.
+
+    `get_image` lives here too so a write route can 404 on a missing image
+    without also depending on `TrackerReader` — a create/edit flow is a single
+    capability. Tests inject a fake implementing just this surface."""
+
+    def get_image(self, image_id: int) -> ImageDetail | None: ...
+    def get_annotation(self, annotation_id: int) -> Annotation | None: ...
+    def add_annotation(self, annotation: Annotation) -> Annotation: ...
+    def update_annotation(self, annotation: Annotation) -> None: ...
+    def delete_annotation(self, annotation_id: int) -> bool: ...
+    def set_model_prelabels(self, image_id: int, annotations: Sequence[Annotation]) -> int: ...
 
 
 class SqliteTrackerRepository:
@@ -219,6 +235,95 @@ class SqliteTrackerRepository:
                 """,
                 (dataset_version_id, image_id, split),
             )
+
+    def real_image_ids_needing_prelabel(self, limit: int | None = None) -> list[int]:
+        """Real images with no approved box yet — the prelabeler's work queue.
+
+        Excludes images a reviewer has already signed off on (any `approved`
+        annotation), so a finished screenshot is never re-seeded; includes both
+        never-touched images and pending-only ones, which `set_model_prelabels`
+        then refreshes idempotently."""
+        sql = (
+            "SELECT i.id FROM images i "
+            "WHERE i.source = 'real' AND NOT EXISTS ("
+            "  SELECT 1 FROM annotations a WHERE a.image_id = i.id AND a.status = 'approved'"
+            ") ORDER BY i.path"
+        )
+        params: tuple[int, ...] = ()
+        if limit is not None:
+            sql += " LIMIT ?"
+            params = (limit,)
+        return [col_int(row, "id") for row in query_all(self._conn, sql, params)]
+
+    # -- writes (annotation review) ------------------------------------------
+
+    def get_annotation(self, annotation_id: int) -> Annotation | None:
+        row = query_one(self._conn, "SELECT * FROM annotations WHERE id = ?", (annotation_id,))
+        return _row_to_annotation(row) if row is not None else None
+
+    def add_annotation(self, annotation: Annotation) -> Annotation:
+        """Insert one annotation and return it with the assigned id."""
+        with transaction(self._conn):
+            cursor = self._conn.execute(
+                """
+                INSERT INTO annotations
+                    (image_id, class_id, geom_type, coords_json, source, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                _annotation_params(annotation.image_id, annotation),
+            )
+            new_id = cursor.lastrowid
+        return replace(annotation, id=new_id)
+
+    def update_annotation(self, annotation: Annotation) -> None:
+        """Overwrite an existing row wholesale; the caller supplies the merged value.
+
+        Assumes the row exists (routes `get_annotation` first to 404). `image_id`
+        is intentionally not updated — an annotation never migrates between images.
+        """
+        with transaction(self._conn):
+            self._conn.execute(
+                """
+                UPDATE annotations
+                SET class_id = ?, geom_type = ?, coords_json = ?, source = ?, status = ?
+                WHERE id = ?
+                """,
+                (
+                    annotation.class_id,
+                    geom_type_of(annotation.geometry),
+                    to_coords_json(annotation.geometry),
+                    annotation.source,
+                    annotation.status,
+                    annotation.id,
+                ),
+            )
+
+    def delete_annotation(self, annotation_id: int) -> bool:
+        with transaction(self._conn):
+            cursor = self._conn.execute("DELETE FROM annotations WHERE id = ?", (annotation_id,))
+        return cursor.rowcount > 0
+
+    def set_model_prelabels(self, image_id: int, annotations: Sequence[Annotation]) -> int:
+        """Replace this image's *unreviewed* model boxes with a fresh prediction set.
+
+        Only `source='model' AND status='pending'` rows are cleared, so re-running
+        the prelabeler is idempotent yet never discards a human's decision: approved
+        boxes (model or human) and hand-drawn boxes survive untouched."""
+        with transaction(self._conn):
+            self._conn.execute(
+                "DELETE FROM annotations "
+                "WHERE image_id = ? AND source = 'model' AND status = 'pending'",
+                (image_id,),
+            )
+            self._conn.executemany(
+                """
+                INSERT INTO annotations
+                    (image_id, class_id, geom_type, coords_json, source, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                [_annotation_params(image_id, ann) for ann in annotations],
+            )
+        return len(annotations)
 
     # -- helpers -------------------------------------------------------------
 

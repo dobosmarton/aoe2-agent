@@ -7,16 +7,18 @@ explicit `{geom_type, coords}` pair so the discriminator survives serialization.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeAlias, assert_never
 
-from .geometry import BBox, Geometry, GeomType, Polygon, geom_type_of
+from pydantic import BaseModel
+
+from .domain import Annotation, AnnotationSource, AnnotationStatus
+from .geometry import BBox, Geometry, GeomType, Polygon, geom_type_of, geometry_from_coords
 
 if TYPE_CHECKING:
     from .classes import ClassCatalog
     from .domain import (
-        Annotation,
         ClassCoverage,
         ClassInfo,
         CoverageReport,
@@ -242,4 +244,74 @@ def coverage_to_dto(report: CoverageReport) -> CoverageDto:
         unlabeled_images=report.unlabeled_images,
         classes=[_coverage_class_to_dto(c) for c in report.classes],
         zero_real_class_ids=list(report.zero_real_class_ids),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Request bodies (the write path) + their mappers to domain records.
+#
+# These are pydantic models, not dataclasses: FastAPI runs them as request
+# validators, and the geom_type/coords pair needs the coordinate-shape check
+# that `geometry_from_coords` provides (a bad `coords` raises ValueError, which
+# the route turns into a 422).
+# ---------------------------------------------------------------------------
+
+
+class AnnotationCreate(BaseModel):
+    """POST body for a hand-drawn (or programmatically added) annotation."""
+
+    class_id: int
+    geom_type: GeomType
+    coords: Coords
+    source: AnnotationSource = "human"
+    status: AnnotationStatus = "approved"
+
+
+class AnnotationUpdate(BaseModel):
+    """PATCH body — every field optional; omitted fields keep their stored value.
+
+    Approving a model box is `{"status": "approved"}`; correcting one sends the
+    changed `class_id` and/or `geom_type`+`coords`.
+    """
+
+    class_id: int | None = None
+    geom_type: GeomType | None = None
+    coords: Coords | None = None
+    status: AnnotationStatus | None = None
+
+
+def create_to_annotation(image_id: int, req: AnnotationCreate) -> Annotation:
+    """Build an unsaved `Annotation` from a create request (raises on bad coords)."""
+    return Annotation(
+        id=None,
+        image_id=image_id,
+        class_id=req.class_id,
+        geometry=geometry_from_coords(req.geom_type, req.coords),
+        source=req.source,
+        status=req.status,
+    )
+
+
+def apply_update(existing: Annotation, req: AnnotationUpdate) -> Annotation:
+    """Merge a PATCH onto an existing annotation, returning the new value.
+
+    Editing the geometry or the class is a human correction, so `source` flips to
+    `"human"`; a pure status change (an approve/reject) leaves provenance intact —
+    that keeps the "model got it right, human confirmed" (`model`/`approved`) case
+    distinguishable from a hand-corrected one in the coverage stats.
+    """
+    changed_geometry = req.geom_type is not None or req.coords is not None
+    geometry = existing.geometry
+    if changed_geometry:
+        if req.geom_type is None or req.coords is None:
+            raise ValueError("geom_type and coords must be supplied together")
+        geometry = geometry_from_coords(req.geom_type, req.coords)
+    class_changed = req.class_id is not None and req.class_id != existing.class_id
+    source: AnnotationSource = "human" if (changed_geometry or class_changed) else existing.source
+    return replace(
+        existing,
+        class_id=existing.class_id if req.class_id is None else req.class_id,
+        geometry=geometry,
+        status=existing.status if req.status is None else req.status,
+        source=source,
     )

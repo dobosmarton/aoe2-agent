@@ -7,17 +7,20 @@ one synthetic image, a 6-class schema) exercises the whole read path end-to-end.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from core import DetectedEntity
 from fastapi.testclient import TestClient
 from PIL import Image
-from training_api import ingest
+from training_api import ingest, prelabel_pending
 from training_api.classes import ClassCatalog
 from training_api.config import TrackerConfig, load_config
 from training_api.db import connect, init_schema
 from training_api.domain import ImageFilter
+from training_api.geometry import BBox
 from training_api.repository import SqliteTrackerRepository
 
 if TYPE_CHECKING:
@@ -252,3 +255,219 @@ def test_api_thumbnail_and_raw(client: TestClient) -> None:
     assert len(raw.content) > 0
 
     assert client.get("/thumbs/99999").status_code == 404
+
+
+# -- API write path (annotation review) --------------------------------------
+
+
+def _unlabeled_image_id(client: TestClient) -> int:
+    body = client.get("/images", params={"labeled": False}).json()
+    image_id = body["items"][0]["image"]["id"]
+    assert isinstance(image_id, int)
+    return image_id
+
+
+def _bbox_body(class_id: int, **extra: object) -> dict[str, object]:
+    return {"class_id": class_id, "geom_type": "bbox", "coords": [4, 6, 8, 8], **extra}
+
+
+def test_api_create_annotation_labels_image(client: TestClient) -> None:
+    image_id = _unlabeled_image_id(client)
+    response = client.post(f"/images/{image_id}/annotations", json=_bbox_body(2))
+    assert response.status_code == 201
+    created = response.json()
+    assert created["id"] is not None
+    assert (created["class_id"], created["source"], created["status"]) == (2, "human", "approved")
+    assert created["coords"] == [4, 6, 8, 8]
+
+    detail = client.get(f"/images/{image_id}").json()
+    assert [a["class_id"] for a in detail["annotations"]] == [2]
+    assert client.get("/stats").json()["labeled_images"] == 2  # B is now labeled too
+
+
+def test_api_create_unknown_class_is_422(client: TestClient) -> None:
+    image_id = _unlabeled_image_id(client)
+    assert client.post(f"/images/{image_id}/annotations", json=_bbox_body(99)).status_code == 422
+
+
+def test_api_create_missing_image_is_404(client: TestClient) -> None:
+    assert client.post("/images/9999/annotations", json=_bbox_body(0)).status_code == 404
+
+
+def test_api_create_bad_coords_is_422(client: TestClient) -> None:
+    image_id = _unlabeled_image_id(client)
+    body = {"class_id": 0, "geom_type": "bbox", "coords": [1, 2, 3]}  # bbox needs 4
+    assert client.post(f"/images/{image_id}/annotations", json=body).status_code == 422
+
+
+def test_api_approve_keeps_model_provenance(client: TestClient) -> None:
+    """Approving an unedited model box records model/approved — the 'model was
+    right' case must stay distinct from a hand-corrected one."""
+    image_id = _unlabeled_image_id(client)
+    created = client.post(
+        f"/images/{image_id}/annotations",
+        json=_bbox_body(2, source="model", status="pending"),
+    ).json()
+
+    patched = client.patch(f"/annotations/{created['id']}", json={"status": "approved"})
+    assert patched.status_code == 200
+    assert (patched.json()["status"], patched.json()["source"]) == ("approved", "model")
+
+
+def test_api_reclassify_flips_source_to_human(client: TestClient) -> None:
+    image_id = _unlabeled_image_id(client)
+    created = client.post(
+        f"/images/{image_id}/annotations",
+        json=_bbox_body(2, source="model", status="pending"),
+    ).json()
+
+    patched = client.patch(f"/annotations/{created['id']}", json={"class_id": 3}).json()
+    assert (patched["class_id"], patched["source"], patched["status"]) == (3, "human", "pending")
+
+
+def test_api_patch_geometry_updates_box(client: TestClient) -> None:
+    """A full geom_type+coords PATCH re-boxes the annotation and records the edit
+    as a human correction (source flips), but leaves it pending for approval."""
+    image_id = _unlabeled_image_id(client)
+    created = client.post(
+        f"/images/{image_id}/annotations",
+        json=_bbox_body(2, source="model", status="pending"),
+    ).json()
+
+    patched = client.patch(
+        f"/annotations/{created['id']}",
+        json={"geom_type": "bbox", "coords": [10, 12, 5, 6]},
+    )
+    assert patched.status_code == 200
+    body = patched.json()
+    assert body["coords"] == [10, 12, 5, 6]
+    assert (body["source"], body["status"]) == ("human", "pending")
+
+
+def test_api_patch_partial_geometry_is_422(client: TestClient) -> None:
+    image_id = _unlabeled_image_id(client)
+    created = client.post(f"/images/{image_id}/annotations", json=_bbox_body(2)).json()
+    # coords without geom_type is an ambiguous half-edit.
+    assert (
+        client.patch(f"/annotations/{created['id']}", json={"coords": [1, 2, 3, 4]}).status_code
+        == 422
+    )
+
+
+def test_api_patch_missing_annotation_is_404(client: TestClient) -> None:
+    assert client.patch("/annotations/999999", json={"status": "approved"}).status_code == 404
+
+
+def test_api_delete_annotation(client: TestClient) -> None:
+    image_id = _unlabeled_image_id(client)
+    created = client.post(f"/images/{image_id}/annotations", json=_bbox_body(2)).json()
+
+    assert client.delete(f"/annotations/{created['id']}").status_code == 204
+    assert client.get(f"/images/{image_id}").json()["annotations"] == []
+    assert client.delete(f"/annotations/{created['id']}").status_code == 404  # already gone
+
+
+# -- prelabel_pending --------------------------------------------------------
+
+
+def _det(class_name: str, bbox: tuple[float, float, float, float], conf: float) -> DetectedEntity:
+    return DetectedEntity(
+        id="d", class_name=class_name, bbox=bbox, center=(0.0, 0.0), confidence=conf
+    )
+
+
+class _FakeDetector:
+    """Returns a fixed prediction list regardless of the image (the only real
+    screenshot in the prelabel queue is the unlabeled one)."""
+
+    def __init__(self, detections: list[DetectedEntity]) -> None:
+        self._detections = detections
+
+    def detect(self, screenshot: Image.Image) -> list[DetectedEntity]:
+        _ = screenshot
+        return list(self._detections)
+
+
+def _queue_ids(config: TrackerConfig) -> tuple[int, int]:
+    """(unlabeled B id, labeled A id) captured before any prelabeling runs."""
+    repo = _repo(config)
+    (b_id,) = [i.record.id for i in repo.list_images(ImageFilter(labeled=False)).items]
+    (a_id,) = [i.record.id for i in repo.list_images(ImageFilter(labeled=True)).items]
+    assert b_id is not None and a_id is not None
+    return b_id, a_id
+
+
+def test_detections_to_annotations_converts_bbox(seeded_config: TrackerConfig) -> None:
+    catalog = ClassCatalog(seeded_config.classes_yaml)
+    converted = prelabel_pending.detections_to_annotations(
+        7, [_det("class_2", (4.0, 6.0, 12.0, 14.0), 0.9)], catalog, 0.25
+    )
+    (ann,) = converted.annotations
+    assert (ann.image_id, ann.class_id, ann.source, ann.status) == (7, 2, "model", "pending")
+    assert ann.geometry == BBox(x=4.0, y=6.0, w=8.0, h=8.0)  # (x1,y1,x2,y2) -> (x,y,w,h)
+
+
+def test_prelabel_writes_pending_boxes(seeded_config: TrackerConfig) -> None:
+    b_id, _ = _queue_ids(seeded_config)
+    fake = _FakeDetector([_det("class_2", (4, 6, 12, 14), 0.9), _det("class_3", (1, 1, 5, 5), 0.8)])
+
+    report = prelabel_pending.run(seeded_config, fake, min_conf=0.25)
+
+    assert (report.images_processed, report.boxes_written) == (1, 2)  # only the unlabeled image
+    labeled = _repo(seeded_config).get_image(b_id)
+    assert labeled is not None
+    assert {a.class_id for a in labeled.annotations} == {2, 3}
+    assert all(a.source == "model" and a.status == "pending" for a in labeled.annotations)
+
+
+def test_prelabel_skips_low_conf_and_unknown_class(seeded_config: TrackerConfig) -> None:
+    fake = _FakeDetector(
+        [
+            _det("class_2", (1, 1, 3, 3), 0.10),  # below threshold
+            _det("no_such_class", (1, 1, 3, 3), 0.99),  # not in the 6-class schema
+            _det("class_4", (2, 2, 6, 6), 0.99),  # kept
+        ]
+    )
+    report = prelabel_pending.run(seeded_config, fake, min_conf=0.25)
+    assert (report.boxes_written, report.skipped_low_conf, report.skipped_unknown_class) == (
+        1,
+        1,
+        1,
+    )
+
+
+def test_prelabel_is_idempotent_and_preserves_human_labels(seeded_config: TrackerConfig) -> None:
+    b_id, a_id = _queue_ids(seeded_config)
+    fake = _FakeDetector([_det("class_2", (4, 6, 12, 14), 0.9), _det("class_3", (1, 1, 5, 5), 0.9)])
+
+    prelabel_pending.run(seeded_config, fake, min_conf=0.25)
+    prelabel_pending.run(seeded_config, fake, min_conf=0.25)  # re-run replaces, never appends
+
+    repo = _repo(seeded_config)
+    b_after = repo.get_image(b_id)
+    a_after = repo.get_image(a_id)
+    assert b_after is not None and a_after is not None
+    assert len(b_after.annotations) == 2  # 2, not 4 — pending set was replaced
+    assert {a.class_id for a in a_after.annotations} == {0, 5}  # human labels untouched
+    assert all(a.source == "human" and a.status == "approved" for a in a_after.annotations)
+
+
+def test_prelabel_hands_off_once_a_box_is_approved(seeded_config: TrackerConfig) -> None:
+    """Approving any box takes the image out of the queue, so a re-run never
+    wipes a review in progress or resurrects a rejected box."""
+    b_id, _ = _queue_ids(seeded_config)
+    fake = _FakeDetector([_det("class_2", (4, 6, 12, 14), 0.9), _det("class_3", (1, 1, 5, 5), 0.9)])
+    prelabel_pending.run(seeded_config, fake, min_conf=0.25)
+
+    repo = _repo(seeded_config)
+    before = repo.get_image(b_id)
+    assert before is not None
+    repo.update_annotation(replace(before.annotations[0], status="approved"))
+
+    report = prelabel_pending.run(seeded_config, fake, min_conf=0.25)
+
+    assert report.images_processed == 0  # B left the queue; A was never in it
+    after = _repo(seeded_config).get_image(b_id)
+    assert after is not None
+    statuses = sorted(a.status for a in after.annotations)
+    assert statuses == ["approved", "pending"]  # both boxes intact
