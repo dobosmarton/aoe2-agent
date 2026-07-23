@@ -5,8 +5,11 @@ import { QueryFallback } from "@/components/query-fallback";
 import { trackerImageDetailQueryOptions } from "@/lib/queries";
 import { trackerAssetUrl } from "@/lib/training-api";
 import { AnnotationBox } from "@/panels/training/annotation-box";
+import { EditableAnnotationBox } from "@/panels/training/editable-annotation-box";
 import { LightboxLegend } from "@/panels/training/lightbox-legend";
 import { LightboxToolbar } from "@/panels/training/lightbox-toolbar";
+import { PendingReview } from "@/panels/training/pending-review";
+import { useAnnotationMutations } from "@/panels/training/use-annotation-mutations";
 import { useZoomPan } from "@/panels/training/use-zoom-pan";
 
 /**
@@ -30,6 +33,9 @@ export function ImageLightbox(props: {
     content,
   );
   const [focus, setFocus] = useState<string | null>(null);
+  // Annotation id whose box is in geometry-edit mode (drag handles shown).
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const mutations = useAnnotationMutations();
 
   // Attached by hand because React registers `wheel` passively at the root,
   // where preventDefault is a no-op.
@@ -47,7 +53,12 @@ export function ImageLightbox(props: {
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
       if (event.key === "Escape") {
-        onClose();
+        // Escape backs out of editing first, then closes the lightbox.
+        if (selectedId !== null) {
+          setSelectedId(null);
+        } else {
+          onClose();
+        }
       } else if (event.key === "+" || event.key === "=") {
         zoomBy(1.3);
       } else if (event.key === "-" || event.key === "_") {
@@ -60,7 +71,7 @@ export function ImageLightbox(props: {
     return (): void => {
       window.removeEventListener("keydown", onKey);
     };
-  }, [onClose, reset, zoomBy]);
+  }, [onClose, reset, zoomBy, selectedId]);
 
   return (
     <div
@@ -84,51 +95,77 @@ export function ImageLightbox(props: {
           onClose={onClose}
         />
 
-        <div
-          ref={viewport}
-          className="flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4"
-          style={{ cursor: zoom > 1 ? "grab" : "default", touchAction: "none" }}
-          onPointerDown={onPointerDown}
-          onDoubleClick={() => {
-            if (zoom > 1) {
-              reset();
-            } else {
-              zoomBy(2.5);
-            }
-          }}
-        >
-          {detail === null ? (
-            <QueryFallback noun="image" query={query} />
-          ) : (
-            // Shrink-wraps the image so the percentage-positioned boxes align;
-            // scaling this wrapper zooms image and overlay as one unit.
-            <div
-              ref={content}
-              className="relative inline-block"
-              style={{
-                transform: `translate(${String(offset.x)}px, ${String(offset.y)}px) scale(${String(zoom)})`,
-                transformOrigin: "0 0",
-                // No `will-change: transform`: that hint makes Chrome rasterise
-                // the layer once and stretch the bitmap, which blurs the labels.
-              }}
-            >
-              <img
-                src={trackerAssetUrl(detail.image.raw_url)}
-                alt={detail.image.filename}
-                draggable={false}
-                className="block max-h-[70vh] max-w-full select-none object-contain"
-              />
-              {detail.annotations.map((ann) => (
-                <AnnotationBox
-                  key={`${String(ann.class_id)}:${ann.coords.toString()}`}
-                  annotation={ann}
-                  record={detail.image}
-                  zoom={zoom}
-                  focus={focus}
+        <div className="flex min-h-0 flex-1">
+          <div
+            ref={viewport}
+            className="flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4"
+            style={{ cursor: zoom > 1 ? "grab" : "default", touchAction: "none" }}
+            onPointerDown={onPointerDown}
+            onDoubleClick={() => {
+              if (zoom > 1) {
+                reset();
+              } else {
+                zoomBy(2.5);
+              }
+            }}
+          >
+            {detail === null ? (
+              <QueryFallback noun="image" query={query} />
+            ) : (
+              // Shrink-wraps the image so the percentage-positioned boxes align;
+              // scaling this wrapper zooms image and overlay as one unit.
+              <div
+                ref={content}
+                className="relative inline-block"
+                style={{
+                  transform: `translate(${String(offset.x)}px, ${String(offset.y)}px) scale(${String(zoom)})`,
+                  transformOrigin: "0 0",
+                  // No `will-change: transform`: that hint makes Chrome rasterise
+                  // the layer once and stretch the bitmap, which blurs the labels.
+                }}
+              >
+                <img
+                  src={trackerAssetUrl(detail.image.raw_url)}
+                  alt={detail.image.filename}
+                  draggable={false}
+                  className="block max-h-[70vh] max-w-full select-none object-contain"
                 />
-              ))}
-            </div>
-          )}
+                {detail.annotations.map((ann) => {
+                  const key = `${String(ann.id ?? "new")}:${String(ann.class_id)}:${ann.coords.toString()}`;
+                  const isEditing =
+                    selectedId !== null && ann.id === selectedId && ann.geom_type === "bbox";
+                  return isEditing ? (
+                    <EditableAnnotationBox
+                      key={key}
+                      annotation={ann}
+                      record={detail.image}
+                      content={content}
+                      zoom={zoom}
+                      onSetGeometry={mutations.setGeometry}
+                    />
+                  ) : (
+                    <AnnotationBox
+                      key={key}
+                      annotation={ann}
+                      record={detail.image}
+                      zoom={zoom}
+                      focus={focus}
+                    />
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {detail !== null ? (
+            <PendingReview
+              detail={detail}
+              mutations={mutations}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              onFocusChange={setFocus}
+            />
+          ) : null}
         </div>
 
         <LightboxLegend

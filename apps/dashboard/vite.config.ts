@@ -49,6 +49,7 @@ export default defineConfig({
       // Training tracker API (apps/training-api on :8100).
       "/classes": "http://localhost:8100",
       "/images": "http://localhost:8100",
+      "/annotations": "http://localhost:8100",
       "/datasets": "http://localhost:8100",
       "/stats": "http://localhost:8100",
       "/thumbs": "http://localhost:8100",

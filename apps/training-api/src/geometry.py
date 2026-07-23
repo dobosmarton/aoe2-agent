@@ -58,12 +58,20 @@ def to_coords_json(geom: Geometry) -> str:
 
 def from_coords_json(geom_type: GeomType, raw: str) -> Geometry:
     """Inverse of `to_coords_json`, discriminated by the stored `geom_type`."""
-    parsed = cast("object", json.loads(raw))
+    return geometry_from_coords(geom_type, cast("object", json.loads(raw)))
+
+
+def geometry_from_coords(geom_type: GeomType, coords: object) -> Geometry:
+    """Build a `Geometry` from already-parsed coordinates (the client-request path).
+
+    Shares the exact same validation as `from_coords_json`, so a bbox posted as
+    JSON and a bbox read back from the DB go through one boundary check.
+    """
     match geom_type:
         case "bbox":
-            return _bbox_from_parsed(parsed)
+            return _bbox_from_parsed(coords)
         case "polygon":
-            return _polygon_from_parsed(parsed)
+            return _polygon_from_parsed(coords)
         case _ as unreachable:
             assert_never(unreachable)
 

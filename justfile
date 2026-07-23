@@ -58,6 +58,10 @@ training-api-dev port="8100":
 training-seed:
     uv run --package training-api python -m training_api.ingest
 
+# Model-assisted prelabel: seed pending boxes for review (idempotent). ARGS e.g. --conf 0.2 --limit 20
+training-prelabel *ARGS:
+    uv run --package training-api python -m training_api.prelabel_pending {{ARGS}}
+
 # ── Quality gate ───────────────────────────────────────────────────────────
 
 lint:

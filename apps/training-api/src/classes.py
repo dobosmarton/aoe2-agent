@@ -23,12 +23,22 @@ class ClassCatalog:
             ClassInfo(id=class_id, name=name) for class_id, name in sorted(id_to_name.items())
         )
         self._names = dict(id_to_name)
+        # Reverse map for the prelabel path (detector emits class names). The last
+        # id wins on the rare duplicate name, matching `_names`' forward mapping.
+        self._ids = {name: class_id for class_id, name in id_to_name.items()}
 
     def all(self) -> tuple[ClassInfo, ...]:
         return self._classes
 
     def name_of(self, class_id: ClassId) -> str:
         return self._names.get(class_id, f"unknown_{class_id}")
+
+    def id_of(self, name: str) -> ClassId | None:
+        """Class id for a detector's class name, or None if it isn't in the schema."""
+        return self._ids.get(name)
+
+    def has(self, class_id: ClassId) -> bool:
+        return class_id in self._names
 
     def __len__(self) -> int:
         return len(self._classes)

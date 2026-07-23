@@ -1,15 +1,22 @@
 """FastAPI service for the detection training tracker.
 
-URL contract (read-only in Phase 1):
-  GET /health           -> {"status": "ok"}
-  GET /classes          -> list[ClassDto]                (the 60-class schema)
-  GET /images           -> ImagePageDto                  (filter: labeled/class_id/source)
-  GET /images/{id}      -> ImageDetailDto                (meta + annotations)
-  GET /datasets         -> list[DatasetSummaryDto]
-  GET /datasets/{id}    -> DatasetDetailDto
-  GET /stats            -> CoverageDto                    (per-class coverage matrix)
-  GET /thumbs/{id}      -> image/jpeg                     (cached thumbnail)
-  GET /raw/{id}         -> image bytes                    (original screenshot)
+URL contract:
+  GET    /health                    -> {"status": "ok"}
+  GET    /classes                   -> list[ClassDto]        (the 60-class schema)
+  GET    /images                    -> ImagePageDto          (filter: labeled/class_id/source)
+  GET    /images/{id}               -> ImageDetailDto        (meta + annotations)
+  POST   /images/{id}/annotations   -> AnnotationDto         (add a box; 201)
+  PATCH  /annotations/{id}          -> AnnotationDto         (approve / reclassify / re-box)
+  DELETE /annotations/{id}          -> 204                   (reject / remove a box)
+  GET    /datasets                  -> list[DatasetSummaryDto]
+  GET    /datasets/{id}             -> DatasetDetailDto
+  GET    /stats                     -> CoverageDto           (per-class coverage matrix)
+  GET    /thumbs/{id}               -> image/jpeg            (cached thumbnail)
+  GET    /raw/{id}                  -> image bytes           (original screenshot)
+
+The write routes back the prelabel-review loop: a batch prelabeler seeds
+`model`/`pending` boxes (see `prelabel_pending.py`), and a reviewer approves,
+corrects, or rejects them through PATCH/DELETE.
 
 Config comes from the environment via `load_config`; the lifespan installer is the
 single writer to `app.state`, so dependency getters `cast` at that boundary.
@@ -24,7 +31,7 @@ from contextlib import asynccontextmanager, closing
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from PIL import Image
@@ -32,17 +39,23 @@ from PIL import Image
 from .classes import ClassCatalog
 from .config import TrackerConfig, load_config
 from .db import connect, init_schema
-from .domain import ImageFilter, ImageSource
-from .repository import SqliteTrackerRepository, TrackerReader
+from .domain import Annotation, ImageFilter, ImageSource
+from .repository import SqliteTrackerRepository, TrackerReader, TrackerWriter
 from .schemas import (
+    AnnotationCreate,
+    AnnotationDto,
+    AnnotationUpdate,
     ClassDto,
     CoverageDto,
     DatasetDetailDto,
     DatasetSummaryDto,
     ImageDetailDto,
     ImagePageDto,
+    annotation_to_dto,
+    apply_update,
     class_to_dto,
     coverage_to_dto,
+    create_to_annotation,
     dataset_detail_to_dto,
     detail_to_dto,
     page_to_dto,
@@ -78,7 +91,7 @@ def _cors_origins() -> list[str]:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -101,8 +114,26 @@ def get_repo(request: Request) -> Iterator[TrackerReader]:
         yield SqliteTrackerRepository(conn, catalog)
 
 
+def get_writer(request: Request) -> Iterator[TrackerWriter]:
+    """A request-scoped repository typed to its write surface.
+
+    Same one-connection-per-request rule as `get_repo` (see its docstring); the
+    concrete `SqliteTrackerRepository` satisfies both protocols, so this differs
+    only in the type the write routes see."""
+    state = cast("FastAPI", request.app).state
+    config = cast("TrackerConfig", state.config)
+    catalog = cast("ClassCatalog", state.catalog)
+    with closing(connect(config.db_path)) as conn:
+        yield SqliteTrackerRepository(conn, catalog)
+
+
 def get_catalog(request: Request) -> ClassCatalog:
     return cast("ClassCatalog", cast("FastAPI", request.app).state.catalog)
+
+
+def _require_known_class(catalog: ClassCatalog, class_id: int) -> None:
+    if not catalog.has(class_id):
+        raise HTTPException(status_code=422, detail=f"unknown class_id {class_id}")
 
 
 def get_config(request: Request) -> TrackerConfig:
@@ -176,6 +207,65 @@ async def dataset_detail(
 async def stats(repo: TrackerReader = Depends(get_repo)) -> CoverageDto:
     report = await asyncio.to_thread(repo.coverage)
     return coverage_to_dto(report)
+
+
+@app.post("/images/{image_id}/annotations", status_code=201)
+async def create_annotation(
+    image_id: int,
+    body: AnnotationCreate,
+    repo: TrackerWriter = Depends(get_writer),
+    catalog: ClassCatalog = Depends(get_catalog),
+) -> AnnotationDto:
+    _require_known_class(catalog, body.class_id)
+    created = await asyncio.to_thread(_create_annotation, repo, image_id, body)
+    return annotation_to_dto(created, catalog)
+
+
+@app.patch("/annotations/{annotation_id}")
+async def update_annotation(
+    annotation_id: int,
+    body: AnnotationUpdate,
+    repo: TrackerWriter = Depends(get_writer),
+    catalog: ClassCatalog = Depends(get_catalog),
+) -> AnnotationDto:
+    if body.class_id is not None:
+        _require_known_class(catalog, body.class_id)
+    updated = await asyncio.to_thread(_update_annotation, repo, annotation_id, body)
+    return annotation_to_dto(updated, catalog)
+
+
+@app.delete("/annotations/{annotation_id}", status_code=204)
+async def delete_annotation(
+    annotation_id: int, repo: TrackerWriter = Depends(get_writer)
+) -> Response:
+    deleted = await asyncio.to_thread(repo.delete_annotation, annotation_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"annotation {annotation_id} not found")
+    return Response(status_code=204)
+
+
+def _create_annotation(repo: TrackerWriter, image_id: int, body: AnnotationCreate) -> Annotation:
+    if repo.get_image(image_id) is None:
+        raise HTTPException(status_code=404, detail=f"image {image_id} not found")
+    try:
+        annotation = create_to_annotation(image_id, body)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return repo.add_annotation(annotation)
+
+
+def _update_annotation(
+    repo: TrackerWriter, annotation_id: int, body: AnnotationUpdate
+) -> Annotation:
+    existing = repo.get_annotation(annotation_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail=f"annotation {annotation_id} not found")
+    try:
+        merged = apply_update(existing, body)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    repo.update_annotation(merged)
+    return merged
 
 
 @app.get("/raw/{image_id}")
