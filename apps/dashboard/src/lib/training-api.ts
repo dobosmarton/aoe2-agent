@@ -134,3 +134,62 @@ export async function fetchImages(
   }
   return getJson<ImagePageDto>(`/images?${params.toString()}`, signal);
 }
+
+// -- write path (annotation review) -----------------------------------------
+// Bodies mirror the pydantic request models in schemas.py. `coords` is absolute
+// pixels, top-left origin — `[x, y, w, h]` for a bbox, `[[x, y], …]` for a polygon.
+
+type GeomType = "bbox" | "polygon";
+type Coords = readonly number[] | readonly (readonly number[])[];
+
+export type AnnotationCreateBody = {
+  readonly class_id: number;
+  readonly geom_type: GeomType;
+  readonly coords: Coords;
+  readonly source?: "model" | "human";
+  readonly status?: "pending" | "approved";
+};
+
+/** Every field optional: send only what changes. `{status:"approved"}` approves;
+ * `{class_id}` reclassifies; a geometry edit needs `geom_type` + `coords` together. */
+export type AnnotationPatchBody = {
+  readonly class_id?: number;
+  readonly geom_type?: GeomType;
+  readonly coords?: Coords;
+  readonly status?: "pending" | "approved";
+};
+
+async function sendJson<T>(path: string, method: "POST" | "PATCH", body: unknown): Promise<T> {
+  const response = await fetch(apiUrl(path), {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    throw new Error(`${method} ${path} failed: ${response.status} ${response.statusText}`);
+  }
+  return (await response.json()) as T;
+}
+
+export async function createAnnotation(
+  imageId: number,
+  body: AnnotationCreateBody,
+): Promise<AnnotationDto> {
+  return sendJson<AnnotationDto>(`/images/${String(imageId)}/annotations`, "POST", body);
+}
+
+export async function updateAnnotation(
+  annotationId: number,
+  patch: AnnotationPatchBody,
+): Promise<AnnotationDto> {
+  return sendJson<AnnotationDto>(`/annotations/${String(annotationId)}`, "PATCH", patch);
+}
+
+export async function deleteAnnotation(annotationId: number): Promise<void> {
+  const response = await fetch(apiUrl(`/annotations/${String(annotationId)}`), {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    throw new Error(`DELETE /annotations/${String(annotationId)} failed: ${response.status}`);
+  }
+}
