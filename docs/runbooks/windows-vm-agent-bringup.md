@@ -84,6 +84,35 @@ These are accumulated failure modes from many bring-up attempts:
 | Detection works on Mac but VM gets `Connection refused` | Server bound to `127.0.0.1` instead of `0.0.0.0` | Restart the server with `--host 0.0.0.0` (it's the default for `just server`, but easy to override and forget). |
 | Detection works once, then connection drops repeatedly | macOS firewall is challenging the server | System Settings → Network → Firewall → allow incoming for the Python binary. |
 
+## Build-menu verification (do once per machine, before trusting a new menu)
+
+The agent will only open a build menu whose slot layout has been confirmed
+in-game here. Only the economic menu (`q`) ships verified. This is not
+bureaucracy: a menu lists only the buildings currently available and the rest
+of the grid shifts up to fill the gap, so a wrong slot does not no-op — runs
+6-7 built **14 outposts** through a re-flowed economic menu.
+
+To clear the more-buildings menu (needed for the Market, and with it the Castle
+Age — see T-544):
+
+1. Start a skirmish and reach the **Feudal Age** (the Market doesn't exist
+   before it, and an absent building is exactly what shifts the grid).
+2. Select a villager, press `V`. Confirm the panel shows the Market, and that
+   **`D` is the Market** — hover it and read the tooltip; don't infer from
+   position.
+3. Press `Escape`… **no** — press `H` to close the menu (Escape opens the game
+   menu and pauses, F-32).
+4. If and only if the tooltip said Market, set:
+   ```cmd
+   set AOE2_VERIFIED_BUILD_MENUS=q,v
+   ```
+5. Same protocol for the military menu (`W`, slot `Q` = Barracks) before adding
+   `w` to the list.
+
+Leave it unset and the agent still plays: the Castle prep builds the blacksmith,
+the market build is refused with an explanation, and the Castle age-up simply
+waits instead of pressing a greyed button.
+
 ## Variables you might want to tune
 
 | Env var | Default | When to change |
@@ -96,6 +125,7 @@ These are accumulated failure modes from many bring-up attempts:
 | `AOE2_SAVE_SCREENSHOTS` | `true` | `false` if disk is filling up. |
 | `AOE2_TEMPERATURE` | `0.0` | Raise for output diversity at reproducibility cost. |
 | `AOE2_SEED` | unset (OS entropy) | Set an int to make `executor.py`'s build-retry jitter deterministic. Doesn't affect the LLM (the SDK doesn't accept `seed=`). |
+| `AOE2_VERIFIED_BUILD_MENUS` | `q` (economic only) | Add `v` / `w` once you've run the verification above. Without `v` the agent cannot reach the Castle Age. |
 
 ## Stopping cleanly
 
