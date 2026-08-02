@@ -212,12 +212,14 @@ The detection module includes a Kalman filter-based multi-object tracker (`detec
 
 **How it works:**
 1. Each tracked entity has a 6D state vector: `[x_center, y_center, vx, vy, width, height]`
-2. On each frame, the tracker **predicts** where entities moved using constant-velocity kinematics
+2. On each cycle, the tracker **predicts** where entities moved using constant-velocity kinematics over the wall-clock seconds actually elapsed (velocities are px/second; extrapolation saturates at 1s)
 3. New detections are **matched** to predicted tracks via the Hungarian algorithm (cost = `1 - IoU`, same-class constraint)
 4. Matched tracks are **updated** with Kalman gain correction; unmatched detections create new tracks
-5. Tracks with 3+ consecutive misses are pruned
+5. Tracks are pruned after more than 3 consecutive misses
 
-**Prediction mode:** When the tracker has high confidence (`get_confidence() > 0.8`), the game loop can call `tracker.predict()` to extrapolate entity positions without running YOLO inference at all (~0ms). This is used in mid-turn rescans to save ~50-234ms per rescan.
+**Camera motion is not modelled.** A pan or zoom displaces every box at once, which no per-entity velocity can express, and a pan of roughly one box width can match tracks to their *neighbours* — a silent ID swap. Callers must call `tracker.reset()` when they move the camera; the agent wires this through `executor.set_tracks_invalidator()`.
+
+**Prediction mode:** When the tracker has high confidence (`prediction_confidence() > 0.8`), the game loop can call `tracker.predict()` to extrapolate entity positions without running YOLO inference at all (~0ms). This is used in mid-turn rescans to save ~50-234ms per rescan.
 
 **Fallback:** If scipy is unavailable for the Hungarian algorithm, a greedy IoU matcher is used. If the tracker module fails to import entirely, the detector falls back to the legacy `_assign_persistent_ids()` method.
 
@@ -268,7 +270,7 @@ Used by the alarm system (`src/goals.py`) to avoid false alarms from own militar
 
 ## Integration with Agent
 
-The detection module integrates with the main agent in `src/game_loop.py`:
+The detection module integrates with the main agent in `apps/agent/src/detection_phase.py`:
 
 ```python
 # Detection is optional - agent falls back gracefully if unavailable
@@ -293,7 +295,7 @@ if DETECTION_AVAILABLE:
     # LLM can reference entities by ID: "right_click on sheep_0"
 
     # Mid-turn rescan callback (inside action execution)
-    if detector.tracker and detector.tracker.get_confidence() > 0.8:
+    if detector.tracker and detector.tracker.prediction_confidence() > 0.8:
         predicted = detector.tracker.predict()  # ~0ms, no YOLO inference
     else:
         rescan_entities = detector.detect_fast(new_screenshot)  # ~50ms single-pass

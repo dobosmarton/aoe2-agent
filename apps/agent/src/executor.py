@@ -31,6 +31,7 @@ _window_offset: tuple[int, int] = (0, 0)
 _detected_entities: list[dict] = []
 _rescan_fn: Callable[[], Awaitable[None]] | None = None
 _rescan_full_fn: Callable[[], Awaitable[None]] | None = None
+_invalidate_tracks_fn: Callable[[], None] | None = None
 
 
 @dataclass
@@ -61,6 +62,18 @@ def set_rescan_full_fn(fn: Callable[[], Awaitable[None]]) -> None:
 def get_rescan_fn() -> Callable[[], Awaitable[None]] | None:
     """Return the registered fast-rescan callback, or None if unset."""
     return _rescan_fn
+
+
+def set_tracks_invalidator(fn: Callable[[], None]) -> None:
+    """Set the callback that drops tracker identities after the camera moves."""
+    global _invalidate_tracks_fn
+    _invalidate_tracks_fn = fn
+
+
+def _invalidate_tracks() -> None:
+    """Tell the tracker its identities are stale (no-op when unregistered)."""
+    if _invalidate_tracks_fn:
+        _invalidate_tracks_fn()
 
 
 def set_detected_entities(entities: Sequence[object]) -> None:
@@ -660,8 +673,28 @@ BUILD_PLACEMENT_KEYWORDS = ("place", "build")
 CAMERA_KEYS: frozenset[str] = frozenset({"h", ".", ","})
 STALE_COORDS_DETAIL = (
     "raw x/y coordinates go stale once the camera moves (a '.'/'h'/',' press "
-    "re-centers the view) — use target_class or target_id instead"
+    "re-centers the view, a scroll zooms it) — use target_class or target_id instead"
 )
+
+
+def _press_moves_camera(action_dict: dict[str, object]) -> bool:
+    """True when a press re-centers the view (explicit rescan or camera hotkey)."""
+    return bool(action_dict.get("rescan")) or str(action_dict.get("key", "")).lower() in CAMERA_KEYS
+
+
+def _moves_camera(action_dict: dict[str, object]) -> bool:
+    """True when the action shifts or rescales the view.
+
+    Scroll counts: the wheel zooms, which moves *and* resizes every box on
+    screen — just as invalidating for raw coordinates and for tracked
+    identities as a re-centering hotkey.
+    """
+    action_type = action_dict.get("type")
+    if action_type == "scroll":
+        return True
+    return action_type == "press" and _press_moves_camera(action_dict)
+
+
 # Local retry offsets sprayed around an already-open anchor — systematic compass
 # points (not random) so coverage is deterministic. The anchor itself is now
 # chosen on empty ground (see default_build_placement), so these only need to
@@ -1109,6 +1142,9 @@ async def _handle_press(action_dict: dict[str, object], intent: str) -> ActionRe
         pyautogui.press(key)
         log.info("press", key=key, intent=intent)
 
+    if _press_moves_camera(action_dict):
+        _invalidate_tracks()
+
     # Rescan: take fresh screenshot + detection after camera-moving keys
     if action_dict.get("rescan") and _rescan_fn:
         await asyncio.sleep(RESCAN_SETTLE_DELAY)
@@ -1140,6 +1176,14 @@ async def _handle_scroll(action_dict: dict[str, object], intent: str) -> ActionR
     else:
         pyautogui.scroll(clicks)
     log.info("scroll", clicks=clicks, intent=intent)
+
+    # Zoom rescales every bbox — nothing detected before this call still holds.
+    _invalidate_tracks()
+    if _rescan_fn:
+        await asyncio.sleep(RESCAN_SETTLE_DELAY)
+        await _rescan_fn()
+        log.info("rescan_after_scroll", clicks=clicks)
+
     return ActionResult(True, "ok")
 
 
@@ -1283,12 +1327,6 @@ def _as_dict(action: dict[str, object] | Action) -> dict[str, object]:
     if isinstance(action, BaseModel):
         return cast("dict[str, object]", action.model_dump())
     return action
-
-
-def _moves_camera(action_dict: dict[str, object]) -> bool:
-    return action_dict.get("type") == "press" and (
-        bool(action_dict.get("rescan")) or str(action_dict.get("key", "")).lower() in CAMERA_KEYS
-    )
 
 
 def _uses_raw_coords_only(action_dict: dict[str, object]) -> bool:

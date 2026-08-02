@@ -261,17 +261,18 @@ Dead Track (misses=3, pruned from tracker)
 
 ### Prediction Mode
 
-`tracker.predict()` extrapolates entity positions using the Kalman predict step *without* new detections. This is used in the game loop's rescan callback: when tracker confidence exceeds 80%, the rescan skips screenshot capture and YOLO inference entirely, using predicted positions instead (~0ms vs ~100ms).
+`tracker.predict()` extrapolates entity positions using the Kalman predict step *without* new detections. This is used in the rescan callback: when the frame differ reports no visual change *and* tracker confidence exceeds 80%, the rescan skips YOLO inference and uses predicted positions instead (~0ms vs ~100ms). The screenshot is still captured — the frame differ needs an image to compare against — so it is only inference that is avoided.
 
 ```python
-# In game_loop.py rescan callback:
-if detector.tracker and detector.tracker.get_confidence() > 0.8:
-    predicted = detector.tracker.predict()  # Instant — no inference
-    set_detected_entities(predicted)
-    return
+# In detection_phase.py rescan callback:
+if frame_differ and not frame_differ.has_changed(screenshot):
+    if detector.tracker and detector.tracker.prediction_confidence() > 0.8:
+        predicted = detector.tracker.predict()  # Instant — no inference
+        set_detected_entities(predicted)
+        return
 ```
 
-Confidence is computed as `active_tracks / total_tracks`. If many tracks are lost (misses > 0), confidence drops and actual detection is triggered.
+Confidence is the fraction of tracks that both matched last cycle (`misses == 0`) and have been confirmed by 3 consecutive detections (`hits >= 3`). The confirmation term is what keeps a tracker repopulated right after a camera reset from reading 100%: every brand-new track is matched by construction, so match rate alone peaks exactly when no identity has been established yet.
 
 ### Greedy IoU Fallback
 
@@ -349,7 +350,7 @@ Adaptive SAHI reverts to full SAHI via `detect()` when:
 - **Alarm**: When enemy threats were detected on the previous turn (need maximum detection coverage)
 
 ```python
-# In game_loop.py:
+# In detection_phase.py:
 force_full = (
     iteration == 1
     or iteration % config.full_sahi_interval == 0

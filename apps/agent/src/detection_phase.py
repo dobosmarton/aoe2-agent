@@ -42,6 +42,7 @@ from .executor import (
     set_detected_entities,
     set_rescan_fn,
     set_rescan_full_fn,
+    set_tracks_invalidator,
 )
 from .screen import capture_screenshot, save_screenshot
 from .window import get_game_window_rect
@@ -130,6 +131,14 @@ def _register_rescan_callbacks(
 ) -> None:
     """Register rescan + full detection callbacks on the executor module."""
 
+    def _invalidate_tracks() -> None:
+        """Drop everything keyed to the old view — the camera has moved."""
+        if detector.tracker:
+            detector.tracker.reset()
+        if frame_differ:
+            frame_differ.reset()  # the stored frame shows somewhere else now
+        log.debug("tracker_reset", reason="camera_moved")
+
     async def _rescan() -> None:
         if overlay:
             overlay.hide()
@@ -138,7 +147,7 @@ def _register_rescan_callbacks(
         if frame_differ and not frame_differ.has_changed(screenshot):
             if (
                 detector.tracker
-                and detector.tracker.get_confidence() > TRACKER_CONFIDENCE_THRESHOLD
+                and detector.tracker.prediction_confidence() > TRACKER_CONFIDENCE_THRESHOLD
             ):
                 predicted = detector.tracker.predict()
                 set_detected_entities(predicted)
@@ -152,13 +161,16 @@ def _register_rescan_callbacks(
                 return
 
         entities = await _invoke_detector(detector, "detect_fast_multi", screenshot)
+        # Backstop for camera moves the executor cannot announce (minimap click,
+        # edge scroll, the game re-centering itself): a collapse in entity count
+        # means the view is somewhere else entirely.
         if (
             detector.tracker
             and detector._previous_entities
             and len(entities) < len(detector._previous_entities) * ENTITY_DROP_RATIO
         ):
             detector.tracker.reset()
-            log.debug("tracker_reset", reason="camera_moved")
+            log.debug("tracker_reset", reason="entity_count_collapsed")
         set_detected_entities(entities)
         if overlay:
             overlay.show(entities, get_game_window_rect())
@@ -181,6 +193,7 @@ def _register_rescan_callbacks(
 
     set_rescan_fn(_rescan)
     set_rescan_full_fn(_rescan_full)
+    set_tracks_invalidator(_invalidate_tracks)
 
 
 async def _capture_screenshot(

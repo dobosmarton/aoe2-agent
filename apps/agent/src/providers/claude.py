@@ -41,12 +41,13 @@ _DEFAULT_JOB_HOTKEY = _JOB_CAMERA_HOTKEY["wood"]
 
 
 def _tracker_velocities() -> dict[str, tuple[float, float]]:
-    """Best-effort per-entity velocity from the already-initialized detector.
+    """Best-effort per-entity velocity, in px/second, from the live detector.
 
     Reads the local detector singleton if one exists (it does whenever local YOLO
     is running) — never creates one, so the remote/mock paths simply return {} and
     selection falls back to nearest-to-camp. Velocity lets `select_worker` prefer a
-    stationary (easy-to-click) worker.
+    stationary (easy-to-click) worker. The tracker measures elapsed wall-clock per
+    step, so these are comparable across the agent's irregular tick rate.
     """
     try:
         from detection.inference.detector import current_detector

@@ -35,6 +35,10 @@ def _run(coro: Awaitable[object]) -> object:
     return asyncio.run(coro)
 
 
+async def _noop_sleep(_seconds: float) -> None:
+    """Stand-in for asyncio.sleep so settle delays don't slow the suite."""
+
+
 class _FakePyautogui:
     """Records every call so tests can assert what would have happened."""
 
@@ -71,6 +75,7 @@ def fake_pyautogui(monkeypatch: pytest.MonkeyPatch) -> _FakePyautogui:
     ex._window_offset = (0, 0)
     ex._rescan_fn = None
     ex._rescan_full_fn = None
+    ex._invalidate_tracks_fn = None
     ex.reset_build_gates()
     return fake
 
@@ -223,9 +228,78 @@ def test_set_rescan_fn_registers_callback(fake_pyautogui: _FakePyautogui) -> Non
     assert ex._rescan_fn is cb
 
 
+def test_set_tracks_invalidator_registers_callback(fake_pyautogui: _FakePyautogui) -> None:
+    def cb() -> None: ...
+
+    ex.set_tracks_invalidator(cb)
+    assert ex._invalidate_tracks_fn is cb
+
+
+def test_invalidate_tracks_is_a_noop_when_unregistered(fake_pyautogui: _FakePyautogui) -> None:
+    assert ex._invalidate_tracks() is None
+
+
 # ---------------------------------------------------------------------------
 # Layer 3 — per-action handlers (pyautogui patched out)
 # ---------------------------------------------------------------------------
+
+
+# --- camera moves invalidate tracked identities ---------------------------
+
+
+@pytest.fixture
+def invalidations(monkeypatch: pytest.MonkeyPatch) -> list[None]:
+    """Record every tracker invalidation the executor requests."""
+    recorded: list[None] = []
+    monkeypatch.setattr(ex, "_invalidate_tracks_fn", lambda: recorded.append(None))
+    return recorded
+
+
+def test_camera_hotkey_invalidates_tracks(
+    fake_pyautogui: _FakePyautogui, invalidations: list[None]
+) -> None:
+    _run(ex._handle_press({"key": "h"}, "jump to town centre"))
+    assert len(invalidations) == 1
+
+
+def test_ordinary_hotkey_leaves_tracks_alone(
+    fake_pyautogui: _FakePyautogui, invalidations: list[None]
+) -> None:
+    _run(ex._handle_press({"key": "q"}, "queue a villager"))
+    assert invalidations == []
+
+
+def test_scroll_invalidates_tracks(
+    fake_pyautogui: _FakePyautogui, invalidations: list[None]
+) -> None:
+    """Zoom rescales every bbox, so tracked geometry no longer applies."""
+    _run(ex._handle_scroll({"clicks": 3}, "zoom in"))
+    assert len(invalidations) == 1
+
+
+def test_scroll_triggers_a_rescan(
+    fake_pyautogui: _FakePyautogui, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rescans: list[None] = []
+
+    async def rescan() -> None:
+        rescans.append(None)
+
+    monkeypatch.setattr(asyncio, "sleep", _noop_sleep)
+    ex.set_rescan_fn(rescan)
+    _run(ex._handle_scroll({"clicks": -2}, "zoom out"))
+    assert len(rescans) == 1
+
+
+def test_raw_coords_after_a_scroll_are_refused(
+    fake_pyautogui: _FakePyautogui, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A zoom invalidates x/y just as a re-centering hotkey does."""
+    monkeypatch.setattr(asyncio, "sleep", _noop_sleep)
+    results = _run(
+        ex.execute_actions([{"type": "scroll", "clicks": 3}, {"type": "click", "x": 5, "y": 5}])
+    )
+    assert results[1].detail == ex.STALE_COORDS_DETAIL
 
 
 def test_handle_click_translates_and_clicks(fake_pyautogui: _FakePyautogui) -> None:
