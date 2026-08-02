@@ -1,6 +1,7 @@
 # ADR 0005 — Vite + React 19 + Tailwind v4 + Radix UI for the arena UI
 
 **Status:** Accepted (2026-05). Shipped as the Phase-2 frontend scaffold.
+**Partially superseded (2026-07) by [ADR 0006](./0006-tanstack-router-query-react-aria.md):** the Vite / React 19 / Tailwind v4 / Bun core still stands. Two sub-decisions did not survive contact with a second surface — **Radix UI primitives** were replaced by React Aria Components, and **"no data-fetching library"** was reversed in favour of TanStack Query (plus TanStack Router). The "Why no data-fetching library" section below is retained as the reasoning that was later invalidated; read 0006 for what invalidated it.
 **Context:** [Chapter 19 — Arena Web Architecture](../part7-arena-web/19-web-architecture.md).
 
 ## Decision

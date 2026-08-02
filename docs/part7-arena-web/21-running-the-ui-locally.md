@@ -24,9 +24,20 @@ just arena-web-dev
 just arena-ui-dev
 ```
 
-Browse to <http://localhost:5173>. Pick a run from the left sidebar.
+Browse to <http://localhost:5173>. `/` redirects to `/runs`; pick a run from the left sidebar.
 
-`just arena-web-dev` resolves to `python -m arena_web --port 8000` (`apps/api/src/__main__.py`). `just arena-ui-dev` runs `bun install` (idempotent) then `bun run dev`. Both recipes are in `justfile:138` and `:165`.
+`just arena-web-dev` resolves to `python -m arena_web --port 8000` (`apps/api/src/__main__.py`). `just arena-ui-dev` runs `bun install` (idempotent) then `bun run dev`.
+
+## The training tracker (third terminal, optional)
+
+The same SPA hosts the detection training tracker under `/training/*`, backed by a **separate** service on :8100 ([Chapter 24](../part3-entity-detection/24-training-tracker.md)). It's independent of the arena backend — you can run either, both, or neither:
+
+```bash
+just training-seed        # once: populate logs/training/tracker.db from disk
+just training-api-dev     # Terminal 3: tracker API on :8100
+```
+
+Then browse to <http://localhost:5173/training>. Without :8100 running, the arena routes work normally and only `/training/*` shows load errors.
 
 ## Watching a run live (cross-process)
 
@@ -58,7 +69,40 @@ No API key? `ARENA_BROKER_BACKEND=redis just arena-smoke` does a mock-LLM run wi
 |---|---|---|
 | `VITE_API_BASE_URL` | unset (use Vite dev proxy) | Set to a full `http(s)://host:port` URL to bypass the proxy. Necessary when the backend is on a different machine. Live in `apps/dashboard/.env.local`; the example is `apps/dashboard/.env.example`. |
 
-The proxy paths (`/runs`, `/events`, `/forks`, `/health`) are listed in `apps/dashboard/vite.config.ts`. When `VITE_API_BASE_URL` is set, the frontend prepends it to every API call instead of using relative URLs.
+### Training tracker (`apps/training-api`, :8100)
+
+| Env Var | Default | Purpose |
+|---|---|---|
+| `TRAINING_API_DB` | `logs/training/tracker.db` | SQLite file. Delete it and re-run `just training-seed` to rebuild from disk. |
+| `TRAINING_API_RAW_IMAGES` | `packages/detection/src/real_screenshots/raw` | Where `ingest.py` looks for screenshots. |
+| `TRAINING_API_DATASET_ROOT` | `packages/detection/src` | Parent of the `training_data_*` dirs. |
+| `TRAINING_API_CLASSES_YAML` | `.../training/config/classes.yaml` | The 60-class schema served at `/classes`. |
+| `TRAINING_API_THUMB_CACHE` | `logs/training/thumbs` | Generated thumbnails; safe to delete. |
+| `TRAINING_API_CORS_ORIGINS` | `http://localhost:5173,http://localhost:8100` | Comma-separated allow-list. |
+
+All paths resolve relative to the repo root, not the process CWD — `uv run` resolves from odd places, so `config.py` anchors them off its own file location.
+
+The proxy paths are listed in `apps/dashboard/vite.config.ts`: `/runs`, `/events`, `/forks`, `/health` → :8000, and `/classes`, `/images`, `/annotations`, `/datasets`, `/stats`, `/thumbs`, `/raw` → :8100. When `VITE_API_BASE_URL` is set, the frontend prepends it to every API call instead of using relative URLs.
+
+<aside class="concept" data-title="When an API path collides with a client route">
+
+`/runs` is now both a backend endpoint *and* a page in the SPA (`/runs`, `/runs/<id>`). Vite matches proxy rules **before** the SPA history fallback, so typing `localhost:5173/runs/abc` into the address bar would hand you the raw JSON run list instead of the app.
+
+The fix is a `bypass` on that one proxy entry:
+
+```ts
+"/runs": {
+  target: "http://localhost:8000",
+  bypass: (req) =>
+    req.headers.accept?.includes("text/html") === true ? "/index.html" : undefined,
+},
+```
+
+Returning a path from `bypass` means "serve this instead of proxying"; returning `undefined` means "proxy normally". The discriminator is the `Accept` header: browsers requesting a *document* send `text/html`, while `fetch()` and `XHR` never do. One header cleanly separates "show me the app" from "give me the data".
+
+The general lesson is worth carrying to any SPA-over-API setup: **once your client routes and your API paths share a namespace, something has to disambiguate them.** The alternatives are prefixing the API (`/api/runs`) or prefixing the app (`/app/runs`) — both cleaner, both a breaking change to a frozen URL contract. The `Accept` bypass buys the same result without touching the contract, at the cost of one non-obvious line that this callout exists to explain.
+
+</aside>
 
 <aside class="concept" data-title="The Vite dev proxy (what it does and why it disappears in production)">
 
@@ -155,9 +199,14 @@ For this to work you need `ANTHROPIC_API_KEY` exported in the shell that started
 | Operator tab returns 500 | `ANTHROPIC_API_KEY` not set on the backend | Export it in the shell that runs `arena-web-dev` and restart. |
 | `/events` returns 404 | Run isn't in any DuckDB under `ARENA_LOGS_ROOT` | Confirm with `curl /runs`; the run may have been written to a different log root. |
 | Run shows as `Streaming` but no events | Live broker mode but the producer's broker doesn't match the server's | Both producer and server need the same `ARENA_BROKER_BACKEND`. See [Runbook: switching-broker-backend](../runbooks/switching-broker-backend.md). |
+| Navigating to `/runs/<id>` shows raw JSON | Dev proxy matched `/runs` before the SPA fallback | The `bypass` on the `/runs` proxy entry handles this — check it wasn't removed from `vite.config.ts`. |
+| `/training/*` pages error, arena pages fine | Tracker API on :8100 isn't running | `just training-api-dev`. The two backends are independent. |
+| `/training/coverage` loads but everything is zero | Tracker DB is empty | `just training-seed`. |
+| Tracker images 404 on `/raw` or `/thumbs` | DB rows point at paths that moved | Re-run `just training-seed`; it upserts by path. |
 
 ## Related reading
 
 - [Chapter 19](./19-web-architecture.md) — what the backend does.
 - [Chapter 20](./20-fork-and-diff-ui.md) — what each tab does.
+- [Chapter 24](../part3-entity-detection/24-training-tracker.md) — the tracker behind `/training/*`.
 - [Runbook: redis-broker-ops](../runbooks/redis-broker-ops.md) — bringing up the compose stack when you need cross-process replay.

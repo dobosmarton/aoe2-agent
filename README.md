@@ -51,9 +51,9 @@ Each iteration (~3-5 seconds):
 
 The repo is a polyglot monorepo:
 
-- **Python (`uv workspace`)** — 9 workspace members. Deployable units live in `apps/`
-  (agent, api, arena, autoresearch, detection-server); reusable libraries live in
-  `packages/` (core, data, detection, evaluation). One `uv sync` installs every
+- **Python (`uv workspace`)** — 10 workspace members. Deployable units live in `apps/`
+  (agent, api, arena, autoresearch, detection-server, training-api); reusable libraries
+  live in `packages/` (core, data, detection, evaluation). One `uv sync` installs every
   member editable into a shared `.venv/`, plus the dev dependency-group (ruff,
   basedpyright, pytest, fakeredis, hypothesis, pre-commit).
 - **TypeScript (`bun workspace`)** — two frontend apps (`apps/dashboard` Vite/React,
@@ -243,6 +243,10 @@ bun install
 just arena-ui-dev          # apps/dashboard (Vite + React, dashboard SPA)
 just landing-dev           # apps/landing (Astro docs site)
 
+# Detection training tracker (dataset coverage + prelabel review, :8100)
+just training-seed         # populate logs/training/tracker.db from disk (idempotent)
+just training-api-dev      # then browse http://localhost:5173/training
+
 # Autoresearch: timed experiment with metrics
 uv run --package autoresearch python -m autoresearch.game_runner --time-budget 600 --description "test run"
 ```
@@ -262,9 +266,10 @@ agent/                                     # monorepo root (uv + bun workspaces)
 │   ├── api/                               # Python — FastAPI + SSE backend for replay/fork (was packages/arena-web)
 │   ├── arena/                             # Python — synthetic arena CLI (race / smoke / rank)
 │   ├── autoresearch/                      # Python — prompt-optimization loop
-│   ├── dashboard/                         # TypeScript — Vite + React arena replay UI (was ui/)
+│   ├── dashboard/                         # TypeScript — Vite + React arena replay UI + training tracker (was ui/)
 │   ├── detection-server/                  # Python — macOS-hosted YOLO inference endpoint
-│   └── landing/                           # TypeScript — Astro docs site (was web/)
+│   ├── landing/                           # TypeScript — Astro docs site (was web/)
+│   └── training-api/                      # Python — FastAPI + SQLite detection dataset tracker
 ├── packages/                              # Reusable libraries (imported by apps)
 │   ├── core/                              # Pure types: Event, Payload, WorldState, DetectedEntity
 │   ├── data/                              # AoE2 game-knowledge SQLite DB

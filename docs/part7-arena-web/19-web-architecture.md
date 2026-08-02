@@ -3,9 +3,11 @@
 `apps/api/src/` is the operator-facing surface for inspecting and steering arena runs. It has two halves:
 
 - **Backend** (`apps/api/src/server.py`) — FastAPI + SSE. Reads from the event broker for live runs, falls back to a read-only DuckDB scan for finalized ones. Hosts the `/forks` endpoint that branches a parent run into a child replay.
-- **Frontend** (`apps/dashboard/`) — Vite + React 19 + Tailwind v4 + Radix UI primitives. Connects to the backend over SSE, renders a Timeline scrubber and a World/Trace/Diff/Operator tab layout for a single run, an experiment overview for comparing the parallel runs of one `rank`/`race` operation, and posts mutation patches to `/forks`.
+- **Frontend** (`apps/dashboard/`) — Vite + React 19 + Tailwind v4 + TanStack Router/Query + React Aria Components. Connects to the backend over SSE, renders a Timeline scrubber and a World/Trace/Diff/Operator tab layout for a single run, an experiment overview for comparing the parallel runs of one `rank`/`race` operation, and posts mutation patches to `/forks`.
 
 Both are optional. They sit on top of the broker and the DuckDB log — the agent and arena CLIs work without them.
+
+The dashboard also hosts a **second, unrelated backend**: the detection training tracker (`apps/training-api`, port 8100), mounted under `/training/*` routes. It shares nothing with the arena API but the SPA shell — see [Chapter 24](../part3-entity-detection/24-training-tracker.md).
 
 <aside class="concept" data-title="SSE vs WebSocket vs long-polling (why SSE was the right call)">
 
@@ -102,7 +104,7 @@ Fork tasks are tracked in `app.state.fork_tasks` (a strong-reference set). Witho
 
 ## Frontend topology
 
-`apps/dashboard/src/App.tsx`. The shape is a 2-column grid:
+The entry point is `apps/dashboard/src/main.tsx`, which mounts a TanStack Router `RouterProvider` wrapped in a TanStack Query `QueryClientProvider`. There is no `App.tsx` — the layout is assembled by nested routes. The arena shape is a 2-column grid:
 
 ```
 ┌─ aside (300px) ──┬─ main ───────────────────────────────────────┐
@@ -118,17 +120,51 @@ Fork tasks are tracked in `app.state.fork_tasks` (a strong-reference set). Witho
 └──────────────────┴───────────────────────────────────────────────┘
 ```
 
-State lives in `App.tsx` plus a handful of fetch-on-mount hooks:
+### Route table
 
-- `useRuns()` (`hooks/use-runs.ts`) — GETs `/runs` once, returns `{runs, status, error}`.
-- `useEvents(selectedRunId)` (`hooks/use-events.ts`) — opens an EventSource against `/events?run_id=...`, accumulates events, exposes SSE status (`idle | connecting | open | closed | error`). Active only in the run-detail view.
-- `useRunSummaries()` and `useOperationSeries(dbPath)` (`hooks/`) — GET `/runs/summaries` and `/runs/series` for the experiment overview.
-- A local `selection` discriminated union (`{kind: "run"} | {kind: "operation"}`) plus a `selectedTurn` scrubber position in `App.tsx`. The scrubber auto-advances as new turns stream in *only* while pinned to the latest turn; if the user scrubbed back, new turns don't yank them forward.
+Routes are file-based under `src/routes/`. The `@tanstack/router-plugin` Vite plugin generates `src/routeTree.gen.ts` from that directory; the generated file **is committed**, because `bun run build` runs `tsc -b` before Vite, so a missing tree would fail a fresh clone's build before the plugin ever ran.
 
-The sidebar (`components/run-list.tsx`) groups runs into operations via `lib/run-grouping.ts` — all runs of a `rank`/`race` share one DuckDB file, hence one `db_path`. Two destinations:
+| Route file | URL | What it renders |
+|---|---|---|
+| `index.tsx` | `/` | `redirect` to `/runs`. |
+| `_arena.tsx` | — (pathless) | `ArenaLayout` — the shared run sidebar. Contributes nothing to the URL. |
+| `_arena.runs.index.tsx` | `/runs` | "No run selected" empty state. |
+| `_arena.runs.$runId.tsx` | `/runs/<id>` | Run detail: header, sibling strip, four tabs, Timeline. |
+| `_arena.experiments.$key.tsx` | `/experiments/<key>` | Experiment overview for one run group. |
+| `training.tsx` | — | `TrainingLayout` — the tracker's own nav shell. |
+| `training.index.tsx` | `/training` | `redirect` to `/training/coverage`. |
+| `training.coverage.tsx` | `/training/coverage` | Per-class coverage matrix ([Chapter 24](../part3-entity-detection/24-training-tracker.md)). |
+| `training.images.tsx` | `/training/images` | Paginated image table + annotation lightbox. |
 
-- **Run-detail view** (click a run) — the four World/Trace/Diff/Operator panels under `src/panels/` (see [Chapter 20](./20-fork-and-diff-ui.md)), plus a sibling strip to jump between the operation's parallel runs. The Timeline (`src/components/timeline.tsx`) is shared across these tabs because the scrubber position is owned at `App.tsx` level.
+The `_arena` prefix is TanStack Router's **pathless layout** convention: the segment groups children under a shared component without appearing in the URL. That's what lets `/runs/<id>` and `/experiments/<key>` share one sidebar instance — switching between them doesn't remount it.
+
+### State: URL, server cache, stream
+
+State is split three ways, and the split is the main thing to understand about this frontend:
+
+- **URL search params** own view state. `/runs/$runId` validates `?turn=<n>&tab=<world|trace|diff|operator>` in `validateSearch`. Both keys are optional, and defaults are applied at *read* time rather than written into the URL, so a bare `/runs/<id>` stays clean. An absent `turn` means "pinned to the newest turn" — `selectedTurn = turn ?? maxTurn` — which is why the scrubber auto-advances with the stream and stops advancing the moment the user drags it. That single expression replaced the two effects the old `App.tsx` needed (pin-to-latest, reset-on-run-change), and switching runs resets the turn for free because the param lives in a URL that changed. Scrubber writes use `replace: true` so dragging doesn't bury the Back button under one history entry per turn.
+- **TanStack Query** owns server reads. Every fetch is a query-option factory in `lib/queries.ts` (`runsQueryOptions`, `runSummariesQueryOptions`, `runSeriesQueryOptions`, plus the `tracker*` family). Keys are hierarchical — invalidating `["runs"]` also sweeps `["runs","summaries"]` and `["runs","series"]`. Route `loader`s call `context.queryClient.ensureQueryData(...)` so data is in flight before the component renders; the component then reads the same key with `useQuery` and gets the cached result. `runSeriesQueryOptions("")` is `enabled: false` rather than firing a request that would 404 — a live operation has no finalized DuckDB file yet.
+- **`useEvents(runId)`** (`hooks/use-events.ts`) stays a hand-written hook, not a query. It opens an `EventSource` against `/events?run_id=...`, accumulates events, and exposes the SSE status union (`idle | connecting | open | closed | error`). A stream that's appended to over minutes and reconnects on a custom overflow signal is not what a request-cache models, so it was deliberately left outside Query.
+
+`main.tsx` sets `defaultPreloadStaleTime: 0` on the router: Query owns caching, and without this the router would layer its own preload staleness on top and the two would disagree about when data is fresh.
+
+The sidebar (`components/run-list.tsx`, rendered by `layouts/arena-layout.tsx`) groups runs into operations via `lib/run-grouping.ts` — all runs of a `rank`/`race` share one DuckDB file, hence one `db_path`. Two destinations:
+
+- **Run detail** (click a run) — the four World/Trace/Diff/Operator panels under `src/panels/` (see [Chapter 20](./20-fork-and-diff-ui.md)), plus a sibling strip to jump between the operation's parallel runs. The Timeline (`src/components/timeline.tsx`) sits outside the `Tabs` so the scrubber survives tab switches.
 - **Experiment overview** (click a group header) — `panels/experiment-overview.tsx`: a leaderboard sorted by the same lexicographic composite as `arena.ranking.composite_score`, per-run comparison bars (final population, total cost), and per-resource trajectory charts averaged per profile. Lets you pick the best/worst run, then drill into any row.
+
+<aside class="concept" data-title="Why put the scrubber position in the URL?">
+
+The obvious home for "which turn is selected" is `useState`. Moving it into the query string buys four things that state in a component cannot:
+
+1. **Shareable.** `/runs/abc?turn=17&tab=trace` is a link to *exactly* what you were looking at. Debugging conversations become URLs instead of "scrub to about turn 17 and open Trace".
+2. **Back/forward works.** The browser's history stack is the undo stack for navigation, for free.
+3. **Reload-survivable.** State that lives in React dies on refresh; state in the URL doesn't.
+4. **Reset-on-navigation is automatic.** Switching runs changes the URL, so the turn resets without an effect watching `runId`.
+
+The cost is that every write is a navigation, which is why the scrubber passes `replace: true` — a 200-turn drag would otherwise push 200 history entries and make the Back button useless. The rule of thumb: **view state that a user would want to link to belongs in the URL; everything else belongs in a component.** Ephemeral things here (form drafts in the Operator panel, lightbox zoom/pan) stay in `useState` precisely because nobody wants to bookmark them.
+
+</aside>
 
 ## Backend / frontend wiring
 
@@ -136,9 +172,11 @@ Three wiring modes are supported:
 
 | Mode | When | What you set |
 |---|---|---|
-| Vite dev proxy | Local dev — UI on :5173, FastAPI on :8000 | Nothing. `vite.config.ts` proxies `/runs`, `/events`, `/forks`, `/health` to `http://localhost:8000`. |
+| Vite dev proxy | Local dev — UI on :5173, FastAPI on :8000 | Nothing. `vite.config.ts` proxies `/runs`, `/events`, `/forks`, `/health` to `http://localhost:8000`, and the tracker's `/classes`, `/images`, `/annotations`, `/datasets`, `/stats`, `/thumbs`, `/raw` to `http://localhost:8100`. |
 | Cross-origin dev | UI local, backend on a VM | `VITE_API_BASE_URL=http://vm:8000` in `apps/dashboard/.env.local`, plus `ARENA_WEB_CORS_ORIGINS` on the backend to allow the SPA origin. |
 | Prod build | SPA served from the API origin | Build with `bun run build`, mount `dist/` behind FastAPI (not wired by default — the contract above is enough to do it). |
+
+One collision is worth knowing about: since the routing migration, **`/runs` is both an API path and a client route** (`/runs`, `/runs/$runId`). Vite matches the proxy before the SPA fallback, so a browser navigation to `/runs/<id>` would render the raw JSON run list. The proxy entry carries a `bypass` that returns `/index.html` when the request's `Accept` header includes `text/html`: document requests ask for HTML, `fetch`/`XHR` never do, so that one header cleanly separates "show me the app" from "give me the data" (`vite.config.ts:41`).
 
 See [Chapter 21 — Running the UI Locally](./21-running-the-ui-locally.md) for the actual recipes.
 
@@ -155,4 +193,6 @@ See [Chapter 21 — Running the UI Locally](./21-running-the-ui-locally.md) for 
 - [Chapter 16 — DuckDB Persister and Replay](../part6-evaluation-arena/16-duckdb-persister-and-replay.md) — the source of the cold-path fallback and the fork primitive.
 - [Chapter 20 — Fork and Diff UI](./20-fork-and-diff-ui.md) — the four tabs in detail.
 - [Chapter 21 — Running the UI Locally](./21-running-the-ui-locally.md) — dev workflow.
-- [ADR 0005 — Vite / React / Tailwind for arena UI](../adr/0005-vite-react-tailwind-for-arena-ui.md).
+- [Chapter 24 — Detection Training Tracker](../part3-entity-detection/24-training-tracker.md) — the other backend behind this SPA.
+- [ADR 0005 — Vite / React / Tailwind for arena UI](../adr/0005-vite-react-tailwind-for-arena-ui.md) — the original scaffold decision.
+- [ADR 0006 — TanStack Router + Query and React Aria](../adr/0006-tanstack-router-query-react-aria.md) — what replaced the hand-rolled state and Radix.
