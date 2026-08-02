@@ -173,6 +173,21 @@ Short (~1 page) decisions that shaped the current architecture. Read these to un
 - [Debugging a stuck fork or replay](./runbooks/debug-stuck-fork.md) — what to check, in what order.
 - [Windows VM agent bring-up](./runbooks/windows-vm-agent-bringup.md) — fast path + symptom matrix. Full first-time setup is in [deployment-guide.md](./deployment-guide.md).
 - [Retrain the detection model (v6 / YOLO26n)](./runbooks/retrain-detection-v6.md) — end-to-end retraining loop: sprite extraction, real-terrain backgrounds, synthetic generation, cvat.ai annotation, Lambda training, deploy.
+- [Record the baseline experiments](./runbooks/baseline-experiments.md) — running 3–5 full games with the current stack into `experiments/results.tsv`.
+
+---
+
+## Run reviews
+
+Post-mortems of individual game runs — what the agent actually did, where it went wrong, and the resulting TODOs.
+
+- [2026-07-11 run 1](./run-reviews/2026-07-11-run1.md) — first post-refactor VM run; full findings and action list.
+
+---
+
+## Reference
+
+- [gameplay.md](./gameplay.md) — deployment topology and the gameplay data flow in brief; the diagram source is [gameplay-flow.mmd](./gameplay-flow.mmd).
 
 ---
 
