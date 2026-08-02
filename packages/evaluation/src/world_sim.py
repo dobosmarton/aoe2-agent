@@ -5,7 +5,7 @@ evolve state across N turns without booting the real game:
   - Flat per-turn resource accumulation (no villager-assignment tracking)
   - Villager production queue (3-tick cooldown after queue_villager)
   - Building placement (wood cost, adds building to state)
-  - Feudal Age advancement (6-tick timer, prereq check)
+  - Age advancement through Castle (6-tick timer, per-age cost + prereq check)
 
 Fidelity is deliberately low — this is a behavioral regression harness,
 not a game engine. The goal is catching stuck loops, inhibitory-memory
@@ -15,7 +15,7 @@ failures, and age-transition regressions, not simulating AoE2 exactly.
 from __future__ import annotations
 
 import random
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from core import AGE_SEQUENCE, DetectedEntity, WorldState
@@ -28,11 +28,15 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 # Flat per-turn gather increments. Represents ~4-6 villagers on each resource
-# at normal AoE2 gather rates over a ~10-second turn window.
+# at normal AoE2 gather rates over a ~10-second turn window. Gold is slower
+# (fewer villagers sit on it) but NOT zero — the Castle Age is gold-gated, so a
+# sim that never accrues gold can't test the path.
 FOOD_GATHER_RATE = 20.0
 WOOD_GATHER_RATE = 15.0
+GOLD_GATHER_RATE = 8.0
 
-# Building costs (wood)
+# Build costs (wood), keyed by the agent's menu-qualified build key
+# (executor._BUILD_ENTRIES). A drift test pins these to the executor's table.
 BUILDING_COSTS: dict[str, int] = {
     "q": 25,  # house
     "w": 100,  # mill
@@ -41,6 +45,8 @@ BUILDING_COSTS: dict[str, int] = {
     "a": 60,  # farm
     "s": 150,  # blacksmith
     "t": 150,  # dock
+    "vd": 175,  # market (more-buildings menu)
+    "wq": 175,  # barracks (military menu)
 }
 
 BUILDING_NAMES: dict[str, str] = {
@@ -51,18 +57,56 @@ BUILDING_NAMES: dict[str, str] = {
     "a": "farm",
     "s": "blacksmith",
     "t": "dock",
+    "vd": "market",
+    "wq": "barracks",
 }
 
 VILLAGER_COST_FOOD = 50
 VILLAGER_PRODUCTION_TICKS = 3  # turns until a queued villager is added to pop
 
-AGE_UP_COST_FOOD = 500
 AGE_UP_TICKS = 6  # turns until age advance completes
 
 # Feudal Age prerequisites
 FEUDAL_PREREQ_BUILDINGS = frozenset({"mill", "lumber_camp"})
 FEUDAL_AGE_MIN_POP = 22
 FEUDAL_AGE_MIN_FOOD = 500
+AGE_UP_COST_FOOD = FEUDAL_AGE_MIN_FOOD  # back-compat alias for the Feudal cost
+
+# Castle Age prerequisites: TWO Feudal-age buildings (Dark Age ones don't
+# count). Mirrors reactive._CASTLE_PREREQ_CLASSES.
+CASTLE_PREREQ_BUILDINGS = frozenset({"blacksmith", "market"})
+CASTLE_AGE_MIN_FOOD = 800
+CASTLE_AGE_MIN_GOLD = 200
+
+
+@dataclass(frozen=True, slots=True)
+class AgeUpRequirement:
+    """What advancing out of a given age costs and requires."""
+
+    next_age: str
+    food: int
+    gold: int
+    prereq_buildings: frozenset[str]
+    min_pop: int = 0
+
+
+# Keyed by the age the player is IN. Mirrors reactive._AGE_UP_REQUIREMENTS
+# (drift-pinned); ages with no entry can't advance in the sim.
+AGE_UP_REQUIREMENTS: dict[str, AgeUpRequirement] = {
+    "Dark Age": AgeUpRequirement(
+        next_age="Feudal Age",
+        food=FEUDAL_AGE_MIN_FOOD,
+        gold=0,
+        prereq_buildings=FEUDAL_PREREQ_BUILDINGS,
+        min_pop=FEUDAL_AGE_MIN_POP,
+    ),
+    "Feudal Age": AgeUpRequirement(
+        next_age="Castle Age",
+        food=CASTLE_AGE_MIN_FOOD,
+        gold=CASTLE_AGE_MIN_GOLD,
+        prereq_buildings=CASTLE_PREREQ_BUILDINGS,
+    ),
+}
 
 HOUSE_POP_SLOTS = 5
 
@@ -92,6 +136,8 @@ _CLASS_BBOX_DIMS_PX: dict[str, tuple[int, int]] = {
     "farm": (100, 100),
     "blacksmith": (80, 80),
     "dock": (100, 80),
+    "market": (100, 100),
+    "barracks": (90, 90),
 }
 
 
@@ -170,22 +216,26 @@ def _apply_build(state: WorldState, building_key: str) -> WorldState:
     )
 
 
-def _feudal_prereqs_met(state: WorldState) -> bool:
-    if state.age != "Dark Age":
+def _age_up_requirement_met(state: WorldState, requirement: AgeUpRequirement) -> bool:
+    if state.food < requirement.food or state.gold < requirement.gold:
         return False
-    if state.food < FEUDAL_AGE_MIN_FOOD:
+    if state.population < requirement.min_pop:
         return False
-    if state.population < FEUDAL_AGE_MIN_POP:
-        return False
-    return FEUDAL_PREREQ_BUILDINGS.issubset(set(state.buildings))
+    return requirement.prereq_buildings.issubset(set(state.buildings))
 
 
 def _apply_age_up(state: WorldState) -> WorldState:
     if state.age_up_ticks_remaining > 0:
         return state  # already in progress
-    if not _feudal_prereqs_met(state):
-        return state  # prereqs not met — no-op
-    return replace(state, food=state.food - AGE_UP_COST_FOOD, age_up_ticks_remaining=AGE_UP_TICKS)
+    requirement = AGE_UP_REQUIREMENTS.get(state.age)
+    if requirement is None or not _age_up_requirement_met(state, requirement):
+        return state  # can't advance from here — the press no-ops, as in game
+    return replace(
+        state,
+        food=state.food - requirement.food,
+        gold=state.gold - requirement.gold,
+        age_up_ticks_remaining=AGE_UP_TICKS,
+    )
 
 
 def _handle_queue_villager_action(state: WorldState, action: dict) -> WorldState:
@@ -281,6 +331,7 @@ def tick(state: WorldState) -> WorldState:
         state,
         food=state.food + FOOD_GATHER_RATE,
         wood=state.wood + WOOD_GATHER_RATE,
+        gold=state.gold + GOLD_GATHER_RATE,
         population=new_pop,
         pop_cap=state.pop_cap,
         villager_queue=new_queue,

@@ -126,13 +126,13 @@ _ACTION_TOOLS: list[dict] = [
     # --- Composite tools (multi-step sequences, no intermediate API roundtrips) ---
     {
         "name": "build",
-        "description": "Composite: select idle villager → open economic build menu → press building_key → place the building on open ground near your Town Center. Building keys: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm. Placement is chosen by the executor AFTER the camera settles — you cannot pass coordinates (selecting the villager moves the camera, so any spot you compute now would be stale). ALWAYS use this instead of press(.)+press(q)+press(key)+click() separately.",
+        "description": "Composite: select idle villager → open the building's build menu → press its slot → place the building on open ground near your Town Center. Building keys: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm, s=Blacksmith (Feudal Age+), vd=Market (Feudal Age+), wq=Barracks. Placement is chosen by the executor AFTER the camera settles — you cannot pass coordinates (selecting the villager moves the camera, so any spot you compute now would be stale). ALWAYS use this instead of press(.)+press(q)+press(key)+click() separately.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "building_key": {
                     "type": "string",
-                    "description": "Hotkey for the building: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm",
+                    "description": "Hotkey for the building: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm, s=Blacksmith (Feudal+), vd=Market (Feudal+), wq=Barracks",
                 },
                 "intent": {"type": "string", "description": "What you are building and why"},
             },
@@ -192,7 +192,7 @@ _ACTION_TOOLS: list[dict] = [
     },
     {
         "name": "reassign_villager",
-        "description": "Composite: pull a villager already GATHERING one resource and reassign it to build a building. Jumps the camera to the source work site (e.g. the Lumber Camp for wood), picks a worker there, then opens the build menu and places the building. Use to rebalance economy on the fly — e.g. pull a wood villager to build a Farm when food is low. Unlike build (which uses an idle villager), this pulls a working one. building_key: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm.",
+        "description": "Composite: pull a villager already GATHERING one resource and reassign it to build a building. Jumps the camera to the source work site (e.g. the Lumber Camp for wood), picks a worker there, then opens the build menu and places the building. Use to rebalance economy on the fly — e.g. pull a wood villager to build a Farm when food is low. Unlike build (which uses an idle villager), this pulls a working one. building_key: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm, s=Blacksmith (Feudal+), vd=Market (Feudal+).",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -202,7 +202,7 @@ _ACTION_TOOLS: list[dict] = [
                 },
                 "building_key": {
                     "type": "string",
-                    "description": "Building to place: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm",
+                    "description": "Building to place: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm, s=Blacksmith (Feudal+), vd=Market (Feudal+)",
                 },
                 "intent": {
                     "type": "string",

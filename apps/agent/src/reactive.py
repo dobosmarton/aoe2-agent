@@ -24,6 +24,7 @@ Design notes:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .entity_utils import (
@@ -97,8 +98,6 @@ _FEUDAL_PREREQ_CLASSES = frozenset({"mill", "lumber_camp"})
 # Start building the prerequisites a bit before the banking phase (pop 16) so
 # they're standing by the time 500 food is.
 _FEUDAL_PREP_POP = 12
-_MILL_BUILD_KEY = "w"  # econ menu: Mill (100 wood)
-_LUMBER_CAMP_BUILD_KEY = "r"  # econ menu: Lumber Camp (100 wood)
 # Below this food, the idle rotation is overridden toward food: honoring the
 # normal wood/gold slots during a famine starves villager production (run 1, F-8).
 _FOOD_CRISIS_THRESHOLD = 60
@@ -108,33 +107,20 @@ _FOOD_CRISIS_THRESHOLD = 60
 # showed all-food routing pinning wood at 0, locking out the farm economy the
 # famine needed to end.
 _FARM_WOOD_COST = 60
-# A lumber camp's wood cost (mirrors executor._BUILD_WOOD_COST["r"], same
-# drift-test arrangement as the farm cost above). Run 8 (F-34): the wood bank
-# targeted only the farm, so the camp — the second Feudal prerequisite — was
-# rejected 19 times at 37-79 wood and Feudal stayed unreachable.
-_LUMBER_CAMP_WOOD_COST = 100
-# A mill's wood cost (mirrors executor._BUILD_WOOD_COST["w"], same drift test).
-# The mill is the OTHER Feudal prerequisite AND the farm unlock, so the wood
-# bank must reach it too — run 12 (F-41) starved because the reactive tier had
-# no mill rule at all and the executor (its only mill-builder) was down.
-_MILL_WOOD_COST = 100
 # Headroom above a bank target so a purchase doesn't leave the stock exactly
 # at the cost boundary. Run 5 (F-23): six farm attempts failed at wood 48-59.
-# A separate constant so the V-4 drift tests keep pinning the raw costs to the
-# executor's table.
 _WOOD_BANK_MARGIN = 20
 
-# Castle-prep economics (T-538, run 13 F-46). Castle research costs 800 food +
-# 200 gold; gold is the scarce half — run 13 sat at 90 gold with 1833 wood
-# banked idle because nothing built a mining camp or spent the wood after
-# Feudal. The gold bank target biases the idle rotation until 200 is banked.
+# Castle research costs 800 food + 200 gold. Gold is the scarce half — run 13
+# (F-46) sat at 90 gold with 1833 wood banked idle, because nothing built a
+# mining camp or spent the wood after Feudal (T-538).
+_CASTLE_FOOD_COST = 800
 _CASTLE_GOLD_COST = 200
-# A mining camp's key and wood cost (mirrors executor._BUILD_WOOD_COST["e"],
-# same drift-test arrangement as the mill/camp costs above). The camp is the
-# gold drop-off — without one, run 13's late gold dispatch trickled through
-# the distant TC and Castle prep never got off the ground.
-_MINING_CAMP_BUILD_KEY = "e"
-_MINING_CAMP_WOOD_COST = 100
+# Castle also needs TWO Feudal-age buildings — F-26's requirement one age up,
+# and Dark Age buildings (house, mill, camps, dock, barracks) don't count. The
+# blacksmith + market pair is the cheapest the agent can place: the military
+# route pays for a barracks that does NOT count before reaching one that does.
+_CASTLE_PREREQ_CLASSES = frozenset({"blacksmith", "market"})
 # House rule: build when delivered headroom shrinks to this. Kept BELOW the
 # executor's _HOUSE_HEADROOM_MAX reject threshold (4) so the emit always
 # passes the gate. Run 13 stalled housed at 5/5 and 10/10 while house builds
@@ -146,6 +132,71 @@ _HOUSE_HEADROOM_TRIGGER = 2
 _GAME_POP_CAP_LIMIT = 200
 
 
+@dataclass(frozen=True, slots=True)
+class _PrepBuild:
+    """A building the current age owes before it can advance.
+
+    Wood costs mirror executor._BUILD_WOOD_COST — duplicated so the reactive
+    tier stays dependency-free, with a V-4 drift test as the cross-check.
+    """
+
+    building_class: str
+    build_key: str
+    wood_cost: int
+    reason: str
+
+
+# Prep builds per age, IN BUILD ORDER. One table drives both the build rules and
+# the wood bank, so the bank can't fund the wrong building (before T-544 the two
+# orderings were separate lists kept in step by a comment).
+#
+# Mill leads: it unlocks farms as well as counting toward Feudal, so a
+# reactive-only game can still feed itself (run 12, F-41). The mining camp leads
+# the Castle set for the same reason — gold is that age-up's scarce half.
+_FEUDAL_PREP_BUILDS: tuple[_PrepBuild, ...] = (
+    _PrepBuild("mill", "w", 100, "Feudal prerequisite + farm/food unlock"),
+    _PrepBuild("lumber_camp", "r", 100, "Feudal prerequisite + wood income"),
+)
+_CASTLE_PREP_BUILDS: tuple[_PrepBuild, ...] = (
+    _PrepBuild("mining_camp", "e", 100, "gold drop-off for the Castle Age bank"),
+    _PrepBuild("blacksmith", "s", 150, "Castle Age prerequisite 1 of 2"),
+    _PrepBuild("market", "vd", 175, "Castle Age prerequisite 2 of 2"),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _AgeUpRequirement:
+    """What the TC's age-up button needs before it will actually research.
+
+    Pressing it early is not free: run 6 spent 14 presses on a greyed button,
+    each one a chance to leak UI context into the next keystroke (F-27).
+    """
+
+    next_age: str
+    food: int
+    gold: int
+    prereq_classes: frozenset[str]
+
+
+# Keyed by the age you are IN. Castle onward has no entry — no reactive program
+# exists past it yet, so the press stays the LLM's call (drift-pinned to the
+# world simulator's copy).
+_AGE_UP_REQUIREMENTS: dict[str, _AgeUpRequirement] = {
+    "Dark Age": _AgeUpRequirement(
+        next_age="Feudal Age",
+        food=_FEUDAL_FOOD_COST,
+        gold=0,
+        prereq_classes=_FEUDAL_PREREQ_CLASSES,
+    ),
+    "Feudal Age": _AgeUpRequirement(
+        next_age="Castle Age",
+        food=_CASTLE_FOOD_COST,
+        gold=_CASTLE_GOLD_COST,
+        prereq_classes=_CASTLE_PREREQ_CLASSES,
+    ),
+}
+
+
 def decide(entities: list[object], state: GameState, alarm: bool) -> list[dict[str, object]]:
     """Return routine action dicts for this turn (empty on alarm)."""
     if alarm:
@@ -154,8 +205,7 @@ def decide(entities: list[object], state: GameState, alarm: bool) -> list[dict[s
     actions.extend(_age_up_actions(state))
     actions.extend(_house_actions(state))
     actions.extend(_queue_villager_actions(state))
-    actions.extend(_feudal_prep_actions(state))
-    actions.extend(_castle_prep_actions(state))
+    actions.extend(_prep_actions(state))
     actions.extend(_distribute_idle_actions(entities, state))
     return actions
 
@@ -174,9 +224,9 @@ def _resource(state: GameState, kind: ResourceKind) -> int:
 
 
 def _age_up_actions(state: GameState) -> list[dict[str, object]]:
-    """Research Feudal Age once the food is banked AND the buildings qualify.
+    """Research the next age once its resources are banked AND the buildings qualify.
 
-    Runs before the villager queue so the 500 food buys the age, not another
+    Runs before the villager queue so the banked food buys the age, not another
     villager. Gated on the two-building requirement being visibly met, so the
     press fires once when it can succeed instead of spamming no-ops (run 6:
     14 presses against a greyed button — and each press was a chance for the
@@ -184,102 +234,73 @@ def _age_up_actions(state: GameState) -> list[dict[str, object]]:
     menu / placement ghost by switching selection, so `z` can't land in the
     econ menu (where Z = Outpost); an escape prefix here OPENED the game menu
     when nothing needed canceling (run 8, F-32).
+
+    An age with no entry in the table (Castle onward) has no reactive age-up —
+    the press stays the LLM's call until a program exists for that age.
     """
+    requirement = _AGE_UP_REQUIREMENTS.get(state.current_age)
+    if requirement is None:
+        return []
     if (
-        state.current_age != "Dark Age"
-        or _resource(state, "food") < _FEUDAL_FOOD_COST
-        or not _FEUDAL_PREREQ_CLASSES.issubset(state.buildings_seen)
+        _resource(state, "food") < requirement.food
+        or _resource(state, "gold") < requirement.gold
+        or not requirement.prereq_classes.issubset(state.buildings_seen)
     ):
         return []
     return [
         {"type": "press", "key": "h", "intent": "Select TC (age up)"},
-        {"type": "press", "key": "z", "intent": "Research Feudal Age (reactive)"},
+        {"type": "press", "key": "z", "intent": f"Research {requirement.next_age} (reactive)"},
     ]
 
 
-def _needs_mill(state: GameState) -> bool:
-    """Feudal prep pending: Dark Age economy established, no mill standing.
+def _prep_builds_for_age(state: GameState) -> tuple[_PrepBuild, ...]:
+    """The prep set this age owes, or empty when none applies.
 
-    The mill is BOTH a Feudal prerequisite and the farm unlock — the entire
-    late-Dark-Age food engine hangs off it. Run 12 (F-41) had the executor
-    down for 85/95 turns and starved, because a mill had only ever been built
-    by the LLM; the reactive tier knew the lumber camp but not the mill. This
-    gives the fast tier its own path to the food engine.
+    The Dark Age set waits for an established economy; the Feudal set starts
+    immediately (run 13 idled 25 minutes in Feudal building nothing, F-46).
     """
-    return (
-        state.current_age == "Dark Age"
-        and state.population >= _FEUDAL_PREP_POP
-        and "mill" not in state.buildings_seen
+    if state.current_age == "Dark Age" and state.population >= _FEUDAL_PREP_POP:
+        return _FEUDAL_PREP_BUILDS
+    if state.current_age == "Feudal Age":
+        return _CASTLE_PREP_BUILDS
+    return ()
+
+
+def _pending_prep_build(state: GameState) -> _PrepBuild | None:
+    """The next prep building still missing, or None once the set is standing.
+
+    Absence-gated on buildings_seen (purchase-grade evidence), so a rule stops
+    re-emitting the moment its building is confirmed.
+    """
+    return next(
+        (
+            prep
+            for prep in _prep_builds_for_age(state)
+            if prep.building_class not in state.buildings_seen
+        ),
+        None,
     )
 
 
-def _needs_lumber_camp(state: GameState) -> bool:
-    """Feudal prep pending: Dark Age economy established, no camp standing."""
-    return (
-        state.current_age == "Dark Age"
-        and state.population >= _FEUDAL_PREP_POP
-        and "lumber_camp" not in state.buildings_seen
-    )
+def _prep_actions(state: GameState) -> list[dict[str, object]]:
+    """One prep build per turn, in table order.
 
-
-def _feudal_prep_actions(state: GameState) -> list[dict[str, object]]:
-    """Ensure both qualifying Dark Age buildings exist — MILL FIRST, then camp.
-
-    The mill leads when neither stands: it unlocks farms (the food engine) on
-    top of counting toward Feudal, so a reactive-only game (executor down, run
-    12 F-41) can still feed itself. One build per turn — the executor's
-    unique-building gate rejects re-emits once the class is confirmed or
-    pending, its cost gate waits out the 100 wood, and the circuit breaker
-    suppresses a placement that keeps vanishing. The lumber camp doubles as a
-    wood-income boost (closer drop-off).
+    The executor's gates reject what can't work right now at zero keystroke
+    cost — cost, unique-building, circuit breaker, and (for the market) the
+    unverified-menu gate whose rejection is the signal that the VM check is
+    still owed.
     """
-    if _needs_mill(state):
-        return [
-            {
-                "type": "build",
-                "building_key": _MILL_BUILD_KEY,
-                "intent": "Build mill (Feudal prerequisite + farm/food unlock)",
-            }
-        ]
-    if _needs_lumber_camp(state):
-        return [
-            {
-                "type": "build",
-                "building_key": _LUMBER_CAMP_BUILD_KEY,
-                "intent": "Build lumber camp (Feudal prerequisite + wood income)",
-            }
-        ]
-    return []
-
-
-def _needs_mining_camp(state: GameState) -> bool:
-    """Castle prep pending: in Feudal Age with no gold drop-off standing.
-
-    Absence-gated on buildings_seen like the Feudal preps, so the rule stops
-    re-emitting once the camp is purchase-confirmed; a second camp at another
-    gold pile stays the LLM's call (mining_camp is deliberately not in the
-    executor's unique-building gate).
-    """
-    return state.current_age == "Feudal Age" and "mining_camp" not in state.buildings_seen
-
-
-def _castle_prep_actions(state: GameState) -> list[dict[str, object]]:
-    """Ensure the gold economy exists once Feudal is reached (T-538).
-
-    Castle Age needs 200 gold and run 13 (F-46) showed the gap: 25 minutes in
-    Feudal, 1833 wood banked, gold parked at 90 — no tier ever built the
-    mining camp. Same one-build-per-turn contract as `_feudal_prep_actions`;
-    the executor's cost gate waits out the 100 wood.
-    """
-    if _needs_mining_camp(state):
-        return [
-            {
-                "type": "build",
-                "building_key": _MINING_CAMP_BUILD_KEY,
-                "intent": "Build mining camp (gold drop-off for the Castle Age bank)",
-            }
-        ]
-    return []
+    prep = _pending_prep_build(state)
+    if prep is None:
+        return []
+    building_name = prep.building_class.replace("_", " ")
+    return [
+        {
+            "type": "build",
+            "building_key": prep.build_key,
+            "intent": f"Build {building_name} ({prep.reason})",
+        }
+    ]
 
 
 def _house_actions(state: GameState) -> list[dict[str, object]]:
@@ -402,18 +423,14 @@ def _idle_batch_size(state: GameState) -> int:
 def _wood_bank_target(state: GameState) -> int | None:
     """Wood the rotation should bank toward: the binding build goal's cost.
 
-    The Feudal prerequisites (mill first, then lumber camp) outrank farms; each
-    target carries the margin so a purchase doesn't leave the stock exactly at
-    the boundary. Run 8 (F-34): a farm-only target let wood plateau at 65 while
-    the camp cost 100. Ordered to match `_feudal_prep_actions` (mill leads, it
-    unlocks farms). None when no wood-gated goal is pending.
+    The pending prep build outranks farms — same table the build rules read, so
+    the bank always funds the building that's actually next. Run 8 (F-34): a
+    farm-only target let wood plateau at 65 while the camp cost 100. None when
+    no wood-gated goal is pending.
     """
-    if _needs_mill(state):
-        return _MILL_WOOD_COST + _WOOD_BANK_MARGIN
-    if _needs_lumber_camp(state):
-        return _LUMBER_CAMP_WOOD_COST + _WOOD_BANK_MARGIN
-    if _needs_mining_camp(state):
-        return _MINING_CAMP_WOOD_COST + _WOOD_BANK_MARGIN
+    prep = _pending_prep_build(state)
+    if prep is not None:
+        return prep.wood_cost + _WOOD_BANK_MARGIN
     if "mill" in state.buildings_seen:
         return _FARM_WOOD_COST + _WOOD_BANK_MARGIN
     return None

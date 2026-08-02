@@ -264,18 +264,25 @@ class DetectAction(BaseModel):
 
 
 class BuildAction(BaseModel):
-    """Build a structure via the economic build menu, auto-placed near the Town Center.
+    """Build a structure via a villager build menu, auto-placed near the Town Center.
 
     Coordinate-free on purpose: x,y are omitted because the text-only model can't see
     open ground — the executor picks the placement (near the TC, with retry). Available
     on the fast single-shot path too, so routine turns can build without the tool loop.
+
+    The key is menu-qualified: a bare letter is the economic menu, two letters are
+    "<menu><slot>" (executor._BUILD_ENTRIES). max_length stays 2 — no schema growth,
+    which the compiled-grammar limit (F-40/F-50) makes worth preserving.
     """
 
     type: Literal["build"]
     building_key: str = Field(
         min_length=1,
         max_length=2,
-        description="Build hotkey: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm",
+        description=(
+            "Build hotkey: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm, "
+            "s=Blacksmith (Feudal+), vd=Market (Feudal+), wq=Barracks"
+        ),
     )
     intent: str = ""
 

@@ -8,14 +8,15 @@ Castle Age is the power spike. You need to boom your economy with additional Tow
 - **Population < 80**: Keep producing villagers from ALL Town Centers. Build 1-2 additional TCs.
 - **Population 80+**: Slow down. Focus military production. Only replace lost villagers.
 
-> **Build execution:** the `build` composite (`building_key=…`) only drives the economic (Q) menu. Town Centers, University, Castle, Towers, and walls are on the **V (advanced) menu** — build them with a manual press sequence (`.` → `v` → key → click), not `build`. These V-menu sequences are not yet VM-verified.
+> **Build execution:** always use the `build` composite — it opens whichever menu the building lives in, given a menu-qualified `building_key` (bare letter = economic menu, `wq`=Barracks, `vd`=Market). Never hand-roll `.` → menu → key → click: selecting the villager moves the camera, so your placement coordinate is stale before the click lands (F-33). Town Centers, University, Castle, Towers and walls are **not wired yet** — their V-menu slots are unverified and several cost stone, so a wrong slot is expensive. Build what's wired and spend the rest on units and upgrades.
 
 **Villager allocation:** 15-18 on food, 10-12 on wood, 6-8 on gold, 3-4 on stone (if building Castles/TCs).
 
 **Economy boom — Build additional Town Centers:**
-- Build 1-2 extra TCs (Villager → V → Z, 275 wood + 100 stone). Place near resources.
-- Each TC produces villagers independently. 3 TCs = 3x villager production.
-- Queue villagers at ALL TCs constantly.
+- Extra Town Centers (275 wood + 100 stone) are the standard boom, but their
+  build slot is **not wired yet** — don't attempt the manual sequence. Put the
+  banked wood into farms, military buildings and upgrades instead.
+- Queue villagers at the TC you have, constantly.
 
 **Military production:**
 - Build 2-3 military production buildings (Archery Range, Stable, Siege Workshop).

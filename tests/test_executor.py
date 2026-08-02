@@ -400,6 +400,82 @@ def test_record_confirmed_buildings_ignores_non_gate_classes(
     assert ex._build_gates.buildings_confirmed == set()
 
 
+# ---------------------------------------------------------------------------
+# Build menus (T-544) — menu-qualified keys, the verification gate, the age gate
+# ---------------------------------------------------------------------------
+
+
+def test_econ_builds_open_the_econ_menu_and_press_their_own_key(
+    fake_pyautogui: _FakePyautogui,
+) -> None:
+    """A bare key is still an economic-menu build, pressed verbatim — every
+    prompt, fixture and logged action from before menus were qualified."""
+    steps = ex.build_menu_steps("w", "Build mill")
+    assert [s.get("key") for s in steps if s["type"] == "press"] == ["q", "w", "h"]
+
+
+def test_qualified_key_opens_its_own_menu_and_presses_its_slot(
+    fake_pyautogui: _FakePyautogui,
+) -> None:
+    """`vd` = more-buildings menu (`v`) → Market slot (`d`). Pressing `d` in the
+    econ menu instead would build something else entirely."""
+    steps = ex.build_menu_steps("vd", "Build market")
+    assert [s.get("key") for s in steps if s["type"] == "press"] == ["v", "d", "h"]
+
+
+def test_unwired_key_falls_back_to_the_econ_menu(fake_pyautogui: _FakePyautogui) -> None:
+    steps = ex.build_menu_steps("z", "Build something unwired")
+    assert [s.get("key") for s in steps if s["type"] == "press"] == ["q", "z", "h"]
+
+
+def test_unverified_menu_is_rejected_before_any_keystroke(
+    fake_pyautogui: _FakePyautogui,
+) -> None:
+    """Only the econ menu ships verified: an unverified slot doesn't no-op, it
+    builds whatever occupies that position (runs 6-7, 14 outposts)."""
+    ex.observe_age("Feudal Age")
+    reason = ex.build_rejection("vd")
+    assert reason is not None and "verified" in reason
+    result = _run(ex._handle_build({"building_key": "vd"}, "Build market"))
+    assert result.success is False
+    assert fake_pyautogui.calls == []
+
+
+def test_verified_menu_allows_the_build(
+    fake_pyautogui: _FakePyautogui, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ex.config, "verified_build_menus", frozenset({"q", "v"}))
+    ex.observe_age("Feudal Age")
+    assert ex.build_rejection("vd") is None
+
+
+def test_feudal_only_building_rejected_in_dark_age(fake_pyautogui: _FakePyautogui) -> None:
+    """The blacksmith enters the econ menu in Feudal. Pressing `s` in the Dark
+    Age hits whatever sits in that slot — the F-27 hazard, one age early."""
+    reason = ex.build_rejection("s")  # gates start in the Dark Age
+    assert reason is not None and "Feudal Age" in reason
+
+
+def test_feudal_only_building_allowed_in_feudal(fake_pyautogui: _FakePyautogui) -> None:
+    ex.observe_age("Feudal Age")
+    assert ex.build_rejection("s") is None
+
+
+def test_age_gate_ignores_an_unknown_age(fake_pyautogui: _FakePyautogui) -> None:
+    """A garbled OCR age must not unlock a later-age slot: unknown ranks as
+    Dark Age, the conservative end."""
+    ex.observe_age("Ferdal Ag3")
+    assert ex.build_rejection("s") is not None
+
+
+def test_every_entry_declares_a_real_age() -> None:
+    """A typo like "Feudal" would rank as Dark Age and SILENTLY disable the age
+    gate — nothing else would catch it."""
+    from core import AGE_SEQUENCE
+
+    assert all(entry.min_age in AGE_SEQUENCE for entry in ex._BUILD_ENTRIES.values())
+
+
 def test_unique_buildings_not_rebuilt(fake_pyautogui: _FakePyautogui) -> None:
     """One mill / lumber camp is enough — the Feudal prep re-emits its build
     every turn and relies on this gate to stop once one stands."""

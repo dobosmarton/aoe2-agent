@@ -22,16 +22,19 @@ def _state(
     idle_streak: int = 0,
     food: int = 200,
     wood: int = 200,
-    # Default = Feudal prereqs + mining camp satisfied, so tests about OTHER
-    # features aren't polluted by prep build actions (lumber camp in Dark Age,
-    # mining camp in Feudal); prep/age-up tests override it.
-    buildings: frozenset[str] = frozenset({"mill", "lumber_camp", "mining_camp"}),
+    gold: int = 100,
+    # Default = every prep goal satisfied (Feudal prereqs, gold drop-off, and
+    # the two Castle prereqs), so tests about OTHER features aren't polluted by
+    # prep build actions; prep/age-up tests override it.
+    buildings: frozenset[str] = frozenset(
+        {"mill", "lumber_camp", "mining_camp", "blacksmith", "market"}
+    ),
     # Default = villager target reached, so no queue order rides along in
     # dispatch/age-up tests; queue tests pass explicit lower orders.
     villagers_ordered: int = 30,
 ) -> GameState:
     return GameState(
-        resources={"food": food, "wood": wood, "gold": 100, "stone": 200},
+        resources={"food": food, "wood": wood, "gold": gold, "stone": 200},
         population=population,
         population_cap=population_cap,
         current_age=age,
@@ -128,9 +131,9 @@ def test_feudal_prep_builds_camp_after_mill_stands() -> None:
     [
         (11, "Dark Age", frozenset({"mill"})),  # economy not established yet
         (12, "Dark Age", frozenset({"mill", "lumber_camp"})),  # already standing
-        # Prereqs are a Dark Age concern (mining camp present so the castle
-        # prep doesn't emit its own build here).
-        (12, "Feudal Age", frozenset({"mill", "mining_camp"})),
+        # Prereqs are a Dark Age concern (the Castle prep's own goals are all
+        # satisfied here so it doesn't emit a build of its own).
+        (12, "Feudal Age", frozenset({"mill", "mining_camp", "blacksmith", "market"})),
     ],
     ids=["below-prep-pop", "camp-exists", "wrong-age"],
 )
@@ -164,6 +167,91 @@ def test_castle_prep_builds_mining_camp_in_feudal() -> None:
 def test_castle_prep_not_emitted(age: str, buildings: frozenset[str]) -> None:
     actions = decide([], _state(population=25, age=age, buildings=buildings), alarm=False)
     assert all(a.get("building_key") != "e" for a in actions)
+
+
+def test_castle_prep_builds_blacksmith_once_the_gold_engine_stands() -> None:
+    """T-544: with the drop-off up, prep moves to the two-building requirement —
+    blacksmith first (cheaper, and on the verified econ menu)."""
+    state = _state(
+        population=25,
+        age="Feudal Age",
+        buildings=frozenset({"mill", "lumber_camp", "mining_camp"}),
+    )
+    builds = [a for a in decide([], state, alarm=False) if a["type"] == "build"]
+    assert builds == [
+        {
+            "type": "build",
+            "building_key": "s",
+            "intent": "Build blacksmith (Castle Age prerequisite 1 of 2)",
+        }
+    ]
+
+
+def test_castle_prep_builds_market_last() -> None:
+    """The second qualifying building, on the more-buildings menu (`vd`). One
+    build per turn, so it only comes up once the blacksmith stands."""
+    state = _state(
+        population=25,
+        age="Feudal Age",
+        buildings=frozenset({"mill", "lumber_camp", "mining_camp", "blacksmith"}),
+    )
+    builds = [a for a in decide([], state, alarm=False) if a["type"] == "build"]
+    assert builds == [
+        {
+            "type": "build",
+            "building_key": "vd",
+            "intent": "Build market (Castle Age prerequisite 2 of 2)",
+        }
+    ]
+
+
+def test_castle_age_up_fires_when_food_gold_and_both_buildings_are_ready() -> None:
+    """Run 13 reached Feudal and stopped there. The press needs 800 food, 200
+    gold AND two Feudal-age buildings — the Dark Age lesson (F-26) one age up."""
+    state = _state(
+        population=32,
+        age="Feudal Age",
+        food=820,
+        gold=210,
+        buildings=frozenset({"mill", "lumber_camp", "mining_camp", "blacksmith", "market"}),
+        villagers_ordered=35,
+    )
+    actions = decide([], state, alarm=False)
+    assert actions[:2] == [
+        {"type": "press", "key": "h", "intent": "Select TC (age up)"},
+        {"type": "press", "key": "z", "intent": "Research Castle Age (reactive)"},
+    ]
+
+
+@pytest.mark.parametrize(
+    ("food", "gold", "buildings"),
+    [
+        (799, 210, frozenset({"blacksmith", "market"})),
+        (820, 199, frozenset({"blacksmith", "market"})),
+        (820, 210, frozenset({"blacksmith"})),
+    ],
+    ids=["food-short", "gold-short", "one-building-short"],
+)
+def test_no_castle_age_up_when_preconditions_missing(
+    food: int, gold: int, buildings: frozenset[str]
+) -> None:
+    """A press against a greyed button is not free — run 6 spent 14 of them,
+    each a chance to leak UI context into the next keystroke (F-27)."""
+    state = _state(
+        population=32,
+        age="Feudal Age",
+        food=food,
+        gold=gold,
+        buildings=buildings | {"mill", "lumber_camp", "mining_camp"},
+        villagers_ordered=35,
+    )
+    assert all(a.get("key") != "z" for a in decide([], state, alarm=False))
+
+
+def test_no_reactive_age_up_past_castle() -> None:
+    """No Castle-age program exists yet, so the press stays the LLM's call."""
+    state = _state(population=40, age="Castle Age", food=2000, gold=2000, villagers_ordered=99)
+    assert all(a.get("key") != "z" for a in decide([], state, alarm=False))
 
 
 def test_house_built_when_headroom_runs_out() -> None:
@@ -324,6 +412,28 @@ def test_missing_mining_camp_raises_the_wood_target() -> None:
     assert _idle_pattern(needs_camp)[0] == "wood"  # 110 < 100 + margin
 
 
+@pytest.mark.parametrize(
+    ("wood", "buildings"),
+    [
+        (160, frozenset({"mining_camp"})),  # blacksmith next: 160 < 150 + margin
+        (190, frozenset({"mining_camp", "blacksmith"})),  # market: 190 < 175 + margin
+    ],
+    ids=["blacksmith", "market"],
+)
+def test_castle_prereq_buildings_raise_the_wood_target(
+    wood: int, buildings: frozenset[str]
+) -> None:
+    """T-544: the two qualifying buildings cost 150 and 175 — the farm band (60)
+    would let wood plateau below both, exactly the F-34 failure."""
+    state = _state(
+        population=30,
+        age="Feudal Age",
+        wood=wood,
+        buildings=buildings | {"mill", "lumber_camp"},
+    )
+    assert _idle_pattern(state)[0] == "wood"
+
+
 def test_feudal_gold_bias_until_castle_gold_banked() -> None:
     """T-538: below 200 gold in Feudal the rotation leads with gold; once the
     Castle gold is banked the base pattern returns. Dark Age never biases."""
@@ -356,8 +466,8 @@ def _gamestate_from_world(w: object) -> GameState:
     """Project a WorldState into the GameState slice reactive.decide reads.
 
     Idle dispatch and the villager queue are suppressed (idle_present=False,
-    villagers_ordered high) so the closed loop below isolates the Feudal-prep
-    BUILD path — the concern F-41 is about.
+    villagers_ordered high) so the closed loops below isolate the prep BUILD
+    and age-up paths — the concern F-41 and F-46 are about.
     """
     return GameState(
         resources={
@@ -433,21 +543,71 @@ def test_reactive_tier_alone_builds_mining_camp_in_feudal() -> None:
     assert state.buildings.count("mining_camp") == 1
 
 
+def test_reactive_tier_alone_reaches_castle_age() -> None:
+    """T-544 closed loop: from a fresh Feudal state, with NO LLM in the loop,
+    the reactive tier must stand up the gold drop-off and both qualifying
+    buildings, bank 800 food + 200 gold, and press the age up. Run 13 reached
+    Feudal and then idled for 25 minutes (F-46)."""
+    from core import WorldState
+    from evaluation.world_sim import apply_actions, tick
+
+    state = WorldState(
+        food=200.0,
+        wood=200.0,
+        gold=90.0,  # run 13's actual Feudal gold
+        stone=200.0,
+        population=30,
+        pop_cap=45,
+        age="Feudal Age",
+        buildings=["mill", "lumber_camp"],
+        villager_queue=[],
+        age_up_ticks_remaining=0,
+    )
+    for _ in range(60):
+        actions = decide([], _gamestate_from_world(state), alarm=False)
+        state = tick(apply_actions(state, actions))
+        if state.age == "Castle Age":
+            break
+    assert state.age == "Castle Age", f"stuck in {state.age} after {state.turn} turns"
+    assert {"mining_camp", "blacksmith", "market"}.issubset(set(state.buildings))
+    assert state.buildings.count("market") == 1  # prep stops once each one stands
+
+
+def test_reactive_age_up_requirements_match_world_sim() -> None:
+    """Drift guard (V-4): run 6 proved the sim knew a requirement the agent
+    lacked. Pin every age's cost and prereq set across the two."""
+    from evaluation.world_sim import AGE_UP_REQUIREMENTS
+    from gameplay_agent import reactive
+
+    assert reactive._AGE_UP_REQUIREMENTS.keys() == AGE_UP_REQUIREMENTS.keys()
+    for age, requirement in reactive._AGE_UP_REQUIREMENTS.items():
+        sim = AGE_UP_REQUIREMENTS[age]
+        assert (requirement.next_age, requirement.food, requirement.gold) == (
+            sim.next_age,
+            sim.food,
+            sim.gold,
+        )
+        assert requirement.prereq_classes == sim.prereq_buildings
+
+
 def test_reactive_build_constants_match_executor_tables() -> None:
     """Drift guard (V-4 seed): the reactive tier duplicates build keys/costs to
     stay dependency-free — this pins every copy to the executor's tables."""
     from gameplay_agent import executor as ex
     from gameplay_agent import reactive
 
+    for prep in (*reactive._FEUDAL_PREP_BUILDS, *reactive._CASTLE_PREP_BUILDS):
+        assert ex.BUILD_KEY_TO_CLASS[prep.build_key] == prep.building_class
+        assert ex._BUILD_WOOD_COST[prep.build_key] == prep.wood_cost
     assert ex._BUILD_WOOD_COST["a"] == reactive._FARM_WOOD_COST
-    assert ex._BUILD_WOOD_COST["r"] == reactive._LUMBER_CAMP_WOOD_COST
-    assert ex._BUILD_WOOD_COST["w"] == reactive._MILL_WOOD_COST
-    assert ex._BUILD_WOOD_COST["e"] == reactive._MINING_CAMP_WOOD_COST
     assert ex.BUILD_KEY_TO_CLASS[reactive._FARM_BUILD_KEY] == "farm"
-    assert ex.BUILD_KEY_TO_CLASS[reactive._LUMBER_CAMP_BUILD_KEY] == "lumber_camp"
-    assert ex.BUILD_KEY_TO_CLASS[reactive._MILL_BUILD_KEY] == "mill"
-    assert ex.BUILD_KEY_TO_CLASS[reactive._MINING_CAMP_BUILD_KEY] == "mining_camp"
     assert ex.BUILD_KEY_TO_CLASS[reactive._HOUSE_BUILD_KEY] == "house"
+    # Every class an age-up waits for must be one some prep rule can build.
+    buildable = {
+        p.building_class for p in (*reactive._FEUDAL_PREP_BUILDS, *reactive._CASTLE_PREP_BUILDS)
+    }
+    for requirement in reactive._AGE_UP_REQUIREMENTS.values():
+        assert requirement.prereq_classes.issubset(buildable)
     # The reactive house trigger must stay INSIDE the executor's allow band,
     # or every emit would be rejected as ample headroom.
     assert reactive._HOUSE_HEADROOM_TRIGGER <= ex._HOUSE_HEADROOM_MAX

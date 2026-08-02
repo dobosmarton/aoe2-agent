@@ -582,11 +582,7 @@ class ClaudeProvider:
             }
         steps = [
             select_step,
-            *build_menu_steps(
-                building_key,
-                intent,
-                menu_intent=f"Open economic build menu ({intent})",
-            ),
+            *build_menu_steps(building_key, intent),
         ]
         ok, detail = await self._run_steps("reassign_villager", steps)
         return action_dict, self._make_tool_result(block, ok, detail, include_entities=True)

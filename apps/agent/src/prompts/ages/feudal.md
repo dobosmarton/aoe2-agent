@@ -41,16 +41,16 @@ You need 200 gold for Castle Age, plus 50–100 per tech, plus 25–50 per milit
 
 **Loom:** if not yet researched, do it now (TC: H → A, 50 gold). Toughens villagers.
 
-**Blacksmith / Market:** both count as Feudal-Age prereq buildings. Blacksmith (`build` with `building_key="s"`, 150 wood) unlocks military upgrades; Market (V→D, 175 wood) unlocks emergency trading.
+**Blacksmith / Market:** the two Castle-Age prereq buildings the reactive tier builds for you — Blacksmith (`build` with `building_key="s"`, 150 wood) unlocks military upgrades, Market (`build` with `building_key="vd"`, 175 wood) unlocks emergency trading. You're a backstop if they haven't landed.
 
 ## Build Menus
 
-You now have access to military and advanced buildings. The full key reference is in the appended hotkey list — the high-leverage ones:
-- **Villager + Q**: economic (same as Dark Age)
-- **Villager + W**: military — Q=Barracks, W=Archery Range, E=Stable
-- **Villager + V**: advanced — D=Market, F=Tower
+You now have access to military and advanced buildings. The `build` composite opens whichever menu the building lives in — pass a **menu-qualified key** and never press the menu keys yourself:
+- **economic**: bare letter — `q`=House, `w`=Mill, `e`=Mining Camp, `r`=Lumber Camp, `a`=Farm, `s`=Blacksmith
+- **military**: `wq`=Barracks
+- **more buildings**: `vd`=Market
 
-Note: the `build` composite ONLY works for the economic (Q) menu. Military and advanced buildings need a manual press sequence (template below).
+A build whose menu hasn't been verified on this machine is refused with an explanation — take that as final for the run and build something on the economic menu instead.
 
 ## Military — When and What
 
@@ -77,15 +77,14 @@ Note: the `build` composite ONLY works for the economic (Q) menu. Military and a
 ]
 ```
 
-**Build Barracks** (W-menu — can't use composite, manual sequence required):
+**Build Barracks** (military menu — same composite, menu-qualified key):
 ```json
 [
-  {"type": "press", "key": ".", "rescan": true, "intent": "Select idle villager"},
-  {"type": "press", "key": "w", "intent": "Military build menu"},
-  {"type": "press", "key": "q", "intent": "Select Barracks (175 wood)"},
-  {"type": "click", "x": 1400, "y": 900, "intent": "Place Barracks on open ground"}
+  {"type": "build", "building_key": "wq", "intent": "Build Barracks (175 wood)"}
 ]
 ```
+Never hand-roll the press sequence: selecting the villager moves the camera, so
+any placement coordinate you compute now is already stale (F-33).
 
 **Research Castle Age** (when the Age-up Gate fires):
 ```json

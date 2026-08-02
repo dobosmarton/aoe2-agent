@@ -13,6 +13,7 @@ from typing import cast
 
 import pyautogui
 import structlog
+from core import AGE_SEQUENCE
 from pydantic import BaseModel
 
 from .config import config
@@ -472,18 +473,56 @@ def build_rejection(building_key: str, intent: str = "") -> str | None:
     return reason
 
 
-def _rejection_reason(building_key: str) -> str | None:
-    """Five gates: suppressed after a missing-settlement streak, unique
-    building already standing, house with ample pop-cap headroom (wasted
-    wood), missing prerequisite (without a mill the farm key selects the
-    OUTPOST — runs 6-7 and 9 built phantom towers this way), and unaffordable
-    cost. The reason string is returned to the LLM as the action's failure
-    detail so the next turn plans around it instead of re-issuing the same
-    doomed build.
+def _age_rank(age: str) -> int:
+    """Position of `age` in the age sequence; unknown ages rank as Dark Age."""
+    try:
+        return AGE_SEQUENCE.index(age)
+    except ValueError:
+        return 0
+
+
+def _slot_hazard_reason(entry: "_BuildEntry") -> str | None:
+    """Reason this slot may not hold the building we think it does, or None.
+
+    One hazard in three guises: a menu lists only what's available and the grid
+    shifts up to fill the gap, so an unverified menu, an age that hasn't
+    arrived, or a missing prerequisite all mean the keystroke lands elsewhere.
     """
-    cls = BUILD_KEY_TO_CLASS.get(building_key)
-    if cls is None:
+    cls = entry.building_class
+    if entry.menu_key not in config.verified_build_menus:
+        return (
+            f"{cls} unavailable: its {_MENU_NAMES.get(entry.menu_key, entry.menu_key)} "
+            "build menu has not been verified on this machine, and an unverified slot "
+            "doesn't no-op — it builds whatever occupies that position. Use an "
+            "economic-menu building instead"
+        )
+    if _age_rank(entry.min_age) > _age_rank(_build_gates.current_age):
+        return (
+            f"{cls} unavailable: it only enters the build menu in the {entry.min_age} "
+            f"and you are still in the {_build_gates.current_age} — its slot currently "
+            "holds a different building"
+        )
+    prereq = entry.prereq_class
+    if prereq is not None and prereq not in _build_gates.buildings_confirmed:
+        return (
+            f"{cls} unavailable: requires a completed {prereq} and none has been "
+            f"seen yet — build a {prereq} first"
+        )
+    return None
+
+
+def _rejection_reason(building_key: str) -> str | None:
+    """Five gates: suppressed after a missing-settlement streak, unique building
+    already standing, house with ample pop-cap headroom (wasted wood), a slot
+    hazard (see `_slot_hazard_reason`), and unaffordable cost.
+
+    The reason is returned to the LLM as the action's failure detail, so the
+    next turn plans around it instead of re-issuing the same doomed build.
+    """
+    entry = _BUILD_ENTRIES.get(building_key)
+    if entry is None:
         return None
+    cls = entry.building_class
     suppressed_until = _build_gates.suppressed_until.get(cls, 0)
     if _build_gates.snapshot_count < suppressed_until:
         streak = _build_gates.missing_streaks.get(cls, 0)
@@ -509,17 +548,13 @@ def _rejection_reason(building_key: str) -> str | None:
                 f"house skipped: population {population}/{cap} leaves {headroom} headroom "
                 f"(> {_HOUSE_HEADROOM_MAX}) — spend the wood on economy buildings instead"
             )
-    prereq = _BUILD_PREREQ_CLASS.get(building_key)
-    if prereq is not None and prereq not in _build_gates.buildings_confirmed:
-        return (
-            f"{cls} unavailable: requires a completed {prereq} and none has been "
-            f"seen yet — build a {prereq} first"
-        )
-    cost = _BUILD_WOOD_COST.get(building_key)
-    if cost is not None and _build_gates.resources is not None:
+    hazard = _slot_hazard_reason(entry)
+    if hazard is not None:
+        return hazard
+    if _build_gates.resources is not None:
         wood = _build_gates.resources.get("wood")
-        if wood is not None and wood < cost:
-            return f"{cls} unavailable: costs {cost} wood, you have {wood}"
+        if wood is not None and wood < entry.wood_cost:
+            return f"{cls} unavailable: costs {entry.wood_cost} wood, you have {wood}"
     return None
 
 
@@ -651,40 +686,72 @@ UI_MARGIN_TOP: int = 160
 UI_MARGIN_BOTTOM: int = 240
 UI_MARGIN_SIDE: int = 40
 
-# Economic build-menu key → detected building class, used to verify a placement
-# actually landed (the class appears in the entity cache after a rescan).
+# A villager's command panel has three build menus, and slot keys are unique
+# only WITHIN a menu (econ `w` is the Mill, military `w` is the Archery Range).
+# So a build action carries a MENU-QUALIFIED key: a bare letter is the economic
+# menu (what every action meant before T-544), two letters are "<menu><slot>".
+ECON_MENU_KEY = "q"
+MILITARY_MENU_KEY = "w"
+MORE_BUILDINGS_MENU_KEY = "v"
+_MENU_NAMES: dict[str, str] = {
+    ECON_MENU_KEY: "economic",
+    MILITARY_MENU_KEY: "military",
+    MORE_BUILDINGS_MENU_KEY: "more-buildings",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class _BuildEntry:
+    """One slot of one villager build menu.
+
+    `prereq_class` and `min_age` are SAFETY gates: a menu lists only what's
+    available and the grid shifts up to fill the gap, so a slot pressed too
+    early builds a DIFFERENT building (runs 6-7, 14 outposts through the
+    mill-less farm slot).
+    """
+
+    menu_key: str
+    slot_key: str
+    building_class: str
+    wood_cost: int  # every wired entry is wood-only; stone builds stay unwired
+    prereq_class: str | None = None
+    min_age: str = "Dark Age"
+
+
+# The wired build slots, keyed by the menu-qualified key an action carries.
+# Archery range and stable are deliberately absent: both need a barracks, so
+# their slots re-flow with it (F-27). Costs are literals — the build gate must
+# not depend on a DB handle.
+_BUILD_ENTRIES: dict[str, _BuildEntry] = {
+    "q": _BuildEntry(ECON_MENU_KEY, "q", "house", 25),
+    "w": _BuildEntry(ECON_MENU_KEY, "w", "mill", 100),
+    "e": _BuildEntry(ECON_MENU_KEY, "e", "mining_camp", 100),
+    "r": _BuildEntry(ECON_MENU_KEY, "r", "lumber_camp", 100),
+    "a": _BuildEntry(ECON_MENU_KEY, "a", "farm", 60, prereq_class="mill"),
+    "s": _BuildEntry(ECON_MENU_KEY, "s", "blacksmith", 150, min_age="Feudal Age"),
+    "t": _BuildEntry(ECON_MENU_KEY, "t", "dock", 150),
+    # The Castle Age's two qualifying buildings (T-544).
+    "vd": _BuildEntry(MORE_BUILDINGS_MENU_KEY, "d", "market", 175, min_age="Feudal Age"),
+    # The one military slot that can't re-flow: first entry, Dark Age onward.
+    # No reactive rule uses it — it's here for the LLM's aggression reads.
+    "wq": _BuildEntry(MILITARY_MENU_KEY, "q", "barracks", 175),
+}
+
+# Build-menu key → detected building class, used to verify a placement actually
+# landed (the class appears in the entity cache after a rescan).
 BUILD_KEY_TO_CLASS: dict[str, str] = {
-    "q": "house",
-    "w": "mill",
-    "e": "mining_camp",
-    "r": "lumber_camp",
-    "a": "farm",
-    "s": "blacksmith",
-    "t": "dock",
+    key: entry.building_class for key, entry in _BUILD_ENTRIES.items()
 }
 
 # Building classes that can serve as build-gate evidence (see
-# record_confirmed_buildings) — the econ buildings the agent itself can place.
+# record_confirmed_buildings) — the buildings the agent itself can place.
 _GATE_BUILDING_CLASSES: frozenset[str] = frozenset(BUILD_KEY_TO_CLASS.values())
 
-# Wood cost per econ-menu entry (all seven are wood-only). Literals on purpose:
-# packages/data's aoe2.db holds the full cost table, but the build gate must not
-# depend on a DB handle, and these seven haven't changed in years.
-_BUILD_WOOD_COST: dict[str, int] = {
-    "q": 25,  # house
-    "w": 100,  # mill
-    "e": 100,  # mining camp
-    "r": 100,  # lumber camp
-    "a": 60,  # farm
-    "s": 150,  # blacksmith
-    "t": 150,  # dock
-}
+_BUILD_WOOD_COST: dict[str, int] = {key: entry.wood_cost for key, entry in _BUILD_ENTRIES.items()}
 
-# Menu entries that only exist once a prerequisite building is COMPLETED.
-# CRITICAL (user-observed, runs 6-7): without a mill the econ menu re-flows and
-# the `A` slot is the OUTPOST — pressing it doesn't no-op, it BUILDS A TOWER.
-# This gate is therefore a safety gate, not just an efficiency gate.
-_BUILD_PREREQ_CLASS: dict[str, str] = {"a": "mill"}  # farm needs a mill
+_BUILD_PREREQ_CLASS: dict[str, str] = {
+    key: entry.prereq_class for key, entry in _BUILD_ENTRIES.items() if entry.prereq_class
+}
 
 # One of each is enough for this bot: a second mill/lumber camp is wasted wood
 # (run 3 attempted a duplicate mill; run 6's Feudal plan re-emits the lumber
@@ -793,27 +860,27 @@ def default_build_placement() -> tuple[int, int]:
     return candidates[0] if candidates else anchor
 
 
-def build_menu_steps(
-    building_key: str,
-    intent: str,
-    *,
-    menu_intent: str = "Open economic build menu",
-) -> list[dict[str, object]]:
+def build_menu_steps(building_key: str, intent: str) -> list[dict[str, object]]:
     """Menu → building → place → select-TC sequence, for an ALREADY-selected villager.
 
-    The tail every build shares: open the economic build menu (q), pick the
-    building, click the placement (with `building_key` attached so `_handle_click`
-    verifies the structure landed), then select the TC so no menu is left open
-    to re-map later keystrokes. The placement is resolved AT CLICK TIME
-    (`auto_placement`) so a camera move earlier in the sequence can't strand it
-    on stale coordinates (run 8, F-33: the mill rose wherever the idle villager
-    stood). `build_steps` prepends the idle-villager select;
+    The tail every build shares — the menu comes from the entry, so a
+    military/more-buildings key opens its own. The placement resolves AT CLICK
+    TIME (`auto_placement`), so a camera move earlier in the sequence can't
+    strand it on stale coordinates (run 8, F-33). The trailing `h` leaves no
+    menu open to re-map later keystrokes. An unwired key falls back to the
+    economic menu pressed verbatim, as every caller did before T-544.
+
+    `build_steps` prepends the idle-villager select;
     `claude.ClaudeProvider._execute_reassign_villager` prepends its own
-    worker-click instead — the menu/place sequence lives in exactly one place.
+    worker-click — the menu/place sequence lives in exactly one place.
     """
+    entry = _BUILD_ENTRIES.get(building_key)
+    menu_key = entry.menu_key if entry is not None else ECON_MENU_KEY
+    slot_key = entry.slot_key if entry is not None else building_key
+    menu_name = _MENU_NAMES.get(menu_key, menu_key)
     return [
-        {"type": "press", "key": "q", "intent": menu_intent},
-        {"type": "press", "key": building_key, "intent": f"Select building ({intent})"},
+        {"type": "press", "key": menu_key, "intent": f"Open {menu_name} build menu ({intent})"},
+        {"type": "press", "key": slot_key, "intent": f"Select building ({intent})"},
         {
             "type": "click",
             "auto_placement": True,

@@ -8,12 +8,26 @@ from pydantic import BaseModel
 
 EffortLevel = Literal["low", "medium", "high"]  # Sonnet 4.6 rejects xhigh/max
 
+# Villager build menus whose slot layout has been verified in-game on THIS
+# machine. Only the economic menu ships verified; the military ("w") and
+# more-buildings ("v") menus stay rejected until the VM check, because a wrong
+# slot doesn't no-op — it builds whatever occupies that position (runs 6-7,
+# 14 outposts). See executor._BUILD_ENTRIES.
+_DEFAULT_VERIFIED_BUILD_MENUS: frozenset[str] = frozenset({"q"})
+
 
 def _parse_optional_int(value: str | None) -> int | None:
     """Parse an optional integer env var. Treats missing or empty as None."""
     if value is None or value == "":
         return None
     return int(value)
+
+
+def _parse_menu_keys(value: str | None) -> frozenset[str]:
+    """Parse a comma-separated build-menu allowlist. Missing = economic only."""
+    if value is None:
+        return _DEFAULT_VERIFIED_BUILD_MENUS
+    return frozenset(part.strip().lower() for part in value.split(",") if part.strip())
 
 
 def _parse_effort(value: str | None) -> EffortLevel:
@@ -67,6 +81,11 @@ class Config(BaseModel):
     full_sahi_interval: int = 5  # Force full SAHI scan every N turns (only if adaptive_sahi=True)
     detection_host: str = ""  # Remote CoreML server URL (e.g., "http://192.168.64.1:8420")
 
+    # Build menus the executor may open (T-544). Set
+    # AOE2_VERIFIED_BUILD_MENUS="q,v" once the VM check confirms the
+    # more-buildings layout; until then the Castle age-up waits.
+    verified_build_menus: frozenset[str] = _DEFAULT_VERIFIED_BUILD_MENUS
+
     # Timing settings
     loop_delay: float = (
         0.3  # Seconds between decisions (pipeline latency provides additional pacing)
@@ -97,6 +116,7 @@ class Config(BaseModel):
             temperature=float(os.environ.get("AOE2_TEMPERATURE", "0.0")),
             seed=_parse_optional_int(os.environ.get("AOE2_SEED")),
             pipeline_commit_max=int(os.environ.get("AOE2_PIPELINE_COMMIT_MAX", "2")),
+            verified_build_menus=_parse_menu_keys(os.environ.get("AOE2_VERIFIED_BUILD_MENUS")),
         )
 
 
