@@ -184,7 +184,7 @@ flowchart TD
     %% =====================================================================
     subgraph RESCAN["Mid-Turn Rescan Callbacks"]
         direction TB
-        RS1["_rescan()<br/><i>quick: screenshot → tracker.predict()<br/>or detect_fast_multi()</i>"]
+        RS1["_rescan()<br/><i>quick: screenshot → tracker.predict()<br/>or detect_fast()</i>"]
         RS2["_rescan_full()<br/><i>full: screenshot → detector.detect()<br/>full SAHI pipeline</i>"]
         RS3["frame_differ.has_changed()<br/><i>skip if camera static</i>"]
         RS3 --> RS1

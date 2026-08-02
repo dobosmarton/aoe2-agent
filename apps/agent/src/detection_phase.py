@@ -160,7 +160,13 @@ def _register_rescan_callbacks(
                 overlay.show(detector._previous_entities, get_game_window_rect())
                 return
 
-        entities = await _invoke_detector(detector, "detect_fast_multi", screenshot)
+        # Single-pass, not detect_fast_multi. Measured on 32 real screenshots at
+        # the native 3024x1964 the agent actually captures (build_native_val.py):
+        # single-pass F1 0.693 (P 0.735 / R 0.655) vs two-pass 0.622 (P 0.583 /
+        # R 0.666). The centre-crop pass buys 13 true positives for 291 false
+        # ones, because a half-frame crop through the same network shows objects
+        # at 2x the training scale — the SAHI scale mismatch in miniature.
+        entities = await _invoke_detector(detector, "detect_fast", screenshot)
         # Backstop for camera moves the executor cannot announce (minimap click,
         # edge scroll, the game re-centering itself): a collapse in entity count
         # means the view is somewhere else entirely.

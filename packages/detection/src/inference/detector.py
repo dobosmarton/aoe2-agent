@@ -440,8 +440,18 @@ class EntityDetector:
         """Multi-resolution fast detection for small object recovery.
 
         Two-pass inference without full SAHI tiling:
-        1. Full image at input_size (1280) — catches buildings, trees, large entities
-        2. Center 50% crop at 640 (native training res) — catches sheep, berries, deer
+        1. Full image at `input_size` — catches buildings, trees, large entities
+        2. Center 50% crop, also at `input_size` — catches sheep, berries, deer
+
+        Pass 2's zoom comes from the crop, not from a smaller inference size:
+        half the frame through the same network input shows every object at 2x
+        the scale of pass 1. Both passes must therefore use `input_size`. Pass 2
+        was previously pinned to a literal 640, which only produced a zoom while
+        the model trained at 640; after the 1280 retrain that literal made both
+        passes land on the identical scale (1280/w == 640/(w/2)), so the second
+        pass cost a full inference and recovered nothing. The ONNX path masked
+        it, because a static export ignores `input_size` (see `_onnx_detect`) —
+        the bug was only reachable via PyTorch or a dynamic-axes re-export.
 
         ~2x cost of detect_fast() but catches small objects that single pass misses.
         Much faster than full SAHI (~2-3s vs ~28s).
@@ -461,22 +471,17 @@ class EntityDetector:
         if self.use_mock:
             entities = mock_detect(screenshot, self._generate_id)
         elif self.backend == "onnx":
-            # Pass 1: full image at input_size (1280)
+            # Pass 1: full image at input_size
             full_entities = self._onnx_detect(screenshot)
 
-            # Pass 2: center 50% crop at 640 (native training resolution)
+            # Pass 2: center 50% crop, same input_size — objects at 2x pass 1
             w, h = image.size
             crop_x1 = w // 4
             crop_y1 = h // 4
             crop_x2 = w - crop_x1
             crop_y2 = h - crop_y1
             center_crop = image.crop((crop_x1, crop_y1, crop_x2, crop_y2))
-
-            # Run at 640 — the model's native training resolution
-            old_input_size = self.input_size
-            self.input_size = 640
             crop_entities = self._onnx_detect(center_crop)
-            self.input_size = old_input_size
 
             # Offset crop entities back to full image coordinates
             for e in crop_entities:
@@ -509,7 +514,10 @@ class EntityDetector:
             if self.model is None:
                 raise RuntimeError("Model not loaded; call _load_model() first")
             results = self.model(
-                center_crop, conf=min(self.class_thresholds.values()), imgsz=640, verbose=False
+                center_crop,
+                conf=min(self.class_thresholds.values()),
+                imgsz=self.input_size,
+                verbose=False,
             )
             crop_entities = self._parse_yolo_results(results)
             for e in crop_entities:
