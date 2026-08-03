@@ -35,11 +35,19 @@ graph TD
     end
 
     subgraph "Arena Web (operator surface)"
-        WEB[apps/api/src/server.py<br/>FastAPI + SSE] --> BROKER
+        WEB[apps/api/src/server.py<br/>FastAPI + SSE :8000] --> BROKER
         WEB --> DUCK
         WEB --> FORK[apps/api/src/forks.py<br/>POST /forks → async replay]
         FORK --> CLI
-        UI[apps/dashboard<br/>Vite + React + Tailwind] -->|SSE| WEB
+        UI[apps/dashboard<br/>Vite + React + TanStack Router/Query] -->|SSE| WEB
+    end
+
+    subgraph "Detection training tracker"
+        UI -->|/training/*| TAPI[apps/training-api/src/server.py<br/>FastAPI :8100]
+        TAPI --> TDB[(SQLite<br/>logs/training/tracker.db)]
+        SEED[ingest.py<br/>seed from disk] --> TDB
+        PRE[prelabel_pending.py<br/>model → pending boxes] --> TDB
+        PRE -.-> DET
     end
 
     subgraph "Autoresearch (prompt evolution)"
@@ -63,11 +71,11 @@ Dashed lines indicate optional / off-by-default components. The real-game tier r
 
 ## Reading paths
 
-Short curated routes through the tutorial — pick one based on what you want to learn, instead of reading all 23 chapters end-to-end.
+Short curated routes through the tutorial — pick one based on what you want to learn, instead of reading all 24 chapters end-to-end.
 
 - **15-minute tour** — [01 System Overview](./part1-architecture/01-system-overview.md) → [07 Detector Architecture](./part3-entity-detection/07-detector-architecture.md) → [14 Arena Overview](./part6-evaluation-arena/14-arena-overview.md).
 - **LLM-agent design** — Parts I, II, and VIII: [01](./part1-architecture/01-system-overview.md), [04](./part2-llm-integration/04-provider-pattern.md), [05](./part2-llm-integration/05-prompt-engineering.md), [06](./part2-llm-integration/06-context-injection.md), [22](./part8-autoresearch/22-autoresearch-overview.md), [23](./part8-autoresearch/23-prompt-mutation-and-memory.md).
-- **Computer vision** — Parts III–V: [07](./part3-entity-detection/07-detector-architecture.md), [08](./part3-entity-detection/08-training-pipeline.md), [09](./part3-entity-detection/09-labeling-and-active-learning.md), [11](./part4-game-knowledge/11-sprite-extraction.md), [13](./part5-operations/13-class-schema-evolution.md).
+- **Computer vision** — Parts III–V: [07](./part3-entity-detection/07-detector-architecture.md), [08](./part3-entity-detection/08-training-pipeline.md), [09](./part3-entity-detection/09-labeling-and-active-learning.md), [24](./part3-entity-detection/24-training-tracker.md), [11](./part4-game-knowledge/11-sprite-extraction.md), [13](./part5-operations/13-class-schema-evolution.md).
 - **Arena infra** — Parts VI–VII: [14](./part6-evaluation-arena/14-arena-overview.md), [15](./part6-evaluation-arena/15-event-broker.md), [16](./part6-evaluation-arena/16-duckdb-persister-and-replay.md), [17](./part6-evaluation-arena/17-ranking-pipeline.md), [18](./part6-evaluation-arena/18-synthetic-world-sim.md), [19](./part7-arena-web/19-web-architecture.md), [20](./part7-arena-web/20-fork-and-diff-ui.md).
 
 See also the [Glossary](./glossary.md) for one-line definitions of terms used throughout the tutorial.
@@ -83,6 +91,7 @@ See also the [Glossary](./glossary.md) for one-line definitions of terms used th
 | 01 | [System Overview](./part1-architecture/01-system-overview.md) | Two-tier design, graceful degradation, async architecture | `config.py`, `main.py` |
 | 02 | [Game Loop Pipeline](./part1-architecture/02-game-loop-pipeline.md) | Capture-detect-alarm-strategist-execute-verify cycle (RTC pipelining, reactive tier) | `game_loop.py`, `reactive.py`, `turn_phases.py`, `goals.py`, `screen.py` |
 | 03 | [Action Model & Execution](./part1-architecture/03-action-model-and-execution.md) | Pydantic action types, target_id/target_class resolution | `models.py`, `executor.py` |
+| — | [Seven-Round Run Map](./part1-architecture/14-seven-round-run-map.md) | Per-step timing table for the first 7 rounds; async-strategist and loop-delay analysis. Deep dive behind chapter 02. | `game_loop.py` |
 
 ### Part 2: LLM integration
 
@@ -99,6 +108,7 @@ See also the [Glossary](./glossary.md) for one-line definitions of terms used th
 | 07 | [Detector Architecture](./part3-entity-detection/07-detector-architecture.md) | EntityDetector, PyTorch/ONNX/Mock backends, 60-class taxonomy | `packages/detection/src/inference/detector.py` |
 | 08 | [Training Pipeline](./part3-entity-detection/08-training-pipeline.md) | Synthetic data, augmentations, YOLO26n training | `training/generate_training_data.py`, `training/train_yolo.py` |
 | 09 | [Labeling & Active Learning](./part3-entity-detection/09-labeling-and-active-learning.md) | CVAT workflow, COCO/YOLO conversion, class definitions | `labeling/prepare_training.py`, `labeling/class_mapping.py` |
+| 24 | [Detection Training Tracker](./part3-entity-detection/24-training-tracker.md) | SQLite dataset tracker, prelabel→review loop, coverage stats | `apps/training-api/src/server.py`, `ingest.py`, `prelabel_pending.py` |
 
 ### Part 4: Game knowledge
 
@@ -128,8 +138,8 @@ See also the [Glossary](./glossary.md) for one-line definitions of terms used th
 
 | # | Chapter | Description | Key files |
 |---|---|---|---|
-| 19 | [Web Architecture](./part7-arena-web/19-web-architecture.md) | FastAPI lifespan, `/events` dispatch, reaper, `/forks` flow | `apps/api/src/server.py`, `apps/api/src/forks.py` |
-| 20 | [Fork and Diff UI](./part7-arena-web/20-fork-and-diff-ui.md) | Timeline scrubber, World/Trace/Diff/Operator tabs | `apps/dashboard/src/App.tsx`, `panels/*` |
+| 19 | [Web Architecture](./part7-arena-web/19-web-architecture.md) | FastAPI lifespan, `/events` dispatch, reaper, `/forks` flow, SPA route table | `apps/api/src/server.py`, `apps/api/src/forks.py`, `apps/dashboard/src/routes/*` |
+| 20 | [Fork and Diff UI](./part7-arena-web/20-fork-and-diff-ui.md) | Timeline scrubber, World/Trace/Diff/Operator tabs | `apps/dashboard/src/routes/_arena.runs.$runId.tsx`, `panels/*` |
 | 21 | [Running the UI Locally](./part7-arena-web/21-running-the-ui-locally.md) | Dev proxy, VITE_API_BASE_URL, deployment modes | `apps/dashboard/vite.config.ts` |
 
 ### Part 8: Autoresearch
@@ -149,7 +159,8 @@ Short (~1 page) decisions that shaped the current architecture. Read these to un
 - [ADR 0002 — Redis Streams as cross-process broker backend](./adr/0002-redis-streams-for-cross-process.md)
 - [ADR 0003 — pyright → basedpyright with `reportAny`](./adr/0003-pyright-to-basedpyright.md)
 - [ADR 0004 — Bradley-Terry ranking over simple win-rate](./adr/0004-bradley-terry-ranking.md)
-- [ADR 0005 — Vite + React + Tailwind for arena UI](./adr/0005-vite-react-tailwind-for-arena-ui.md)
+- [ADR 0005 — Vite + React + Tailwind for arena UI](./adr/0005-vite-react-tailwind-for-arena-ui.md) *(partially superseded by 0006)*
+- [ADR 0006 — TanStack Router + Query and React Aria](./adr/0006-tanstack-router-query-react-aria.md)
 
 ---
 
@@ -162,6 +173,21 @@ Short (~1 page) decisions that shaped the current architecture. Read these to un
 - [Debugging a stuck fork or replay](./runbooks/debug-stuck-fork.md) — what to check, in what order.
 - [Windows VM agent bring-up](./runbooks/windows-vm-agent-bringup.md) — fast path + symptom matrix. Full first-time setup is in [deployment-guide.md](./deployment-guide.md).
 - [Retrain the detection model (v6 / YOLO26n)](./runbooks/retrain-detection-v6.md) — end-to-end retraining loop: sprite extraction, real-terrain backgrounds, synthetic generation, cvat.ai annotation, Lambda training, deploy.
+- [Record the baseline experiments](./runbooks/baseline-experiments.md) — running 3–5 full games with the current stack into `experiments/results.tsv`.
+
+---
+
+## Run reviews
+
+Post-mortems of individual game runs — what the agent actually did, where it went wrong, and the resulting TODOs.
+
+- [2026-07-11 run 1](./run-reviews/2026-07-11-run1.md) — first post-refactor VM run; full findings and action list.
+
+---
+
+## Reference
+
+- [gameplay.md](./gameplay.md) — deployment topology and the gameplay data flow in brief; the diagram source is [gameplay-flow.mmd](./gameplay-flow.mmd).
 
 ---
 

@@ -8,6 +8,8 @@ Real screenshots are labeled in CVAT, exported in COCO format, converted to YOLO
 
 </aside>
 
+> **Also see [Chapter 24 — Detection Training Tracker](./24-training-tracker.md).** The CVAT loop described here is still how bulk annotation gets done, but the in-repo tracker now owns *dataset visibility* (per-class coverage) and *incremental review* (approve/correct model predictions in the browser). Reach for CVAT when labeling a fresh batch from scratch; reach for the tracker to see what's missing, and to review model-proposed boxes one at a time.
+
 ## 9.1 The Labeling Workflow
 
 ```
@@ -155,13 +157,30 @@ After manual correction in CVAT, `integrate()` copies the corrected labels into 
 
 ## 9.7 Current Dataset Scale
 
+As of the `v9` build (`packages/detection/src/training_data_v9_slim/`):
+
 | Source | Train | Val | Total |
 |--------|-------|-----|-------|
-| Synthetic | 2,400 | 600 | 3,000 |
-| Real (labeled) | 50 | 8 | 58 |
-| **Total** | **2,450** | **608** | **3,058** |
+| Synthetic (`img_*`) | 2,400 | 600 | 3,000 |
+| Real (`real_*`, incl. duplicates) | 1,870 | 32 | 1,902 |
+| **Total** | **4,270** | **632** | **4,902** |
 
-220 raw screenshots exist in `packages/detection/src/real_screenshots/raw/`. 58 have been labeled in CVAT so far.
+The real-image row needs a caveat: those 1,902 files come from **219 distinct screenshots**. Train-side real images are oversampled 10× (187 distinct stems × 10, carrying a `__dupN` filename suffix); val is not oversampled (32 distinct, 32 files). Labeling has progressed from 58 screenshots at the v5/v6 era to 219 of the 220 raw captures in `packages/detection/src/real_screenshots/raw/`.
+
+<aside class="concept" data-title="Why duplicate real images instead of reweighting the loss?">
+
+Real images are outnumbered ~13:1 by synthetic ones here. Left alone, the gradient is dominated by synthetic data whose appearance the model already fits easily — and the real screenshots, which are the *only* samples drawn from the deployment distribution, contribute a rounding error to each epoch.
+
+Two standard fixes:
+
+1. **Weight the loss** per sample by source. Principled, but Ultralytics' training loop has no per-sample weight hook — you'd be patching the loss function and maintaining that patch across upgrades.
+2. **Duplicate the files** so the sampler draws them more often. Crude, costs disk, and shows up as inflated image counts that mislead anyone reading the dataset stats (exactly the confusion this table's caveat exists to prevent).
+
+We take (2) because it's zero-code and framework-agnostic. The important detail is that duplication is applied to **train only**. Duplicating validation images would be actively harmful: it doesn't change which distinct images are measured, but it re-weights the val metric toward the duplicated ones, so your reported mAP drifts from the mAP on real, distinct data. Any oversampling scheme has the same rule — **resample the training set, never the evaluation set.**
+
+</aside>
+
+Live per-class coverage — including which classes have *zero* real examples — is served by the training tracker's `/stats` endpoint and its `/training/coverage` page ([Chapter 24](./24-training-tracker.md)), which is more current than any table checked into a document.
 
 ---
 
@@ -171,9 +190,11 @@ After manual correction in CVAT, `integrate()` copies the corrected labels into 
 - Automatic COCO-to-YOLO conversion with name-based class mapping
 - All data sources use classes.yaml IDs directly (no remapping needed for v5+ synthetic data)
 - Active learning scores unlabeled images by model uncertainty
+- Coverage and incremental review now live in the [training tracker](./24-training-tracker.md); CVAT remains the bulk-annotation tool
 
 ## Related Topics
 
 - [Chapter 8: Training Pipeline](./08-training-pipeline.md) -- synthetic data generation and YOLO training
 - [Chapter 13: Class Schema Evolution](../part5-operations/13-class-schema-evolution.md) -- schema history and unified class IDs
 - [Chapter 7: Detector Architecture](./07-detector-architecture.md) -- how the trained model runs at inference time
+- [Chapter 24: Detection Training Tracker](./24-training-tracker.md) -- coverage stats and in-browser prelabel review
