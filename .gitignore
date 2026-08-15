@@ -18,7 +18,10 @@ coverage.xml
 .vscode/
 .idea/
 .DS_Store
+# Real env files stay out; the documented template is tracked (same idiom as the
+# basedpyright baseline above). `.env` itself is covered by the bare rule at the top.
 .env.*
+!.env.example
 
 # Logs / debug captures (any pattern at repo root or nested)
 logs.*

@@ -101,4 +101,4 @@ Persistence model: AOF (append-only file). Good for crash recovery, bad if you d
 - Broker impl: `packages/evaluation/src/redis_broker.py`.
 - Factory + env-var read: `packages/evaluation/src/broker_factory.py`.
 - Healthcheck + compose config: `docker-compose.yml` (Redis service starts at line 155).
-- Compose env-var template: `env.example` (look for `REDIS_PASSWORD`).
+- Compose env-var template: `.env.example` (look for `REDIS_PASSWORD`).

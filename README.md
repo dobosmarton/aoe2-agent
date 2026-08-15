@@ -78,16 +78,16 @@ detection training needs ultralytics) are declared on each package's own
 
 The project reads configuration from environment variables. For local development we keep
 them in a gitignored `.env` file (loaded by `docker compose` automatically, and by the
-agent when launched via `just agent`). A documented template lives at `env.example`.
+agent when launched via `just agent`). A documented template lives at `.env.example`.
 
 ### Quick start
 
 ```bash
-cp env.example .env        # then edit .env and fill in the values below
+cp .env.example .env        # then edit .env and fill in the values below
 ```
 
 At minimum, set `AOE2_LLM_API_KEY` — that's all the **gameplay agent** needs. Every other
-variable in `env.example` is for the **Synthetic Arena infrastructure** (Langfuse + MinIO +
+variable in `.env.example` is for the **Synthetic Arena infrastructure** (Langfuse + MinIO +
 ClickHouse + Redis + Postgres) and is only consumed by `just arena-infra-up`. If you're
 not running the arena stack yet, leaving those blank is fine.
 
@@ -196,11 +196,11 @@ secrets. **Never commit the populated `.env`** (it's gitignored).
 | `LANGFUSE_DB_PASSWORD` | `openssl rand -base64 24 \| tr -d '=+/'` | Postgres password (no special chars; ends up in a `DATABASE_URL`) |
 | `CLICKHOUSE_PASSWORD` | `openssl rand -base64 24 \| tr -d '=+/'` | ClickHouse `default` user password |
 | `REDIS_PASSWORD` | `openssl rand -base64 24 \| tr -d '=+/'` | Redis AUTH password |
-| `MINIO_ROOT_USER` | Pick a username (default in `env.example`: `arena`) | MinIO admin user |
+| `MINIO_ROOT_USER` | Pick a username (default in `.env.example`: `arena`) | MinIO admin user |
 | `MINIO_ROOT_PASSWORD` | `openssl rand -base64 24 \| tr -d '=+/'` | Min 8 chars; MinIO rejects shorter |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Leave as `http://localhost:4318` | Where the native agent sends OTLP spans |
 
-**One-shot generator** — paste this once after copying `env.example` to `.env`, then fill the
+**One-shot generator** — paste this once after copying `.env.example` to `.env`, then fill the
 output back into `.env` (or pipe directly with a script of your choosing):
 
 ```bash
