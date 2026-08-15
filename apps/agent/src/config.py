@@ -2,11 +2,18 @@
 
 import os
 from pathlib import Path
-from typing import Literal
+from typing import Final, Literal, get_args
 
 from pydantic import BaseModel
 
 EffortLevel = Literal["low", "medium", "high"]  # Sonnet 4.6 rejects xhigh/max
+WireName = Literal["anthropic", "openai", "zen"]
+
+# The one credential, whichever vendor is serving.
+KEY_ENV = "AOE2_LLM_API_KEY"
+WIRE_ENV = "AOE2_LLM_WIRE"
+# Derived from the Literal so the valid set is written once.
+_WIRES: Final[tuple[WireName, ...]] = get_args(WireName)
 
 
 def _parse_optional_int(value: str | None) -> int | None:
@@ -23,6 +30,22 @@ def _parse_effort(value: str | None) -> EffortLevel:
     return "low"
 
 
+def _parse_wire(value: str | None) -> WireName:
+    """Parse the wire env var. Missing defaults to openai; an unknown name raises.
+
+    Unlike the other parsers, this one refuses to fall back: a wrong effort costs
+    a knob, a wrong vendor costs a whole run. Config is built at import, so a bad
+    value fails every module that imports it — which is the point.
+    """
+    if value is None or not value.strip():
+        return "openai"
+    normalized = value.strip().lower()
+    if normalized not in _WIRES:
+        expected = ", ".join(repr(wire) for wire in _WIRES)
+        raise ValueError(f"unknown {WIRE_ENV}={value!r}; expected one of {expected}")
+    return normalized
+
+
 class Config(BaseModel):
     """Agent configuration."""
 
@@ -30,21 +53,27 @@ class Config(BaseModel):
     screenshot_quality: int = 85  # JPEG quality (1-100)
 
     # LLM settings
-    anthropic_api_key: str = ""
-    model: str = "claude-sonnet-4-6"  # Executor: better instruction following
+    llm_wire: WireName = "openai"  # AOE2_LLM_WIRE; each adapter has its own endpoint
+    # Empty means "use the adapter's own endpoint" — only set this to reach a
+    # non-default host (a staging gateway, a self-hosted proxy).
+    llm_base_url: str = ""  # AOE2_LLM_BASE_URL
+    llm_api_key: str = ""  # AOE2_LLM_API_KEY — the only credential
+    model: str = "gpt-5.6-luna"  # Executor
     max_tokens: int = 1536
     max_tool_iterations: int = 7  # Max tool calls per game turn in agentic loop
-    executor_effort: EffortLevel = "low"  # output_config effort for the executor tool loop
-    strategist_model: str = "claude-sonnet-4-6"  # Strategist: deeper reasoning
+    executor_effort: EffortLevel = "low"  # reasoning effort for the executor tool loop
+    strategist_model: str = "gpt-5.6-luna"  # Strategist: deeper reasoning
     strategist_interval: int = 10  # Run strategist every N turns
+    # Post-game memory extraction and prompt mutation: a cheap model is enough.
+    memory_model: str = "gpt-5.6-luna"  # AOE2_MEMORY_MODEL
     # Resource bar is read locally (Claude vision dropped). Backend: rapidocr
     # (pip-only, runs on onnxruntime) | tesseract (needs binary) | template.
     ocr_backend: str = "rapidocr"  # AOE2_OCR_BACKEND
 
     # Determinism knobs (Phase 3). Pin model snapshots via AOE2_MODEL /
-    # AOE2_STRATEGIST_MODEL to a dated form (e.g. claude-sonnet-4-6-2026-XX-XX)
-    # rather than the floating family alias for reproducible runs.
-    temperature: float = 0.0  # Anthropic Messages API temperature (0.0 = lowest variance)
+    # AOE2_STRATEGIST_MODEL to a dated form rather than the floating family
+    # alias for reproducible runs.
+    temperature: float = 0.0  # sampling temperature (0.0 = lowest variance)
     seed: int | None = None  # Local RNG seed; None = OS entropy (today's behavior)
 
     # Detection settings
@@ -84,11 +113,14 @@ class Config(BaseModel):
     def from_env(cls) -> "Config":
         """Load configuration from environment variables."""
         return cls(
-            anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
-            model=os.environ.get("AOE2_MODEL", "claude-sonnet-4-6"),
+            llm_wire=_parse_wire(os.environ.get("AOE2_LLM_WIRE")),
+            llm_base_url=os.environ.get("AOE2_LLM_BASE_URL", ""),
+            llm_api_key=os.environ.get(KEY_ENV, ""),
+            model=os.environ.get("AOE2_MODEL", "gpt-5.6-luna"),
             executor_effort=_parse_effort(os.environ.get("AOE2_EXECUTOR_EFFORT")),
-            strategist_model=os.environ.get("AOE2_STRATEGIST_MODEL", "claude-sonnet-4-6"),
+            strategist_model=os.environ.get("AOE2_STRATEGIST_MODEL", "gpt-5.6-luna"),
             strategist_interval=int(os.environ.get("AOE2_STRATEGIST_INTERVAL", "10")),
+            memory_model=os.environ.get("AOE2_MEMORY_MODEL", "gpt-5.6-luna"),
             ocr_backend=os.environ.get("AOE2_OCR_BACKEND", "rapidocr"),
             loop_delay=float(os.environ.get("AOE2_LOOP_DELAY", "0.3")),
             save_screenshots=os.environ.get("AOE2_SAVE_SCREENSHOTS", "true").lower() == "true",

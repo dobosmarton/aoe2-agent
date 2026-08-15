@@ -1,13 +1,15 @@
-"""Claude (Anthropic) LLM provider for AoE2 Agent."""
+"""Executor provider: turns game context into actions.
 
-import json
+Holds the game logic — prompt assembly, the composite tool handlers, the
+single-shot/tool-loop routing — and delegates every vendor detail to a
+`ChatWire`, selected by `AOE2_LLM_WIRE`.
+"""
+
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, cast
 
-import anthropic
 import structlog
-from anthropic.types import OutputConfigParam, ToolUseBlock
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
@@ -25,8 +27,23 @@ from ..executor import (
 )
 from ..models import LLMResponse, Observations, validate_actions
 from ..villager_roles import select_worker
-from .base import LLMResult
-from .claude_tools import _ACTION_TOOLS
+from .action_tools import _ACTION_TOOLS
+from .base import (
+    AssistantTurn,
+    ChatRequest,
+    ChatWire,
+    LLMResult,
+    SystemBlock,
+    TokenUsage,
+    ToolCall,
+    ToolOutcome,
+    ToolResultsTurn,
+    Turn,
+    UserTurn,
+    text_of_blocks,
+)
+from .pricing import cost_usd
+from .wire_factory import make_wire
 
 # Camera "go to work site" hotkey per source job (see prompts/hotkeys.md): jumps the
 # view to the drop-off camp so the workers of that job are on screen to pick from.
@@ -73,13 +90,6 @@ def _target_right_click(inp: dict, intent: object) -> dict[str, object] | None:
     return {"type": "right_click", "target_class": inp["target_class"], "intent": intent}
 
 
-# Pricing per million tokens (claude-sonnet-4-6)
-_PRICE_INPUT = 3.00
-_PRICE_OUTPUT = 15.00
-_PRICE_CACHE_READ = 0.30
-_PRICE_CACHE_WRITE = 3.75
-
-
 log = structlog.stdlib.get_logger()
 
 # Load system prompt from file
@@ -95,27 +105,35 @@ except ImportError:
     log.debug("game_knowledge_not_available", message="Running without dynamic context injection")
 
 
-class ClaudeProvider:
-    """Anthropic Claude provider implementation."""
+class ExecutorProvider:
+    """Turns game context into actions, over whichever wire is configured."""
 
     def __init__(
         self,
         api_key: str | None = None,
         model: str | None = None,
         use_dynamic_context: bool = True,
+        wire: ChatWire | None = None,
     ) -> None:
         """
-        Initialize Claude provider.
+        Initialize the executor provider.
 
         Args:
-            api_key: Anthropic API key (defaults to config/env)
+            api_key: Credential for the default wire (defaults to config)
             model: Model to use (defaults to config)
             use_dynamic_context: Whether to use dynamic context injection from game database
+            wire: Transport to talk to the model over. Defaults to whatever
+                `AOE2_LLM_WIRE` selects. Pass one explicitly to run the same
+                game logic against another vendor.
         """
-        self.api_key = api_key or config.anthropic_api_key
+        self.api_key = api_key or config.llm_api_key
         self.model = model or config.model
-        # Use AsyncAnthropic with built-in retry (429/5xx with exponential backoff)
-        self.client = anthropic.AsyncAnthropic(api_key=self.api_key, max_retries=3)
+        self.wire: ChatWire = wire or make_wire(
+            config.llm_wire,
+            model=self.model,
+            api_key=self.api_key,
+            base_url=config.llm_base_url,
+        )
         self._core_prompt: str | None = None
         self._age_prompts: dict[str, str] = {}
         # Titles of cross-game memories loaded into the cached system block.
@@ -124,10 +142,7 @@ class ClaudeProvider:
         self.loaded_memory_titles: list[str] = []
         self.use_dynamic_context = use_dynamic_context and GAME_KNOWLEDGE_AVAILABLE
         self._game_db: GameKnowledge | None = None
-        self._total_input_tokens: int = 0
-        self._total_output_tokens: int = 0
-        self._total_cache_read_tokens: int = 0
-        self._total_cache_write_tokens: int = 0
+        self._usage = TokenUsage()
 
         if self.use_dynamic_context:
             try:
@@ -190,11 +205,13 @@ class ClaudeProvider:
             else:
                 log.debug("age_prompt_missing", age=age_name)
 
-    def get_system_prompt(self, age: str = "Dark Age") -> list[dict]:
-        """Return system prompt as a two-block list for optimal caching.
+    def get_system_prompt(self, age: str = "Dark Age") -> tuple[SystemBlock, ...]:
+        """Return the system prompt as two cacheable blocks.
 
         Block 1 (core + hotkeys) is stable across all ages — always cached.
-        Block 2 (age-specific) changes only on age transitions (3 times per game).
+        Block 2 (age-specific) changes only on age transitions (3 times per game),
+        so every turn within an age reads it back instead of re-prefilling.
+
         """
         self._load_prompts()
 
@@ -202,25 +219,10 @@ class ClaudeProvider:
         age_key = age.split()[0].lower() if age else "dark"
         age_content = self._age_prompts.get(age_key, self._age_prompts.get("dark", ""))
 
-        blocks = [
-            {
-                "type": "text",
-                "text": self._core_prompt,
-                "cache_control": {"type": "ephemeral"},
-            },
-        ]
+        blocks = [SystemBlock(text=self._core_prompt or "", cacheable=True)]
         if age_content:
-            # Cache the age block too: it changes only on age-ups (<=3 per game),
-            # so every turn within an age reads it from cache instead of re-prefilling.
-            blocks.append(
-                {
-                    "type": "text",
-                    "text": age_content,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            )
-
-        return blocks
+            blocks.append(SystemBlock(text=age_content, cacheable=True))
+        return tuple(blocks)
 
     @staticmethod
     def _extract_age(context: str) -> str:
@@ -313,30 +315,28 @@ class ClaudeProvider:
 
     ENTITY_RESULT_LIMIT = 20
 
-    def _entity_snapshot(self) -> list[dict]:
+    def _entity_snapshot(self) -> tuple[dict[str, object], ...]:
         """Return truncated entity list for tool results."""
-        return [
+        return tuple(
             {"id": e.get("id", ""), "class": e.get("class", ""), "center": e.get("center", [])}
             for e in get_detected_entities()[: self.ENTITY_RESULT_LIMIT]
-        ]
+        )
 
     def _make_tool_result(
         self,
-        block: ToolUseBlock,
+        block: ToolCall,
         success: bool,
         detail: str,
         *,
         include_entities: bool = False,
-    ) -> dict:
-        """Build the tool_result dict returned to Claude."""
-        result_data: dict[str, object] = {"success": success, "detail": detail}
-        if include_entities:
-            result_data["entities"] = self._entity_snapshot()
-        return {
-            "type": "tool_result",
-            "tool_use_id": block.id,
-            "content": json.dumps(result_data),
-        }
+    ) -> ToolOutcome:
+        """Package one tool's result; the wire frames it for its own API."""
+        return ToolOutcome(
+            tool_call_id=block.id,
+            success=success,
+            detail=detail,
+            entities=self._entity_snapshot() if include_entities else (),
+        )
 
     @staticmethod
     def _dump_actions(result: LLMResponse) -> list[dict[str, object]]:
@@ -367,10 +367,10 @@ class ClaudeProvider:
         The loop already executed the actions, so actions_already_executed is
         True and the game loop only records them.
         """
-        actions = ClaudeProvider._dump_actions(result)
+        actions = ExecutorProvider._dump_actions(result)
         return LLMResult(
             reasoning=result.reasoning,
-            observations=ClaudeProvider._observations_dict(result),
+            observations=ExecutorProvider._observations_dict(result),
             actions=actions,
             actions_already_executed=True,
             success_count=result._success_count if result._success_count else len(actions),
@@ -387,8 +387,8 @@ class ClaudeProvider:
         """
         return LLMResult(
             reasoning=result.reasoning,
-            observations=ClaudeProvider._observations_dict(result),
-            actions=ClaudeProvider._dump_actions(result),
+            observations=ExecutorProvider._observations_dict(result),
+            actions=ExecutorProvider._dump_actions(result),
             actions_already_executed=False,
         )
 
@@ -419,25 +419,25 @@ class ClaudeProvider:
 
     async def _run_composite(
         self,
-        block: ToolUseBlock,
+        block: ToolCall,
         name: str,
         steps: list[dict],
         *,
         include_entities: bool = True,
-    ) -> tuple[dict, dict]:
+    ) -> tuple[dict, ToolOutcome]:
         """Run a composite's steps and package the (action_dict, tool_result) pair.
 
         The tail every composite handler shares: execute the steps, echo the tool
         input back as the recorded action dict, wrap success/detail for Claude.
         """
         success, detail = await self._run_steps(name, steps)
-        action_dict = {"type": name, **block.input}
+        action_dict = {"type": name, **block.arguments}
         tool_result = self._make_tool_result(
             block, success, detail, include_entities=include_entities
         )
         return action_dict, tool_result
 
-    async def _execute_build(self, block: ToolUseBlock) -> tuple[dict, dict]:
+    async def _execute_build(self, block: ToolCall) -> tuple[dict, ToolOutcome]:
         """Composite: press . (rescan) → q (econ menu) → building_key → place.
 
         Placement is resolved by the executor AT CLICK TIME, after the "."
@@ -445,7 +445,7 @@ class ClaudeProvider:
         because they were computed from the pre-jump frame (run 8, F-33: the
         mill rose wherever the idle villager stood).
         """
-        inp = block.input
+        inp = block.arguments
         intent = str(inp.get("intent", "Build"))
         building_key = cast("str", inp["building_key"])
         rejection = build_rejection(building_key, intent)
@@ -455,19 +455,19 @@ class ClaudeProvider:
         steps = build_steps(building_key, intent)
         return await self._run_composite(block, "build", steps)
 
-    def _refuse_raw_send(self, block: ToolUseBlock, name: str) -> tuple[dict, dict]:
+    def _refuse_raw_send(self, block: ToolCall, name: str) -> tuple[dict, ToolOutcome]:
         """Failure result for a send composite that gave only raw coordinates."""
-        return {"type": name, **block.input}, self._make_tool_result(
+        return {"type": name, **block.arguments}, self._make_tool_result(
             block, False, STALE_COORDS_DETAIL
         )
 
-    async def _execute_send_villager(self, block: ToolUseBlock) -> tuple[dict, dict]:
+    async def _execute_send_villager(self, block: ToolCall) -> tuple[dict, ToolOutcome]:
         """Composite: press . (with rescan) → right_click target.
 
         The "." press moves the camera, so we rescan to get fresh entity
         positions before right-clicking. Raw x/y are refused (F-33).
         """
-        inp = block.input
+        inp = block.arguments
         intent = inp.get("intent", "Send villager")
         right_click = _target_right_click(inp, intent)
         if right_click is None:
@@ -483,13 +483,13 @@ class ClaudeProvider:
         ]
         return await self._run_composite(block, "send_villager", steps)
 
-    async def _execute_send_all_idle(self, block: ToolUseBlock) -> tuple[dict, dict]:
+    async def _execute_send_all_idle(self, block: ToolCall) -> tuple[dict, ToolOutcome]:
         """Composite: Shift-. (select ALL idle) → right_click target.
 
         Dispatches every idle villager in one action. Mirrors send_villager but
         uses the select-all hotkey so no idle count is needed.
         """
-        inp = block.input
+        inp = block.arguments
         intent = inp.get("intent", "Send all idle villagers")
         right_click = _target_right_click(inp, intent)
         if right_click is None:
@@ -506,20 +506,20 @@ class ClaudeProvider:
         ]
         return await self._run_composite(block, "send_all_idle", steps)
 
-    async def _execute_queue_villager(self, block: ToolUseBlock) -> tuple[dict, dict]:
+    async def _execute_queue_villager(self, block: ToolCall) -> tuple[dict, ToolOutcome]:
         """Composite: one villager order through the executor's ledger gate.
 
         A single `queue_villager` action (not raw h+q presses) so the order
         target and food gate apply to LLM-initiated queues too — raw presses
         were invisible to the brake and over-ordered 40 villagers (F-38).
         """
-        inp = block.input
+        inp = block.arguments
         steps: list[dict] = [
             {"type": "queue_villager", "intent": str(inp.get("intent", "Queue villager"))}
         ]
         return await self._run_composite(block, "queue_villager", steps, include_entities=False)
 
-    async def _execute_reassign_villager(self, block: ToolUseBlock) -> tuple[dict, dict]:
+    async def _execute_reassign_villager(self, block: ToolCall) -> tuple[dict, ToolOutcome]:
         """Composite: jump to a work site → pick a working villager → build.
 
         Two phases because the worker's screen position only exists AFTER the camera
@@ -528,7 +528,7 @@ class ClaudeProvider:
         velocities are available), and select→build→place. Falls back to selecting
         the highest-confidence villager on screen if the job model finds none.
         """
-        inp = block.input
+        inp = block.arguments
         intent = str(inp.get("intent", "Reassign villager"))
         # LLM boundary: the tool schema restricts from_job to the resource kinds, so
         # narrow the raw string here; an off-schema value keeps today's behavior
@@ -601,18 +601,18 @@ class ClaudeProvider:
         "reassign_villager": "_execute_reassign_villager",
     }
 
-    async def _execute_tool_call(self, block: ToolUseBlock) -> tuple[dict, dict]:
+    async def _execute_tool_call(self, block: ToolCall) -> tuple[dict, ToolOutcome]:
         """Execute a single tool call and build the result payload."""
         tool_name = block.name
         handler_name = self._COMPOSITE_HANDLERS.get(tool_name)
         if handler_name:
             handler = cast(
-                "Callable[[ToolUseBlock], Awaitable[tuple[dict, dict]]]",
+                "Callable[[ToolCall], Awaitable[tuple[dict, ToolOutcome]]]",
                 getattr(self, handler_name),
             )
             return await handler(block)
 
-        block_input = cast("dict[str, object]", block.input)
+        block_input = cast("dict[str, object]", block.arguments)
         action_dict = {"type": tool_name, **block_input}
         result = await execute_action(action_dict)
         intent = block_input.get("intent", "")
@@ -628,90 +628,52 @@ class ClaudeProvider:
         )
         return action_dict, tool_result
 
-    @staticmethod
-    def _apply_moving_cache_breakpoint(messages: list[dict]) -> None:
-        """Mark the latest message so the conversation prefix hits the cache.
-
-        Strips any prior message-level breakpoint, then caches the last content
-        block of the most recent message. Only dict blocks are touched —
-        assistant turns are appended as SDK content objects, which must not be
-        mutated. One moving breakpoint keeps the total at three (two system
-        blocks plus this), within the four-breakpoint API limit.
-        """
-        for msg in messages:
-            content = msg["content"]
-            if isinstance(content, list):
-                for block in content:
-                    if isinstance(block, dict):
-                        block.pop("cache_control", None)
-        last_content = messages[-1]["content"]
-        if isinstance(last_content, list) and last_content and isinstance(last_content[-1], dict):
-            last_content[-1]["cache_control"] = {"type": "ephemeral"}
+    def _record_usage(self, usage: TokenUsage) -> None:
+        """Fold one call's tokens into the running per-game total."""
+        self._usage = self._usage + usage
 
     async def _call_api(self, content: list[dict], age: str = "Dark Age") -> LLMResponse:
-        """Call Claude API in an agentic tool loop.
+        """Run the agentic tool loop.
 
-        Each iteration: model calls one tool → we execute it → feed result
-        back → model calls next tool. Loop until model says end_turn or we
-        hit max_tool_iterations. The model receives fresh entity positions
+        Each iteration: model calls one tool → we execute it → feed the result
+        back → model calls the next tool. Loop until the model ends its turn or
+        we hit max_tool_iterations. The model receives fresh entity positions
         after every camera-moving action.
         """
-        messages: list[dict] = [{"role": "user", "content": content}]
+        turns: list[Turn] = [UserTurn(text=text_of_blocks(content))]
         executed_actions: list[dict] = []
         success_count = 0
         reasoning_parts: list[str] = []
-        system_prompt = self.get_system_prompt(age)
-        output_config: OutputConfigParam = {"effort": config.executor_effort}
+        system = self.get_system_prompt(age)
 
         for _ in range(config.max_tool_iterations):
-            # Cache the conversation prefix so iterations 2..N read it back
-            # instead of re-prefilling the whole growing message list each call.
-            self._apply_moving_cache_breakpoint(messages)
-            # The anthropic SDK types these args with strict TypedDicts
-            # (MessageParam, ToolUnionParam, etc.). Our dicts are runtime-
-            # equivalent; matching the TypedDicts everywhere upstream is more
-            # churn than the safety buys, so we tell pyright to skip these
-            # three argument-type checks specifically.
-            response = await self.client.messages.create(
-                model=self.model,
-                max_tokens=config.max_tokens,
-                temperature=config.temperature,
-                system=system_prompt,  # pyright: ignore[reportArgumentType]
-                messages=messages,  # pyright: ignore[reportArgumentType]
-                tools=_ACTION_TOOLS,  # pyright: ignore[reportArgumentType]
-                output_config=output_config,
+            reply = await self.wire.tool_turn(
+                ChatRequest(
+                    system=system,
+                    turns=tuple(turns),
+                    max_tokens=config.max_tokens,
+                    temperature=config.temperature,
+                    effort=config.executor_effort,
+                ),
+                _ACTION_TOOLS,
             )
+            self._record_usage(reply.usage)
+            if reply.text:
+                reasoning_parts.append(reply.text)
 
-            # Accumulate token usage (cache fields may be None when caching is off)
-            usage = response.usage
-            self._total_input_tokens += usage.input_tokens
-            self._total_output_tokens += usage.output_tokens
-            self._total_cache_read_tokens += getattr(usage, "cache_read_input_tokens", 0) or 0
-            self._total_cache_write_tokens += getattr(usage, "cache_creation_input_tokens", 0) or 0
-
-            # Single pass: extract text and tool_use blocks
-            tool_blocks = []
-            for block in response.content:
-                if block.type == "text" and block.text.strip():
-                    reasoning_parts.append(block.text.strip())
-                elif block.type == "tool_use":
-                    tool_blocks.append(block)
-
-            if response.stop_reason != "tool_use":
+            if not reply.wants_more_tools:
                 break
 
-            # Execute each tool call and collect results
-            messages.append({"role": "assistant", "content": response.content})
-            tool_results = []
-            for block in tool_blocks:
-                action_dict, tool_result = await self._execute_tool_call(block)
+            turns.append(AssistantTurn(text=reply.text, tool_calls=reply.tool_calls))
+            outcomes: list[ToolOutcome] = []
+            for call in reply.tool_calls:
+                action_dict, outcome = await self._execute_tool_call(call)
                 executed_actions.append(action_dict)
-                tool_results.append(tool_result)
-                parsed_content = cast("object", json.loads(tool_result["content"]))
-                if isinstance(parsed_content, dict) and parsed_content.get("success"):
+                outcomes.append(outcome)
+                if outcome.success:
                     success_count += 1
 
-            messages.append({"role": "user", "content": tool_results})
+            turns.append(ToolResultsTurn(outcomes=tuple(outcomes)))
 
         # Validate standard actions; keep composite actions as-is (already executed).
         _COMPOSITE_NAMES = self._COMPOSITE_NAMES
@@ -736,26 +698,20 @@ class ClaudeProvider:
         "single wait action if you genuinely intend to do nothing this turn."
     )
 
-    async def _parse_single_shot(self, messages: list[dict[str, object]], age: str) -> LLMResponse:
+    async def _parse_single_shot(self, turns: tuple[Turn, ...], age: str) -> LLMResponse:
         """One structured-output call; accumulates token usage."""
-        # parse() merges output_format into output_config.format, so we get
-        # structured output and the effort knob in a single call.
-        output_config: OutputConfigParam = {"effort": config.executor_effort}
-        response = await self.client.messages.parse(  # pyright: ignore[reportAttributeAccessIssue]
-            model=self.model,
-            max_tokens=config.max_tokens,
-            temperature=config.temperature,
-            system=self.get_system_prompt(age),  # pyright: ignore[reportArgumentType]
-            messages=messages,  # pyright: ignore[reportArgumentType]
-            output_format=LLMResponse,
-            output_config=output_config,
+        parsed, usage = await self.wire.parse_structured(
+            ChatRequest(
+                system=self.get_system_prompt(age),
+                turns=turns,
+                max_tokens=config.max_tokens,
+                temperature=config.temperature,
+                effort=config.executor_effort,
+            ),
+            LLMResponse,
         )
-        usage = response.usage
-        self._total_input_tokens += usage.input_tokens
-        self._total_output_tokens += usage.output_tokens
-        self._total_cache_read_tokens += getattr(usage, "cache_read_input_tokens", 0) or 0
-        self._total_cache_write_tokens += getattr(usage, "cache_creation_input_tokens", 0) or 0
-        return cast("LLMResponse", response.parsed_output)
+        self._record_usage(usage)
+        return parsed
 
     async def _call_single_shot(self, content: list[dict], age: str = "Dark Age") -> LLMResult:
         """Fast path for routine turns: one structured-output call, no tool loop.
@@ -767,35 +723,32 @@ class ClaudeProvider:
         A zero-action response gets ONE nudged retry before the game loop's
         hardcoded fallback takes over.
         """
-        messages: list[dict[str, object]] = [{"role": "user", "content": content}]
-        parsed = await self._parse_single_shot(messages, age)
+        turns: tuple[Turn, ...] = (UserTurn(text=text_of_blocks(content)),)
+        parsed = await self._parse_single_shot(turns, age)
         if not parsed.actions:
             log.warning("single_shot_empty_actions_retried", reasoning=parsed.reasoning[:120])
-            messages = [
-                *messages,
-                {"role": "assistant", "content": parsed.reasoning or "(no actions)"},
-                {"role": "user", "content": self._EMPTY_ACTIONS_NUDGE},
-            ]
-            parsed = await self._parse_single_shot(messages, age)
+            turns = (
+                *turns,
+                AssistantTurn(text=parsed.reasoning or "(no actions)"),
+                UserTurn(text=self._EMPTY_ACTIONS_NUDGE),
+            )
+            parsed = await self._parse_single_shot(turns, age)
         return self._serialize_single_shot(parsed)
 
     def _cumulative_cost_usd(self) -> float:
-        """Calculate cumulative API cost across all calls."""
-        return (
-            self._total_input_tokens * _PRICE_INPUT / 1_000_000
-            + self._total_output_tokens * _PRICE_OUTPUT / 1_000_000
-            + self._total_cache_read_tokens * _PRICE_CACHE_READ / 1_000_000
-            + self._total_cache_write_tokens * _PRICE_CACHE_WRITE / 1_000_000
-        )
+        """Cumulative API cost across all calls, priced for the served model."""
+        return cost_usd(self.model, self._usage)
 
     def _log_api_cost(self) -> None:
         """Emit running token and cost totals (shared by both executor paths)."""
         log.info(
             "api_cost",
-            input_tokens=self._total_input_tokens,
-            output_tokens=self._total_output_tokens,
-            cache_read_tokens=self._total_cache_read_tokens,
-            cache_write_tokens=self._total_cache_write_tokens,
+            model=self.wire.model,
+            endpoint=self.wire.endpoint,
+            input_tokens=self._usage.input_tokens,
+            output_tokens=self._usage.output_tokens,
+            cache_read_tokens=self._usage.cache_read_tokens,
+            cache_write_tokens=self._usage.cache_write_tokens,
             cumulative_cost_usd=round(self._cumulative_cost_usd(), 4),
         )
 
@@ -852,11 +805,11 @@ class ClaudeProvider:
             self._log_api_cost()
             return payload
 
-        except anthropic.APIError as e:
-            log.error("claude_api_error", error=str(e))
-            return self._error_response(f"API error: {e}")
         except Exception as e:
-            log.error("claude_error", error=str(e))
+            if self.wire.is_api_error(e):
+                log.error("llm_api_error", error=str(e))
+                return self._error_response(f"API error: {e}")
+            log.error("llm_error", error=str(e))
             return self._error_response(f"Error: {e}")
 
     async def _single_shot_or_tool_loop(self, content: list[dict], age: str) -> LLMResult:
@@ -873,7 +826,9 @@ class ClaudeProvider:
         """
         try:
             return await self._call_single_shot(content, age=age)
-        except anthropic.BadRequestError as e:
+        except Exception as e:
+            if not self.wire.is_schema_too_large(e):
+                raise
             log.warning("single_shot_bad_request_fallback_tool_loop", error=str(e))
             result = await self._call_api(content, age=age)
             return self._serialize_response(result)

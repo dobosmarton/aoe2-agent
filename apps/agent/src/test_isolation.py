@@ -88,29 +88,29 @@ def _write_fixture_memory(memories_dir: Path, memory: dict, index: int) -> None:
 
 @contextlib.contextmanager
 def _mock_executor() -> Iterator[None]:
-    """Patch execute_action in both the canonical module and the import in claude.py.
+    """Patch execute_action in both the canonical module and the import in executor_provider.py.
 
     The executor's tool loop calls execute_action for every action; without
     mocking it would invoke pyautogui (real clicks). We replace it with a
     success-returning no-op so the LLM's behavior loop is preserved.
     """
     import gameplay_agent.executor as ex
-    import gameplay_agent.providers.claude as claude_mod
+    import gameplay_agent.providers.executor_provider as executor_mod
 
     real_canonical = ex.execute_action
-    real_in_claude = claude_mod.execute_action
+    real_in_claude = executor_mod.execute_action
 
     async def fake_execute_action(action_dict: dict) -> ActionResult:
         return ex.ActionResult(success=True, detail="ok (eval)")
 
     ex.execute_action = fake_execute_action
-    claude_mod.execute_action = fake_execute_action
+    executor_mod.execute_action = fake_execute_action
 
     try:
         yield
     finally:
         ex.execute_action = real_canonical
-        claude_mod.execute_action = real_in_claude
+        executor_mod.execute_action = real_in_claude
 
 
 def _seed_detected_entities(entities: list[dict]) -> None:

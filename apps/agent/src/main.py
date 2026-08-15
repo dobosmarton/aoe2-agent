@@ -3,12 +3,14 @@
 import argparse
 import asyncio
 import sys
+from typing import get_args
 
 import structlog
 
-from .config import config
+from .config import KEY_ENV, WireName, config
 from .game_loop import game_loop, run_single_iteration
-from .providers import ClaudeProvider
+from .providers import ExecutorProvider
+from .providers.wire_factory import make_wire
 
 # Configure structured logging
 structlog.configure(
@@ -28,24 +30,8 @@ structlog.configure(
 log = structlog.stdlib.get_logger()
 
 
-def create_provider(provider_name: str) -> ClaudeProvider:
-    """Create an LLM provider by name."""
-    providers = {
-        "claude": ClaudeProvider,
-        # Add more providers here as they're implemented
-        # "openai": OpenAIProvider,
-        # "gemini": GeminiProvider,
-    }
-
-    if provider_name not in providers:
-        available = ", ".join(providers.keys())
-        raise ValueError(f"Unknown provider: {provider_name}. Available: {available}")
-
-    return providers[provider_name]()
-
-
 class _AgentArgs(argparse.Namespace):
-    provider: str
+    wire: WireName | None
     test: bool
     iterations: int | None
     overlay: bool
@@ -53,14 +39,20 @@ class _AgentArgs(argparse.Namespace):
 
 async def main_async(args: _AgentArgs) -> None:
     """Async main function."""
-    # Validate API key
-    if not config.anthropic_api_key:
-        log.error("missing_api_key", message="Set ANTHROPIC_API_KEY environment variable")
+    if not config.llm_api_key:
+        log.error("missing_api_key", message=f"Set {KEY_ENV}")
         sys.exit(1)
 
-    # Create provider
-    provider = create_provider(args.provider)
-    log.info("provider_created", provider=args.provider, model=config.model)
+    wire_name: WireName = args.wire or config.llm_wire
+    provider = ExecutorProvider(
+        wire=make_wire(
+            wire_name,
+            model=config.model,
+            api_key=config.llm_api_key,
+            base_url=config.llm_base_url,
+        )
+    )
+    log.info("provider_created", wire=wire_name, model=config.model)
 
     if args.test:
         # Run single iteration for testing
@@ -84,11 +76,11 @@ def main() -> None:
         description="AoE2 LLM Agent - Play Age of Empires 2 using vision LLM"
     )
     parser.add_argument(
-        "--provider",
+        "--wire",
         type=str,
-        default="claude",
-        choices=["claude"],  # Add more as implemented
-        help="LLM provider to use (default: claude)",
+        default=None,
+        choices=list(get_args(WireName)),
+        help="Adapter serving the model (default: AOE2_LLM_WIRE, else openai)",
     )
     parser.add_argument(
         "--test",

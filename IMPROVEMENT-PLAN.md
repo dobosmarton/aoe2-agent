@@ -14,7 +14,7 @@
 | Real training data | Only **187 real train / 32 real val images** (v8), vs 2400 synthetic | `training_data_v8/merge_summary.json` |
 | Map awareness | Viewport-only. **No minimap parsing, no off-screen memory** — an entity scrolled out of view ceases to exist | `detection_phase.py`, docs survey |
 | Villager guidance | Single undifferentiated `villager` class; job inferred by **140px proximity heuristic**; idle count read only as a **badge-presence boolean** | `villager_roles.py`, `resource_ocr.py`, `reactive.py` |
-| Decision layer | Two `claude-sonnet-4-6` calls: executor **every turn** (routine ~2–4s, combat tool-loop up to 20–30s), strategist every 3–10 turns. Text-only, well-cached | `providers/claude.py`, `strategist.py` |
+| Decision layer | Two `claude-sonnet-4-6` calls: executor **every turn** (routine ~2–4s, combat tool-loop up to 20–30s), strategist every 3–10 turns. Text-only, well-cached | `providers/executor_provider.py`, `strategist.py` |
 | Cost | ~$1–3 per 30-turn real game (both roles on Sonnet) | `docs/explorations/eval-virtualbox-ideas.md` |
 | Evaluation | Scenario fixtures + OCR regression exist, but `experiments/results.tsv` is **empty** — no experiment has ever been recorded against the composite score | `experiments/results.tsv` |
 | Hygiene | Version drift: README says served model is v7, `get_detector()` defaults to v6, config/docs say v9. Uncommitted working tree (16 modified files) | detection `README.md` vs `detector.py:852` vs `apps/agent/src/config.py` |

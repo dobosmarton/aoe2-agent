@@ -808,7 +808,7 @@ def build_menu_steps(
     (`auto_placement`) so a camera move earlier in the sequence can't strand it
     on stale coordinates (run 8, F-33: the mill rose wherever the idle villager
     stood). `build_steps` prepends the idle-villager select;
-    `claude.ClaudeProvider._execute_reassign_villager` prepends its own
+    `executor_provider.ExecutorProvider._execute_reassign_villager` prepends its own
     worker-click instead — the menu/place sequence lives in exactly one place.
     """
     return [
@@ -834,7 +834,7 @@ def build_steps(building_key: str, intent: str) -> list[dict[str, object]]:
     build menu → pick the building → place it.
 
     Shared by the single-shot build handler (`_handle_build`), the tool-loop
-    build composite (`claude.ClaudeProvider._execute_build`), and the housed
+    build composite (`executor_provider.ExecutorProvider._execute_build`), and the housed
     fallback, so the steps live in exactly one place. The `.` select re-centers
     the camera on the villager, so it rescans and the placement resolves after
     the jump (F-33).

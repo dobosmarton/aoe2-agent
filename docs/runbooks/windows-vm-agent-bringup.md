@@ -33,7 +33,7 @@ Note that IP; the VM needs it.
 cd %USERPROFILE%\aoe2-llm-arena\agent
 venv\Scripts\activate
 
-set ANTHROPIC_API_KEY=sk-ant-...
+set AOE2_LLM_API_KEY=your-key-here    :: must match AOE2_LLM_WIRE (default: openai)
 set AOE2_DETECTION_HOST=http://192.168.64.1:8420
 :: Optional knobs
 set AOE2_STRATEGIST_INTERVAL=10
@@ -99,7 +99,7 @@ These are accumulated failure modes from many bring-up attempts:
 
 ## Stopping cleanly
 
-`Ctrl+C` in the Command Prompt running the agent. The shutdown handler closes the Anthropic client and flushes any open files. Don't `Ctrl+C` twice — the second one will terminate before the cleanup completes and might leave an orphan AsyncAnthropic connection (harmless, but ugly).
+`Ctrl+C` in the Command Prompt running the agent. The shutdown handler closes the wire's HTTP client and flushes any open files. Don't `Ctrl+C` twice — the second one will terminate before the cleanup completes and might leave an orphan connection (harmless, but ugly).
 
 ## Related
 

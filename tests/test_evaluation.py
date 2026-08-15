@@ -3,7 +3,7 @@
 Three layers:
   1. Assertion DSL unit tests (no LLM, fast)
   2. Fixture YAML lint (no LLM, fast)
-  3. Live scenario runs (requires ANTHROPIC_API_KEY; gated by --runlive)
+  3. Live scenario runs (requires AOE2_LLM_API_KEY; gated by --runlive)
 
 Run modes:
     pytest tests/test_evaluation.py                # layers 1 & 2 only
@@ -536,7 +536,7 @@ def test_fixture_lint(fixture_path):
 @pytest.mark.live
 @pytest.mark.parametrize("fixture_path", _all_fixtures(), ids=lambda p: p.stem)
 def test_scenario_runs(fixture_path):
-    """Run a real scenario through ClaudeProvider. Requires ANTHROPIC_API_KEY.
+    """Run a real scenario through ExecutorProvider. Requires ANTHROPIC_API_KEY.
 
     For variant fixtures, fails if ANY variant fails — the failure message
     aggregates per-variant details so all problems surface at once.
@@ -544,8 +544,8 @@ def test_scenario_runs(fixture_path):
     from gameplay_agent.scenario_runner import _load_dotenv, run_scenario
 
     _load_dotenv()
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        pytest.skip("ANTHROPIC_API_KEY not set")
+    if not os.environ.get("AOE2_LLM_API_KEY"):
+        pytest.skip("AOE2_LLM_API_KEY not set")
 
     results = run_scenario(fixture_path)
 

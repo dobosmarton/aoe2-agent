@@ -45,5 +45,5 @@ just eval-all
 
 - **Only one writer per DuckDB file.** The persister owns the connection RW; readers (cold path, web UI) open read-only. Breaking this triggers DuckDB's cross-connection invariant — the bug that motivated [ADR 0001](../../docs/adr/0001-broker-first-architecture.md).
 - **`Seq` is per-run and totally ordered.** Multiple events can share `Event.t` (turn number); `Seq` resolves their ordering.
-- **No back-edges to `gameplay-agent`.** This was the layering fix that unblocked the workspace split. Anything that needs `ClaudeProvider`, `AgentMemory`, etc. lives in `gameplay-agent` (or `arena` / `arena-web` for things that depend on both).
+- **No back-edges to `gameplay-agent`.** This was the layering fix that unblocked the workspace split. Anything that needs `ExecutorProvider`, `AgentMemory`, etc. lives in `gameplay-agent` (or `arena` / `arena-web` for things that depend on both).
 - **`render()` never touches global `random` state.** Local `random.Random(seed)`. Determinism is the point.

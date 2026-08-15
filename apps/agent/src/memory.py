@@ -238,7 +238,7 @@ class AgentMemory:
         """Build context string for LLM prompt.
 
         NOTE: cross-game memories are NOT loaded here anymore. They live in the
-        cached system prompt block (see ClaudeProvider._load_prompts) so they're
+        cached system prompt block (see ExecutorProvider._load_prompts) so they're
         paid once per game instead of every turn. This method only returns
         per-turn state.
         """

@@ -133,7 +133,7 @@ The chapter's `EXTRACTION_SYSTEM` prompt is the **episodic → semantic transfor
 
 - Reads `prompts/system.md` — the executor system prompt the real game agent uses.
 - Writes git commits to the main repo — `prompts/system.md` changes show up in `git log`.
-- Writes `memories/*.md` — read at agent startup by `ClaudeProvider` (the executor LLM context builder).
+- Writes `memories/*.md` — read at agent startup by `ExecutorProvider` (the executor LLM context builder).
 - Writes `experiments/results.tsv` — the canonical ledger; not source-controlled (it's per-machine experiment state).
 
 ## Related reading

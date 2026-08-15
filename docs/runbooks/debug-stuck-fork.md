@@ -15,7 +15,8 @@ When `POST /forks` returns a `child_run_id` but the run never finishes — no `C
 
 The replay task uses `logger.exception(...)` on any exception (`apps/api/src/forks.py:248`). The trace shows up wherever `uvicorn` is writing logs. Most "stuck" cases turn out to be:
 
-- `anthropic.APIError` — bad/expired `ANTHROPIC_API_KEY`, rate limit, network blip. The replay aborts cleanly; check `/metrics → runs_open` to confirm the run was closed.
+- `openai.APIError` or `anthropic.APIError`, whichever adapter `AOE2_LLM_WIRE` selected — bad/expired `AOE2_LLM_API_KEY`, rate limit, network blip. The replay aborts cleanly; check `/metrics → runs_open` to confirm the run was closed.
+- `ValueError: unknown AOE2_LLM_WIRE=...` at import — a typo in the adapter name. Since `2e2717e` this raises rather than silently running the default, so the process never starts.
 - `pydantic.ValidationError` — LLM returned malformed JSON that the action parser couldn't fix. Rare; usually intermittent.
 - `RuntimeError: run X is not open` — lifecycle ordering bug. Should not happen in shipped code; if you see it, take a stack trace.
 
@@ -49,7 +50,7 @@ A task that's `done()=False` but `get_coro()` shows it parked on a specific `awa
 
 - `await asyncio.sleep(0)` inside the two-tick drain — would mean the loop is wedged; almost never the actual cause.
 - `await self.broker.publish(...)` for Redis — Redis is unreachable or the connection pool is exhausted. Check `redis-cli ping`.
-- `await synth_game_loop(...)` deep inside an `await client.messages.create(...)` — Anthropic API call hanging; usually the SDK times out eventually but can sit for a while.
+- `await synth_game_loop(...)` deep inside the wire's API call (`chat.completions.create` on the `openai`/`zen` adapters, `messages.create` on `anthropic`) — the model call is hanging; usually the SDK times out eventually but can sit for a while.
 
 ## Step 4 — Redis-backend specific checks
 

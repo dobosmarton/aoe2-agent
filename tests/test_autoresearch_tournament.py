@@ -69,7 +69,7 @@ def test_extract_json_array_returns_empty_on_garbage() -> None:
 def test_parse_changes_keeps_only_valid(monkeypatch: pytest.MonkeyPatch) -> None:
     import autoresearch.prompt_mutator as pm
 
-    monkeypatch.setattr(pm.anthropic, "Anthropic", lambda *_a, **_k: object())
+    monkeypatch.setattr(pm, "make_text_completer", lambda *_a, **_k: object())
     mutator = pm.PromptMutator()
     text = (
         '[{"description": "d", "old_text": "o", "new_text": "n", "rationale": "r"},'

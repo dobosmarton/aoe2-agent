@@ -21,7 +21,7 @@ sequenceDiagram
     participant STR as strategist
     participant GM as goal_manager
     participant M as memory
-    participant C as ClaudeProvider
+    participant C as ExecutorProvider
     participant E as executor
 
     loop Every ~1 second

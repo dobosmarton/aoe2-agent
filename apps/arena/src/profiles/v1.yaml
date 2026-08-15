@@ -12,13 +12,13 @@ profiles:
   # the absence of a target prereq list lets the agent keep building
   # past Feudal Age instead of stopping the moment the threshold is hit.
   - name: bare
-    model: claude-haiku-4-5-20251001
+    model: gpt-5.6-luna
     temperature: 0.0
     prompt_variant: bare
 
   # `strategy`: explicit prereq enumeration + "stop spamming villagers"
   # rule. Reaches Feudal at the minimum bar; over-constrains late game.
   - name: strategy
-    model: claude-haiku-4-5-20251001
+    model: gpt-5.6-luna
     temperature: 0.0
     prompt_variant: strategy

@@ -1,3 +1,3 @@
-from .claude import ClaudeProvider
+from .executor_provider import ExecutorProvider
 
-__all__ = ["ClaudeProvider"]
+__all__ = ["ExecutorProvider"]

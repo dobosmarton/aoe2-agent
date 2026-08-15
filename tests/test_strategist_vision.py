@@ -4,7 +4,7 @@ Three layers (mirrors test_evaluation.py):
   1. Assertion DSL unit tests (no LLM, no screenshots, fast)
   2. Vision fixture YAML lint (no LLM, fast)
   3. Live strategist runs against labeled screenshots (requires
-     ANTHROPIC_API_KEY and labeled fixtures; gated by --runlive)
+     AOE2_LLM_API_KEY and labeled fixtures; gated by --runlive)
 
 Add new vision fixtures by:
   1. Drop a screenshot into evaluation/vision_fixtures/screenshots/
@@ -171,8 +171,8 @@ def test_vision_fixture_lint(fixture_path):
 def test_strategist_vision_reading(fixture_path):
     """Run the real strategist against a labeled screenshot."""
     _load_dotenv()
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        pytest.skip("ANTHROPIC_API_KEY not set")
+    if not os.environ.get("AOE2_LLM_API_KEY"):
+        pytest.skip("AOE2_LLM_API_KEY not set")
 
     result = run_vision_check(fixture_path)
     if not result.passed:

@@ -133,7 +133,7 @@ The hotkey file covers navigation, TC commands, villager build menus (economic, 
 
 ## 5.8 Prompt Loading Mechanism
 
-The prompt is loaded from disk in `ClaudeProvider.get_system_prompt(age)`, which returns a **list of cacheable content blocks** (not a single string):
+The prompt is loaded from disk in `ExecutorProvider.get_system_prompt(age)`, which returns a **list of cacheable content blocks** (not a single string):
 
 ```python
 def get_system_prompt(self, age: str = "Dark Age") -> list[dict]:
@@ -165,7 +165,7 @@ For our agent, this turns a 320-line prompt from a per-turn cost into a once-per
 
 </aside>
 
-The `cache_control` markers are set in `providers/claude.py`: two on the system blocks (above), plus a **moving breakpoint** on the most recent message in the executor's tool loop (`_apply_moving_cache_breakpoint`) so iterations 2–7 read the growing conversation from cache rather than re-prefilling it. See [Chapter 4: Provider Pattern](./04-provider-pattern.md) for the exact API call shape.
+The `cache_control` markers are set in `providers/executor_provider.py`: two on the system blocks (above), plus a **moving breakpoint** on the most recent message in the executor's tool loop (`_apply_moving_cache_breakpoint`) so iterations 2–7 read the growing conversation from cache rather than re-prefilling it. See [Chapter 4: Provider Pattern](./04-provider-pattern.md) for the exact API call shape.
 
 ---
 

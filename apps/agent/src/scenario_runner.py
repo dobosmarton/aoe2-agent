@@ -1,6 +1,6 @@
 """Scenario runner: load YAML fixture → run executor → evaluate assertions.
 
-Reuses the production `ClaudeProvider.get_actions()` so the test path matches
+Reuses the production `ExecutorProvider.get_actions()` so the test path matches
 real gameplay exactly. The only thing mocked is `execute_action` (so the
 agentic tool loop runs without pyautogui side effects).
 
@@ -31,6 +31,7 @@ from evaluation.world_sim import (
     tick,
 )
 from gameplay_agent.assertions import evaluate, matches
+from gameplay_agent.config import KEY_ENV, config
 from gameplay_agent.context_builder import _build_context
 from gameplay_agent.test_isolation import (
     _isolate_memories_dir,
@@ -114,9 +115,9 @@ async def _invoke_executor(fixture: dict, model: str | None) -> tuple[list[dict]
     Returns (executed_actions, reasoning, cost_usd). The memory + executor
     mocks are managed by the caller's `with` statements.
     """
-    from gameplay_agent.providers.claude import ClaudeProvider
+    from gameplay_agent.providers.executor_provider import ExecutorProvider
 
-    provider = ClaudeProvider(model=model)
+    provider = ExecutorProvider(model=model)
     _seed_detected_entities(fixture.get("inputs", {}).get("detected_entities", []))
     context = _build_context(fixture)
 
@@ -420,7 +421,7 @@ async def _run_all_async(
 ) -> list[ScenarioResult]:
     """Run every scenario (possibly multi-variant) in a SINGLE shared event loop.
 
-    Each variant gets its own ClaudeProvider (so memories are correctly
+    Each variant gets its own ExecutorProvider (so memories are correctly
     isolated) but they share the asyncio loop, which prevents httpx
     transport cleanup from racing against a closed loop.
     """
@@ -495,7 +496,9 @@ def _resolve_fixtures(args: _RunnerArgs) -> list[Path]:
 
 
 def _parse_args() -> _RunnerArgs:
-    parser = argparse.ArgumentParser(description="Run scenario evaluations against ClaudeProvider")
+    parser = argparse.ArgumentParser(
+        description="Run scenario evaluations against ExecutorProvider"
+    )
     parser.add_argument("fixtures", nargs="*", help="YAML fixture paths (or use --all)")
     parser.add_argument(
         "--all", action="store_true", help="Run every fixture in gameplay_agent/scenarios/"
@@ -506,8 +509,8 @@ def _parse_args() -> _RunnerArgs:
 
 def main() -> int:
     _load_dotenv()
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        print("ERROR: ANTHROPIC_API_KEY not set (checked env + .env file).")
+    if not config.llm_api_key:
+        print(f"ERROR: {KEY_ENV} not set (checked env + .env file).")
         return 1
 
     args = _parse_args()

@@ -2,7 +2,7 @@
 
 A self-contained SQLite database of AoE2 game knowledge — buildings, units,
 techs, civs, counter relationships — plus the loaders that populated it.
-Consumed by `gameplay-agent.providers.claude` for dynamic context injection
+Consumed by `gameplay-agent.providers.executor_provider` for dynamic context injection
 (the executor can be asked "what's the cost of a Castle?" and look it up
 without re-prompting the LLM).
 

@@ -98,20 +98,19 @@ def test_save_and_load_recent_traces(tmp_path: Path) -> None:
 
 def test_propose_changes_builds_reflective_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
     import autoresearch.prompt_mutator as pm
-    from anthropic.types import TextBlock
 
-    monkeypatch.setattr(pm.anthropic, "Anthropic", lambda *_a, **_k: object())
+    monkeypatch.setattr(pm, "make_text_completer", lambda *_a, **_k: object())
     mutator = pm.PromptMutator()
 
     captured: dict[str, object] = {}
 
-    def _fake_create(**kwargs: object) -> SimpleNamespace:
-        captured["messages"] = kwargs["messages"]
-        captured["system"] = kwargs["system"]
-        text = '[{"description": "d", "old_text": "o", "new_text": "n", "rationale": "r"}]'
-        return SimpleNamespace(content=[TextBlock(citations=None, text=text, type="text")])
+    def _fake_complete(system: str, user: str, max_tokens: int) -> str:
+        captured["system"] = system
+        captured["user"] = user
+        captured["max_tokens"] = max_tokens
+        return '[{"description": "d", "old_text": "o", "new_text": "n", "rationale": "r"}]'
 
-    mutator.client = SimpleNamespace(messages=SimpleNamespace(create=_fake_create))
+    mutator.completer = SimpleNamespace(complete=_fake_complete)
 
     trace = GameTrace(
         turns=[TurnTrace(1, "queued villagers", "press(q)", "")],
@@ -128,9 +127,7 @@ def test_propose_changes_builds_reflective_prompt(monkeypatch: pytest.MonkeyPatc
     out = mutator.propose_changes("PROMPT", [trace], {"survival": 0.5, "economy": 0.1}, [], n=2)
 
     assert len(out) == 1
-    messages = captured["messages"]
-    assert isinstance(messages, list)
-    user_text = str(messages[0]["content"])
+    user_text = str(captured["user"])
     assert "queued villagers" in user_text  # trace reasoning present
     assert "survival" in user_text  # component breakdown present
     assert captured["system"] == pm.REFLECTIVE_MUTATOR_SYSTEM

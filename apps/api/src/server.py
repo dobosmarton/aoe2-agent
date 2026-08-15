@@ -712,13 +712,9 @@ async def post_forks(
     reaper: _ReaperRegistry = Depends(get_reaper),
     fork_tasks: set[asyncio.Task[None]] = Depends(get_fork_tasks),
 ) -> ForkResponse:
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY is not set on the server")
     try:
         return await create_fork(
             request=request,
-            api_key=api_key,
             broker=broker,
             on_close=reaper.mark_closed,
             logs_root=_logs_root(),

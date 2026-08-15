@@ -10,7 +10,7 @@ The agent's output is a list of actions that must be validated, resolved to scre
 
 ## 3.1 Action Types
 
-The agent has **nine base action types** (Pydantic-validated in `apps/agent/src/models.py`) plus **composite tools** (defined in `apps/agent/src/providers/claude.py`) that bundle multi-step sequences to eliminate API roundtrips. Two of the base actions — `build` and `queue_villager` — are *also* exposed as composite tools on the tool-loop path, so a routine single-shot turn can emit them directly; `send_villager` remains composite-only.
+The agent has **nine base action types** (Pydantic-validated in `apps/agent/src/models.py`) plus **composite tools** (defined in `apps/agent/src/providers/executor_provider.py`) that bundle multi-step sequences to eliminate API roundtrips. Two of the base actions — `build` and `queue_villager` — are *also* exposed as composite tools on the tool-loop path, so a routine single-shot turn can emit them directly; `send_villager` remains composite-only.
 
 ### Base Actions
 
@@ -138,7 +138,7 @@ Field order matters: `actions` first ensures structured output generates them be
 
 ### Composite Tools
 
-Composite tools execute multi-step hotkey sequences locally without intermediate API roundtrips. They are defined as Claude tool_use tools in `_ACTION_TOOLS` and handled by dedicated methods in `ClaudeProvider`. Each composite calls `_run_steps()` which executes sub-actions sequentially via `execute_action()`, stopping on the first failure. (`build` and `queue_villager` used to be composite-only but are now first-class base actions — see the union above — so routine single-shot turns can emit them directly; the tool loop still exposes matching tools that run the same shared sequences.)
+Composite tools execute multi-step hotkey sequences locally without intermediate API roundtrips. They are defined as Claude tool_use tools in `_ACTION_TOOLS` and handled by dedicated methods in `ExecutorProvider`. Each composite calls `_run_steps()` which executes sub-actions sequentially via `execute_action()`, stopping on the first failure. (`build` and `queue_villager` used to be composite-only but are now first-class base actions — see the union above — so routine single-shot turns can emit them directly; the tool loop still exposes matching tools that run the same shared sequences.)
 
 **`send_villager(target_class or x, y)`** — Select idle villager → right_click target. Accepts `target_class` (e.g. "sheep", "tree") or raw coordinates. Saves 1 roundtrip (~3s).
 

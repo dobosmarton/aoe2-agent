@@ -370,7 +370,7 @@ class LLMResponse(BaseModel):
     reasoning: str = ""
 
     # Side-channel: how many actions actually succeeded when the executor ran
-    # the composite-tool loop locally. Set by ClaudeProvider._call_api after
+    # the composite-tool loop locally. Set by ExecutorProvider._call_api after
     # tool execution; read by _serialize_response. PrivateAttr keeps it out
     # of model serialization and Pydantic field validation.
     _success_count: int = PrivateAttr(default=0)

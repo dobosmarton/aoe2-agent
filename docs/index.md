@@ -13,7 +13,7 @@ graph TD
         LOOP --> SCREEN[screen.py]
         LOOP --> EXEC[executor.py]
         LOOP --> GOALS[goals.py]
-        LOOP --> PROV[providers/claude.py]
+        LOOP --> PROV[providers/executor_provider.py]
         LOOP --> STRAT[providers/strategist.py]
         LOOP -.->|optional| DET[detector.py]
         DET --> YOLO[YOLO26n]
@@ -97,9 +97,9 @@ See also the [Glossary](./glossary.md) for one-line definitions of terms used th
 
 | # | Chapter | Description | Key files |
 |---|---|---|---|
-| 04 | [Provider Pattern](./part2-llm-integration/04-provider-pattern.md) | Abstract base, Claude executor (text-only), strategist (text + local OCR) | `providers/base.py`, `providers/claude.py`, `providers/strategist.py` |
+| 04 | [Provider Pattern](./part2-llm-integration/04-provider-pattern.md) | The `ChatWire` Protocol, three adapters behind one executor, and how a wire name is validated | `providers/base.py`, `providers/wire_factory.py`, `providers/executor_provider.py`, `config.py` |
 | 05 | [Prompt Engineering](./part2-llm-integration/05-prompt-engineering.md) | Executor + strategist prompt design | `prompts/core.md`, `prompts/strategist.md`, `prompts/ages/*.md` |
-| 06 | [Context Injection](./part2-llm-integration/06-context-injection.md) | Memory system, goals, resources, dynamic game knowledge | `memory.py`, `goals.py`, `providers/claude.py` |
+| 06 | [Context Injection](./part2-llm-integration/06-context-injection.md) | Memory system, goals, resources, dynamic game knowledge | `memory.py`, `goals.py`, `providers/executor_provider.py` |
 
 ### Part 3: Entity detection
 

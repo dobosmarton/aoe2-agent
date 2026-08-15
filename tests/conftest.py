@@ -14,10 +14,17 @@ manipulation required.
 
 from __future__ import annotations
 
+import os
 import sys
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
+
+# Set BEFORE any gameplay_agent import: `config` is a module-level singleton
+# read once at import time. The OpenAI SDK raises at construction when no key is
+# present, so a provider built in a test would fail before reaching its stub.
+# `setdefault` leaves a real key alone for the --runlive tests.
+os.environ.setdefault("AOE2_LLM_API_KEY", "test-key-not-used")
 
 import pytest
 from evaluation.event_log import Event, TurnStartPayload
@@ -44,7 +51,7 @@ def pytest_addoption(parser):
         "--runlive",
         action="store_true",
         default=False,
-        help="Run live scenario tests (requires ANTHROPIC_API_KEY, costs ~$0.50)",
+        help="Run live scenario tests (requires AOE2_LLM_API_KEY, costs ~$0.50)",
     )
 
 

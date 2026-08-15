@@ -16,7 +16,7 @@ The agent splits decision-making into two models:
 
 **Executor (Sonnet)** — Runs every turn. Receives only text: YOLO entity list, cached resource readings, active goals, memory context, and game knowledge. Returns structured actions (clicks, key presses) validated as Pydantic models. `build` is a **coordinate-free** action — the model picks the building, the executor auto-places it near the Town Center — and a no-actions turn falls back to building a house when housed, so the economy never freezes at the population cap. Routine turns take a fast single-shot call; combat/housing turns take an agentic tool loop (see [Chapter 4 §4.3](../part2-llm-integration/04-provider-pattern.md)).
 
-The split separates concerns: the strategist owns slow, periodic goal-setting; the executor owns rapid, per-turn tactics. Both tiers are text-only — the strategist reads the HUD via local OCR, the executor reads the YOLO entity list. Both run `claude-sonnet-4-6` — the executor was moved from Haiku to Sonnet for more reliable instruction-following — and a per-call `effort` knob (default `low`) keeps the executor fast.
+The split separates concerns: the strategist owns slow, periodic goal-setting; the executor owns rapid, per-turn tactics. Both tiers are text-only — the strategist reads the HUD via local OCR, the executor reads the YOLO entity list. Both run `gpt-5.6-luna` over an OpenAI-compatible wire by default (Claude remains one env var away), and a per-call `effort` knob (default `low`) keeps the executor fast.
 
 ## 1.2 Component Map
 
@@ -36,7 +36,7 @@ agent/
 │   ├── window.py              # Game window detection and focus management
 │   └── providers/
 │       ├── base.py            # Abstract LLM provider interface
-│       ├── claude.py          # Sonnet executor (text-only, no images)
+│       ├── executor_provider.py          # Sonnet executor (text-only, no images)
 │       └── strategist.py      # Sonnet strategist (local OCR + goal generation)
 ├── detection/                 # YOLO entity detection (optional)
 │   ├── inference/
@@ -79,7 +79,7 @@ except ImportError:
 
 Without detection, the executor has no entity list — it cannot target units, buildings, or resources by class or ID. The strategist can still read the resource bar (local OCR) and set goals, but the executor is limited to hotkeys and hardcoded coordinates. In practice, this makes the agent nearly non-functional: it can't gather resources, train units, or build at specific locations. Detection is technically optional (the agent starts and runs) but practically required for any useful gameplay.
 
-**Game Knowledge** — imported inside a try/except in `apps/agent/src/providers/claude.py`:
+**Game Knowledge** — imported inside a try/except in `apps/agent/src/providers/executor_provider.py`:
 
 ```python
 try:
@@ -101,10 +101,12 @@ Configuration uses a Pydantic `BaseModel` with environment variable overrides (`
 
 | Setting | Env Var | Default | Purpose |
 |---------|---------|---------|---------|
-| `anthropic_api_key` | `ANTHROPIC_API_KEY` | `""` | Claude API authentication |
-| `model` | `AOE2_MODEL` | `claude-sonnet-4-6` | Executor model (instruction-following) |
+| `llm_api_key` | `AOE2_LLM_API_KEY` | `""` | Model API authentication |
+| `llm_wire` | `AOE2_LLM_WIRE` | `openai` | Adapter: `openai`, `zen` or `anthropic` |
+| `llm_base_url` | `AOE2_LLM_BASE_URL` | `""` | Endpoint override; empty uses the adapter's own |
+| `model` | `AOE2_MODEL` | `gpt-5.6-luna` | Executor model (instruction-following) |
 | `executor_effort` | `AOE2_EXECUTOR_EFFORT` | `low` | Executor `output_config` effort (`low`/`medium`/`high`) |
-| `strategist_model` | `AOE2_STRATEGIST_MODEL` | `claude-sonnet-4-6` | Strategist model (deeper reasoning) |
+| `strategist_model` | `AOE2_STRATEGIST_MODEL` | `gpt-5.6-luna` | Strategist model (deeper reasoning) |
 | `strategist_interval` | `AOE2_STRATEGIST_INTERVAL` | `10` | Run strategist every N turns |
 | `max_tokens` | — | `1536` | Max response tokens per executor call |
 | `max_tool_iterations` | — | `7` | Max tool roundtrips per turn (tool-loop path) |
@@ -116,6 +118,14 @@ Configuration uses a Pydantic `BaseModel` with environment variable overrides (`
 | `action_delay` | — | `0.05` | Seconds between individual actions |
 | `pipeline_commit_max` | `AOE2_PIPELINE_COMMIT_MAX` | `2` | Actions committed per pipelined (routine) turn; the tail is discarded |
 | `save_screenshots` | `AOE2_SAVE_SCREENSHOTS` | `true` | Log screenshots to disk |
+
+`AOE2_LLM_WIRE` tolerates case and surrounding whitespace, so `ZEN` and `" zen "` both resolve. An unrecognised name raises at startup rather than falling back — `config._parse_wire` is the only validator, and a silent fallback would play a whole game on a vendor nobody chose:
+
+```
+ValueError: unknown AOE2_LLM_WIRE='zzz'; expected one of 'anthropic', 'openai', 'zen'
+```
+
+The valid set is the `WireName` Literal in `config.py`, and the `--wire` CLI choices derive from it. See [Provider Pattern §4.2](../part2-llm-integration/04-provider-pattern.md) for how the factories turn a name into a client.
 | `log_dir` | — | `logs` | Screenshot and log output directory |
 
 A global singleton `config = Config.from_env()` is created at module load time and imported throughout the codebase.
@@ -125,7 +135,7 @@ A global singleton `config = Config.from_env()` is created at module load time a
 The entire agent runs on asyncio:
 
 - **Entry point**: `asyncio.run(main_async(args))` in `apps/agent/src/main.py`
-- **API clients**: `anthropic.AsyncAnthropic` for both executor and strategist
+- **API clients**: `openai.AsyncOpenAI` by default for both executor and strategist, or `anthropic.AsyncAnthropic` on the `anthropic` adapter — each `ChatWire` owns its own client
 - **Game loop**: `game_loop()` in `apps/agent/src/game_loop.py`
 - **Action execution**: `execute_actions()` in `apps/agent/src/executor.py`
 - **Delays**: `asyncio.sleep()` for non-blocking waits

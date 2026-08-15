@@ -18,7 +18,15 @@ from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
 
 import pytest
-from gameplay_agent.providers.claude import ClaudeProvider
+from gameplay_agent.providers.base import (
+    AssistantTurn,
+    ToolCall,
+    ToolOutcome,
+    ToolResultsTurn,
+    UserTurn,
+)
+from gameplay_agent.providers.executor_provider import ExecutorProvider
+from gameplay_agent.providers.wire_anthropic import AnthropicWire
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable
@@ -44,17 +52,27 @@ def _end_turn_response(cache_read: int = 0) -> SimpleNamespace:
     return SimpleNamespace(content=[], stop_reason="end_turn", usage=_usage(cache_read))
 
 
-def _install_create(provider: ClaudeProvider, *responses: object) -> AsyncMock:
-    """Point the client's messages.create at an AsyncMock yielding `responses`."""
+def _install_create(provider: ExecutorProvider, *responses: object) -> AsyncMock:
+    """Point the wire's messages.create at an AsyncMock yielding `responses`.
+
+    The provider now talks to the API through a `ChatWire`, so the SDK client
+    lives one level down. Patching it here (rather than stubbing the wire) keeps
+    these tests exercising the executor *and* `AnthropicWire` together, which is
+    what the request-shape assertions below are actually about.
+    """
     create = AsyncMock(side_effect=list(responses))
-    provider.client = SimpleNamespace(messages=SimpleNamespace(create=create))
+    provider.wire.client = SimpleNamespace(messages=SimpleNamespace(create=create))
     return create
 
 
 @pytest.fixture
-def provider() -> ClaudeProvider:
-    """A ClaudeProvider with stubbed prompts and no game-knowledge DB."""
-    p = ClaudeProvider(api_key="test", use_dynamic_context=False)
+def provider() -> ExecutorProvider:
+    """A ExecutorProvider with stubbed prompts and no game-knowledge DB."""
+    # Pin the wire: these tests patch Anthropic-shaped fakes onto it, so the
+    # fixture must not ride whatever the global default happens to be.
+    p = ExecutorProvider(
+        use_dynamic_context=False, wire=AnthropicWire(model="test-model", api_key="test")
+    )
     # Non-None _core_prompt short-circuits _load_prompts() → no I/O.
     p._core_prompt = "SYSTEM"
     p._age_prompts = {"dark": "DARK", "feudal": "FEUDAL"}
@@ -66,18 +84,18 @@ def provider() -> ClaudeProvider:
 # ---------------------------------------------------------------------------
 
 
-def test_call_api_forwards_default_effort(provider: ClaudeProvider) -> None:
+def test_call_api_forwards_default_effort(provider: ExecutorProvider) -> None:
     create = _install_create(provider, _end_turn_response())
     _run(provider._call_api([{"type": "text", "text": "hi"}]))
     assert create.call_args.kwargs["output_config"] == {"effort": "low"}
 
 
 def test_call_api_forwards_configured_effort(
-    provider: ClaudeProvider, monkeypatch: pytest.MonkeyPatch
+    provider: ExecutorProvider, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from gameplay_agent.providers import claude
+    from gameplay_agent.providers import executor_provider
 
-    monkeypatch.setattr(claude.config, "executor_effort", "medium")
+    monkeypatch.setattr(executor_provider.config, "executor_effort", "medium")
     create = _install_create(provider, _end_turn_response())
     _run(provider._call_api([{"type": "text", "text": "hi"}]))
     assert create.call_args.kwargs["output_config"] == {"effort": "medium"}
@@ -88,21 +106,25 @@ def test_call_api_forwards_configured_effort(
 # ---------------------------------------------------------------------------
 
 
-def _parse_response(actions: list[dict], reasoning: str = "r") -> SimpleNamespace:
+def _parse_response(
+    actions: list[dict], reasoning: str = "r", stop_reason: str = "end_turn"
+) -> SimpleNamespace:
     from gameplay_agent.models import LLMResponse
 
     return SimpleNamespace(
-        usage=_usage(), parsed_output=LLMResponse(actions=actions, reasoning=reasoning)
+        usage=_usage(),
+        stop_reason=stop_reason,
+        parsed_output=LLMResponse(actions=actions, reasoning=reasoning),
     )
 
 
-def _install_parse(provider: ClaudeProvider, *responses: object) -> AsyncMock:
+def _install_parse(provider: ExecutorProvider, *responses: object) -> AsyncMock:
     parse = AsyncMock(side_effect=list(responses))
-    provider.client = SimpleNamespace(messages=SimpleNamespace(parse=parse))
+    provider.wire.client = SimpleNamespace(messages=SimpleNamespace(parse=parse))
     return parse
 
 
-def test_single_shot_retries_once_on_zero_actions(provider: ClaudeProvider) -> None:
+def test_single_shot_retries_once_on_zero_actions(provider: ExecutorProvider) -> None:
     parse = _install_parse(
         provider,
         _parse_response([], reasoning="plan narrated, nothing emitted"),
@@ -112,16 +134,17 @@ def test_single_shot_retries_once_on_zero_actions(provider: ClaudeProvider) -> N
     assert parse.await_count == 2
     assert out["actions"] and out["actions"][0]["key"] == "h"
     retry_messages = parse.await_args.kwargs["messages"]
-    assert "zero actions" in retry_messages[-1]["content"]  # the nudge was sent
+    # The nudge is the final user turn; the wire renders it as a text block.
+    assert "zero actions" in retry_messages[-1]["content"][0]["text"]
 
 
-def test_single_shot_no_retry_when_actions_present(provider: ClaudeProvider) -> None:
+def test_single_shot_no_retry_when_actions_present(provider: ExecutorProvider) -> None:
     parse = _install_parse(provider, _parse_response([{"type": "press", "key": "q"}]))
     _run(provider._call_single_shot([{"type": "text", "text": "ctx"}]))
     assert parse.await_count == 1
 
 
-def test_single_shot_gives_up_after_one_retry(provider: ClaudeProvider) -> None:
+def test_single_shot_gives_up_after_one_retry(provider: ExecutorProvider) -> None:
     parse = _install_parse(provider, _parse_response([]), _parse_response([]))
     out = _run(provider._call_single_shot([{"type": "text", "text": "ctx"}]))
     assert parse.await_count == 2  # bounded: no infinite nudging
@@ -142,12 +165,12 @@ def _bad_request(message: str) -> object:
     return anthropic.BadRequestError(message, response=response, body=None)
 
 
-def test_single_shot_falls_back_to_tool_loop_on_400(provider: ClaudeProvider) -> None:
+def test_single_shot_falls_back_to_tool_loop_on_400(provider: ExecutorProvider) -> None:
     """A 400 on the structured-output path (e.g. "compiled grammar is too
     large") must retry THIS turn via the tool loop, not burn it (run 12, F-40)."""
     parse = AsyncMock(side_effect=_bad_request("compiled grammar is too large"))
     create = AsyncMock(side_effect=[_end_turn_response()])
-    provider.client = SimpleNamespace(messages=SimpleNamespace(parse=parse, create=create))
+    provider.wire.client = SimpleNamespace(messages=SimpleNamespace(parse=parse, create=create))
 
     out = _run(provider._single_shot_or_tool_loop([{"type": "text", "text": "ctx"}], "Dark Age"))
 
@@ -156,13 +179,26 @@ def test_single_shot_falls_back_to_tool_loop_on_400(provider: ClaudeProvider) ->
     assert out["actions_already_executed"] is True  # tool-loop serialization, not a wait no-op
 
 
-def test_single_shot_non_400_error_propagates(provider: ClaudeProvider) -> None:
+def test_refusal_raises_rather_than_returning_an_empty_plan(provider: ExecutorProvider) -> None:
+    """A refused turn must surface, not read as a valid zero-action response.
+
+    `get_actions` turns it into an error=True no-op, which is what feeds the
+    executor-outage alarm and llm_error_rate (T-533).
+    """
+    from gameplay_agent.providers.base import ModelRefusedError
+
+    _install_parse(provider, _parse_response([], stop_reason="refusal"))
+    with pytest.raises(ModelRefusedError):
+        _run(provider._call_single_shot([{"type": "text", "text": "ctx"}]))
+
+
+def test_single_shot_non_400_error_propagates(provider: ExecutorProvider) -> None:
     """Only 400s fall back — other API errors surface to get_actions' handler."""
     import anthropic
 
     parse = AsyncMock(side_effect=anthropic.APITimeoutError(request=None))  # type: ignore[arg-type]
     create = AsyncMock(side_effect=[_end_turn_response()])
-    provider.client = SimpleNamespace(messages=SimpleNamespace(parse=parse, create=create))
+    provider.wire.client = SimpleNamespace(messages=SimpleNamespace(parse=parse, create=create))
 
     with pytest.raises(anthropic.APIError):
         _run(provider._single_shot_or_tool_loop([{"type": "text", "text": "ctx"}], "Dark Age"))
@@ -174,37 +210,54 @@ def test_single_shot_non_400_error_propagates(provider: ClaudeProvider) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_age_block_is_cached(provider: ClaudeProvider) -> None:
+def test_age_block_is_cached(provider: ExecutorProvider) -> None:
     blocks = provider.get_system_prompt("Feudal Age")
-    assert blocks[0]["cache_control"] == {"type": "ephemeral"}  # core block
-    assert blocks[1]["text"] == "FEUDAL"
-    assert blocks[1]["cache_control"] == {"type": "ephemeral"}  # age block
+    assert blocks[0].cacheable is True  # core block
+    assert blocks[1].text == "FEUDAL"
+    assert blocks[1].cacheable is True  # age block
 
 
-def test_moving_breakpoint_marks_last_and_strips_previous() -> None:
-    messages: list[dict] = [
-        {
-            "role": "user",
-            "content": [{"type": "text", "text": "a", "cache_control": {"type": "ephemeral"}}],
-        },
-        {"role": "user", "content": [{"type": "text", "text": "b"}]},
-    ]
-    ClaudeProvider._apply_moving_cache_breakpoint(messages)
-    assert "cache_control" not in messages[0]["content"][0]
-    assert messages[1]["content"][0]["cache_control"] == {"type": "ephemeral"}
+def _breakpoint_count(messages: list[dict]) -> int:
+    """How many content blocks across the whole request carry a breakpoint."""
+    return sum(
+        1
+        for message in messages
+        for block in message["content"]
+        if isinstance(block, dict) and "cache_control" in block
+    )
 
 
-def test_moving_breakpoint_ignores_non_dict_blocks() -> None:
-    # Assistant turns hold SDK content objects, not dicts — must not crash.
-    messages: list[dict] = [
-        {"role": "assistant", "content": [SimpleNamespace(type="tool_use")]},
-        {"role": "user", "content": [{"type": "text", "text": "b"}]},
-    ]
-    ClaudeProvider._apply_moving_cache_breakpoint(messages)
-    assert messages[1]["content"][0]["cache_control"] == {"type": "ephemeral"}
+def test_render_turns_puts_one_moving_breakpoint_on_the_last_block() -> None:
+    """Exactly one conversation breakpoint, on the newest block.
+
+    Two of the four available breakpoints are spent on the system blocks, so the
+    conversation gets one and it has to move to the tail each turn.
+    """
+    messages = AnthropicWire._render_turns(
+        (
+            UserTurn(text="a"),
+            AssistantTurn(text="thinking", tool_calls=(ToolCall("t1", "press", {}),)),
+            ToolResultsTurn(outcomes=(ToolOutcome("t1", True, "ok"),)),
+        )
+    )
+    assert _breakpoint_count(messages) == 1
+    assert messages[-1]["content"][-1]["cache_control"] == {"type": "ephemeral"}
 
 
-def test_create_call_caches_last_user_block(provider: ClaudeProvider) -> None:
+def test_render_turns_emits_only_dict_blocks() -> None:
+    """Assistant turns render as plain dicts, not SDK objects.
+
+    Rebuilding the request from neutral turns is what lets the breakpoint pass
+    assume dicts — previously assistant turns held SDK content objects that had
+    to be skipped.
+    """
+    messages = AnthropicWire._render_turns(
+        (UserTurn(text="a"), AssistantTurn(text="t", tool_calls=(ToolCall("t1", "press", {}),)))
+    )
+    assert all(isinstance(block, dict) for message in messages for block in message["content"])
+
+
+def test_create_call_caches_last_user_block(provider: ExecutorProvider) -> None:
     create = _install_create(provider, _end_turn_response())
     _run(provider._call_api([{"type": "text", "text": "hi"}]))
     sent = create.call_args.kwargs["messages"]
@@ -212,19 +265,19 @@ def test_create_call_caches_last_user_block(provider: ClaudeProvider) -> None:
 
 
 def test_cache_read_tokens_accumulate(
-    provider: ClaudeProvider, monkeypatch: pytest.MonkeyPatch
+    provider: ExecutorProvider, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Round 1 asks for a tool, round 2 ends the turn; cache reads sum across both.
     tool_block = SimpleNamespace(type="tool_use", id="t1", name="press", input={})
     first = SimpleNamespace(content=[tool_block], stop_reason="tool_use", usage=_usage(40))
     _install_create(provider, first, _end_turn_response(60))
 
-    async def _fake_exec(_block: object) -> tuple[dict, dict]:
-        return ({"type": "press"}, {"tool_use_id": "t1", "content": '{"success": true}'})
+    async def _fake_exec(_block: object) -> tuple[dict, ToolOutcome]:
+        return ({"type": "press"}, ToolOutcome("t1", success=True, detail="ok"))
 
     monkeypatch.setattr(provider, "_execute_tool_call", _fake_exec)
     _run(provider._call_api([{"type": "text", "text": "hi"}]))
-    assert provider._total_cache_read_tokens == 100
+    assert provider._usage.cache_read_tokens == 100
 
 
 # ---------------------------------------------------------------------------
@@ -233,7 +286,7 @@ def test_cache_read_tokens_accumulate(
 
 
 def test_routine_turn_routes_to_single_shot(
-    provider: ClaudeProvider, monkeypatch: pytest.MonkeyPatch
+    provider: ExecutorProvider, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     single = AsyncMock(return_value={"actions": [], "actions_already_executed": False})
     tool = AsyncMock()
@@ -248,7 +301,7 @@ def test_routine_turn_routes_to_single_shot(
 
 
 def test_under_attack_routes_to_tool_loop(
-    provider: ClaudeProvider, monkeypatch: pytest.MonkeyPatch
+    provider: ExecutorProvider, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     single = AsyncMock()
     tool = AsyncMock(return_value=SimpleNamespace(reasoning="ok"))
@@ -267,7 +320,7 @@ def test_serialize_single_shot_is_not_pre_executed() -> None:
     from gameplay_agent.models import LLMResponse
 
     resp = LLMResponse(actions=[{"type": "press", "key": "h"}])
-    out = ClaudeProvider._serialize_single_shot(resp)
+    out = ExecutorProvider._serialize_single_shot(resp)
     assert out["actions_already_executed"] is False
     assert len(out["actions"]) == 1
 
@@ -276,7 +329,7 @@ def test_serialize_response_is_pre_executed() -> None:
     from gameplay_agent.models import LLMResponse
 
     resp = LLMResponse(actions=[{"type": "press", "key": "h"}])
-    out = ClaudeProvider._serialize_response(resp)
+    out = ExecutorProvider._serialize_response(resp)
     assert out["actions_already_executed"] is True
 
 
@@ -293,9 +346,9 @@ def _allow_farm(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_reassign_villager_sequences_camp_select_build(
-    provider: ClaudeProvider, monkeypatch: pytest.MonkeyPatch
+    provider: ExecutorProvider, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from gameplay_agent.providers import claude as claude_mod
+    from gameplay_agent.providers import executor_provider as executor_mod
 
     steps: list[dict] = []
 
@@ -308,16 +361,16 @@ def test_reassign_villager_sequences_camp_select_build(
         {"class": "tree", "id": "tree_0", "center": (300, 300), "confidence": 0.9},
         {"class": "villager", "id": "villager_0", "center": (310, 305), "confidence": 0.9},
     ]
-    monkeypatch.setattr(claude_mod, "execute_action", _record)
-    monkeypatch.setattr(claude_mod, "get_detected_entities", lambda: entities)
-    monkeypatch.setattr(claude_mod, "_tracker_velocities", lambda: {})
+    monkeypatch.setattr(executor_mod, "execute_action", _record)
+    monkeypatch.setattr(executor_mod, "get_detected_entities", lambda: entities)
+    monkeypatch.setattr(executor_mod, "_tracker_velocities", lambda: {})
     monkeypatch.setattr(provider, "_entity_snapshot", lambda: [])
     _allow_farm(monkeypatch)  # a mill has been seen → the farm gate passes
 
-    block = SimpleNamespace(
+    block = ToolCall(
         id="tu1",
         name="reassign_villager",
-        input={"from_job": "wood", "building_key": "a", "intent": "need food"},
+        arguments={"from_job": "wood", "building_key": "a", "intent": "need food"},
     )
     action_dict, _result = _run(provider._execute_reassign_villager(block))
 
@@ -334,12 +387,12 @@ def test_reassign_villager_sequences_camp_select_build(
 
 
 def test_reassign_villager_rejected_when_farm_gate_fails(
-    provider: ClaudeProvider, monkeypatch: pytest.MonkeyPatch
+    provider: ExecutorProvider, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """No mill seen → the whole reassign composite is rejected before the camera
     jump, and the reason reaches the LLM as the tool result."""
     from gameplay_agent import executor as ex
-    from gameplay_agent.providers import claude as claude_mod
+    from gameplay_agent.providers import executor_provider as executor_mod
 
     steps: list[dict] = []
 
@@ -347,14 +400,14 @@ def test_reassign_villager_rejected_when_farm_gate_fails(
         steps.append(action)
         return SimpleNamespace(success=True, detail="ok")
 
-    monkeypatch.setattr(claude_mod, "execute_action", _record)
+    monkeypatch.setattr(executor_mod, "execute_action", _record)
     monkeypatch.setattr(provider, "_entity_snapshot", lambda: [])
     monkeypatch.setattr(ex._build_gates, "buildings_confirmed", set())
 
-    block = SimpleNamespace(
+    block = ToolCall(
         id="tu8",
         name="reassign_villager",
-        input={"from_job": "wood", "building_key": "a", "intent": "need food"},
+        arguments={"from_job": "wood", "building_key": "a", "intent": "need food"},
     )
     action_dict, result = _run(provider._execute_reassign_villager(block))
 
@@ -364,9 +417,9 @@ def test_reassign_villager_rejected_when_farm_gate_fails(
 
 
 def test_reassign_villager_falls_back_to_villager_class(
-    provider: ClaudeProvider, monkeypatch: pytest.MonkeyPatch
+    provider: ExecutorProvider, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from gameplay_agent.providers import claude as claude_mod
+    from gameplay_agent.providers import executor_provider as executor_mod
 
     steps: list[dict] = []
 
@@ -374,16 +427,16 @@ def test_reassign_villager_falls_back_to_villager_class(
         steps.append(action)
         return SimpleNamespace(success=True, detail="ok")
 
-    monkeypatch.setattr(claude_mod, "execute_action", _record)
-    monkeypatch.setattr(claude_mod, "get_detected_entities", lambda: [])  # no worker found
-    monkeypatch.setattr(claude_mod, "_tracker_velocities", lambda: {})
+    monkeypatch.setattr(executor_mod, "execute_action", _record)
+    monkeypatch.setattr(executor_mod, "get_detected_entities", lambda: [])  # no worker found
+    monkeypatch.setattr(executor_mod, "_tracker_velocities", lambda: {})
     monkeypatch.setattr(provider, "_entity_snapshot", lambda: [])
     _allow_farm(monkeypatch)  # a mill has been seen → the farm gate passes
 
-    block = SimpleNamespace(
+    block = ToolCall(
         id="tu2",
         name="reassign_villager",
-        input={"from_job": "gold", "building_key": "a", "intent": "farm"},
+        arguments={"from_job": "gold", "building_key": "a", "intent": "farm"},
     )
     _run(provider._execute_reassign_villager(block))
 
@@ -399,9 +452,9 @@ def test_reassign_villager_falls_back_to_villager_class(
 
 
 @pytest.fixture
-def recorded_steps(provider: ClaudeProvider, monkeypatch: pytest.MonkeyPatch) -> list[dict]:
+def recorded_steps(provider: ExecutorProvider, monkeypatch: pytest.MonkeyPatch) -> list[dict]:
     """Record every step a composite executes; entity snapshot stubbed empty."""
-    from gameplay_agent.providers import claude as claude_mod
+    from gameplay_agent.providers import executor_provider as executor_mod
 
     steps: list[dict] = []
 
@@ -409,16 +462,16 @@ def recorded_steps(provider: ClaudeProvider, monkeypatch: pytest.MonkeyPatch) ->
         steps.append(action)
         return SimpleNamespace(success=True, detail="ok")
 
-    monkeypatch.setattr(claude_mod, "execute_action", _record)
+    monkeypatch.setattr(executor_mod, "execute_action", _record)
     monkeypatch.setattr(provider, "_entity_snapshot", lambda: [])
     return steps
 
 
 def test_send_villager_step_list_verbatim(
-    provider: ClaudeProvider, recorded_steps: list[dict]
+    provider: ExecutorProvider, recorded_steps: list[dict]
 ) -> None:
-    block = SimpleNamespace(
-        id="tu3", name="send_villager", input={"target_class": "tree", "intent": "chop"}
+    block = ToolCall(
+        id="tu3", name="send_villager", arguments={"target_class": "tree", "intent": "chop"}
     )
     action_dict, _result = _run(provider._execute_send_villager(block))
     assert action_dict == {"type": "send_villager", "target_class": "tree", "intent": "chop"}
@@ -429,10 +482,10 @@ def test_send_villager_step_list_verbatim(
 
 
 def test_send_all_idle_step_list_verbatim(
-    provider: ClaudeProvider, recorded_steps: list[dict]
+    provider: ExecutorProvider, recorded_steps: list[dict]
 ) -> None:
-    block = SimpleNamespace(
-        id="tu4", name="send_all_idle", input={"target_class": "tree", "intent": "regroup"}
+    block = ToolCall(
+        id="tu4", name="send_all_idle", arguments={"target_class": "tree", "intent": "regroup"}
     )
     action_dict, _result = _run(provider._execute_send_all_idle(block))
     assert action_dict == {"type": "send_all_idle", "target_class": "tree", "intent": "regroup"}
@@ -450,12 +503,12 @@ def test_send_all_idle_step_list_verbatim(
 
 @pytest.mark.parametrize("composite", ["send_villager", "send_all_idle"])
 def test_send_composites_refuse_raw_coordinates(
-    provider: ClaudeProvider, recorded_steps: list[dict], composite: str
+    provider: ExecutorProvider, recorded_steps: list[dict], composite: str
 ) -> None:
     """F-33: the '.' select re-centers the camera, so literal x/y computed from
     the pre-jump frame land on arbitrary terrain — the composite fails with a
     teaching detail instead of spending keystrokes."""
-    block = SimpleNamespace(id="tu5", name=composite, input={"x": 100, "y": 200, "intent": "go"})
+    block = ToolCall(id="tu5", name=composite, arguments={"x": 100, "y": 200, "intent": "go"})
     handler = getattr(provider, f"_execute_{composite}")
     action_dict, result = _run(handler(block))
     assert action_dict["type"] == composite
@@ -464,12 +517,12 @@ def test_send_composites_refuse_raw_coordinates(
 
 
 def test_build_house_rejected_by_headroom_gate(
-    provider: ClaudeProvider, recorded_steps: list[dict], monkeypatch: pytest.MonkeyPatch
+    provider: ExecutorProvider, recorded_steps: list[dict], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from gameplay_agent import executor as ex
 
     monkeypatch.setattr(ex._build_gates, "population", (10, 30))  # 20 headroom
-    block = SimpleNamespace(id="tu6", name="build", input={"building_key": "q", "intent": "house"})
+    block = ToolCall(id="tu6", name="build", arguments={"building_key": "q", "intent": "house"})
     action_dict, result = _run(provider._execute_build(block))
     assert action_dict == {"type": "build", "building_key": "q", "intent": "house"}
     assert recorded_steps == []  # gate fired before any step executed
@@ -477,20 +530,20 @@ def test_build_house_rejected_by_headroom_gate(
 
 
 def test_build_house_allowed_near_cap(
-    provider: ClaudeProvider, recorded_steps: list[dict], monkeypatch: pytest.MonkeyPatch
+    provider: ExecutorProvider, recorded_steps: list[dict], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from gameplay_agent import executor as ex
 
     monkeypatch.setattr(ex._build_gates, "population", (28, 30))  # housed-adjacent
-    block = SimpleNamespace(id="tu7", name="build", input={"building_key": "q", "intent": "house"})
+    block = ToolCall(id="tu7", name="build", arguments={"building_key": "q", "intent": "house"})
     _run(provider._execute_build(block))
     assert recorded_steps  # steps ran — the gate let it through
 
 
 def test_queue_villager_step_list_verbatim(
-    provider: ClaudeProvider, recorded_steps: list[dict]
+    provider: ExecutorProvider, recorded_steps: list[dict]
 ) -> None:
-    block = SimpleNamespace(id="tu5", name="queue_villager", input={"intent": "more vils"})
+    block = ToolCall(id="tu5", name="queue_villager", arguments={"intent": "more vils"})
     action_dict, _result = _run(provider._execute_queue_villager(block))
     assert action_dict == {"type": "queue_villager", "intent": "more vils"}
     # One first-class action, not raw h+q presses — the executor's order

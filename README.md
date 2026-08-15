@@ -1,6 +1,6 @@
 # AoE2 LLM Agent
 
-An AI agent that plays Age of Empires 2: Definitive Edition using a two-tier LLM architecture: a Sonnet strategist reads the resource bar via local OCR and sets goals, a Sonnet executor reads YOLO entity detections and executes actions. Both LLM tiers are text-only — no image is ever sent to Claude.
+An AI agent that plays Age of Empires 2: Definitive Edition using a two-tier LLM architecture: a strategist reads the resource bar via local OCR and sets goals, an executor reads YOLO entity detections and executes actions. Both LLM tiers are text-only, so no image is ever sent to the model. The vendor is a config value — `gpt-5.6-luna` by default, with Claude one env var away.
 
 ## Architecture
 
@@ -8,9 +8,9 @@ An AI agent that plays Age of Empires 2: Definitive Edition using a two-tier LLM
 Screenshot → YOLO Detection → Entity List (text)
 Screenshot → Local OCR (RapidOCR) → Resource Readings (text)
                                     ↓
-Resource Readings → Strategist (Sonnet, text) → Goals
+Resource Readings → Strategist (LLM, text) → Goals
                                     ↓
-Entity List + Goals + Resources → Executor (Sonnet, text) → Actions
+Entity List + Goals + Resources → Executor (LLM, text) → Actions
                                                              ↓
                                                        Mouse/Keyboard
 ```
@@ -19,10 +19,10 @@ Entity List + Goals + Resources → Executor (Sonnet, text) → Actions
 
 | Role | Model | Input | Output | Frequency |
 |------|-------|-------|--------|-----------|
-| Strategist | `claude-sonnet-4-6` | Text (resources via local OCR) + game state | Goals + resource readings | Every 10 turns, or on alarm |
-| Executor | `claude-sonnet-4-6` | Text only (entities, goals, resources) | Mouse/keyboard actions | Every turn |
+| Strategist | `gpt-5.6-luna` | Text (resources via local OCR) + game state | Goals + resource readings | Every 10 turns, or on alarm |
+| Executor | `gpt-5.6-luna` | Text only (entities, goals, resources) | Mouse/keyboard actions | Every turn |
 
-The executor runs Sonnet (moved from Haiku for more reliable instruction-following) with a per-call `effort` knob (default `low`) for speed. Routine turns take a single-shot structured call; combat/housing turns take an agentic tool loop.
+The executor runs the model named above with a per-call `effort` knob (default `low`) for speed. Routine turns take a single-shot structured call; combat/housing turns take an agentic tool loop.
 
 The executor never sees screenshots. All visual information comes from YOLO entity detection (text list of class/position/confidence) and the strategist's cached resource readings.
 
@@ -34,10 +34,10 @@ Each iteration (~3-5 seconds):
 2. **Detect** — Run YOLO v9 (single-pass @1280) on screenshot → list of entities with IDs, classes, positions
 3. **Classify ownership** — Color-based blue-dominance check on military units (own vs enemy)
 4. **Alarm check** — Scan for enemy military → inject emergency defense goals if found
-5. **Strategist** (periodic) — reads resources from the bar via local OCR (RapidOCR), then Sonnet creates/updates goals from that text
+5. **Strategist** (periodic) — reads resources from the bar via local OCR (RapidOCR), then the strategist creates/updates goals from that text
 6. **Reactive tier** — a deterministic, no-LLM rule layer handles routine upkeep first: villager queuing to the age's order target (30 Dark / 35 Feudal), Feudal prep (mill + lumber camp), the mining camp in Feudal, house building at low headroom, and the age-up press. Many turns need no LLM call at all.
 7. **Build context** — Assemble text: entities + goals + resources + memory + game knowledge
-8. **Execute** — Sonnet reads text context, returns structured actions (Pydantic-validated)
+8. **Execute** — the executor reads text context, returns structured actions (Pydantic-validated)
 9. **Act** — Execute mouse clicks / keyboard presses via pyautogui
 10. **Remember** — Update memory, evaluate goal progress, compute rewards
 
@@ -45,7 +45,7 @@ Each iteration (~3-5 seconds):
 
 - Windows 10/11 with AoE2:DE installed
 - Python 3.11+ (x64, not ARM64)
-- Anthropic API key
+- An API key for whichever adapter you use (`AOE2_LLM_API_KEY`)
 
 ## Installation
 
@@ -86,7 +86,7 @@ agent when launched via `just agent`). A documented template lives at `env.examp
 cp env.example .env        # then edit .env and fill in the values below
 ```
 
-At minimum, set `ANTHROPIC_API_KEY` — that's all the **gameplay agent** needs. Every other
+At minimum, set `AOE2_LLM_API_KEY` — that's all the **gameplay agent** needs. Every other
 variable in `env.example` is for the **Synthetic Arena infrastructure** (Langfuse + MinIO +
 ClickHouse + Redis + Postgres) and is only consumed by `just arena-infra-up`. If you're
 not running the arena stack yet, leaving those blank is fine.
@@ -95,24 +95,39 @@ not running the arena stack yet, leaving those blank is fine.
 
 ```bash
 # Windows VM
-set ANTHROPIC_API_KEY=your-key-here
+set AOE2_LLM_API_KEY=your-key-here
 
 # macOS / Linux
-export ANTHROPIC_API_KEY=your-key-here
+export AOE2_LLM_API_KEY=your-key-here
+```
+
+The agent defaults to GPT-5.6 Luna on the OpenAI API. Each adapter supplies its own
+endpoint, so switching vendor is one variable: set `AOE2_LLM_WIRE=zen` for OpenCode Zen,
+or `AOE2_LLM_WIRE=anthropic` plus an `AOE2_MODEL` Claude model for Claude. The key is
+`AOE2_LLM_API_KEY` either way — supply the one that matches the adapter.
+
+The name tolerates case and surrounding whitespace, so `ZEN` and `" zen "` both work. An
+unrecognised name stops the process at startup rather than falling back to a default, because
+a silent fallback means playing a whole game on a vendor you did not choose:
+
+```
+ValueError: unknown AOE2_LLM_WIRE='zzz'; expected one of 'anthropic', 'openai', 'zen'
 ```
 
 | Env Var | Default | Purpose |
 |---------|---------|---------|
-| `ANTHROPIC_API_KEY` | — | Claude API authentication (required) |
-| `AOE2_MODEL` | `claude-sonnet-4-6` | Executor model |
+| `AOE2_LLM_API_KEY` | — | Model API authentication (required) |
+| `AOE2_LLM_WIRE` | `openai` | Adapter: `openai`, `zen` (OpenCode Zen) or `anthropic` |
+| `AOE2_LLM_BASE_URL` | — | Endpoint override; empty uses the adapter's own |
+| `AOE2_MODEL` | `gpt-5.6-luna` | Executor model |
 | `AOE2_EXECUTOR_EFFORT` | `low` | Executor effort (`low`/`medium`/`high`) |
-| `AOE2_STRATEGIST_MODEL` | `claude-sonnet-4-6` | Strategist model |
+| `AOE2_STRATEGIST_MODEL` | `gpt-5.6-luna` | Strategist model |
 | `AOE2_STRATEGIST_INTERVAL` | `10` | Run strategist every N turns |
 | `AOE2_LOOP_DELAY` | `0.3` | Seconds between iterations |
 | `AOE2_SAVE_SCREENSHOTS` | `true` | Save screenshots to logs/ |
 | `AOE2_OCR_BACKEND` | `rapidocr` | Resource-bar OCR backend (`rapidocr`/`template`/`tesseract`) |
 | `AOE2_DETECTION_HOST` | — | Remote detection server URL (e.g., `http://192.168.64.1:8420`) |
-| `AOE2_TEMPERATURE` | `0.0` | Anthropic Messages API temperature (lowest variance) |
+| `AOE2_TEMPERATURE` | `0.0` | Sampling temperature, whichever adapter serves (lowest variance) |
 | `AOE2_SEED` | — | Local-RNG seed (build-retry jitter); unset = OS entropy |
 
 ### Event broker backend (Phase C)
@@ -157,11 +172,11 @@ pip install -e ".[broker-redis]"
 
 Determinism is asymptotic — per [arxiv 2408.04667](https://arxiv.org/html/2408.04667v5), expect ~5–12% per-decision variance even with `temperature=0`. Promise *statistical* replay over N trials, not byte-identical traces.
 
-Three knobs to make runs as reproducible as Anthropic and the Python stack allow:
+Three knobs to make runs as reproducible as the model vendor and the Python stack allow:
 
-- **`AOE2_TEMPERATURE=0.0`** (default) is Anthropic's lowest-variance temperature. Raise it (e.g. `0.7`) for output diversity at the cost of reproducibility.
-- **`AOE2_SEED=<int>`** seeds the local RNG used in `executor.py`'s build-retry jitter and Phase 1's `world_sim.render()` default fallback. Two runs with the same seed produce the same RNG sequence. Leave unset to get today's stochastic behavior (OS entropy). **Not passed to the Anthropic API** — `messages.create()` doesn't accept `seed=` as of late 2025; this is purely for the local code paths.
-- **Pin model snapshots.** Set `AOE2_MODEL` and `AOE2_STRATEGIST_MODEL` to a dated snapshot (e.g. `claude-sonnet-4-6-2026-XX-XX`) rather than the floating family alias. Floating tags can move under you between runs.
+- **`AOE2_TEMPERATURE=0.0`** (default) is the lowest-variance temperature on every adapter. Raise it (e.g. `0.7`) for output diversity at the cost of reproducibility.
+- **`AOE2_SEED=<int>`** seeds the local RNG used in `executor.py`'s build-retry jitter and Phase 1's `world_sim.render()` default fallback. Two runs with the same seed produce the same RNG sequence. Leave unset to get today's stochastic behavior (OS entropy). **Not passed to the model API** — neither adapter's call path accepts `seed=`; this is purely for the local code paths.
+- **Pin model snapshots.** Set `AOE2_MODEL` and `AOE2_STRATEGIST_MODEL` to a dated snapshot rather than the floating family alias. Floating tags can move under you between runs.
 
 ### Synthetic Arena infrastructure (optional)
 

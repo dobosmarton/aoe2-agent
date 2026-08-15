@@ -50,5 +50,5 @@ Every command writes its event log to `logs/arena/<YYYY-MM-DD>/<label>-<HHMMSS>.
 ## Conventions
 
 - Profile YAML loaders are frozen Pydantic models (`config_profile.py`). Adding a new field means updating the model.
-- Each variant gets its own `AsyncAnthropic` client — they never share API state or any singleton from `gameplay-agent`.
+- Each variant gets its own `ChatWire`, built by `make_wire` from the profile's `wire` field. They never share API state or any singleton from `gameplay-agent`.
 - `synth_game_loop` (in `gameplay-agent`) is the loop the arena drives, *not* the real `game_loop.py`. They share the same providers but the synth loop talks to `WorldState` instead of pyautogui.

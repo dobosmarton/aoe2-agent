@@ -27,7 +27,7 @@ All three commands live behind one CLI entry point in `apps/arena/src/__main__.p
 
 ### `race` — head-to-head against real Claude
 
-`apps/arena/src/__main__.py:89` (`_cmd_race`). Reads a YAML profile (default `apps/arena/src/profiles/v1.yaml`), spins up one `AsyncAnthropic` client per variant, runs them concurrently via `asyncio.gather` (`apps/arena/src/race.py:43`, `_race_with_factory`), and prints a ranked table from `arena.metrics.summarise` (`apps/arena/src/metrics.py:76`). Each variant is one `ConfigProfile` — a frozen Pydantic model with `name / model / temperature / prompt_variant` (`apps/arena/src/config_profile.py:26`). Variants are isolated: they never share API state or any singleton from `apps/agent/src/`.
+`apps/arena/src/__main__.py:89` (`_cmd_race`). Reads a YAML profile (default `apps/arena/src/profiles/v1.yaml`), builds one `ChatWire` per variant via `make_wire` (`apps/arena/src/invoke.py:124`), runs them concurrently via `asyncio.gather` (`apps/arena/src/race.py:43`, `_race_with_factory`), and prints a ranked table from `arena.metrics.summarise` (`apps/arena/src/metrics.py:76`). Each variant is one `ConfigProfile` — a frozen Pydantic model with `name / model / temperature / prompt_variant / wire / base_url` (`apps/arena/src/config_profile.py:29`). `wire` is where a race selects `zen` or `anthropic`; every profile in one race must name the same vendor, since they share one credential. Variants are isolated: they never share API state or any singleton from `apps/agent/src/`.
 
 ### `rank` — Bradley–Terry tournament
 

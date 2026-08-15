@@ -15,9 +15,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
-import anthropic
 import structlog
 from core.json_utils import extract_json_object
+
+from .config import config
+from .providers.wire_factory import make_text_completer
 
 if TYPE_CHECKING:
     from autoresearch.metrics import GameScore
@@ -114,14 +116,18 @@ class MemoryChain:
     def __init__(self, memories_dir: Path | str = MEMORIES_DIR) -> None:
         self.memories_dir = Path(memories_dir)
         self.memories_dir.mkdir(parents=True, exist_ok=True)
-        self.client = anthropic.Anthropic()
+        self.completer = make_text_completer(
+            config.llm_wire,
+            model=config.memory_model,
+            api_key=config.llm_api_key,
+            base_url=config.llm_base_url,
+        )
 
     def extract_memories(
         self,
         memory: AgentMemory,
         score: GameScore,
         game_id: str,
-        model: str = "claude-haiku-4-5-20251001",
     ) -> list[Path]:
         """Extract memory fragments from a completed game.
 
@@ -141,17 +147,8 @@ class MemoryChain:
             return []
 
         try:
-            response = self.client.messages.create(
-                model=model,
-                max_tokens=1024,
-                system=EXTRACTION_SYSTEM,
-                messages=[{"role": "user", "content": game_summary}],
-            )
-            block = response.content[0]
-            if not isinstance(block, anthropic.types.TextBlock):
-                log.error("memory_extraction_unexpected_block", block_type=type(block).__name__)
-                return []
-            observations = self._parse_observations(block.text)
+            text = self.completer.complete(EXTRACTION_SYSTEM, game_summary, max_tokens=1024)
+            observations = self._parse_observations(text)
         except Exception as e:
             log.error("memory_extraction_failed", error=str(e))
             return []
