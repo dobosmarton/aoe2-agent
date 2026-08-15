@@ -16,6 +16,7 @@ import structlog
 from pydantic import BaseModel
 
 from .config import config
+from .entity_utils import CLASSES_BY_KIND, nearest_center_of_classes
 from .models import Action, validate_action
 from .window import ensure_game_focused, get_game_window_rect
 
@@ -520,6 +521,12 @@ def _rejection_reason(building_key: str) -> str | None:
         wood = _build_gates.resources.get("wood")
         if wood is not None and wood < cost:
             return f"{cls} unavailable: costs {cost} wood, you have {wood}"
+    if building_key in _RESOURCE_REQUIRED_KEYS and _resource_anchor(building_key) is None:
+        classes = ", ".join(sorted(_BUILD_ANCHOR_CLASSES[building_key]))
+        return (
+            f"{cls} skipped: no {classes} visible to build against — a drop-off camp "
+            "away from its resource carries nothing; wait for the view to show one"
+        )
     return None
 
 
@@ -568,7 +575,17 @@ def _resolve_coords(action_dict: dict[str, object]) -> tuple[str, tuple[int, int
     time, after any camera move earlier in the sequence (run 8, F-33).
     """
     if action_dict.get("auto_placement"):
-        return ("", default_build_placement())
+        key = str(action_dict.get("building_key", ""))
+        placement = default_build_placement(key)
+        if placement is None:
+            # The camera moved since the pre-flight gate ran, so the resource that
+            # authorised this build is no longer in frame. The trailing `h` press
+            # in build_menu_steps still clears the open menu.
+            return (
+                f"no visible resource to anchor the {BUILD_KEY_TO_CLASS.get(key, key)} on",
+                None,
+            )
+        return ("", placement)
 
     target_id = action_dict.get("target_id")
     if target_id:
@@ -641,6 +658,10 @@ DEFAULT_WAIT_MS = 100
 # Ring geometry for picking open build ground around the town centre. The base
 # clusters on the TC, so the emptiest ring point is almost always valid ground.
 BUILD_RING_RADII: tuple[int, ...] = (280, 400, 520)
+# Ring for a drop-off camp, measured from the RESOURCE. It has to land adjacent,
+# so these hug far tighter than the TC ring above (a tile is ~130px at the
+# deployment capture size — see BUILD_RETRY_RADIUS).
+RESOURCE_RING_RADII: tuple[int, ...] = (150, 210, 270)
 BUILD_RING_DIRECTIONS: int = 8
 BUILD_CLUTTER_RADIUS: int = 160  # entities within this of a candidate = clutter
 
@@ -662,6 +683,20 @@ BUILD_KEY_TO_CLASS: dict[str, str] = {
     "s": "blacksmith",
     "t": "dock",
 }
+
+# Drop-off camps are worthless away from their resource, so they anchor on it
+# instead of the town centre. A key absent here keeps the TC anchor.
+_BUILD_ANCHOR_CLASSES: dict[str, frozenset[str]] = {
+    "r": CLASSES_BY_KIND["wood"],  # lumber camp → tree
+    "e": CLASSES_BY_KIND["gold"] | CLASSES_BY_KIND["stone"],  # mining camp → either mine
+    "w": frozenset({"berry_bush"}),  # mill → berries
+}
+# The mill is the only anchored building that still places without its resource:
+# it is also the farm unlock and a Feudal prerequisite, and run 12 (F-41) starved
+# because only the LLM ever built one.
+_ANCHOR_OPTIONAL_KEYS: frozenset[str] = frozenset({"w"})
+# Derived, so a newly anchored building waits for its resource by default.
+_RESOURCE_REQUIRED_KEYS: frozenset[str] = frozenset(_BUILD_ANCHOR_CLASSES) - _ANCHOR_OPTIONAL_KEYS
 
 # Building classes that can serve as build-gate evidence (see
 # record_confirmed_buildings) — the econ buildings the agent itself can place.
@@ -749,7 +784,9 @@ def _in_play_area(x: int, y: int) -> bool:
 def _clutter_score(point: tuple[int, int]) -> int:
     """Number of detected entities within BUILD_CLUTTER_RADIUS of `point`.
 
-    Lower = emptier ground = more likely a valid building spot.
+    Lower = emptier ground = more likely a valid building spot. Counting the
+    resource itself is deliberate: on a camp's tight ring it makes the emptiest
+    candidate the open ground at the forest's edge.
     """
     px, py = point
     r2 = BUILD_CLUTTER_RADIUS * BUILD_CLUTTER_RADIUS
@@ -760,12 +797,14 @@ def _clutter_score(point: tuple[int, int]) -> int:
     )
 
 
-def _open_ground_candidates(anchor: tuple[int, int]) -> list[tuple[int, int]]:
+def _open_ground_candidates(
+    anchor: tuple[int, int], radii: tuple[int, ...] = BUILD_RING_RADII
+) -> list[tuple[int, int]]:
     """Ring points around `anchor` that lie in the play area, emptiest-first."""
     ax, ay = anchor
     min_x, min_y, max_x, max_y = _play_area_bounds()
     candidates: list[tuple[int, int]] = []
-    for radius in BUILD_RING_RADII:
+    for radius in radii:
         for i in range(BUILD_RING_DIRECTIONS):
             angle = 2.0 * math.pi * i / BUILD_RING_DIRECTIONS
             cx = int(ax + radius * math.cos(angle))
@@ -776,19 +815,44 @@ def _open_ground_candidates(anchor: tuple[int, int]) -> list[tuple[int, int]]:
     return candidates
 
 
-def default_build_placement() -> tuple[int, int]:
-    """Screenshot-relative point to start a building placement when the model
-    gave no x,y — the executor picks *where*, since the text-only model can't see
-    open ground.
+def _home_anchor() -> tuple[int, int]:
+    """The base's screen point: the detected town centre, else the view centre."""
+    tc = _resolve_target_class("town_center")
+    if tc is not None:
+        return tc
+    width, height = _window_size()
+    return (width // 2, height // 2)
 
-    Anchors on the detected town centre but returns the emptiest ring point *around*
-    it, never the TC tile itself (clicking on the TC always fails). Falls back to the
-    window centre's open ring, then a fixed point, when no TC is detected.
+
+def _resource_anchor(building_key: str) -> tuple[int, int] | None:
+    """Center of the resource a drop-off camp should hug, or None if none is visible.
+
+    Nearest to the town centre rather than to the camera, so a camp lands at the
+    home forest instead of whichever tree the view happens to show.
     """
-    anchor = _resolve_target_class("town_center")
-    if anchor is None:
-        width, height = _window_size()
-        anchor = (width // 2, height // 2)
+    classes = _BUILD_ANCHOR_CLASSES.get(building_key)
+    if classes is None:
+        return None
+    center = nearest_center_of_classes(_detected_entities, classes, _home_anchor())
+    return None if center is None else (int(center[0]), int(center[1]))
+
+
+def default_build_placement(building_key: str) -> tuple[int, int] | None:
+    """Screenshot-relative point to start a placement, since the text-only model
+    can't see open ground and the schema carries no coordinates.
+
+    A drop-off camp takes the emptiest point on a tight ring around its resource;
+    everything else takes one around the town centre, never the TC tile itself
+    (clicking on the TC always fails). None means the camp's resource is off
+    screen and the caller should skip the turn.
+    """
+    resource = _resource_anchor(building_key)
+    if resource is not None:
+        candidates = _open_ground_candidates(resource, RESOURCE_RING_RADII)
+        return candidates[0] if candidates else resource
+    if building_key in _RESOURCE_REQUIRED_KEYS:
+        return None
+    anchor = _home_anchor()
     candidates = _open_ground_candidates(anchor)
     return candidates[0] if candidates else anchor
 

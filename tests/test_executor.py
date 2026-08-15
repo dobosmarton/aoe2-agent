@@ -941,7 +941,7 @@ def test_raw_coords_click_without_camera_move_executes(fake_pyautogui: _FakePyau
 def test_resolve_coords_auto_placement_resolves_at_click_time(
     fake_pyautogui: _FakePyautogui, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(ex, "default_build_placement", lambda: (321, 654))
+    monkeypatch.setattr(ex, "default_build_placement", lambda _key="": (321, 654))
     detail, coords = ex._resolve_coords({"auto_placement": True})
     assert (detail, coords) == ("", (321, 654))
 

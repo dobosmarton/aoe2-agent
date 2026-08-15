@@ -190,7 +190,7 @@ Set `game_state` in observations:
 - **wait**: Wait. REQUIRED: `ms` (milliseconds)
 - **scroll**: Scroll/zoom. REQUIRED: `clicks` (positive=in, negative=out)
 - **detect**: Request full entity scan. No extra fields. SLOW (~5-10s) — only use when target_class keeps failing. Do NOT use every turn.
-- **build**: Composite. REQUIRED: `building_key`. `x`/`y` are OPTIONAL — **omit them and the executor auto-places on open ground near the town centre** (it picks the emptiest spot and verifies the building landed). Only pass `x`/`y` for a specific *detected* empty tile. Executes: select idle villager → open economic build menu (Q) → press building_key → place. Building keys: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm, s=Blacksmith, t=Dock. **ALWAYS use this for economic buildings instead of press(.)+press(q)+press(key)+click() separately** — it's 4x faster. NOTE: Military buildings (W menu) and advanced buildings (V menu) cannot use this composite — use manual press sequences instead.
+- **build**: Composite. REQUIRED: `building_key`. The schema takes NO coordinates — the executor picks the spot after the camera settles, because selecting the villager moves the view and any point you computed would be stale. It places a Lumber Camp, Mining Camp or Mill next to its resource, and everything else on open ground near the town centre. Executes: select idle villager → open economic build menu (Q) → press building_key → place. Building keys: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm, s=Blacksmith, t=Dock. **ALWAYS use this for economic buildings instead of press(.)+press(q)+press(key)+click() separately** — it's 4x faster. NOTE: Military buildings (W menu) and advanced buildings (V menu) cannot use this composite — use manual press sequences instead.
 - **send_villager**: Composite. REQUIRED: `target_class` OR `x`+`y`. Executes: select idle villager (press .) → right_click target. **ALWAYS use this instead of press(.)+right_click() separately** — it's 2x faster.
 - **queue_villager**: Composite. No extra fields. Executes: go to TC → queue villager. **ALWAYS use this instead of press(h)+press(q) separately** — it's 2x faster.
 - **reassign_villager**: Composite. REQUIRED: `from_job` (`wood`/`gold`/`stone`/`food`), `building_key`. Pulls a villager already GATHERING `from_job` and builds with it — jumps the camera to that work site, picks a worker there, then builds (q → building_key → auto-place). Unlike `build` (which uses an *idle* villager), this pulls a *working* one. Use to rebalance on the fly, e.g. `from_job="wood"`, `building_key="a"` to pull a wood villager onto a Farm when food is low and no villager is idle.
@@ -199,11 +199,13 @@ Set `game_state` in observations:
 **NEVER output x=0, y=0 or intent containing "Skip".** If you have no valid target, use press actions instead of placeholder click/right_click.
 
 ## Building Placement
-- Buildings CANNOT be placed on trees, water, stone, gold, berry bushes, or other buildings
-- **Mill, Lumber Camp, Mining Camp**: MUST be placed on OPEN GROUND next to the resource, NOT directly on it. Use coordinates 100-200 pixels away from the resource entity. Example: if berry_bush is at (2500, 880), place Mill at (2500, 1050) or (2300, 880).
-- **NEVER use target_class for building placement clicks** — target_class resolves to the resource center, where buildings can't be placed. Always use raw x/y on nearby open ground.
-- The executor auto-retries nearby positions if placement fails, so don't worry about exact coordinates
-- **If a building placement fails 2+ turns in a row**, the location is blocked. Try a COMPLETELY DIFFERENT spot — move 300+ pixels away from the previous attempt. Don't keep clicking the same area.
+
+Placement is the executor's job, not yours. You choose WHAT to build; it chooses WHERE.
+
+- Buildings CANNOT be placed on trees, water, stone, gold, berry bushes, or other buildings. The executor picks open ground for you and retries nearby spots when a placement fails.
+- **Lumber Camp, Mining Camp, Mill** are placed next to their resource automatically. Just issue the `build` — you do not need to find the trees or the mine.
+- A Lumber Camp or Mining Camp is **skipped** when no tree or mine is on screen, and the failure detail says so. That is not a blocked spot: bring the resource into view (or wait for the next turn) rather than retrying immediately.
+- **If a building placement fails 2+ turns in a row**, the ground is blocked or the prerequisite is missing. Read the failure detail before re-issuing the same build.
 
 ## Action Limits
 - Use 3-7 actions per turn — speed matters more than long sequences

@@ -539,6 +539,9 @@ class ExecutorProvider:
 
         # Same gates as the plain build composite (prerequisite / cost / headroom):
         # reassigning a worker to a build that can't exist wastes the whole jump.
+        # Note this reads the PRE-jump frame, so a camp key ("r"/"e") can be skipped
+        # for a resource the phase-1 jump would have brought into view. Accepted:
+        # the cost is one turn with a logged reason, and the common call is "a".
         rejection = build_rejection(building_key, intent)
         if rejection is not None:
             return action_dict, self._make_tool_result(block, False, rejection)
