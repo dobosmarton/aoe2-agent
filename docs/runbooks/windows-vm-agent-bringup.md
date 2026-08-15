@@ -33,7 +33,7 @@ Note that IP; the VM needs it.
 cd %USERPROFILE%\aoe2-llm-arena\agent
 venv\Scripts\activate
 
-set ANTHROPIC_API_KEY=sk-ant-...
+set AOE2_LLM_API_KEY=sk-ant-...
 set AOE2_DETECTION_HOST=http://192.168.64.1:8420
 :: Optional knobs
 set AOE2_STRATEGIST_INTERVAL=10

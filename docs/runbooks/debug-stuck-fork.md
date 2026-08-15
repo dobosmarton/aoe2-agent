@@ -15,7 +15,7 @@ When `POST /forks` returns a `child_run_id` but the run never finishes — no `C
 
 The replay task uses `logger.exception(...)` on any exception (`apps/api/src/forks.py:248`). The trace shows up wherever `uvicorn` is writing logs. Most "stuck" cases turn out to be:
 
-- `anthropic.APIError` — bad/expired `ANTHROPIC_API_KEY`, rate limit, network blip. The replay aborts cleanly; check `/metrics → runs_open` to confirm the run was closed.
+- `anthropic.APIError` — bad/expired `AOE2_LLM_API_KEY`, rate limit, network blip. The replay aborts cleanly; check `/metrics → runs_open` to confirm the run was closed.
 - `pydantic.ValidationError` — LLM returned malformed JSON that the action parser couldn't fix. Rare; usually intermittent.
 - `RuntimeError: run X is not open` — lifecycle ordering bug. Should not happen in shipped code; if you see it, take a stack trace.
 

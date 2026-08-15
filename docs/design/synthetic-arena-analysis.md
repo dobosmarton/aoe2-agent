@@ -36,7 +36,7 @@ A 60-second tour of what was found in this repo:
 | Metrics | `AgentMemory.get_metrics_snapshot()` returns 20+ fields | Per-run only, no cross-run aggregation/UI |
 | Web UI | Empty `.superset/config.json` placeholder; FastAPI present (for detection server) | No game-state dashboard exists |
 | Determinism | `random.seed(42)` in mock_detect | LLM `temperature` is hardcoded SDK default; `random.uniform()` in `executor.py:221` is unseeded |
-| Reference paths | `gameplay_agent/main.py`, `gameplay_agent/game_loop.py`, `gameplay_agent/config.py`, `gameplay_agent/memory.py`, `gameplay_agent/providers/claude_tools.py` | — |
+| Reference paths | `gameplay_agent/main.py`, `gameplay_agent/game_loop.py`, `gameplay_agent/config.py`, `gameplay_agent/memory.py`, `gameplay_agent/providers/action_tools.py` | — |
 
 The takeaway: this is not a greenfield environment. The shape of the answer is "compose existing parts into a fork-able harness", not "build a simulator from scratch."
 
@@ -181,7 +181,7 @@ Promote `evaluation/world_sim.py` to a first-class **`SyntheticWorld`** with:
 - Existing fields (resources, ages, villager queue, building costs) — keep.
 - A `render() → list[DetectedEntity]` method that **projects** world state to detections matching the schema in `detection/inference/detector.py`. This is the missing link between the stateful world and the agent's perception layer.
 - `snapshot() / restore()` returning a serialized dict (Pydantic — already idiomatic in the codebase).
-- `apply_action(action: Action) → ActionResult` consuming the existing tool schema from `gameplay_agent/providers/claude_tools.py`. The world updates resources/positions accordingly. This replaces `gameplay_agent/executor.py`'s pyautogui sinks.
+- `apply_action(action: Action) → ActionResult` consuming the existing tool schema from `gameplay_agent/providers/action_tools.py`. The world updates resources/positions accordingly. This replaces `gameplay_agent/executor.py`'s pyautogui sinks.
 - `mutate(patch: dict)` for operator perturbations — set resources, hide entities, spawn enemies. Mirrors Smallville's NL injection but typed.
 
 Why this works: `world_sim.py` already models the right state shape for AoE2 Dark→Imperial regression testing. The current `mock_detect()` is a *constant function* of (screenshot dimensions); upgrading it to be a function of `WorldState` is small, additive, and unblocks everything else.
@@ -216,7 +216,7 @@ Backend: DuckDB or SQLite — query-able, no server. Mirror to **Langfuse** (sel
 
 Exposing controls already implicit in the architecture:
 
-- Expose `temperature` and `seed` in `Config`. Anthropic SDK supports both. Currently hardcoded in `gameplay_agent/providers/claude.py:430-436`.
+- Expose `temperature` and `seed` in `Config`. Anthropic SDK supports both. Currently hardcoded in `gameplay_agent/providers/executor_provider.py:430-436`.
 - Seed `random.uniform()` in `gameplay_agent/executor.py:221-222` (building-placement retry). Today this silently makes runs unrepeatable.
 - Pin model snapshot (`claude-sonnet-4-6-2026-XX-XX`, not floating).
 - Wire prompt caching (Claude SDK supports it). Same prefix = more stable outputs and cheaper.
@@ -288,7 +288,7 @@ Single bridge network `arena-net`; only Langfuse UI exposed to host by default. 
 - CI guard: grep fails if any `image:` line lacks `@sha256:`.
 
 **Secrets & config**:
-- `.env.example` documents every required variable (`ANTHROPIC_API_KEY`, `LANGFUSE_SECRET`, `MINIO_ROOT_PASSWORD`, etc.).
+- `.env.example` documents every required variable (`AOE2_LLM_API_KEY`, `LANGFUSE_SECRET`, `MINIO_ROOT_PASSWORD`, etc.).
 - Real `.env` gitignored, injected via compose `${VAR}` interpolation.
 - No Vault/sops for v1 — single-developer scope. Revisit if multi-host eval becomes a need.
 
@@ -317,7 +317,7 @@ just arena-up             # arena-infra-up + native arena controller + web UI
 ```
 git clone …
 uv sync                    # installs Python deps from uv.lock
-cp .env.example .env       # fill in ANTHROPIC_API_KEY
+cp .env.example .env       # fill in AOE2_LLM_API_KEY
 just arena-infra-up        # docker compose up, ~30s
 just arena-smoke           # 50-turn synthetic run, exits when assertions pass
 ```
@@ -396,7 +396,7 @@ The phased plan above is scoped to **local development** of the synthetic arena.
 | World projection | `evaluation/world_sim.py` | Add `render() → DetectedEntity[]`, `snapshot()`, `restore()`, `mutate()` |
 | Synthetic detection | `detection/inference/mock.py` | Accept optional `world: SyntheticWorld`; project state to detections |
 | Agent action sink | `gameplay_agent/executor.py` | Pluggable backend: `pyautogui` (real) vs `SyntheticWorld.apply_action()` (test); seed `random.uniform()` |
-| Determinism knobs | `gameplay_agent/config.py`, `gameplay_agent/providers/claude.py` | Expose `temperature`, `seed`; pin model snapshot |
+| Determinism knobs | `gameplay_agent/config.py`, `gameplay_agent/providers/executor_provider.py` | Expose `temperature`, `seed`; pin model snapshot |
 | Event log | new `evaluation/event_log.py` (DuckDB) | Schema, writer, replay |
 | Fork | new `evaluation/fork.py` | `fork(run_id, t, mutation_fn)` |
 | Arena controller | new `arena/controller.py`, `arena/config_profile.py` | Subprocess pool + profile loader |
@@ -404,7 +404,7 @@ The phased plan above is scoped to **local development** of the synthetic arena.
 | Ranking | new `arena/ranking.py` | Bradley-Terry over event log |
 | Infra orchestration | new `docker-compose.yml`, `docker-compose.ci.yml` | Digest-pinned services (Langfuse, Postgres, ClickHouse, MinIO, OTel collector) |
 | Python lock | `pyproject.toml`, new `uv.lock` | Migrate to `uv`; commit lockfile; CI verifies with `uv lock --locked` |
-| Env contract | new `.env.example` | All required vars documented (`ANTHROPIC_API_KEY`, `LANGFUSE_SECRET`, `MINIO_ROOT_PASSWORD`, …) |
+| Env contract | new `.env.example` | All required vars documented (`AOE2_LLM_API_KEY`, `LANGFUSE_SECRET`, `MINIO_ROOT_PASSWORD`, …) |
 | Renovate | new `.github/renovate.json` | Auto-PR for Docker digest + Python lock bumps |
 | Integration CI | new `.github/workflows/arena-integration.yml` | Opt-in or nightly; brings up compose stack with `tmpfs` volumes |
 | Existing reuse | `evaluation/runner.py`, `evaluation/assertions.py`, `autoresearch/orchestrator.py`, `gameplay_agent/{detection,strategist,turn}_phase.py` | No structural change; consumed unchanged |
@@ -486,7 +486,7 @@ References: §D. Phased table row 3.
 
 **3.1 — Expose temperature and seed in `Config`**
 - References: §D, Critical files row "Determinism knobs"
-- Files: `gameplay_agent/config.py` (new fields), `gameplay_agent/providers/claude.py` (lines 430–436: replace hardcoded values), `prompts/`
+- Files: `gameplay_agent/config.py` (new fields), `gameplay_agent/providers/executor_provider.py` (lines 430–436: replace hardcoded values), `prompts/`
 - Done when: `AOE2_TEMPERATURE=0`, `AOE2_LLM_SEED=42`, and `AOE2_MODEL=claude-sonnet-4-6-2026-XX-XX` all flow through to the Anthropic SDK call; pinned-snapshot model name is the default
 - Depends on: —
 

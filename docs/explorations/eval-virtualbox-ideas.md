@@ -10,7 +10,7 @@ Running real AoE2 games against the agent is **slow and expensive**:
 - A meaningful 30-turn game costs ~$1–3 in API spend and ~5–10 minutes wall-clock
 - The Mac fan spins, RAM/CPU are saturated, and you can't run more than one in parallel
 
-The eval framework added in `evaluation/runner.py` is a great start — it runs the **real `ClaudeProvider.get_actions()`** against YAML-fixture state with `execute_action` mocked — but it only covers single-turn, hand-authored scenarios. Most real bugs (stuck loops, memory bleeding, age-transition regressions, model drift between Sonnet/Haiku/Opus) emerge across multiple turns or under perceptual conditions the fixtures don't cover.
+The eval framework added in `evaluation/runner.py` is a great start — it runs the **real `ExecutorProvider.get_actions()`** against YAML-fixture state with `execute_action` mocked — but it only covers single-turn, hand-authored scenarios. Most real bugs (stuck loops, memory bleeding, age-transition regressions, model drift between Sonnet/Haiku/Opus) emerge across multiple turns or under perceptual conditions the fixtures don't cover.
 
 **Goal of this doc:** survey the design space for a "virtual box" — a fast, cheap test environment for the agent that runs without AoE2 DE and without the Mac VM — and present an **idea pool** ranked by leverage-per-effort. This is exploration, not implementation.
 
@@ -107,9 +107,9 @@ Ranked by **leverage-per-effort**, with deliberate over-coverage so the user can
 **Unlocks:** Deterministic model bench-marking. "Does Haiku follow the inhibitory memory rules as well as Sonnet?" answered directly. Also enables eval drift detection: re-run the same captured game next month against the same model and check if results regressed.
 **Effort:** Low–medium. Two pieces:
   1. Add a `--record` flag to `gameplay_agent/main.py` that writes `logs/<game>/snapshots/turn_NNN.json` during normal play. ~100 LOC instrumentation.
-  2. New `evaluation/replay.py` that loads a snapshot dir, hot-swaps the model, runs `ClaudeProvider.get_actions()` per snapshot, and reports diffs. ~200 LOC.
+  2. New `evaluation/replay.py` that loads a snapshot dir, hot-swaps the model, runs `ExecutorProvider.get_actions()` per snapshot, and reports diffs. ~200 LOC.
 **Files touched:** `gameplay_agent/game_loop.py` (instrumentation), new `evaluation/replay.py`, new `evaluation/diff_report.py`.
-**Reuses:** `ClaudeProvider`, `AgentMemory`, the existing context-builder.
+**Reuses:** `ExecutorProvider`, `AgentMemory`, the existing context-builder.
 
 #### 4. Strategist-in-the-loop in eval
 **What:** Today, fixtures hardcode `resources`, `goals`, and `current_age`. Add an optional `strategist_response:` block to fixtures so the runner can inject synthetic strategist output. Wire `_isolate_strategist` similarly to `_isolate_memories_dir`. Optionally, **also** allow running the real strategist against a fixture screenshot (for vision-pipeline regression).

@@ -461,7 +461,7 @@ Property test (hypothesis): given any sequence of `publish`/`stream` operations 
 **Local end-to-end smoke (after Phase 2):**
 
 1. `just arena-infra-up` — start backing services.
-2. Start backend with `ANTHROPIC_API_KEY` set; start frontend (`npm run dev` in `arena/web/ui`).
+2. Start backend with `AOE2_LLM_API_KEY` set; start frontend (`npm run dev` in `arena/web/ui`).
 3. In the UI: pick a finalized parent run, scrub timeline to a turn boundary, hit fork.
 4. Observe in DevTools Network tab:
    - `POST /forks` → 200 with `child_run_id`.

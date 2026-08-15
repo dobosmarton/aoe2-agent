@@ -19,8 +19,8 @@ Entity List + Goals + Resources → Executor (Sonnet, text) → Actions
 
 | Role | Model | Input | Output | Frequency |
 |------|-------|-------|--------|-----------|
-| Strategist | `claude-sonnet-4-6` | Text (resources via local OCR) + game state | Goals + resource readings | Every 10 turns, or on alarm |
-| Executor | `claude-sonnet-4-6` | Text only (entities, goals, resources) | Mouse/keyboard actions | Every turn |
+| Strategist | `gpt-5.6-luna` | Text (resources via local OCR) + game state | Goals + resource readings | Every 10 turns, or on alarm |
+| Executor | `gpt-5.6-luna` | Text only (entities, goals, resources) | Mouse/keyboard actions | Every turn |
 
 The executor runs Sonnet (moved from Haiku for more reliable instruction-following) with a per-call `effort` knob (default `low`) for speed. Routine turns take a single-shot structured call; combat/housing turns take an agentic tool loop.
 
@@ -86,7 +86,7 @@ agent when launched via `just agent`). A documented template lives at `env.examp
 cp env.example .env        # then edit .env and fill in the values below
 ```
 
-At minimum, set `ANTHROPIC_API_KEY` — that's all the **gameplay agent** needs. Every other
+At minimum, set `AOE2_LLM_API_KEY` — that's all the **gameplay agent** needs. Every other
 variable in `env.example` is for the **Synthetic Arena infrastructure** (Langfuse + MinIO +
 ClickHouse + Redis + Postgres) and is only consumed by `just arena-infra-up`. If you're
 not running the arena stack yet, leaving those blank is fine.
@@ -95,18 +95,24 @@ not running the arena stack yet, leaving those blank is fine.
 
 ```bash
 # Windows VM
-set ANTHROPIC_API_KEY=your-key-here
+set AOE2_LLM_API_KEY=your-key-here
 
 # macOS / Linux
-export ANTHROPIC_API_KEY=your-key-here
+export AOE2_LLM_API_KEY=your-key-here
 ```
+
+The agent defaults to GPT-5.6 Luna over OpenCode Zen. To run Claude instead, set
+`AOE2_LLM_WIRE=anthropic`, point `AOE2_MODEL` at a Claude model, and use an Anthropic
+key — one credential either way.
 
 | Env Var | Default | Purpose |
 |---------|---------|---------|
-| `ANTHROPIC_API_KEY` | — | Claude API authentication (required) |
-| `AOE2_MODEL` | `claude-sonnet-4-6` | Executor model |
+| `AOE2_LLM_API_KEY` | — | Model API authentication (required) |
+| `AOE2_LLM_WIRE` | `openai` | Transport: `openai` (OpenAI-compatible) or `anthropic` |
+| `AOE2_LLM_BASE_URL` | OpenCode Zen | Endpoint for the `openai` wire |
+| `AOE2_MODEL` | `gpt-5.6-luna` | Executor model |
 | `AOE2_EXECUTOR_EFFORT` | `low` | Executor effort (`low`/`medium`/`high`) |
-| `AOE2_STRATEGIST_MODEL` | `claude-sonnet-4-6` | Strategist model |
+| `AOE2_STRATEGIST_MODEL` | `gpt-5.6-luna` | Strategist model |
 | `AOE2_STRATEGIST_INTERVAL` | `10` | Run strategist every N turns |
 | `AOE2_LOOP_DELAY` | `0.3` | Seconds between iterations |
 | `AOE2_SAVE_SCREENSHOTS` | `true` | Save screenshots to logs/ |
@@ -161,7 +167,7 @@ Three knobs to make runs as reproducible as Anthropic and the Python stack allow
 
 - **`AOE2_TEMPERATURE=0.0`** (default) is Anthropic's lowest-variance temperature. Raise it (e.g. `0.7`) for output diversity at the cost of reproducibility.
 - **`AOE2_SEED=<int>`** seeds the local RNG used in `executor.py`'s build-retry jitter and Phase 1's `world_sim.render()` default fallback. Two runs with the same seed produce the same RNG sequence. Leave unset to get today's stochastic behavior (OS entropy). **Not passed to the Anthropic API** — `messages.create()` doesn't accept `seed=` as of late 2025; this is purely for the local code paths.
-- **Pin model snapshots.** Set `AOE2_MODEL` and `AOE2_STRATEGIST_MODEL` to a dated snapshot (e.g. `claude-sonnet-4-6-2026-XX-XX`) rather than the floating family alias. Floating tags can move under you between runs.
+- **Pin model snapshots.** Set `AOE2_MODEL` and `AOE2_STRATEGIST_MODEL` to a dated snapshot rather than the floating family alias. Floating tags can move under you between runs.
 
 ### Synthetic Arena infrastructure (optional)
 

@@ -8,7 +8,7 @@ import { Pause, Play } from "lucide-react";
  * screenshot of a Dark Age AoE2 game, with the actual detector's predicted
  * bounding boxes from the labeling pipeline. Strategist and executor copy
  * is hand-written but uses the exact string shapes that the live agent
- * emits (entity_utils.py:58, claude_tools.py).
+ * emits (entity_utils.py:58, action_tools.py).
  *
  * All animation derives from a single elapsedMs counter, which makes
  * step-jumping, pausing, and reduced-motion fallback trivial.
@@ -70,7 +70,7 @@ interface Step {
 // Per prompts/strategist.md:1-9, the strategist reads the *screenshot* (for
 // resource bar / pop / age text that YOLO can't detect) and emits goals;
 // the executor is text-only and uses YOLO entity ids to resolve targets
-// (providers/claude.py:233). Captions reflect that data flow.
+// (providers/executor_provider.py:233). Captions reflect that data flow.
 const STEPS: Step[] = [
   { title: "1. Capture screen", caption: "Frame grabbed from the AoE2 client" },
   { title: "2. Detect entities", caption: "YOLOv8 finds units, buildings, resources" },
@@ -100,7 +100,7 @@ const ENTITY_SUMMARY_LINES = ENTITIES.map(
 const REASONING_TEXT =
   "Dark Age opener — resource bar reads F=200 W=100 G=0 S=200, pop 3/5. Wood is the bottleneck. Goals: gather wood→200 (P9), queue villagers→10 (P8), advance to Feudal Age (P4).";
 
-// Real tool names from apps/agent/src/providers/claude_tools.py.
+// Real tool names from apps/agent/src/providers/action_tools.py.
 const TOOL_CALLS = [
   `click target="villager_0"`,
   `right_click target="tree_0"`,

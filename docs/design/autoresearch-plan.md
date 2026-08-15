@@ -70,7 +70,7 @@ Screenshot → YOLO Detection (60 classes) + resource-bar OCR → Entity + Resou
 | File | Purpose |
 |---|---|
 | `gameplay_agent/game_loop.py` | Core capture→detect→think→act cycle (2-second loop) |
-| `gameplay_agent/providers/claude.py` | Sends screenshot + context to Claude, parses JSON response |
+| `gameplay_agent/providers/executor_provider.py` | Sends screenshot + context to Claude, parses JSON response |
 | `gameplay_agent/memory.py` | Turn history, game state tracking, cumulative metrics |
 | `gameplay_agent/models.py` | Pydantic models for actions and observations |
 | `gameplay_agent/executor.py` | Translates actions to pyautogui calls |
@@ -115,7 +115,7 @@ We define **four parallel improvement loops**, each with its own "file to modify
 > - 4.3 Window offset per-action — re-fetch in `execute_action()` instead of `execute_actions()`
 > - 4.4 Debug print cleanup — replaced with `logger.debug()` calls
 > - 4.5 Action verification — pre/post detection comparison in `game_loop.py`
-> - Additionally: structured output via `messages.parse()` replaced custom JSON parsing in `claude.py`
+> - Additionally: structured output via `messages.parse()` replaced custom JSON parsing in `executor_provider.py`
 
 ### 4.1 Entity ID Persistence — IoU-Based Tracking ✅
 
@@ -980,7 +980,7 @@ if strategy_db:
     )
 ```
 
-#### Modify `gameplay_agent/providers/claude.py` — Inject Strategy Patterns
+#### Modify `gameplay_agent/providers/executor_provider.py` — Inject Strategy Patterns
 
 In `_get_dynamic_context()` or a new method, inject proven patterns:
 
@@ -1432,7 +1432,7 @@ Where `epsilon = 0.02`. This means:
 | `gameplay_agent/executor.py` | ✅ Re-fetch window rect per action | MEDIUM |
 | `gameplay_agent/game_loop.py` | ✅ Post-action screenshot verification | MEDIUM |
 | `gameplay_agent/memory.py` | ✅ Add `last_verification` field | MEDIUM |
-| `gameplay_agent/providers/claude.py` | ✅ Structured output via `messages.parse()` (replaced custom JSON parsing) | HIGH |
+| `gameplay_agent/providers/executor_provider.py` | ✅ Structured output via `messages.parse()` (replaced custom JSON parsing) | HIGH |
 
 ### Files to Create (Future Phases)
 

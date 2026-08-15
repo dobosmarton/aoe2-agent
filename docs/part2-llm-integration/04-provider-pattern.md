@@ -1,81 +1,88 @@
 # Chapter 4: Provider Pattern
 
-The agent abstracts LLM communication behind a provider interface. Currently only Claude is implemented, but the pattern allows adding OpenAI, Gemini, or local models without touching the game loop.
+The agent splits LLM communication in two: **one executor holds the game logic**, and a **wire** holds everything vendor-specific. Switching between Anthropic and any OpenAI-compatible endpoint (OpenCode Zen, api.openai.com) is a wire swap, not a second copy of the ~900-line executor.
 
 <aside class="prereqs">
 
-Python ABCs and async/await. If "tool use" or "function calling" is new, jump to the agentic-tool-loop deep dive at the end of §4.3 first.
+Python Protocols and async/await. If "tool use" or "function calling" is new, jump to the agentic-tool-loop deep dive at the end of §4.3 first.
 
 </aside>
 
-## 4.1 The Abstract Interface
+## 4.1 The Wire Contract
 
-`apps/agent/src/providers/base.py:7-37` defines the contract:
+`apps/agent/src/providers/base.py` defines a `Protocol` (structural, no inheritance) plus the frozen value objects that cross it:
 
 ```python
-class BaseLLMProvider(ABC):
-    @abstractmethod
-    async def get_actions(
-        self,
-        screenshot_bytes: bytes,
-        context: str = "",
-        width: int = 1920,
-        height: int = 1080,
-    ) -> dict[str, Any]:
-        """Returns dict with 'reasoning', 'actions', and optionally 'observations'."""
-        pass
+class ChatWire(Protocol):
+    model: str
 
-    @abstractmethod
-    def get_system_prompt(self) -> str:
-        """Get the system prompt for this provider."""
-        pass
+    async def tool_turn(self, request: ChatRequest,
+                        tools: list[dict[str, object]]) -> ToolTurnResult: ...
+    async def parse_structured(self, request: ChatRequest,
+                               schema: type[ModelT]) -> tuple[ModelT, TokenUsage]: ...
+    def is_api_error(self, exc: Exception) -> bool: ...
+    def is_schema_too_large(self, exc: Exception) -> bool: ...
 ```
 
-Two methods: `get_actions()` takes a screenshot and context, returns structured output. `get_system_prompt()` returns the provider-specific prompt. Both are required for any new provider.
+The last two matter: they move **exception classification** behind the seam, so the executor never names a vendor's error classes. `is_schema_too_large` is true only on Anthropic, whose constrained decoding has a compiled-grammar size cap — that is what routes a turn off the single-shot path onto the smaller tool-loop schema (run 12, F-40).
 
-## 4.2 Provider Registration
+Conversations cross the seam as neutral turns — `UserTurn`, `AssistantTurn`, `ToolResultsTurn` — and each wire renders its own message list from them. That is where the vendors genuinely differ:
 
-Providers are registered in a simple dict at `apps/agent/src/main.py:31-44`:
+| Concern | `wire_anthropic.py` | `wire_openai.py` |
+|---|---|---|
+| System prompt | list of blocks with explicit `cache_control` | one message; caching automatic on prefix |
+| Tools | `{name, description, input_schema}` | `{type: "function", function: {...}, strict: true}` |
+| Tool results | all batched into one user turn | **one `tool` message per `tool_call_id`** |
+| Wants more tools | `stop_reason == "tool_use"` | `finish_reason == "tool_calls"` |
+| Usage | `input_tokens` excludes cached | `prompt_tokens` **includes** cached — subtracted back out |
+| Refusal | `stop_reason == "refusal"` | `message.refusal` |
+
+Both raise `ModelRefusedError` so callers handle one exception type.
+
+## 4.2 Wire Selection
+
+`apps/agent/src/providers/wire_factory.py` is the single place a wire is chosen by name — one match arm per implementation, a lazy import inside each so neither SDK is mandatory, and a `ValueError` naming the valid choices rather than a silent fallback:
 
 ```python
-def create_provider(provider_name: str):
-    providers = {
-        "claude": ClaudeProvider,
-        # "openai": OpenAIProvider,
-        # "gemini": GeminiProvider,
-    }
-    if provider_name not in providers:
-        available = ", ".join(providers.keys())
-        raise ValueError(f"Unknown provider: {provider_name}. Available: {available}")
-    return providers[provider_name]()
+wire = make_wire(config.llm_wire, model=config.model,
+                 api_key=..., base_url=config.llm_base_url)
 ```
 
-Selected via CLI: `python -m gameplay_agent --provider claude`.
+Selected by env or CLI:
 
-## 4.3 Claude Provider Implementation
+```bash
+AOE2_LLM_WIRE=openai OPENCODE_API_KEY=sk-... AOE2_MODEL=gpt-5.6-luna just agent
+python -m gameplay_agent.main --wire openai
+```
 
-`apps/agent/src/providers/claude.py:32-291` -- the only production provider.
+There is deliberately **no registry of provider classes** — one executor serves every model. `make_text_completer` is the synchronous sibling for the plain prompt-in/text-out callers (memory extraction, prompt mutation).
 
-### Initialization (`claude.py:35-63`)
+Per-model pricing lives in one table, `providers/pricing.py`, shared by the agent and the arena. An unknown model logs `pricing_unknown_model` rather than silently costing $0.00.
+
+## 4.3 Executor Implementation
+
+`apps/agent/src/providers/executor_provider.py` -- the one production executor, holding only game logic.
+
+### Initialization
 
 ```python
-class ClaudeProvider(BaseLLMProvider):
-    def __init__(self, api_key=None, model=None, use_dynamic_context=True):
-        self.client = anthropic.AsyncAnthropic(api_key=self.api_key)
-        self._system_prompt: str | None = None
+class ExecutorProvider:
+    def __init__(self, api_key=None, model=None, use_dynamic_context=True, wire=None):
+        self.model = model or config.model
+        # Defaults to whatever AOE2_LLM_WIRE selects; inject one to override.
+        self.wire: ChatWire = wire or make_wire(config.llm_wire, model=self.model, ...)
         self.use_dynamic_context = use_dynamic_context and GAME_KNOWLEDGE_AVAILABLE
-        self._game_db: Optional["GameKnowledge"] = None
 ```
 
-- Uses `AsyncAnthropic` for non-blocking API calls
+- Delegates every API call to its `ChatWire`; the SDK client lives there
 - Lazily loads the system prompt on first access
 - Optionally initializes the game knowledge database for dynamic context injection
 
-### System Prompt Loading (`claude.py:148-189`)
+### System Prompt Loading (`executor_provider.py`)
 
 Loads and concatenates `prompts/core.md` + `prompts/hotkeys.md`, then layers the age-specific `prompts/ages/<age>.md` at request time. If a file doesn't exist, falls back to a minimal inline prompt that teaches the JSON output format and basic action types. See [Chapter 5](./05-prompt-engineering.md) for prompt content.
 
-### Content Building (`claude.py:_build_content`)
+### Content Building (`executor_provider._build_content`)
 
 The executor is **text-only** — no screenshot — so all visual information arrives as the YOLO entity list plus the strategist's cached resource readings. (The strategist itself is also text-only: it produces those readings by OCR-ing the resource bar locally — `resource_ocr.py`, RapidOCR — not via a Claude vision call.) `_build_content()` assembles a single text content block:
 
@@ -83,34 +90,34 @@ The executor is **text-only** — no screenshot — so all visual information ar
 2. Prepends a dimensions line: `"Game window: 1920x1080 pixels. Center=(960,540). ..."`
 3. Returns `[{"type": "text", "text": ...}]`
 
-### The two executor paths (`claude.py`)
+### The two executor paths
 
-The executor runs `claude-sonnet-4-6` (`config.model`). `get_actions()` routes each turn to one of two paths via `_use_single_shot(context)`:
+The executor runs whatever `config.model` names, over `config.llm_wire`. `get_actions()` routes each turn to one of two paths via `_use_single_shot(context)`:
 
-- **Single-shot (routine turns).** `_call_single_shot()` makes **one** `messages.parse()` call — no tool loop. The returned actions are handed to the game loop to execute (`actions_already_executed=False`). This is the fast, cheap path for ordinary economy turns.
-- **Agentic tool loop (interactive turns).** `_call_api()` runs `messages.create(..., tools=_ACTION_TOOLS)` up to `config.max_tool_iterations` (7) times: Claude calls a tool, the host executes it, the result is fed back, and composite tools (`send_villager`, `queue_villager`) run multi-step sequences within one iteration. Used when the turn needs mid-turn rescans or the composite tools the single-shot `Action` union can't express. (`build` is now in the single-shot `Action` union too, so routine turns build directly; the loop still exposes a `build` tool that runs the same shared `build_steps()` sequence.)
+- **Single-shot (routine turns).** `_call_single_shot()` makes **one** `parse_structured` call — no tool loop. The returned actions are handed to the game loop to execute (`actions_already_executed=False`). This is the fast, cheap path for ordinary economy turns.
+- **Agentic tool loop (interactive turns).** `_call_api()` runs `wire.tool_turn(..., _ACTION_TOOLS)` up to `config.max_tool_iterations` (7) times: Claude calls a tool, the host executes it, the result is fed back, and composite tools (`send_villager`, `queue_villager`) run multi-step sequences within one iteration. Used when the turn needs mid-turn rescans or the composite tools the single-shot `Action` union can't express. (`build` is now in the single-shot `Action` union too, so routine turns build directly; the loop still exposes a `build` tool that runs the same shared `build_steps()` sequence.)
 
 `_use_single_shot` keeps the loop for combat/housing emergencies — it scans the context for signals like `under attack: true`, `defend`, `housed (cannot` — and takes the single-shot path otherwise.
 
 ```python
-async def _call_single_shot(self, content, age="Dark Age") -> LLMResult:
-    output_config: OutputConfigParam = {"effort": config.executor_effort}
-    response = await self.client.messages.parse(
-        model=self.model,
-        max_tokens=config.max_tokens,
-        temperature=config.temperature,
-        system=self.get_system_prompt(age),
-        messages=[{"role": "user", "content": content}],
-        output_format=LLMResponse,   # SDK merges this into output_config.format
-        output_config=output_config,
+async def _parse_single_shot(self, turns: tuple[Turn, ...], age: str) -> LLMResponse:
+    parsed, usage = await self.wire.parse_structured(
+        ChatRequest(
+            system=self.get_system_prompt(age),
+            turns=turns,
+            max_tokens=config.max_tokens,
+            temperature=config.temperature,
+            effort=config.executor_effort,
+        ),
+        LLMResponse,
     )
-    # ... accumulate usage ...
-    return self._serialize_single_shot(response.parsed_output)
+    self._record_usage(usage)
+    return parsed
 ```
 
-Both paths share the **effort knob** (`config.executor_effort`, default `low`, env `AOE2_EXECUTOR_EFFORT`) passed as `output_config={"effort": ...}`: a low effort trims latency and consolidates tool calls on Sonnet 4.6 (the SDK rejects `xhigh`/`max` for this tier, so the config type is `Literal["low","medium","high"]`). `messages.parse()` returns a validated `LLMResponse` Pydantic model directly (requires `anthropic>=0.84.0`); the tool loop assembles an `LLMResponse` from the executed tool calls. Both paths use prompt caching — see [Chapter 5 §5.8](./05-prompt-engineering.md).
+Both paths share the **effort knob** (`config.executor_effort`, default `low`, env `AOE2_EXECUTOR_EFFORT`), carried on `ChatRequest.effort` and rendered as `output_config` on Anthropic or `reasoning_effort` on OpenAI: a low effort trims latency and consolidates tool calls on Sonnet 4.6 (the SDK rejects `xhigh`/`max` for this tier, so the config type is `Literal["low","medium","high"]`). `parse_structured` returns a validated `LLMResponse` Pydantic model directly; the tool loop assembles an `LLMResponse` from the executed tool calls. Both paths use prompt caching — see [Chapter 5 §5.8](./05-prompt-engineering.md).
 
-### Error Recovery (`claude.py:_error_response`)
+### Error Recovery (`executor_provider._error_response`)
 
 On any API or parsing failure (either path), `get_actions()` returns a safe fallback:
 
@@ -144,33 +151,37 @@ Every arrow that says "LLM thinks" is a **full API roundtrip**. You pay the full
 
 - **ReAct** (Yao et al., 2022) interleaves free-form *thought*-tokens between tool calls. More inspectable, but more output tokens and the thoughts are not validated by any schema.
 - **Plan-and-execute** asks the LLM to write a full plan upfront and then executes it without re-prompting. Faster for predictable tasks; brittle when the world changes between plan and execution — exactly our situation.
-- **Single-shot structured output** (what our chapter shows: `messages.parse` returning an `LLMResponse` with a list of actions) sidesteps the loop entirely: one API call, one response, the host runs each action and feeds nothing back to the LLM until the next turn. Cheapest and most predictable, but the model can't react mid-turn to a tool's success or failure.
+- **Single-shot structured output** (what our chapter shows: `parse_structured` returning an `LLMResponse` with a list of actions) sidesteps the loop entirely: one API call, one response, the host runs each action and feeds nothing back to the LLM until the next turn. Cheapest and most predictable, but the model can't react mid-turn to a tool's success or failure.
 
-We actually use a **hybrid that switches per turn**: routine turns take the single-shot path (one `messages.parse`, no roundtrips), while combat/housing turns — the ones that need mid-execution feedback (a rescan whose result changes what to click next) or composite tools — take the agentic tool loop. The router (`_use_single_shot`) keeps the predictable case cheap and reserves the expensive loop for the turns that genuinely need it.
+We actually use a **hybrid that switches per turn**: routine turns take the single-shot path (one `parse_structured`, no roundtrips), while combat/housing turns — the ones that need mid-execution feedback (a rescan whose result changes what to click next) or composite tools — take the agentic tool loop. The router (`_use_single_shot`) keeps the predictable case cheap and reserves the expensive loop for the turns that genuinely need it.
 
 **Mental model for the cost.** A useful rule of thumb: at Claude Sonnet rates, every tool roundtrip on a fully primed conversation costs roughly the same as one second of GPT-running-flat-out — pennies, but they add up. If your agent feels expensive, the lever is almost always "reduce the number of roundtrips," not "switch to a cheaper model."
 
 </details>
 
-## 4.4 Adding a New Provider
+## 4.4 Adding a New Vendor
 
-1. Create `apps/agent/src/providers/new_provider.py` implementing `BaseLLMProvider`
-2. Implement `get_actions()` to accept screenshot bytes and return the standard dict
-3. Implement `get_system_prompt()` with an appropriate prompt for the model
-4. Register in `create_provider()` at `apps/agent/src/main.py:33`
-5. Add to `--choices` in the argparse definition at `apps/agent/src/main.py:83`
+You add a **wire**, not a provider — the executor stays as it is.
 
-The game loop, memory system, executor, and detection pipeline are provider-agnostic -- they only interact through the `get_actions()` return value.
+1. Create `apps/agent/src/providers/wire_<vendor>.py` satisfying `ChatWire`
+2. Render `SystemBlock`/`Turn` values onto that API's message shape, and map its usage fields onto `TokenUsage`
+3. Classify its exceptions in `is_api_error` / `is_schema_too_large`
+4. Add one match arm to `make_wire` in `providers/wire_factory.py`, with a lazy import so the SDK stays optional
+5. Add the model's rates to `providers/pricing.py`
+
+An OpenAI-compatible endpoint needs none of this: point `AOE2_LLM_BASE_URL` at it and reuse `wire_openai`.
+
+The game loop, memory system, executor, and detection pipeline never see a vendor -- they interact only through `LLMResult`.
 
 ---
 
 ## Summary
 
-- Abstract `BaseLLMProvider` with two required methods
-- Claude implementation: AsyncAnthropic executor on `claude-sonnet-4-6` with a per-turn router (`_use_single_shot`) — single-shot `messages.parse` for routine turns, an agentic `messages.create` tool loop for combat/housing
-- Shared `effort` knob (`config.executor_effort`, default `low`) via `output_config`; structured output via `messages.parse` (requires `anthropic>=0.84.0`)
-- Error recovery returns a safe wait action rather than crashing
-- Provider-agnostic game loop enables model switching
+- One executor (`ExecutorProvider`) holding game logic; a `ChatWire` Protocol holding every vendor detail
+- Per-turn router (`_use_single_shot`) — a single structured call for routine turns, an agentic tool loop for combat/housing, with the tool loop as the fallback when a vendor rejects the larger schema
+- Shared `effort` knob (`config.executor_effort`, default `low`): `output_config` on Anthropic, `reasoning_effort` on OpenAI
+- Error recovery returns a safe wait action with `error=True`, feeding the executor-outage alarm and `llm_error_rate` rather than crashing
+- Vendor choice is one env var; pricing lives in one shared table
 
 ## Related Topics
 

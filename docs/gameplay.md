@@ -24,7 +24,7 @@ Topology: macOS host runs the detection server; Windows VM runs AoE2 + the agent
   Phase 2 — Windows VM: configure the agent
 
   - [ ] Set env (Command Prompt):
-    - [ ] $env:ANTHROPIC_API_KEY=sk-ant-…
+    - [ ] $env:AOE2_LLM_API_KEY=sk-ant-…
     - [ ] $env:AOE2_DETECTION_HOST=http://<MAC_IP>:8420
     - [ ] $env:AOE2_SAVE_SCREENSHOTS=true  ← leave on; this run also harvests training frames to logs/
     - [ ] (optional) $env:AOE2_STRATEGIST_INTERVAL=10, $env:AOE2_EXECUTOR_EFFORT="low", $env:AOE2_OCR_BACKEND="rapidocr"

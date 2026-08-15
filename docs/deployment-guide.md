@@ -22,7 +22,7 @@ Run the detection server on macOS (Apple Silicon) and the gameplay agent on a Wi
 | **Mac** | Python 3.11+, Apple Silicon recommended |
 | **Windows VM** | Python 3.11+ (x64 installer, NOT ARM64), AoE2:DE installed, VMware Fusion or similar |
 | **Both** | Network connectivity between host and VM |
-| **API Key** | Anthropic API key (`ANTHROPIC_API_KEY`) |
+| **API Key** | Anthropic API key (`AOE2_LLM_API_KEY`) |
 
 ---
 
@@ -159,13 +159,13 @@ pip install -r gameplay_agent\requirements.txt
 
 **Command Prompt:**
 ```cmd
-set ANTHROPIC_API_KEY=sk-ant-...your-key...
+set AOE2_LLM_API_KEY=sk-ant-...your-key...
 set AOE2_DETECTION_HOST=http://192.168.64.1:8420
 ```
 
 **PowerShell:**
 ```powershell
-$env:ANTHROPIC_API_KEY = "sk-ant-...your-key..."
+$env:AOE2_LLM_API_KEY = "sk-ant-...your-key..."
 $env:AOE2_DETECTION_HOST = "http://192.168.64.1:8420"
 ```
 
@@ -217,7 +217,7 @@ python -m gameplay_agent --test
 You should see logs like:
 ```
 detector_initialized         mode=remote server=http://192.168.64.1:8420
-game_loop_start              detection=True executor_model=claude-sonnet-4-6
+game_loop_start              detection=True executor_model=gpt-5.6-luna
 iteration_start              iteration=1
 screenshot_captured           width=1920 height=1080
 detection_complete           entity_count=12
@@ -274,11 +274,11 @@ The remote detector logs `remote_detector_unavailable` and falls back to local O
 
 | Variable | Default | Where | Purpose |
 |----------|---------|-------|---------|
-| `ANTHROPIC_API_KEY` | — | VM | Claude API key (required) |
+| `AOE2_LLM_API_KEY` | — | VM | Claude API key (required) |
 | `AOE2_DETECTION_HOST` | `""` | VM | Detection server URL, e.g. `http://192.168.64.1:8420` |
-| `AOE2_MODEL` | `claude-sonnet-4-6` | VM | Executor LLM model |
+| `AOE2_MODEL` | `gpt-5.6-luna` | VM | Executor LLM model |
 | `AOE2_EXECUTOR_EFFORT` | `low` | VM | Executor effort (`low`/`medium`/`high`) |
-| `AOE2_STRATEGIST_MODEL` | `claude-sonnet-4-6` | VM | Strategist LLM model |
+| `AOE2_STRATEGIST_MODEL` | `gpt-5.6-luna` | VM | Strategist LLM model |
 | `AOE2_STRATEGIST_INTERVAL` | `10` | VM | Run strategist every N turns |
 | `AOE2_LOOP_DELAY` | `0.3` | VM | Seconds between game loop iterations |
 | `AOE2_SAVE_SCREENSHOTS` | `true` | VM | Save screenshots to `logs/` |
@@ -322,7 +322,7 @@ just server --model detection/inference/models/aoe2_yolo_v9.onnx
 ```cmd
 cd aoe2-llm-arena\agent
 venv\Scripts\activate
-set ANTHROPIC_API_KEY=sk-ant-...
+set AOE2_LLM_API_KEY=sk-ant-...
 set AOE2_DETECTION_HOST=http://192.168.64.1:8420
 python -m gameplay_agent
 ```

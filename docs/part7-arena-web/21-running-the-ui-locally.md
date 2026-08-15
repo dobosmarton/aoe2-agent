@@ -61,7 +61,7 @@ No API key? `ARENA_BROKER_BACKEND=redis just arena-smoke` does a mock-LLM run wi
 | `ARENA_LOGS_ROOT` | `logs/arena` | Where to look for DuckDB files. Useful for test isolation or pointing at a remote-mounted log dir. |
 | `ARENA_WEB_CORS_ORIGINS` | `http://localhost:5173, http://localhost:8000` | Comma-separated allow-list. Add your SPA origin when running cross-host. |
 | `ARENA_BROKER_BACKEND` | `inprocess` | Set to `redis` to live-tail a CLI run started in another process. See [Runbook: switching-broker-backend](../runbooks/switching-broker-backend.md). |
-| `ANTHROPIC_API_KEY` | — | Required only if you use the Operator panel (it calls `/forks`, which runs an LLM-driven replay). Listing and replaying runs works without it. |
+| `AOE2_LLM_API_KEY` | — | Required only if you use the Operator panel (it calls `/forks`, which runs an LLM-driven replay). Listing and replaying runs works without it. |
 
 ### Frontend
 
@@ -187,7 +187,7 @@ The end-to-end Operator workflow:
 6. The new run appears in the sidebar; the timeline starts streaming live as `_replay` publishes events.
 7. Switch to the **Diff** tab to see parent vs child side-by-side.
 
-For this to work you need `ANTHROPIC_API_KEY` exported in the shell that started `arena-web-dev` — the fork replay drives a real LLM. The default fork profile is Haiku at temperature 0.5 (`apps/api/src/forks.py:95`, `DEFAULT_FORK_PROFILE`). Cost per 10-turn fork is roughly the same per-profile cost as one race-instance variant from `arena race` — see Chapter 17 for the breakdown.
+For this to work you need `AOE2_LLM_API_KEY` exported in the shell that started `arena-web-dev` — the fork replay drives a real LLM. The default fork profile is Haiku at temperature 0.5 (`apps/api/src/forks.py:95`, `DEFAULT_FORK_PROFILE`). Cost per 10-turn fork is roughly the same per-profile cost as one race-instance variant from `arena race` — see Chapter 17 for the breakdown.
 
 ## Troubleshooting
 
@@ -196,7 +196,7 @@ For this to work you need `ANTHROPIC_API_KEY` exported in the shell that started
 | Sidebar empty | No DuckDB files under `logs/arena/` | `just arena-smoke` to generate one, or set `ARENA_LOGS_ROOT` to a populated directory. |
 | `404 /runs` from the UI | Vite proxy not running, or `VITE_API_BASE_URL` is set but the backend isn't reachable at that URL | `curl` the backend directly; if it works, the issue is in the frontend wiring. |
 | SSE shows `Error` status | CORS rejection (you'll see a console error in DevTools) or the backend died | Check the backend logs and `ARENA_WEB_CORS_ORIGINS`. |
-| Operator tab returns 500 | `ANTHROPIC_API_KEY` not set on the backend | Export it in the shell that runs `arena-web-dev` and restart. |
+| Operator tab returns 500 | `AOE2_LLM_API_KEY` not set on the backend | Export it in the shell that runs `arena-web-dev` and restart. |
 | `/events` returns 404 | Run isn't in any DuckDB under `ARENA_LOGS_ROOT` | Confirm with `curl /runs`; the run may have been written to a different log root. |
 | Run shows as `Streaming` but no events | Live broker mode but the producer's broker doesn't match the server's | Both producer and server need the same `ARENA_BROKER_BACKEND`. See [Runbook: switching-broker-backend](../runbooks/switching-broker-backend.md). |
 | Navigating to `/runs/<id>` shows raw JSON | Dev proxy matched `/runs` before the SPA fallback | The `bypass` on the `/runs` proxy entry handles this — check it wasn't removed from `vite.config.ts`. |

@@ -24,7 +24,7 @@ Every iteration executes the same pipeline. Steps marked **conditional** only ru
 | 6 | Alarm check | ~10 ms | `goals.py:check_alarm()` | Every turn (if entities detected) |
 | 7 | Strategist API call (Sonnet, text — resources via local OCR) | ~5000 ms | `providers/strategist.py` | Turn 1, every 10th turn, on alarm (3-turn cooldown) |
 | 8 | Build LLM context | ~10 ms | `game_loop.py:_build_llm_context()` | Every turn |
-| 9 | Executor agentic loop (1–7 tool calls) | ~2000 ms | `providers/claude.py` | Every turn |
+| 9 | Executor agentic loop (1–7 tool calls) | ~2000 ms | `providers/executor_provider.py` | Every turn |
 | 10 | Process response + memory update | ~50 ms | `game_loop.py:_process_response()` | Every turn |
 | 11 | Ground commands (zoom, scout) | ~250 ms | `game_loop.py:_get_ground_commands()` | Turn 1 only |
 | 12 | Action execution (3–5 actions) | ~250 ms | `executor.py` at 50 ms/action | Every turn (or fallback) |

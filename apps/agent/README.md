@@ -31,7 +31,7 @@ apps/agent/src/            # importable as `gameplay_agent`
 ├── overlay.py             # Tkinter live overlay (optional)
 ├── goal_logger.py         # Per-game goal/score TSV writer
 ├── config.py              # Pydantic config from env vars
-├── providers/             # ClaudeProvider (executor) + StrategistProvider (text + local OCR)
+├── providers/             # ExecutorProvider (executor) + StrategistProvider (text + local OCR)
 ├── prompts/               # System prompts (core.md, hotkeys.md, strategist.md, ages/*.md)
 ├── scenario_runner.py     # `python -m gameplay_agent.scenario_runner ...` (multi-turn harness)
 ├── assertions.py          # Assertion DSL used by scenario fixtures
