@@ -22,7 +22,7 @@ Run the detection server on macOS (Apple Silicon) and the gameplay agent on a Wi
 | **Mac** | Python 3.11+, Apple Silicon recommended |
 | **Windows VM** | Python 3.11+ (x64 installer, NOT ARM64), AoE2:DE installed, VMware Fusion or similar |
 | **Both** | Network connectivity between host and VM |
-| **API Key** | Anthropic API key (`AOE2_LLM_API_KEY`) |
+| **API Key** | Model API key for the selected adapter (`AOE2_LLM_API_KEY`) |
 
 ---
 
@@ -159,13 +159,13 @@ pip install -r gameplay_agent\requirements.txt
 
 **Command Prompt:**
 ```cmd
-set AOE2_LLM_API_KEY=sk-ant-...your-key...
+set AOE2_LLM_API_KEY=your-key-here
 set AOE2_DETECTION_HOST=http://192.168.64.1:8420
 ```
 
 **PowerShell:**
 ```powershell
-$env:AOE2_LLM_API_KEY = "sk-ant-...your-key..."
+$env:AOE2_LLM_API_KEY = "your-key-here"
 $env:AOE2_DETECTION_HOST = "http://192.168.64.1:8420"
 ```
 
@@ -173,11 +173,16 @@ Replace `192.168.64.1` with your Mac's IP from step 1.5.
 
 Optional tuning:
 ```cmd
+set AOE2_LLM_WIRE=openai
 set AOE2_LOOP_DELAY=0.3
 set AOE2_EXECUTOR_EFFORT=low
 set AOE2_STRATEGIST_INTERVAL=10
 set AOE2_SAVE_SCREENSHOTS=true
 ```
+
+`AOE2_LLM_WIRE` picks the adapter: `openai` (default, api.openai.com), `zen` (OpenCode Zen)
+or `anthropic`. Supply the matching key in `AOE2_LLM_API_KEY`. A name outside that set stops
+the agent at startup with `ValueError: unknown AOE2_LLM_WIRE=...` rather than falling back.
 
 ### 2.4 Verify connectivity to the Mac server
 
@@ -274,7 +279,9 @@ The remote detector logs `remote_detector_unavailable` and falls back to local O
 
 | Variable | Default | Where | Purpose |
 |----------|---------|-------|---------|
-| `AOE2_LLM_API_KEY` | — | VM | Claude API key (required) |
+| `AOE2_LLM_API_KEY` | — | VM | Model API key for the selected adapter (required) |
+| `AOE2_LLM_WIRE` | `openai` | VM | Adapter: `openai`, `zen` (OpenCode Zen) or `anthropic`. An unknown name raises at startup |
+| `AOE2_LLM_BASE_URL` | `""` | VM | Endpoint override; empty uses the adapter's own |
 | `AOE2_DETECTION_HOST` | `""` | VM | Detection server URL, e.g. `http://192.168.64.1:8420` |
 | `AOE2_MODEL` | `gpt-5.6-luna` | VM | Executor LLM model |
 | `AOE2_EXECUTOR_EFFORT` | `low` | VM | Executor effort (`low`/`medium`/`high`) |
@@ -322,7 +329,7 @@ just server --model detection/inference/models/aoe2_yolo_v9.onnx
 ```cmd
 cd aoe2-llm-arena\agent
 venv\Scripts\activate
-set AOE2_LLM_API_KEY=sk-ant-...
+set AOE2_LLM_API_KEY=your-key-here
 set AOE2_DETECTION_HOST=http://192.168.64.1:8420
 python -m gameplay_agent
 ```

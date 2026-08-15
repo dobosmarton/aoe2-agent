@@ -7,7 +7,7 @@ Topology: macOS host runs the detection server; Windows VM runs AoE2 + the agent
   members).
   - [ ] Windows VM: Python x64 (not ARM64), AoE2:DE installed, network to the Mac. Get the code on the VM and
   install deps (uv uv sync, or pip from the generated requirements.txt if uv is fiddly on the VM).
-  - [ ] Anthropic API key ready (sk-ant-…).
+  - [ ] API key ready for the adapter in `AOE2_LLM_WIRE` (default `openai`).
   - [ ] VM is current: git pull on the VM so it has the OCR feature commit (2d09f58) — without it the strategist
   still expects the old path.
 
@@ -24,7 +24,7 @@ Topology: macOS host runs the detection server; Windows VM runs AoE2 + the agent
   Phase 2 — Windows VM: configure the agent
 
   - [ ] Set env (Command Prompt):
-    - [ ] $env:AOE2_LLM_API_KEY=sk-ant-…
+    - [ ] $env:AOE2_LLM_API_KEY=your-key-here
     - [ ] $env:AOE2_DETECTION_HOST=http://<MAC_IP>:8420
     - [ ] $env:AOE2_SAVE_SCREENSHOTS=true  ← leave on; this run also harvests training frames to logs/
     - [ ] (optional) $env:AOE2_STRATEGIST_INTERVAL=10, $env:AOE2_EXECUTOR_EFFORT="low", $env:AOE2_OCR_BACKEND="rapidocr"

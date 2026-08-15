@@ -8,6 +8,7 @@ Entries are organized alphabetically. Most are followed by a short link of the f
 
 ## A
 
+- **Adapter (LLM)** — One `ChatWire` implementation plus the name that selects it. Three exist: `openai`, `zen` and `anthropic`, chosen with `AOE2_LLM_WIRE`. → [Chapter 4 §4.2](./part2-llm-integration/04-provider-pattern.md).
 - **Action-effect verification** — After an entity-affecting action (a build/placement or a camera move), the agent re-detects and confirms the expected change, recording `CONFIRMED …` or the exact phrase `no visible change`; repeated misses feed the stuck-loop detector. → [Chapter 2 §2.1 Step 11](./part1-architecture/02-game-loop-pipeline.md).
 - **Anchor box** — A YOLO-style detector predicts each object's bounding box as an *offset* from a pre-defined anchor of a given aspect ratio, rather than predicting raw coordinates. → [Appendix A — YOLO and object detection](./appendix/01-yolo-and-object-detection.md).
 - **Asyncio** — Python's cooperative-multitasking concurrency primitive. The agent's game loop is built on a single asyncio event loop so the strategist can think in the background while the executor is acting. → [Chapter 1 §Async-first architecture](./part1-architecture/01-system-overview.md).
@@ -20,6 +21,7 @@ Entries are organized alphabetically. Most are followed by a short link of the f
 
 ## C
 
+- **ChatWire** — The `Protocol` that every LLM transport satisfies: four methods covering a tool turn, a structured-output call, and two exception classifiers. It holds everything vendor-specific and no game logic, so one executor serves every model. → [Chapter 4 §4.1](./part2-llm-integration/04-provider-pattern.md).
 - **Cache hit / cache miss (LLM)** — Whether the provider was able to reuse its internal KV-cache for a prefix of your request. Visible in `usage.cache_read_input_tokens`. → [Chapter 5 — Prompt caching callout](./part2-llm-integration/05-prompt-engineering.md).
 - **`cache_control`** — Anthropic's marker for "this block of the prompt can be cached." → [Chapter 5 — Prompt caching callout](./part2-llm-integration/05-prompt-engineering.md).
 - **COCO format** — A JSON-based bounding-box / segmentation label format with explicit category IDs. The default format CVAT exports. → [Chapter 9 — COCO vs YOLO callout](./part3-entity-detection/09-labeling-and-active-learning.md).
@@ -61,6 +63,7 @@ Entries are organized alphabetically. Most are followed by a short link of the f
 
 ## O
 
+- **OpenCode Zen** — A gateway that speaks the OpenAI Chat Completions shape, reaching GPT-5.6 Luna, Kimi and GLM behind one key. Selected with `AOE2_LLM_WIRE=zen`, which supplies its endpoint automatically. → [Chapter 4 §4.2](./part2-llm-integration/04-provider-pattern.md).
 - **OLAP vs OLTP** — *OLAP* (analytical) workloads read lots of rows and few columns to compute aggregates; *OLTP* (transactional) workloads read/write a few rows touching many columns. DuckDB is OLAP; Postgres/SQLite are primarily OLTP. → [Chapter 16](./part6-evaluation-arena/16-duckdb-persister-and-replay.md).
 - **OPRO** — Optimization by PROmpting: a paper from DeepMind where one LLM proposes new prompts and another LLM scores them, iteratively converging on better prompts. Related to our autoresearch loop. → [Chapter 22 — Prompt optimization landscape](./part8-autoresearch/22-autoresearch-overview.md).
 
@@ -89,6 +92,11 @@ Entries are organized alphabetically. Most are followed by a short link of the f
 ## V
 
 - **Vectorized execution** — Processing a batch (vector) of rows at a time through each operator, instead of one row at a time. The reason DuckDB and modern OLAP engines are 10–100× faster than row-at-a-time engines on analytical queries. → [Chapter 16](./part6-evaluation-arena/16-duckdb-persister-and-replay.md).
+
+## W
+
+- **Wire** — Chapter 4's term for a vendor transport: the message envelope, tool-schema shape, usage field names, stop-reason spelling and exception classes for one API. Swapping vendor is a wire swap, not a second executor. → [Chapter 4](./part2-llm-integration/04-provider-pattern.md).
+- **WireName** — The `Literal["anthropic", "openai", "zen"]` in `config.py` that is the single source for the valid adapter set. `config._parse_wire` validates against it and the factories dispatch over it with `assert_never`, so a new adapter fails the typecheck until every arm handles it. → [Chapter 4 §4.2](./part2-llm-integration/04-provider-pattern.md).
 
 ## Y
 

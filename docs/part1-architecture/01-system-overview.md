@@ -118,6 +118,14 @@ Configuration uses a Pydantic `BaseModel` with environment variable overrides (`
 | `action_delay` | — | `0.05` | Seconds between individual actions |
 | `pipeline_commit_max` | `AOE2_PIPELINE_COMMIT_MAX` | `2` | Actions committed per pipelined (routine) turn; the tail is discarded |
 | `save_screenshots` | `AOE2_SAVE_SCREENSHOTS` | `true` | Log screenshots to disk |
+
+`AOE2_LLM_WIRE` tolerates case and surrounding whitespace, so `ZEN` and `" zen "` both resolve. An unrecognised name raises at startup rather than falling back — `config._parse_wire` is the only validator, and a silent fallback would play a whole game on a vendor nobody chose:
+
+```
+ValueError: unknown AOE2_LLM_WIRE='zzz'; expected one of 'anthropic', 'openai', 'zen'
+```
+
+The valid set is the `WireName` Literal in `config.py`, and the `--wire` CLI choices derive from it. See [Provider Pattern §4.2](../part2-llm-integration/04-provider-pattern.md) for how the factories turn a name into a client.
 | `log_dir` | — | `logs` | Screenshot and log output directory |
 
 A global singleton `config = Config.from_env()` is created at module load time and imported throughout the codebase.
@@ -127,7 +135,7 @@ A global singleton `config = Config.from_env()` is created at module load time a
 The entire agent runs on asyncio:
 
 - **Entry point**: `asyncio.run(main_async(args))` in `apps/agent/src/main.py`
-- **API clients**: `anthropic.AsyncAnthropic` for both executor and strategist
+- **API clients**: `openai.AsyncOpenAI` by default for both executor and strategist, or `anthropic.AsyncAnthropic` on the `anthropic` adapter — each `ChatWire` owns its own client
 - **Game loop**: `game_loop()` in `apps/agent/src/game_loop.py`
 - **Action execution**: `execute_actions()` in `apps/agent/src/executor.py`
 - **Delays**: `asyncio.sleep()` for non-blocking waits

@@ -21,7 +21,7 @@ flowchart TD
     SKIP --> FINAL
     DIM["Screenshot dimensions<br/>(width x height + center, as text)"] --> MSG["User Message"]
     FINAL --> MSG
-    SYS["System Prompt<br/>(prompts/system.md)"] --> API["Claude API Call"]
+    SYS["System Prompt<br/>(prompts/system.md)"] --> API["LLM API Call"]
     MSG --> API
 ```
 
