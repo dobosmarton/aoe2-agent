@@ -2,16 +2,12 @@
 
 import os
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast, get_args
 
 from pydantic import BaseModel
 
 EffortLevel = Literal["low", "medium", "high"]  # Sonnet 4.6 rejects xhigh/max
-WireName = Literal["anthropic", "openai"]
-
-# OpenCode Zen speaks the OpenAI Chat Completions shape, so the same wire reaches
-# GPT-5.6 Luna, Kimi and GLM there, or api.openai.com with AOE2_LLM_BASE_URL.
-ZEN_BASE_URL = "https://opencode.ai/zen/v1"
+WireName = Literal["anthropic", "openai", "zen"]
 
 
 def _parse_optional_int(value: str | None) -> int | None:
@@ -29,8 +25,9 @@ def _parse_effort(value: str | None) -> EffortLevel:
 
 
 def _parse_wire(value: str | None) -> WireName:
-    if value in ("anthropic", "openai"):
-        return value
+    """Parse the wire env var, deriving the valid set from `WireName` itself."""
+    if value in get_args(WireName):
+        return cast("WireName", value)
     return "openai"
 
 
@@ -45,10 +42,12 @@ class Config(BaseModel):
     screenshot_quality: int = 85  # JPEG quality (1-100)
 
     # LLM settings
-    # Which transport serves the models below. OpenAI-compatible by default,
-    # pointed at OpenCode Zen; set AOE2_LLM_WIRE=anthropic to run Claude.
+    # Which adapter serves the models below: openai (api.openai.com) |
+    # zen (OpenCode Zen) | anthropic. Each supplies its own endpoint.
     llm_wire: WireName = "openai"  # AOE2_LLM_WIRE
-    llm_base_url: str = ZEN_BASE_URL  # AOE2_LLM_BASE_URL (openai wire only)
+    # Empty means "use the adapter's own endpoint" — only set this to reach a
+    # non-default host (a staging gateway, a self-hosted proxy).
+    llm_base_url: str = ""  # AOE2_LLM_BASE_URL
     llm_api_key: str = ""  # AOE2_LLM_API_KEY — the only credential
     model: str = "gpt-5.6-luna"  # Executor
     max_tokens: int = 1536
@@ -106,7 +105,7 @@ class Config(BaseModel):
         """Load configuration from environment variables."""
         return cls(
             llm_wire=_parse_wire(os.environ.get("AOE2_LLM_WIRE")),
-            llm_base_url=os.environ.get("AOE2_LLM_BASE_URL", ZEN_BASE_URL),
+            llm_base_url=os.environ.get("AOE2_LLM_BASE_URL", ""),
             llm_api_key=os.environ.get(KEY_ENV, ""),
             model=os.environ.get("AOE2_MODEL", "gpt-5.6-luna"),
             executor_effort=_parse_effort(os.environ.get("AOE2_EXECUTOR_EFFORT")),

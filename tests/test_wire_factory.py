@@ -10,7 +10,7 @@ import pytest
 from gameplay_agent.config import KEY_ENV, Config
 from gameplay_agent.providers.base import TokenUsage
 from gameplay_agent.providers.pricing import cost_usd, price_for
-from gameplay_agent.providers.wire_factory import make_wire
+from gameplay_agent.providers.wire_factory import ZEN_BASE_URL, make_text_completer, make_wire
 
 _WIRE_METHODS = ("tool_turn", "parse_structured", "is_api_error", "is_schema_too_large")
 
@@ -32,7 +32,7 @@ def test_name_tolerates_case_and_whitespace(name: str) -> None:
     assert type(make_wire(name, model="m", api_key="k")).__name__ == "AnthropicWire"
 
 
-@pytest.mark.parametrize("name", ["anthropic", "openai"])
+@pytest.mark.parametrize("name", ["anthropic", "openai", "zen"])
 def test_both_wires_satisfy_the_protocol(name: str) -> None:
     """ChatWire is not runtime_checkable, so conformance is checked by shape."""
     wire = make_wire(name, model="m", api_key="k")
@@ -41,8 +41,47 @@ def test_both_wires_satisfy_the_protocol(name: str) -> None:
 
 def test_unknown_wire_raises_rather_than_falling_back() -> None:
     """Silently defaulting would run a whole game on the wrong vendor."""
-    with pytest.raises(ValueError, match=r"'anthropic'.*'openai'"):
+    with pytest.raises(ValueError, match=r"'anthropic'.*'openai'.*'zen'"):
         make_wire("gemini", model="m")
+
+
+# ---------------------------------------------------------------------------
+# Endpoints: `openai` and `zen` share a transport and differ only here
+# ---------------------------------------------------------------------------
+
+
+def test_zen_branch_supplies_its_own_endpoint() -> None:
+    """The whole point of the third name: one variable, not a wire plus a URL."""
+    wire = make_wire("zen", model="gpt-5.6-luna", api_key="k")
+    assert str(wire.endpoint).rstrip("/") == ZEN_BASE_URL
+
+
+def test_openai_branch_defaults_to_the_vendor_endpoint() -> None:
+    wire = make_wire("openai", model="gpt-5.6-luna", api_key="k")
+    assert "api.openai.com" in str(wire.endpoint)
+
+
+def test_explicit_base_url_overrides_the_zen_endpoint() -> None:
+    """A staging gateway must still win over the adapter's default."""
+    wire = make_wire("zen", model="m", api_key="k", base_url="http://staging/v1")
+    assert str(wire.endpoint).startswith("http://staging/v1")
+
+
+def test_empty_base_url_does_not_reach_the_sdk() -> None:
+    """config supplies "" for "unset"; passing it through breaks every request."""
+    wire = make_wire("openai", model="m", api_key="k", base_url="")
+    assert "api.openai.com" in str(wire.endpoint)
+
+
+def test_zen_text_completer_shares_the_zen_endpoint() -> None:
+    """Forgetting this arm leaves memory extraction pointed at the wrong host."""
+    completer = make_text_completer("zen", model="m", api_key="k")
+    assert str(completer.client.base_url).rstrip("/") == ZEN_BASE_URL
+
+
+def test_unknown_text_completer_raises() -> None:
+    with pytest.raises(ValueError, match=r"'zen'"):
+        make_text_completer("gemini", model="m")
 
 
 # ---------------------------------------------------------------------------

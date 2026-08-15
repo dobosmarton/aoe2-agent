@@ -35,10 +35,10 @@ class ConfigProfile(BaseModel):
     model: str = "gpt-5.6-luna"
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     prompt_variant: str = "strategy"
-    # Which transport serves `model`. Both profiles in a race share one
-    # credential, so a race is all-OpenAI or all-Anthropic.
+    # Which adapter serves `model`. Both profiles in a race share one
+    # credential, so every profile in a race must name the same vendor.
     wire: WireName = "openai"
-    base_url: str | None = None  # openai wire only; None uses the SDK default
+    base_url: str | None = None  # override; None uses the adapter's endpoint
 
 
 class RaceConfig(BaseModel):

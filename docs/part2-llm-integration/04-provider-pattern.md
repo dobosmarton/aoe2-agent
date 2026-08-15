@@ -48,16 +48,26 @@ wire = make_wire(config.llm_wire, model=config.model,
                  api_key=..., base_url=config.llm_base_url)
 ```
 
+Three names are valid. `openai` and `zen` share `wire_openai` and differ only in default endpoint, so picking a gateway is one variable rather than a wire plus a URL:
+
+| `AOE2_LLM_WIRE` | Wire | Default endpoint |
+|---|---|---|
+| `openai` (default) | `OpenAIWire` | `https://api.openai.com/v1` |
+| `zen` | `OpenAIWire` | `https://opencode.ai/zen/v1` |
+| `anthropic` | `AnthropicWire` | `https://api.anthropic.com` |
+
+`AOE2_LLM_BASE_URL` overrides the endpoint on either OpenAI-compatible arm; empty means "use the adapter's own". The valid set is the `WireName` Literal in `config.py`, and both `_parse_wire` and the `--wire` CLI choices derive from it, so a fourth adapter is a one-line change.
+
 Selected by env or CLI:
 
 ```bash
-AOE2_LLM_WIRE=openai OPENCODE_API_KEY=sk-... AOE2_MODEL=gpt-5.6-luna just agent
-python -m gameplay_agent.main --wire openai
+AOE2_LLM_WIRE=zen AOE2_LLM_API_KEY=sk-... AOE2_MODEL=gpt-5.6-luna just agent
+python -m gameplay_agent.main --wire zen
 ```
 
-There is deliberately **no registry of provider classes** — one executor serves every model. `make_text_completer` is the synchronous sibling for the plain prompt-in/text-out callers (memory extraction, prompt mutation).
+There is deliberately **no registry of provider classes** — one executor serves every model. `make_text_completer` is the synchronous sibling for the plain prompt-in/text-out callers (memory extraction, prompt mutation); it carries the same arms, so a new adapter must be added to both.
 
-Per-model pricing lives in one table, `providers/pricing.py`, shared by the agent and the arena. An unknown model logs `pricing_unknown_model` rather than silently costing $0.00.
+Per-model pricing lives in one table, `providers/pricing.py`, shared by the agent and the arena. An unknown model logs `pricing_unknown_model` rather than silently costing $0.00. The table is keyed by model alone, so a gateway that resells a model at its own rate is priced at the first-party rate — the `api_cost` log event carries `endpoint` so a figure stays attributable.
 
 ## 4.3 Executor Implementation
 
@@ -166,10 +176,11 @@ You add a **wire**, not a provider — the executor stays as it is.
 1. Create `apps/agent/src/providers/wire_<vendor>.py` satisfying `ChatWire`
 2. Render `SystemBlock`/`Turn` values onto that API's message shape, and map its usage fields onto `TokenUsage`
 3. Classify its exceptions in `is_api_error` / `is_schema_too_large`
-4. Add one match arm to `make_wire` in `providers/wire_factory.py`, with a lazy import so the SDK stays optional
-5. Add the model's rates to `providers/pricing.py`
+4. Add the name to the `WireName` Literal in `config.py` — `_parse_wire` and the CLI choices follow automatically
+5. Add one arm to **both** `make_wire` and `make_text_completer` in `providers/wire_factory.py`, with a lazy import so the SDK stays optional
+6. Add the model's rates to `providers/pricing.py`
 
-An OpenAI-compatible endpoint needs none of this: point `AOE2_LLM_BASE_URL` at it and reuse `wire_openai`.
+An OpenAI-compatible endpoint needs only steps 4 and 5: give it a name on the existing `wire_openai` arm with its own default URL, as `zen` does.
 
 The game loop, memory system, executor, and detection pipeline never see a vendor -- they interact only through `LLMResult`.
 

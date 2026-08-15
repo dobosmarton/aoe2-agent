@@ -10,6 +10,10 @@ Rates are US dollars per million tokens, from the vendors' published first-party
 pricing (checked 2026-08-15). `cache_read` and `cache_write` follow the standard
 multipliers where a vendor does not publish them separately: reads at 0.1x input,
 writes at 1.25x input.
+
+The table is keyed by model alone, so a gateway that resells a model at its own
+rate is priced here at the first-party rate. Check the `endpoint` field on the
+`api_cost` log event before trusting a cost figure from a gateway.
 """
 
 from __future__ import annotations

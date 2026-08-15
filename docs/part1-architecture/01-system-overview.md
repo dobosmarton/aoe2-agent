@@ -102,8 +102,8 @@ Configuration uses a Pydantic `BaseModel` with environment variable overrides (`
 | Setting | Env Var | Default | Purpose |
 |---------|---------|---------|---------|
 | `llm_api_key` | `AOE2_LLM_API_KEY` | `""` | Model API authentication |
-| `llm_wire` | `AOE2_LLM_WIRE` | `openai` | Transport: `openai` or `anthropic` |
-| `llm_base_url` | `AOE2_LLM_BASE_URL` | OpenCode Zen | Endpoint for the `openai` wire |
+| `llm_wire` | `AOE2_LLM_WIRE` | `openai` | Adapter: `openai`, `zen` or `anthropic` |
+| `llm_base_url` | `AOE2_LLM_BASE_URL` | `""` | Endpoint override; empty uses the adapter's own |
 | `model` | `AOE2_MODEL` | `gpt-5.6-luna` | Executor model (instruction-following) |
 | `executor_effort` | `AOE2_EXECUTOR_EFFORT` | `low` | Executor `output_config` effort (`low`/`medium`/`high`) |
 | `strategist_model` | `AOE2_STRATEGIST_MODEL` | `gpt-5.6-luna` | Strategist model (deeper reasoning) |

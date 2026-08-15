@@ -101,15 +101,16 @@ set AOE2_LLM_API_KEY=your-key-here
 export AOE2_LLM_API_KEY=your-key-here
 ```
 
-The agent defaults to GPT-5.6 Luna over OpenCode Zen. To run Claude instead, set
-`AOE2_LLM_WIRE=anthropic`, point `AOE2_MODEL` at a Claude model, and use an Anthropic
-key — one credential either way.
+The agent defaults to GPT-5.6 Luna on the OpenAI API. Each adapter supplies its own
+endpoint, so switching vendor is one variable: set `AOE2_LLM_WIRE=zen` for OpenCode Zen,
+or `AOE2_LLM_WIRE=anthropic` plus an `AOE2_MODEL` Claude model for Claude. The key is
+`AOE2_LLM_API_KEY` either way — supply the one that matches the adapter.
 
 | Env Var | Default | Purpose |
 |---------|---------|---------|
 | `AOE2_LLM_API_KEY` | — | Model API authentication (required) |
-| `AOE2_LLM_WIRE` | `openai` | Transport: `openai` (OpenAI-compatible) or `anthropic` |
-| `AOE2_LLM_BASE_URL` | OpenCode Zen | Endpoint for the `openai` wire |
+| `AOE2_LLM_WIRE` | `openai` | Adapter: `openai`, `zen` (OpenCode Zen) or `anthropic` |
+| `AOE2_LLM_BASE_URL` | — | Endpoint override; empty uses the adapter's own |
 | `AOE2_MODEL` | `gpt-5.6-luna` | Executor model |
 | `AOE2_EXECUTOR_EFFORT` | `low` | Executor effort (`low`/`medium`/`high`) |
 | `AOE2_STRATEGIST_MODEL` | `gpt-5.6-luna` | Strategist model |

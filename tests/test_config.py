@@ -1,4 +1,4 @@
-"""Unit tests for gameplay_agent/config.py — determinism knob parsing (Phase 3).
+"""Unit tests for gameplay_agent/config.py — determinism knobs and adapter choice.
 
 Uses pytest's `monkeypatch` so env-var mutations are scoped to the test and
 do not leak across the suite.
@@ -6,11 +6,7 @@ do not leak across the suite.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    import pytest
-
+import pytest
 
 # ---------------------------------------------------------------------------
 # AOE2_TEMPERATURE
@@ -83,3 +79,35 @@ def test_executor_effort_invalid_falls_back_to_low(monkeypatch: pytest.MonkeyPat
     # parser treats anything outside {low, medium, high} as "low".
     monkeypatch.setenv("AOE2_EXECUTOR_EFFORT", "xhigh")
     assert Config.from_env().executor_effort == "low"
+
+
+# ---------------------------------------------------------------------------
+# Wire selection
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", ["anthropic", "openai", "zen"])
+def test_every_adapter_name_survives_parsing(name: str) -> None:
+    """A name the factory accepts must not be silently rewritten to the default."""
+    from gameplay_agent.config import _parse_wire
+
+    assert _parse_wire(name) == name
+
+
+def test_unknown_wire_name_falls_back_to_the_default() -> None:
+    from gameplay_agent.config import _parse_wire
+
+    assert _parse_wire("gemini") == "openai"
+
+
+def test_missing_wire_name_falls_back_to_the_default() -> None:
+    from gameplay_agent.config import _parse_wire
+
+    assert _parse_wire(None) == "openai"
+
+
+def test_base_url_is_unset_by_default() -> None:
+    """Empty means "use the adapter's endpoint"; a URL here would pin every wire."""
+    from gameplay_agent.config import Config
+
+    assert Config().llm_base_url == ""

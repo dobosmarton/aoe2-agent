@@ -743,6 +743,8 @@ class ExecutorProvider:
         """Emit running token and cost totals (shared by both executor paths)."""
         log.info(
             "api_cost",
+            model=self.wire.model,
+            endpoint=self.wire.endpoint,
             input_tokens=self._usage.input_tokens,
             output_tokens=self._usage.output_tokens,
             cache_read_tokens=self._usage.cache_read_tokens,

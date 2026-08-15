@@ -12,6 +12,10 @@ import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, Protocol, TypedDict, TypeVar
 
+# Re-exported from config, which is the import leaf — declaring it here would
+# cycle back through providers/__init__.
+from ..config import WireName as WireName
+
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
@@ -37,7 +41,6 @@ class LLMResult(TypedDict, total=False):
 # Anthropic accepts low/medium/high here; Sonnet 4.6 rejects xhigh/max (see
 # config.EffortLevel). The OpenAI wire maps these onto `reasoning_effort`.
 EffortName = Literal["low", "medium", "high"]
-WireName = Literal["anthropic", "openai"]
 
 ModelT = TypeVar("ModelT", bound="BaseModel")
 
@@ -192,6 +195,9 @@ class ChatWire(Protocol):
     """
 
     model: str
+    # Where the calls go, for cost attribution: `openai` and `zen` share a
+    # transport, so the class name alone cannot tell their bills apart.
+    endpoint: str
 
     async def tool_turn(
         self,

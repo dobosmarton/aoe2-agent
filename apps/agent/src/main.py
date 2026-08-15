@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import sys
+from typing import get_args
 
 import structlog
 
@@ -78,8 +79,8 @@ def main() -> None:
         "--wire",
         type=str,
         default=None,
-        choices=["anthropic", "openai"],
-        help="Transport for the model (default: AOE2_LLM_WIRE, else openai)",
+        choices=list(get_args(WireName)),
+        help="Adapter serving the model (default: AOE2_LLM_WIRE, else openai)",
     )
     parser.add_argument(
         "--test",

@@ -56,6 +56,8 @@ class OpenAIWire:
             base_url=base_url,
             max_retries=max_retries,
         )
+        # Read back from the client so a None here reports the SDK's own default.
+        self.endpoint = str(self.client.base_url)
 
     # -- Rendering ----------------------------------------------------------
 

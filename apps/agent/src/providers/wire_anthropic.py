@@ -54,6 +54,7 @@ class AnthropicWire:
         # AsyncAnthropic retries 429/5xx with exponential backoff internally, which
         # is why this repo carries no tenacity decorators.
         self.client = anthropic.AsyncAnthropic(api_key=api_key, max_retries=max_retries)
+        self.endpoint = str(self.client.base_url)
 
     # -- Rendering ----------------------------------------------------------
 
