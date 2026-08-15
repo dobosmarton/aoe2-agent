@@ -146,13 +146,18 @@ cd agent
 ```cmd
 python -m venv venv
 venv\Scripts\activate
-pip install -r gameplay_agent\requirements.txt
+pip install -r requirements.txt
 ```
+
+`requirements.txt` lives at the repo root and is generated from `uv.lock`
+(`uv export --no-hashes --format requirements-txt --no-emit-project --all-packages --no-dev`).
+Regenerate it after any dependency change, or the VM installs a stale set — the
+`openai` SDK was missing from it for the whole first day of the adapter work.
 
 If you get torch/scipy conflicts:
 ```cmd
 pip install scipy numpy --force-reinstall
-pip install -r gameplay_agent\requirements.txt
+pip install -r requirements.txt
 ```
 
 ### 2.3 Set environment variables

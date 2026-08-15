@@ -58,7 +58,7 @@ You should see structured logs like:
 
 ```
 detector_initialized   mode=remote server=http://192.168.64.1:8420
-game_loop_start        detection=True executor_model=claude-sonnet-4-6
+game_loop_start        detection=True executor_model=gpt-5.6-luna
 iteration_start        iteration=1
 screenshot_captured    width=1920 height=1080
 detection_complete     entity_count=12

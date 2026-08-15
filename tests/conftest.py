@@ -23,8 +23,11 @@ from unittest.mock import MagicMock
 # Set BEFORE any gameplay_agent import: `config` is a module-level singleton
 # read once at import time. The OpenAI SDK raises at construction when no key is
 # present, so a provider built in a test would fail before reaching its stub.
-# `setdefault` leaves a real key alone for the --runlive tests.
-os.environ.setdefault("AOE2_LLM_API_KEY", "test-key-not-used")
+# Empty counts as absent: `just` loads .env, and a .env copied from the template
+# carries `AOE2_LLM_API_KEY=` — which `setdefault` would have treated as a real
+# key. A real key is left alone, for the --runlive tests.
+if not os.environ.get("AOE2_LLM_API_KEY", "").strip():
+    os.environ["AOE2_LLM_API_KEY"] = "test-key-not-used"
 
 import pytest
 from evaluation.event_log import Event, TurnStartPayload
