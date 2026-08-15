@@ -76,7 +76,7 @@ In Dark Age, ONLY use the Q build menu (economic: House, Mill, Mining Camp, Lumb
 
 **FOOD EMERGENCY — pick the template by what you detect** (when NO sheep/berry_bush AND food < 100):
 
-**Omit `x`/`y` on every `build`** — the executor auto-places each building on **open ground near the town centre** (it picks the emptiest spot; clicking a fixed coordinate lands on the TC or a house and fails). Only pass `x`/`y` if you have a specific *detected* empty tile in mind.
+**`build` takes no coordinates** — the executor places each building itself: a Mill next to berries when it can see them, a Lumber Camp next to trees, everything else on open ground near the town centre.
 
 **A) NO `mill` detected yet — build ONE Mill, then farms:**
 ```json

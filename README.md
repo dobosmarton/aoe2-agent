@@ -127,7 +127,7 @@ ValueError: unknown AOE2_LLM_WIRE='zzz'; expected one of 'anthropic', 'openai', 
 | `AOE2_SAVE_SCREENSHOTS` | `true` | Save screenshots to logs/ |
 | `AOE2_OCR_BACKEND` | `rapidocr` | Resource-bar OCR backend (`rapidocr`/`template`/`tesseract`) |
 | `AOE2_DETECTION_HOST` | — | Remote detection server URL (e.g., `http://192.168.64.1:8420`) |
-| `AOE2_TEMPERATURE` | `0.0` | Sampling temperature, whichever adapter serves (lowest variance) |
+| `AOE2_TEMPERATURE` | — | Sampling temperature; unset = not sent. `gpt-5.6` rejects any value but 1 |
 | `AOE2_SEED` | — | Local-RNG seed (build-retry jitter); unset = OS entropy |
 
 ### Event broker backend (Phase C)
@@ -174,7 +174,7 @@ Determinism is asymptotic — per [arxiv 2408.04667](https://arxiv.org/html/2408
 
 Three knobs to make runs as reproducible as the model vendor and the Python stack allow:
 
-- **`AOE2_TEMPERATURE=0.0`** (default) is the lowest-variance temperature on every adapter. Raise it (e.g. `0.7`) for output diversity at the cost of reproducibility.
+- **`AOE2_TEMPERATURE`** is unset by default, which means the field is not sent and each model applies its own. Set `0.0` for the lowest variance on adapters that allow it. The `gpt-5.6` family does **not**: it accepts only its default of 1 and returns `400 unsupported_value` for anything else, so there is no low-variance setting available on the current default model.
 - **`AOE2_SEED=<int>`** seeds the local RNG used in `executor.py`'s build-retry jitter and Phase 1's `world_sim.render()` default fallback. Two runs with the same seed produce the same RNG sequence. Leave unset to get today's stochastic behavior (OS entropy). **Not passed to the model API** — neither adapter's call path accepts `seed=`; this is purely for the local code paths.
 - **Pin model snapshots.** Set `AOE2_MODEL` and `AOE2_STRATEGIST_MODEL` to a dated snapshot rather than the floating family alias. Floating tags can move under you between runs.
 

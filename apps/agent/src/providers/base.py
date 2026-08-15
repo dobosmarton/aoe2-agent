@@ -167,7 +167,9 @@ class ChatRequest:
     system: tuple[SystemBlock, ...]
     turns: tuple[Turn, ...]
     max_tokens: int
-    temperature: float
+    # None means "do not send it" — the gpt-5.6 models reject every value but
+    # 1, so a default of 0.0 made every call a 400.
+    temperature: float | None
     # The OpenAI wire maps this onto `reasoning_effort`.
     effort: EffortLevel = "low"
 

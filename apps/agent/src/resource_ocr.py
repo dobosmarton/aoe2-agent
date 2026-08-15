@@ -843,10 +843,18 @@ def read_resource_bar(
         # stays the gate. Both omitted when population isn't calibrated (no
         # anchor → unknown, caller skips).
         rgb = _decode_rgb(screenshot_bytes)
-        out["idle_present"] = detect_idle_present(rgb, pop_box)
-        idle_count = read_idle_count(rgb, pop_box)
-        if idle_count is not None:
-            out["idle_count"] = idle_count
+        idle_present = detect_idle_present(rgb, pop_box)
+        out["idle_present"] = idle_present
+        # The badge colour is the gate, the digit only sizes the batch. A dark
+        # badge means zero idle, so do not run the digit reader at all: with no
+        # digit to read it classifies whatever else is in the region, and run
+        # 2026_08_15_1 got a phantom count on 52 of 52 dark-badge frames.
+        if not idle_present:
+            out["idle_count"] = 0
+        else:
+            idle_count = read_idle_count(rgb, pop_box)
+            if idle_count is not None:
+                out["idle_count"] = idle_count
 
     # Age is text ("Dark/Feudal/Castle/Imperial Age") — OCR it and keyword-map.
     # The pure-template backend has no OCR engine, so age is left "" there.

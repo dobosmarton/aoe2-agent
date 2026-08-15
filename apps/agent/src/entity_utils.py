@@ -103,6 +103,21 @@ def first_center_of_class(entities: list[object], class_name: str) -> tuple[floa
     return None
 
 
+def nearest_center_of_classes(
+    entities: list[object], classes: frozenset[str], origin: tuple[float, float] = (0.0, 0.0)
+) -> tuple[float, float] | None:
+    """Center of the entity in `classes` nearest `origin`, or None if none is visible.
+
+    The positional sibling of `nearest_class_of_kind`, which computes the same
+    minimum and then throws the coordinates away. Build placement needs the point:
+    a drop-off camp is only worth its 100 wood if it touches the resource.
+    """
+    candidates = [a for a in iter_attrs(entities) if a.class_name in classes]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda a: dist(a.center, origin)).center
+
+
 def nearest_class_of_kind(
     entities: list[object], kind: ResourceKind, origin: tuple[float, float] = (0.0, 0.0)
 ) -> str | None:

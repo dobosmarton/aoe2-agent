@@ -23,6 +23,13 @@ def _parse_optional_int(value: str | None) -> int | None:
     return int(value)
 
 
+def _parse_optional_float(value: str | None) -> float | None:
+    """Parse an optional float env var. Treats missing or empty as None."""
+    if value is None or not value.strip():
+        return None
+    return float(value)
+
+
 def _parse_effort(value: str | None) -> EffortLevel:
     """Parse the executor effort env var. Unknown or missing falls back to "low"."""
     if value in ("low", "medium", "high"):
@@ -73,7 +80,10 @@ class Config(BaseModel):
     # Determinism knobs (Phase 3). Pin model snapshots via AOE2_MODEL /
     # AOE2_STRATEGIST_MODEL to a dated form rather than the floating family
     # alias for reproducible runs.
-    temperature: float = 0.0  # sampling temperature (0.0 = lowest variance)
+    # Unset means "do not send it", so each model applies its own default. The
+    # gpt-5.6 family rejects every value but 1, so a hardcoded 0.0 made every
+    # call a 400 (run 2026_08_15_1: 88 of 88 failed).
+    temperature: float | None = None  # AOE2_TEMPERATURE
     seed: int | None = None  # Local RNG seed; None = OS entropy (today's behavior)
 
     # Detection settings
@@ -126,7 +136,7 @@ class Config(BaseModel):
             save_screenshots=os.environ.get("AOE2_SAVE_SCREENSHOTS", "true").lower() == "true",
             detection_host=os.environ.get("AOE2_DETECTION_HOST", ""),
             detection_model=os.environ.get("AOE2_DETECTION_MODEL", "aoe2_yolo_v9"),
-            temperature=float(os.environ.get("AOE2_TEMPERATURE", "0.0")),
+            temperature=_parse_optional_float(os.environ.get("AOE2_TEMPERATURE")),
             seed=_parse_optional_int(os.environ.get("AOE2_SEED")),
             pipeline_commit_max=int(os.environ.get("AOE2_PIPELINE_COMMIT_MAX", "2")),
         )

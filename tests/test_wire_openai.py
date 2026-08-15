@@ -219,3 +219,18 @@ def test_executor_runs_its_tool_loop_through_the_openai_wire(
     roles = [m["role"] for m in replayed]
     assert roles == ["system", "user", "assistant", "tool"]
     assert replayed[-1]["tool_call_id"] == "c1"
+
+
+def test_temperature_is_omitted_when_unset() -> None:
+    """Sending 0 returns `unsupported_value` on gpt-5.6; 88 of 88 calls 400'd."""
+    import openai
+    from gameplay_agent.providers.wire_openai import _temperature
+
+    assert _temperature(None) is openai.NOT_GIVEN
+
+
+def test_temperature_is_forwarded_when_set() -> None:
+    """An operator who sets it on a model that supports it still gets it."""
+    from gameplay_agent.providers.wire_openai import _temperature
+
+    assert _temperature(0.0) == 0.0
