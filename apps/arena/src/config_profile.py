@@ -33,7 +33,8 @@ class ConfigProfile(BaseModel):
 
     name: str
     model: str = "gpt-5.6-luna"
-    temperature: float = Field(default=0.0, ge=0.0, le=1.0)
+    # None = do not send; the gpt-5.6 models reject every value but 1.
+    temperature: float | None = Field(default=None, ge=0.0, le=1.0)
     prompt_variant: str = "strategy"
     # Which adapter serves `model`. Both profiles in a race share one
     # credential, so every profile in a race must name the same vendor.

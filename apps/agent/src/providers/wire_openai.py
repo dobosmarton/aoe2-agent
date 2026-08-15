@@ -39,6 +39,12 @@ if TYPE_CHECKING:
 log = structlog.stdlib.get_logger()
 
 
+def _temperature(value: float | None) -> float | openai.NotGiven:
+    """Omit when unset. Reasoning models accept only the default (1); sending
+    0 returns `unsupported_value` on every call."""
+    return openai.NOT_GIVEN if value is None else value
+
+
 class OpenAIWire:
     """`ChatWire` over `openai.AsyncOpenAI`, pointed at any compatible endpoint."""
 
@@ -167,7 +173,7 @@ class OpenAIWire:
             model=self.model,
             messages=self._render_messages(request),  # pyright: ignore[reportArgumentType]
             tools=to_openai_tools(tools),  # pyright: ignore[reportArgumentType]
-            temperature=request.temperature,
+            temperature=_temperature(request.temperature),
             # Reasoning models reject the classic `max_tokens`. `reasoning_effort`
             # is sent even where support is uncertain: a loud 400 beats silently
             # dropping a knob the operator set (surfaces via the T-533 alarm).
@@ -195,7 +201,7 @@ class OpenAIWire:
             model=self.model,
             messages=self._render_messages(request),  # pyright: ignore[reportArgumentType]
             response_format=schema,
-            temperature=request.temperature,
+            temperature=_temperature(request.temperature),
             reasoning_effort=request.effort,
             max_completion_tokens=request.max_tokens,
         )

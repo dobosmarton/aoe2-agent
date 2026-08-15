@@ -40,6 +40,11 @@ def _ephemeral() -> dict[str, str]:
     return {"type": "ephemeral"}
 
 
+def _temperature(value: float | None) -> float | anthropic.NotGiven:
+    """Omit when unset, so the model applies its own default."""
+    return anthropic.NOT_GIVEN if value is None else value
+
+
 class _HasUsage(Protocol):
     """`messages.create` and `messages.parse` return different classes."""
 
@@ -156,7 +161,7 @@ class AnthropicWire:
         response = await self.client.messages.create(
             model=self.model,
             max_tokens=request.max_tokens,
-            temperature=request.temperature,
+            temperature=_temperature(request.temperature),
             system=self._render_system(request.system),  # pyright: ignore[reportArgumentType]
             messages=self._render_turns(request.turns),  # pyright: ignore[reportArgumentType]
             tools=tools,  # pyright: ignore[reportArgumentType]
@@ -200,7 +205,7 @@ class AnthropicWire:
         response = await self.client.messages.parse(  # pyright: ignore[reportAttributeAccessIssue]
             model=self.model,
             max_tokens=request.max_tokens,
-            temperature=request.temperature,
+            temperature=_temperature(request.temperature),
             system=self._render_system(request.system),  # pyright: ignore[reportArgumentType]
             messages=self._render_turns(request.turns),  # pyright: ignore[reportArgumentType]
             output_format=schema,

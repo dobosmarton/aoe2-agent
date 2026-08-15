@@ -94,7 +94,7 @@ _ARENA_MAX_TOKENS = 256
 
 async def _call_model(
     wire: ChatWire,
-    temperature: float,
+    temperature: float | None,
     system_prompt: str,
     prompt: str,
 ) -> tuple[list[dict[str, object]], str, float]:

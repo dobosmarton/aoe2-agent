@@ -492,3 +492,21 @@ def test_warm_up_ocr_runs_one_inference(monkeypatch):
     monkeypatch.setattr(ro, "_rapidocr_engine", _fake_engine)
     ro.warm_up_ocr()
     assert len(calls) == 1
+
+
+def test_dark_badge_publishes_zero_idle_even_when_the_digit_reader_misfires(
+    synthetic_bar, monkeypatch
+):
+    """The badge colour is the gate; a dark badge means zero, whatever the digit says.
+
+    Run 2026_08_15_1 read a phantom count on 52 of 52 dark-badge frames, which
+    would have told the executor to chase 41 idle villagers that did not exist.
+    """
+    import gameplay_agent.resource_ocr as ocr
+
+    shot, calib = synthetic_bar
+    monkeypatch.setattr(ocr, "detect_idle_present", lambda *_a: False)
+    monkeypatch.setattr(ocr, "read_idle_count", lambda *_a: 41)
+
+    readings = ocr.read_resource_bar(shot, calib, backend="template")
+    assert readings["idle_count"] == 0

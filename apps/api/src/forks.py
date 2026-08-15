@@ -94,7 +94,7 @@ class ForkResponse(BaseModel):
 DEFAULT_FORK_PROFILE = ConfigProfile(
     name="operator-fork",
     model="gpt-5.6-luna",
-    temperature=0.5,
+    temperature=None,  # gpt-5.6 rejects every value but 1
     prompt_variant="strategy",
 )
 

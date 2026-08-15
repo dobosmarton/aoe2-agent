@@ -20,11 +20,12 @@ def test_from_env_parses_temperature(monkeypatch: pytest.MonkeyPatch) -> None:
     assert Config.from_env().temperature == 0.7
 
 
-def test_from_env_temperature_defaults_to_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_from_env_temperature_defaults_to_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unset means "do not send it". A hardcoded 0.0 made every gpt-5.6 call a 400."""
     from gameplay_agent.config import Config
 
     monkeypatch.delenv("AOE2_TEMPERATURE", raising=False)
-    assert Config.from_env().temperature == 0.0
+    assert Config.from_env().temperature is None
 
 
 # ---------------------------------------------------------------------------

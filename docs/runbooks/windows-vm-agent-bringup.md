@@ -20,12 +20,30 @@ source venv/bin/activate
 just server --model detection/inference/models/aoe2_yolo_v9.onnx
 # INFO: Uvicorn running on http://0.0.0.0:8420
 
-# In another shell, find the VM-facing IP
-ifconfig vmnet8 | grep 'inet '   # VMware Fusion's NAT bridge
-# inet 192.168.64.1 netmask 0xffffff00 broadcast 192.168.64.255
+# In another shell, find the VM-facing IP. DISCOVER it — do not assume a
+# value from an earlier setup. The interface name and subnet change with the
+# hypervisor, its version, and how many VMs have ever been created.
+for i in $(ifconfig -l); do
+  case $i in vmnet*|bridge*) echo "$i $(ifconfig $i | awk '/inet /{print $2}')";; esac
+done
+# bridge100 192.168.99.1
+# bridge101 172.16.216.1     <- this one, if the VM is on 172.16.216.x
 ```
 
-Note that IP; the VM needs it.
+Two ways to tell which bridge the VM is on:
+
+```bash
+arp -an | grep -E '192\.168\.99\.|172\.16\.216\.'
+# ? (172.16.216.133) at 0:c:29:89:77:70 on bridge101   <- the VM
+```
+
+Or read the VM's own IP with `ipconfig` on Windows and match the subnet. The
+Mac is `.1` on that subnet. Confirm before moving on:
+
+```bash
+curl -s http://<that-ip>:8420/health
+# {"status":"ok","backend":"onnx_coreml","num_classes":60}
+```
 
 ### On the VM (Command Prompt)
 
