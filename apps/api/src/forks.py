@@ -93,7 +93,7 @@ class ForkResponse(BaseModel):
 
 DEFAULT_FORK_PROFILE = ConfigProfile(
     name="operator-fork",
-    model="claude-haiku-4-5-20251001",
+    model="gpt-5.6-luna",
     temperature=0.5,
     prompt_variant="strategy",
 )
@@ -203,7 +203,6 @@ async def _replay(
     initial_state: WorldState,
     child_run_id: str,
     n_turns: int,
-    api_key: str,
     broker: EventBroker,
     persist_task: asyncio.Task[None],
     on_close: Callable[[RunId], None],
@@ -229,7 +228,7 @@ async def _replay(
             run_id=typed_run,
             loop=asyncio.get_running_loop(),
         )
-        invoke = build_synth_invoke(DEFAULT_FORK_PROFILE, api_key)
+        invoke = build_synth_invoke(DEFAULT_FORK_PROFILE)
         await synth_game_loop(
             invoke=invoke,
             initial_state=initial_state,
@@ -263,7 +262,6 @@ async def _replay(
 
 async def create_fork(
     request: ForkRequest,
-    api_key: str,
     broker: EventBroker,
     logs_root: Path,
     fork_tasks: set[asyncio.Task[None]],
@@ -329,7 +327,6 @@ async def create_fork(
             initial_state=forked_state,
             child_run_id=child_run_id,
             n_turns=request.n_turns,
-            api_key=api_key,
             broker=broker,
             persist_task=persist_task,
             on_close=on_close,

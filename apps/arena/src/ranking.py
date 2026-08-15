@@ -304,16 +304,15 @@ async def _rank_with_race_fn(
 
 async def rank(
     config: RankingConfig,
-    api_key: str,
     sink: EventSink | None = None,
     score_fn: ScoreFn = composite_score,
     ranking_id: str = "ranking",
 ) -> RankingResult:
-    """Run K rounds x M scenarios x N profiles with real Claude API; rank them."""
+    """Run K rounds x M scenarios x N profiles against the real API; rank them."""
     effective_sink: EventSink = sink if sink is not None else NullEventSink()
 
     async def real_race(cfg: RaceConfig, state: WorldState, s: EventSink) -> list[VariantResult]:
-        return await race(cfg, api_key, state, s)
+        return await race(cfg, state, s)
 
     return await _rank_with_race_fn(config, real_race, effective_sink, score_fn, ranking_id)
 

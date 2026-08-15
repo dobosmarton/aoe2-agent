@@ -8,7 +8,7 @@ Example YAML (arena/profiles/v1.yaml):
     turns: 50
     profiles:
       - name: haiku-deterministic
-        model: claude-haiku-4-5-20251001
+        model: gpt-5.6-luna
         temperature: 0.0
         prompt_variant: strategy
 """
@@ -17,6 +17,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+# Runtime import: Pydantic resolves field annotations when the model is built,
+# so deferring this into TYPE_CHECKING would break ConfigProfile.
+from gameplay_agent.providers.base import WireName  # noqa: TC002
 from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
@@ -29,9 +32,13 @@ class ConfigProfile(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     name: str
-    model: str = "claude-haiku-4-5-20251001"
+    model: str = "gpt-5.6-luna"
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     prompt_variant: str = "strategy"
+    # Which transport serves `model`. Both profiles in a race share one
+    # credential, so a race is all-OpenAI or all-Anthropic.
+    wire: WireName = "openai"
+    base_url: str | None = None  # openai wire only; None uses the SDK default
 
 
 class RaceConfig(BaseModel):

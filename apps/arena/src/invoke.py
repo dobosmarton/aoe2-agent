@@ -3,8 +3,9 @@
 Each racing variant needs its own `invoke` function that accepts a WorldState
 and returns (actions, reasoning, cost_usd). Two builders are provided:
 
-  `build_synth_invoke(profile, api_key)` — real Anthropic API, one call per
-      turn, simple JSON-array response format (no agentic tool-use loop).
+  `build_synth_invoke(profile)` — real model API over the profile's wire
+      (Anthropic or OpenAI-compatible), one call per turn, simple JSON-array
+      response format (no agentic tool-use loop).
 
   `build_mock_invoke(responses)` — deterministic stub that cycles through
       canned responses; no API key required. Used by offline tests and
@@ -17,13 +18,17 @@ import re
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, TypeAlias
 
-from anthropic import AsyncAnthropic
 from arena.prompts import get_prompt
+from gameplay_agent.config import config
+from gameplay_agent.providers.base import ChatRequest, SystemBlock, UserTurn
+from gameplay_agent.providers.pricing import cost_usd
+from gameplay_agent.providers.wire_factory import make_wire
 from pydantic import TypeAdapter, ValidationError
 
 if TYPE_CHECKING:
     from arena.config_profile import ConfigProfile
     from evaluation.world_sim import WorldState
+    from gameplay_agent.providers.base import ChatWire
 
 
 # ---------------------------------------------------------------------------
@@ -80,72 +85,55 @@ def _parse_actions(text: str) -> list[dict[str, object]]:
 
 
 # ---------------------------------------------------------------------------
-# Cost computation
+# Real model invoke builder
 # ---------------------------------------------------------------------------
 
-# Pricing in USD per 1 million tokens (input, output).
-_MODEL_PRICING: dict[str, tuple[float, float]] = {
-    "claude-haiku-4-5-20251001": (0.80, 4.00),
-    "claude-haiku-4-5": (0.80, 4.00),
-    "claude-sonnet-4-6": (3.00, 15.00),
-    "claude-opus-4-7": (15.00, 75.00),
-}
+# One short JSON array of actions per turn; the arena needs no more than this.
+_ARENA_MAX_TOKENS = 256
 
 
-def _compute_cost(model: str, input_tokens: int, output_tokens: int) -> float:
-    price_in, price_out = _MODEL_PRICING.get(model, (0.0, 0.0))
-    return (input_tokens * price_in + output_tokens * price_out) / 1_000_000
-
-
-# ---------------------------------------------------------------------------
-# Real Claude invoke builder
-# ---------------------------------------------------------------------------
-
-
-async def _call_claude(
-    client: AsyncAnthropic,
-    model: str,
+async def _call_model(
+    wire: ChatWire,
     temperature: float,
     system_prompt: str,
     prompt: str,
 ) -> tuple[list[dict[str, object]], str, float]:
-    from anthropic.types import TextBlock
-
-    response = await client.messages.create(
-        model=model,
-        max_tokens=256,
-        temperature=temperature,
-        system=system_prompt,
-        messages=[{"role": "user", "content": prompt}],  # pyright: ignore[reportArgumentType]
+    """One text turn through the wire; no tools, no structured output."""
+    reply = await wire.tool_turn(
+        ChatRequest(
+            system=(SystemBlock(text=system_prompt),),
+            turns=(UserTurn(text=prompt),),
+            max_tokens=_ARENA_MAX_TOKENS,
+            temperature=temperature,
+        ),
+        [],
     )
-
-    text = next(
-        (block.text for block in response.content if isinstance(block, TextBlock)),
-        "",
-    )
-    cost = _compute_cost(model, response.usage.input_tokens, response.usage.output_tokens)
-    return _parse_actions(text), text, cost
+    return _parse_actions(reply.text), reply.text, cost_usd(wire.model, reply.usage)
 
 
-def build_synth_invoke(profile: ConfigProfile, api_key: str) -> InvokeFn:
-    """Build an invoke callable backed by the real Anthropic API.
+def build_synth_invoke(profile: ConfigProfile) -> InvokeFn:
+    """Build an invoke callable backed by a real model API.
 
     One API call per turn: sends a WorldState summary, parses the JSON-array
-    response into actions. Each call uses `profile.model` and
+    response into actions. Each call uses `profile.model`, `profile.wire` and
     `profile.temperature`, isolated from the global `gameplay_agent.config`
-    singleton.
+    singleton — so one race can pit a Claude profile against an
+    OpenAI-compatible one.
+
     """
-    client = AsyncAnthropic(api_key=api_key)
-    model = profile.model
+    wire = make_wire(
+        profile.wire,
+        model=profile.model,
+        api_key=config.llm_api_key,
+        base_url=profile.base_url,
+    )
     temperature = profile.temperature
     system_prompt = get_prompt(profile.prompt_variant)
 
     async def invoke(
         state: WorldState,
     ) -> tuple[list[dict[str, object]], str, float]:
-        return await _call_claude(
-            client, model, temperature, system_prompt, _state_to_prompt(state)
-        )
+        return await _call_model(wire, temperature, system_prompt, _state_to_prompt(state))
 
     return invoke
 

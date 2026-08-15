@@ -7,7 +7,6 @@ dependencies = [
     "core",
     "evaluation",
     "gameplay-agent",
-    "anthropic>=0.84.0",
     "duckdb>=1.0.0",
     "numpy>=1.24.0",
     "pydantic>=2.5.0",

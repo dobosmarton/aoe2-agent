@@ -7,11 +7,11 @@ rounds: 5
 # when the `scenarios` list is empty.
 profiles:
   - name: bare
-    model: claude-haiku-4-5-20251001
+    model: gpt-5.6-luna
     temperature: 0.5
     prompt_variant: bare
 
   - name: strategy
-    model: claude-haiku-4-5-20251001
+    model: gpt-5.6-luna
     temperature: 0.5
     prompt_variant: strategy

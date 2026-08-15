@@ -65,21 +65,15 @@ async def _race_with_factory(
 
 async def race(
     config: RaceConfig,
-    api_key: str,
     initial_state: WorldState,
     sink: EventSink = _NULL_SINK,
 ) -> list[VariantResult]:
-    """Run all profiles concurrently with real Claude API calls.
+    """Run all profiles concurrently against the real model API.
 
-    Each variant gets its own `AsyncAnthropic` client built from `api_key`.
+    Each variant gets its own wire, built from its profile's `wire` and `model`.
     All variants share `initial_state` as their starting position.
     """
-    return await _race_with_factory(
-        config,
-        lambda p: build_synth_invoke(p, api_key),
-        initial_state,
-        sink,
-    )
+    return await _race_with_factory(config, build_synth_invoke, initial_state, sink)
 
 
 async def race_with_mock(

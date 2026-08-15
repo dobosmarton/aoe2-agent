@@ -10,9 +10,10 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import anthropic
 import structlog
 from core.json_utils import extract_json_array
+from gameplay_agent.config import config
+from gameplay_agent.providers.wire_factory import make_text_completer
 
 if TYPE_CHECKING:
     from .trace import GameTrace
@@ -65,9 +66,14 @@ REFLECTIVE_MUTATOR_SYSTEM = (
 class PromptMutator:
     """Proposes, applies, and reverts changes to the system prompt."""
 
-    def __init__(self, model: str = "claude-haiku-4-5-20251001") -> None:
-        self.client = anthropic.Anthropic()
-        self.model = model
+    def __init__(self, model: str | None = None) -> None:
+        self.model = model or config.memory_model
+        self.completer = make_text_completer(
+            config.llm_wire,
+            model=self.model,
+            api_key=config.llm_api_key,
+            base_url=config.llm_base_url,
+        )
 
     def read_current_prompt(self) -> str:
         """Read the current system prompt."""
@@ -118,17 +124,8 @@ Respond with a JSON array of exactly {n} objects with keys
 description, old_text, new_text, rationale. Output the JSON array only."""
 
         try:
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=2048,
-                system=REFLECTIVE_MUTATOR_SYSTEM,
-                messages=[{"role": "user", "content": user_msg}],
-            )
-            block = response.content[0]
-            if not isinstance(block, anthropic.types.TextBlock):
-                log.error("prompt_mutator_unexpected_block", block_type=type(block).__name__)
-                return []
-            return self._parse_changes(block.text)
+            text = self.completer.complete(REFLECTIVE_MUTATOR_SYSTEM, user_msg, max_tokens=2048)
+            return self._parse_changes(text)
         except Exception as e:
             log.error("prompt_mutator_error", error=str(e))
             return []

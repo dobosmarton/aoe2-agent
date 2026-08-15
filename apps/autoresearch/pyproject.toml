@@ -6,7 +6,6 @@ requires-python = ">=3.11"
 dependencies = [
     "core",
     "gameplay-agent",
-    "anthropic>=0.84.0",
     "structlog>=24.1.0",
 ]
 

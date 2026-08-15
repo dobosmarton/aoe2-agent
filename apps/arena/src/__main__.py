@@ -1,7 +1,7 @@
 """CLI entry point for the synth arena (Phase 6 + Phase 8).
 
 Sub-commands:
-  python -m arena race [profile.yaml]   — real Claude API (requires ANTHROPIC_API_KEY)
+  python -m arena race [profile.yaml]   — real model API (key per profile wire)
   python -m arena smoke                 — offline mock run, no API key needed
   python -m arena rank [profile.yaml]   — multi-round BT ranking (real API)
 
@@ -12,7 +12,6 @@ All commands persist the full event log to a DuckDB file under
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -28,6 +27,9 @@ from evaluation.broker_factory import make_broker
 from evaluation.duckdb_persister import MultiRunBrokerSink
 from evaluation.event_log import DuckDBEventSink
 from evaluation.world_sim import WorldState
+from gameplay_agent.config import KEY_ENV
+from gameplay_agent.config import config as agent_config
+from gameplay_agent.providers.pricing import price_for
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -38,9 +40,11 @@ _T = TypeVar("_T")
 _DEFAULT_PROFILE = Path(__file__).parent / "profiles" / "v1.yaml"
 _DEFAULT_RANKING_PROFILE = Path(__file__).parent / "profiles" / "ranking-v1.yaml"
 _LOGS_ROOT = Path("logs") / "arena"
-# Rough estimate per turn for Haiku 4.5 (~215 input tokens at $0.80 + ~15
-# output at $4.00 per 1M). Used only for the cost-projection print.
-_HAIKU_COST_PER_TURN_USD = 0.00032
+# Measured shape of one arena turn: a short WorldState summary in, a small JSON
+# array of actions out. Only used for the pre-flight cost projection — the real
+# figure comes from each response's usage.
+_TURN_INPUT_TOKENS = 215
+_TURN_OUTPUT_TOKENS = 15
 
 _STANDARD_START = WorldState(
     food=200.0,
@@ -89,19 +93,35 @@ async def _run_through_broker(
             await sink.close_all()
 
 
-def _cmd_race(profile_path: Path) -> None:
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        print("error: ANTHROPIC_API_KEY not set", file=sys.stderr)
+def _estimate_cost(profiles: list[ConfigProfile], turns_per_profile: int) -> float:
+    """Project the spend of a ranking run, priced per profile's own model."""
+    total = 0.0
+    for profile in profiles:
+        price = price_for(profile.model)
+        per_turn = (
+            _TURN_INPUT_TOKENS * price.input + _TURN_OUTPUT_TOKENS * price.output
+        ) / 1_000_000
+        total += per_turn * turns_per_profile
+    return total
+
+
+def _require_api_key() -> None:
+    """Fail fast rather than a third of the way into a paid race."""
+    if not agent_config.llm_api_key:
+        print(f"error: {KEY_ENV} not set", file=sys.stderr)
         sys.exit(1)
+
+
+def _cmd_race(profile_path: Path) -> None:
     config = RaceConfig.from_yaml(profile_path)
+    _require_api_key()
     db_path = _new_db_path("race")
     print(f"Racing {len(config.profiles)} profiles for {config.turns} turns …")
     print(f"Event log: {db_path}")
     results = asyncio.run(
         _run_through_broker(
             db_path,
-            lambda sink: race(config, api_key, _STANDARD_START, sink=sink),
+            lambda sink: race(config, _STANDARD_START, sink=sink),
         )
     )
     print(summarise(results))
@@ -144,25 +164,21 @@ def _format_ranking(result: RankingResult) -> str:
 
 
 def _cmd_rank(profile_path: Path) -> None:
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        print("error: ANTHROPIC_API_KEY not set", file=sys.stderr)
-        sys.exit(1)
     config = RankingConfig.from_yaml(profile_path)
+    _require_api_key()
     scenarios = (
         list(DEFAULT_SCENARIOS)
         if not config.scenarios
         else [get_scenario(n) for n in config.scenarios]
     )
     n_races = config.rounds * len(scenarios)
-    n_api_calls = n_races * len(config.profiles) * config.turns
-    est_cost = n_api_calls * _HAIKU_COST_PER_TURN_USD
+    est_cost = _estimate_cost(config.profiles, n_races * config.turns)
 
     print(
         f"Ranking: {len(config.profiles)} profiles x {len(scenarios)} scenarios "
         f"x {config.rounds} rounds x {config.turns} turns = {n_races} race-instances"
     )
-    print(f"Estimated cost (Haiku pricing): ~${est_cost:.2f}")
+    print(f"Estimated cost: ~${est_cost:.2f}")
 
     if sys.stdin.isatty():
         reply = input("Proceed? [y/N] ").strip().lower()
@@ -175,7 +191,7 @@ def _cmd_rank(profile_path: Path) -> None:
     result = asyncio.run(
         _run_through_broker(
             db_path,
-            lambda sink: rank(config, api_key, sink=sink),
+            lambda sink: rank(config, sink=sink),
         )
     )
     print(_format_ranking(result))

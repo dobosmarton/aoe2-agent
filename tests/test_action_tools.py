@@ -15,7 +15,7 @@ The contract:
 from __future__ import annotations
 
 import pytest
-from gameplay_agent.providers.claude_tools import _ACTION_TOOLS, _click_schema
+from gameplay_agent.providers.action_tools import _ACTION_TOOLS, _click_schema
 
 # ---------------------------------------------------------------------------
 # _click_schema helper

@@ -77,7 +77,7 @@ def _patch_invoke(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         forks_module,
         "build_synth_invoke",
-        lambda _profile, _api_key: build_mock_invoke(),
+        lambda _profile: build_mock_invoke(),
     )
 
 
@@ -118,7 +118,7 @@ def test_mutation_patch_rejects_extra_fields() -> None:
 def test_create_fork_raises_when_parent_run_missing(logs_root: Path) -> None:
     request = ForkRequest(parent_run_id="ghost", parent_t=1)
     with pytest.raises(FileNotFoundError):
-        asyncio.run(create_fork(request, "stub-key", InProcessEventBroker(), logs_root, set()))
+        asyncio.run(create_fork(request, InProcessEventBroker(), logs_root, set()))
 
 
 def test_create_fork_returns_child_run_id(
@@ -139,7 +139,6 @@ def test_create_fork_returns_child_run_id(
                 n_turns=2,
                 reason="test",
             ),
-            "stub-key",
             broker,
             logs_root,
             tasks,
@@ -170,7 +169,6 @@ def test_create_fork_writes_world_mutation_when_patch_non_empty(
                 n_turns=0,
                 reason="mutate food",
             ),
-            "stub-key",
             broker,
             logs_root,
             tasks,
@@ -202,7 +200,6 @@ def test_create_fork_closes_broker_run_after_replay(
         tasks: set[asyncio.Task[None]] = set()
         response = await create_fork(
             ForkRequest(parent_run_id="P3", parent_t=1, n_turns=1),
-            "stub-key",
             broker,
             logs_root,
             tasks,

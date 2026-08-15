@@ -1,10 +1,14 @@
-"""Anthropic tool-schema definitions for the executor's tool-use loop.
+"""Tool-schema definitions for the executor's tool-use loop.
 
-These are pure data: 8 standard one-step actions (click, right_click, press,
-drag, wait, scroll, detect, plus the placement variants) and 3 composite
-sequences (build, send_villager, queue_villager). The composite tools collapse
-common multi-step UI flows into a single tool call so the model doesn't pay
-per-step API roundtrip latency for predictable sequences.
+These are pure data: twelve tools, of which seven are single-step actions
+(click, right_click, press, drag, wait, scroll, detect) and five expand to
+multi-step sequences (build, send_villager, send_all_idle, queue_villager,
+reassign_villager). The composite tools collapse common multi-step UI flows into
+a single tool call so the model doesn't pay per-step API roundtrip latency for
+predictable sequences.
+
+Schemas are written in Anthropic's shape and converted for OpenAI-compatible
+endpoints by `to_openai_tools` at the bottom of this module.
 
 Strict per-tool input schemas are intentional — the previous structured-output
 union approach allowed field confusion (e.g. a `click` action getting `key`
@@ -214,3 +218,66 @@ _ACTION_TOOLS: list[dict] = [
         },
     },
 ]
+
+
+# -- OpenAI strict-mode conversion -------------------------------------------
+#
+# OpenAI strict mode demands every `properties` key appear in `required`, with
+# "optional" expressed as a nullable union. Numeric bounds ARE allowed here — it
+# is Anthropic's constrained decoding that rejects them, which is why models.py
+# enforces ranges via field_validator instead (F-40).
+
+
+def _strictify(schema: dict[str, object]) -> dict[str, object]:
+    """Return `schema` with every property required, optionals made nullable."""
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        return dict(schema)
+
+    required = schema.get("required")
+    already_required = set(required) if isinstance(required, list) else set()
+
+    converted: dict[str, object] = {}
+    for name, raw in properties.items():
+        if not isinstance(raw, dict):
+            converted[name] = raw
+            continue
+        prop = _strictify(raw)
+        if name not in already_required:
+            prop["type"] = _nullable(prop.get("type"))
+        converted[name] = prop
+
+    return {
+        **schema,
+        "properties": converted,
+        "required": list(properties.keys()),
+        "additionalProperties": False,
+    }
+
+
+def _nullable(declared: object) -> object:
+    """Widen a JSON Schema `type` to also admit null."""
+    if isinstance(declared, str):
+        return [declared, "null"]
+    if isinstance(declared, list) and "null" not in declared:
+        return [*declared, "null"]
+    return declared
+
+
+def to_openai_tools(tools: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Convert the Anthropic tool list to OpenAI strict function definitions."""
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": tool["name"],
+                "description": tool["description"],
+                "parameters": _strictify(tool["input_schema"]),
+                "strict": True,
+            },
+        }
+        for tool in tools
+    ]
+
+
+__all__ = ["to_openai_tools"]

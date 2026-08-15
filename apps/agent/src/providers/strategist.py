@@ -6,7 +6,6 @@ import io
 from pathlib import Path
 from typing import ClassVar, cast
 
-import anthropic
 import structlog
 from PIL import Image
 from pydantic import BaseModel, Field
@@ -23,6 +22,8 @@ from ..resource_ocr import (
     read_age,
     read_resource_bar,
 )
+from .base import ChatRequest, ChatWire, SystemBlock, UserTurn, text_of_blocks
+from .wire_factory import make_wire
 
 log = structlog.stdlib.get_logger()
 
@@ -183,9 +184,15 @@ class StrategistProvider:
     or immediately when an alarm is triggered (e.g. enemy attack).
     """
 
-    def __init__(self, model: str | None = None) -> None:
+    def __init__(self, model: str | None = None, wire: ChatWire | None = None) -> None:
         self.model = model or config.strategist_model
-        self.client = anthropic.AsyncAnthropic(api_key=config.anthropic_api_key, max_retries=2)
+        self.wire: ChatWire = wire or make_wire(
+            config.llm_wire,
+            model=self.model,
+            api_key=config.llm_api_key,
+            base_url=config.llm_base_url,
+            max_retries=2,
+        )
         self.refresh_interval = config.strategist_interval
         self._system_prompt: str | None = None
         self._last_alarm_turn: int = 0  # Cooldown tracking
@@ -218,31 +225,29 @@ class StrategistProvider:
             return True
         return False
 
+    # Goals, not tool calls: one structured call is the whole interaction.
+    _MAX_TOKENS: ClassVar[int] = 768
+
     async def _call_api(self, content: list[dict]) -> StrategistResponse:
-        """Call strategist API with structured output parsing.
+        """Call the strategist model with structured output parsing.
 
-        SDK handles retry (429/5xx) with exponential backoff automatically.
+        SDK-internal retry on 429/5xx; raises `ModelRefusedError` on a decline.
         """
-        # `messages.parse` is the structured-output method — runtime-only,
-        # absent from public AsyncMessages stubs. The argument-type union for
-        # `messages` shifts between anthropic SDK versions, so we ignore the
-        # arg-type check too. The runtime contract is stable; the typing isn't.
-        response = await self.client.messages.parse(  # pyright: ignore[reportAttributeAccessIssue]
-            model=self.model,
-            max_tokens=768,
-            temperature=config.temperature,
-            system=self.get_system_prompt(),
-            messages=[{"role": "user", "content": content}],  # pyright: ignore[reportArgumentType]
-            output_format=StrategistResponse,
+        parsed, usage = await self.wire.parse_structured(
+            ChatRequest(
+                system=(SystemBlock(text=self.get_system_prompt()),),
+                turns=(UserTurn(text=text_of_blocks(content)),),
+                max_tokens=self._MAX_TOKENS,
+                temperature=config.temperature,
+            ),
+            StrategistResponse,
         )
-        if response.stop_reason == "refusal":
-            raise ValueError("Strategist refused the request")
-
-        usage = response.usage
         log.info(
-            "strategist_usage", input_tokens=usage.input_tokens, output_tokens=usage.output_tokens
+            "strategist_usage",
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
         )
-        return cast("StrategistResponse", response.parsed_output)
+        return parsed
 
     async def generate_goals(
         self,

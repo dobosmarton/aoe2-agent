@@ -13,7 +13,7 @@ import structlog
 
 if TYPE_CHECKING:
     from .providers.base import LLMResult
-    from .providers.claude import ClaudeProvider
+    from .providers.executor_provider import ExecutorProvider
 
 from . import reactive
 from .config import config
@@ -77,7 +77,7 @@ class _PendingPlan:
     iteration: int
 
 
-def _should_pipeline(context: str, provider: ClaudeProvider) -> bool:
+def _should_pipeline(context: str, provider: ExecutorProvider) -> bool:
     """Whether this turn is routine (single-shot) and can pipeline.
 
     Only single-shot (routine) turns pipeline: the tool loop executes its
@@ -211,7 +211,7 @@ async def _cancel_pending(plan: _PendingPlan | None) -> None:
 
 
 async def game_loop(
-    provider: ClaudeProvider,
+    provider: ExecutorProvider,
     max_iterations: int | None = None,
     memory: AgentMemory | None = None,
     use_detection: bool = True,
@@ -448,7 +448,7 @@ async def game_loop(
 
 
 async def run_single_iteration(
-    provider: ClaudeProvider,
+    provider: ExecutorProvider,
     memory: AgentMemory | None = None,
     execute: bool = False,
     use_detection: bool = True,

@@ -14,7 +14,7 @@ import gameplay_agent.game_loop as gl
 import pytest
 from gameplay_agent.executor import clear_detected_entities, set_detected_entities
 from gameplay_agent.providers.base import LLMResult
-from gameplay_agent.providers.claude import ClaudeProvider
+from gameplay_agent.providers.executor_provider import ExecutorProvider
 
 
 def _run(coro):
@@ -63,12 +63,12 @@ def test_revalidate_drops_unresolved_targets():
 
 
 def test_should_pipeline_true_for_routine_single_shot():
-    provider = ClaudeProvider(api_key="test", use_dynamic_context=False)
+    provider = ExecutorProvider(api_key="test", use_dynamic_context=False)
     assert gl._should_pipeline("economy turn, gather food", provider) is True
 
 
 def test_should_pipeline_false_for_combat():
-    provider = ClaudeProvider(api_key="test", use_dynamic_context=False)
+    provider = ExecutorProvider(api_key="test", use_dynamic_context=False)
     assert gl._should_pipeline("enemy spotted — under attack: true", provider) is False
 
 
@@ -130,7 +130,7 @@ def test_drain_pending_returns_game_end_without_executing(monkeypatch, tmp_path)
 # ---------------------------------------------------------------------------
 
 
-class _FakePipelineProvider(ClaudeProvider):
+class _FakePipelineProvider(ExecutorProvider):
     """Records each context it is asked for and returns 5 tagged press actions
     per turn so tests can trace which turn's plan executed when."""
 

@@ -10,7 +10,7 @@ prompt_loop:
   enabled: true
   epsilon: 0.02            # accept if score >= best - epsilon
   max_line_changes: 5      # max lines the mutator can change
-  mutator_model: "claude-haiku-4-5-20251001"  # cheap model for mutations
+  mutator_model: "gpt-5.6-luna"  # cheap model for mutations
   # Successive-halving tournament (the prompt loop). Documented defaults; pass
   # them on the CLI: --n-candidates 3 --halving-rounds 2 --keep-fraction 0.5
   # --games-budget 6. Games are human-started and sequential, so a tournament

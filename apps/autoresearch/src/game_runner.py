@@ -15,7 +15,7 @@ from gameplay_agent.config import config
 from gameplay_agent.game_loop import game_loop
 from gameplay_agent.memory import AgentMemory
 from gameplay_agent.memory_chain import MemoryChain
-from gameplay_agent.providers.claude import ClaudeProvider
+from gameplay_agent.providers.executor_provider import ExecutorProvider
 
 log = structlog.stdlib.get_logger()
 
@@ -40,7 +40,7 @@ async def run_game(
     Returns:
         Dict with metrics snapshot and computed score
     """
-    provider = ClaudeProvider()
+    provider = ExecutorProvider()
     memory = AgentMemory()
 
     log.info(
