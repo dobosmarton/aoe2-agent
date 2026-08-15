@@ -1,18 +1,20 @@
 """Unit tests for gameplay_agent/providers/wire_factory.py and pricing.py.
 
-Mirrors tests/test_broker_factory.py: every selection branch, input tolerance,
-and the error message treated as an operator-facing contract.
+Mirrors tests/test_broker_factory.py: every selection branch and every endpoint
+default. Name normalisation and the unknown-name error moved to
+tests/test_config.py, which is where `_parse_wire` now validates them.
 """
 
 from __future__ import annotations
 
 import pytest
-from gameplay_agent.config import KEY_ENV, Config
+from gameplay_agent.config import KEY_ENV, Config, WireName
 from gameplay_agent.providers.base import TokenUsage
 from gameplay_agent.providers.pricing import cost_usd, price_for
 from gameplay_agent.providers.wire_factory import ZEN_BASE_URL, make_text_completer, make_wire
 
 _WIRE_METHODS = ("tool_turn", "parse_structured", "is_api_error", "is_schema_too_large")
+_WIRE_ATTRS = ("model", "endpoint")
 
 
 def test_anthropic_branch_returns_an_anthropic_wire() -> None:
@@ -27,22 +29,18 @@ def test_openai_branch_honours_the_base_url() -> None:
     assert str(wire.client.base_url).startswith("http://zen/v1")
 
 
-@pytest.mark.parametrize("name", ["  ANTHROPIC ", "Anthropic", "anthropic"])
-def test_name_tolerates_case_and_whitespace(name: str) -> None:
-    assert type(make_wire(name, model="m", api_key="k")).__name__ == "AnthropicWire"
-
-
 @pytest.mark.parametrize("name", ["anthropic", "openai", "zen"])
-def test_both_wires_satisfy_the_protocol(name: str) -> None:
+def test_every_wire_implements_the_protocol_methods(name: WireName) -> None:
     """ChatWire is not runtime_checkable, so conformance is checked by shape."""
     wire = make_wire(name, model="m", api_key="k")
     assert all(callable(getattr(wire, method)) for method in _WIRE_METHODS)
 
 
-def test_unknown_wire_raises_rather_than_falling_back() -> None:
-    """Silently defaulting would run a whole game on the wrong vendor."""
-    with pytest.raises(ValueError, match=r"'anthropic'.*'openai'.*'zen'"):
-        make_wire("gemini", model="m")
+@pytest.mark.parametrize("name", ["anthropic", "openai", "zen"])
+def test_every_wire_carries_the_protocol_attributes(name: WireName) -> None:
+    """`endpoint` joined the Protocol for cost attribution; every wire must set it."""
+    wire = make_wire(name, model="m", api_key="k")
+    assert all(getattr(wire, attr) for attr in _WIRE_ATTRS)
 
 
 # ---------------------------------------------------------------------------
@@ -53,24 +51,24 @@ def test_unknown_wire_raises_rather_than_falling_back() -> None:
 def test_zen_branch_supplies_its_own_endpoint() -> None:
     """The whole point of the third name: one variable, not a wire plus a URL."""
     wire = make_wire("zen", model="gpt-5.6-luna", api_key="k")
-    assert str(wire.endpoint).rstrip("/") == ZEN_BASE_URL
+    assert wire.endpoint.rstrip("/") == ZEN_BASE_URL
 
 
 def test_openai_branch_defaults_to_the_vendor_endpoint() -> None:
     wire = make_wire("openai", model="gpt-5.6-luna", api_key="k")
-    assert "api.openai.com" in str(wire.endpoint)
+    assert "api.openai.com" in wire.endpoint
 
 
 def test_explicit_base_url_overrides_the_zen_endpoint() -> None:
     """A staging gateway must still win over the adapter's default."""
     wire = make_wire("zen", model="m", api_key="k", base_url="http://staging/v1")
-    assert str(wire.endpoint).startswith("http://staging/v1")
+    assert wire.endpoint.startswith("http://staging/v1")
 
 
 def test_empty_base_url_does_not_reach_the_sdk() -> None:
     """config supplies "" for "unset"; passing it through breaks every request."""
     wire = make_wire("openai", model="m", api_key="k", base_url="")
-    assert "api.openai.com" in str(wire.endpoint)
+    assert "api.openai.com" in wire.endpoint
 
 
 def test_zen_text_completer_shares_the_zen_endpoint() -> None:
@@ -79,9 +77,9 @@ def test_zen_text_completer_shares_the_zen_endpoint() -> None:
     assert str(completer.client.base_url).rstrip("/") == ZEN_BASE_URL
 
 
-def test_unknown_text_completer_raises() -> None:
-    with pytest.raises(ValueError, match=r"'zen'"):
-        make_text_completer("gemini", model="m")
+def test_openai_text_completer_defaults_to_the_vendor_endpoint() -> None:
+    completer = make_text_completer("openai", model="m", api_key="k")
+    assert "api.openai.com" in str(completer.client.base_url)
 
 
 # ---------------------------------------------------------------------------

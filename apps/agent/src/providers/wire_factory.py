@@ -1,9 +1,9 @@
 """The single point where an LLM wire is chosen by name.
 
-Mirrors `evaluation.broker_factory`: one match arm per implementation, a lazy
-import inside each arm so neither SDK becomes mandatory, and a `ValueError`
-naming the valid choices rather than a silent fallback — a mistyped wire name
-should fail at startup, not quietly run the wrong vendor for a whole game.
+Mirrors `evaluation.broker_factory`: one arm per implementation and a lazy import
+inside each arm so neither SDK becomes mandatory. Validation is not here — it is
+in `config._parse_wire`, which is where a name first arrives as text; by this
+point `WireName` makes an invalid one a type error.
 
 `openai` and `zen` share one transport and differ only in default endpoint, so
 picking a gateway is one variable rather than a wire plus a URL.
@@ -11,24 +11,20 @@ picking a gateway is one variable rather than a wire plus a URL.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Final, get_args
-
-from .base import WireName
+from typing import TYPE_CHECKING, Final, assert_never
 
 if TYPE_CHECKING:
+    from ..config import WireName
     from .base import ChatWire
     from .text_wire import TextCompleter
 
-WIRE_ENV: Final = "AOE2_LLM_WIRE"
 # OpenCode Zen speaks the OpenAI Chat Completions shape, so it reaches GPT-5.6
 # Luna, Kimi and GLM over the same transport.
 ZEN_BASE_URL: Final = "https://opencode.ai/zen/v1"
-# Derived from the Literal so the valid set is written once.
-_VALID: Final = get_args(WireName)
 
 
 def make_wire(
-    name: str,
+    name: WireName,
     model: str,
     api_key: str = "",
     base_url: str | None = None,
@@ -39,29 +35,29 @@ def make_wire(
     An empty `api_key` or `base_url` falls back to the SDK's own default; an
     explicit `base_url` overrides the adapter's endpoint.
     """
-    normalized = name.strip().lower()
+    match name:
+        case "anthropic":
+            # Local imports: keep each vendor SDK out of the other's dependency path.
+            from .wire_anthropic import AnthropicWire
 
-    if normalized == "anthropic":
-        # Local imports: keep each vendor SDK out of the other's dependency path.
-        from .wire_anthropic import AnthropicWire
+            return AnthropicWire(model=model, api_key=api_key or None, max_retries=max_retries)
 
-        return AnthropicWire(model=model, api_key=api_key or None, max_retries=max_retries)
+        case "openai" | "zen":
+            from .wire_openai import OpenAIWire
 
-    if normalized in ("openai", "zen"):
-        from .wire_openai import OpenAIWire
+            return OpenAIWire(
+                model=model,
+                api_key=api_key or None,
+                base_url=_openai_endpoint(name, base_url),
+                max_retries=max_retries,
+            )
 
-        return OpenAIWire(
-            model=model,
-            api_key=api_key or None,
-            base_url=_endpoint(normalized, base_url),
-            max_retries=max_retries,
-        )
-
-    raise _unknown(name)
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def make_text_completer(
-    name: str,
+    name: WireName,
     model: str,
     api_key: str = "",
     base_url: str | None = None,
@@ -71,39 +67,28 @@ def make_text_completer(
     Same selection rules as `make_wire`, for the blocking prompt-in/text-out
     callers (memory extraction, prompt mutation).
     """
-    normalized = name.strip().lower()
+    match name:
+        case "anthropic":
+            from .text_wire import AnthropicTextCompleter
 
-    if normalized == "anthropic":
-        from .text_wire import AnthropicTextCompleter
+            return AnthropicTextCompleter(model=model, api_key=api_key or None)
 
-        return AnthropicTextCompleter(model=model, api_key=api_key or None)
+        case "openai" | "zen":
+            from .text_wire import OpenAITextCompleter
 
-    if normalized in ("openai", "zen"):
-        from .text_wire import OpenAITextCompleter
+            return OpenAITextCompleter(
+                model=model,
+                api_key=api_key or None,
+                base_url=_openai_endpoint(name, base_url),
+            )
 
-        return OpenAITextCompleter(
-            model=model,
-            api_key=api_key or None,
-            base_url=_endpoint(normalized, base_url),
-        )
-
-    raise _unknown(name)
-
-
-def _endpoint(normalized: str, base_url: str | None) -> str | None:
-    """Resolve the endpoint for an OpenAI-compatible arm.
-
-    An explicit `base_url` always wins. Empty must become None, not "": the SDK
-    reads None as "use my default" but accepts "" and then fails per request.
-    """
-    if base_url:
-        return base_url
-    return ZEN_BASE_URL if normalized == "zen" else None
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
-def _unknown(name: str) -> ValueError:
-    expected = ", ".join(repr(choice) for choice in _VALID)
-    return ValueError(f"unknown {WIRE_ENV}={name!r}; expected one of {expected}")
+def _openai_endpoint(name: WireName, override: str | None) -> str | None:
+    """Override wins; "" must become None, or the SDK builds an empty base URL."""
+    return override or (ZEN_BASE_URL if name == "zen" else None)
 
 
-__all__ = ["WIRE_ENV", "ZEN_BASE_URL", "make_text_completer", "make_wire"]
+__all__ = ["ZEN_BASE_URL", "make_text_completer", "make_wire"]

@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal, Protocol, TypedDict, TypeVar
+from typing import TYPE_CHECKING, Protocol, TypedDict, TypeVar
 
-# Re-exported from config, which is the import leaf — declaring it here would
+# Re-exported from config, which is the import leaf — declaring them here would
 # cycle back through providers/__init__.
+from ..config import EffortLevel as EffortLevel
 from ..config import WireName as WireName
 
 if TYPE_CHECKING:
@@ -37,10 +38,6 @@ class LLMResult(TypedDict, total=False):
 
 
 # -- Names -------------------------------------------------------------------
-
-# Anthropic accepts low/medium/high here; Sonnet 4.6 rejects xhigh/max (see
-# config.EffortLevel). The OpenAI wire maps these onto `reasoning_effort`.
-EffortName = Literal["low", "medium", "high"]
 
 ModelT = TypeVar("ModelT", bound="BaseModel")
 
@@ -171,7 +168,8 @@ class ChatRequest:
     turns: tuple[Turn, ...]
     max_tokens: int
     temperature: float
-    effort: EffortName = "low"
+    # The OpenAI wire maps this onto `reasoning_effort`.
+    effort: EffortLevel = "low"
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,7 +229,7 @@ __all__ = [
     "AssistantTurn",
     "ChatRequest",
     "ChatWire",
-    "EffortName",
+    "EffortLevel",
     "LLMResult",
     "ModelRefusedError",
     "ModelT",

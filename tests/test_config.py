@@ -82,32 +82,59 @@ def test_executor_effort_invalid_falls_back_to_low(monkeypatch: pytest.MonkeyPat
 
 
 # ---------------------------------------------------------------------------
-# Wire selection
+# AOE2_LLM_WIRE
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("name", ["anthropic", "openai", "zen"])
-def test_every_adapter_name_survives_parsing(name: str) -> None:
-    """A name the factory accepts must not be silently rewritten to the default."""
-    from gameplay_agent.config import _parse_wire
+def test_from_env_accepts_every_adapter_name(name: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A name the factory has an arm for must survive parsing unchanged."""
+    from gameplay_agent.config import Config
 
-    assert _parse_wire(name) == name
-
-
-def test_unknown_wire_name_falls_back_to_the_default() -> None:
-    from gameplay_agent.config import _parse_wire
-
-    assert _parse_wire("gemini") == "openai"
+    monkeypatch.setenv("AOE2_LLM_WIRE", name)
+    assert Config.from_env().llm_wire == name
 
 
-def test_missing_wire_name_falls_back_to_the_default() -> None:
-    from gameplay_agent.config import _parse_wire
+@pytest.mark.parametrize("raw", ["  ANTHROPIC ", "Anthropic", "anthropic"])
+def test_from_env_tolerates_case_and_whitespace(raw: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    from gameplay_agent.config import Config
 
-    assert _parse_wire(None) == "openai"
+    monkeypatch.setenv("AOE2_LLM_WIRE", raw)
+    assert Config.from_env().llm_wire == "anthropic"
 
 
-def test_base_url_is_unset_by_default() -> None:
+def test_unknown_wire_raises_rather_than_falling_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Silently defaulting would run a whole game on the wrong vendor."""
+    from gameplay_agent.config import Config
+
+    monkeypatch.setenv("AOE2_LLM_WIRE", "gemini")
+    with pytest.raises(ValueError, match=r"'anthropic'.*'openai'.*'zen'"):
+        _ = Config.from_env()
+
+
+def test_missing_wire_falls_back_to_the_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    from gameplay_agent.config import Config
+
+    monkeypatch.delenv("AOE2_LLM_WIRE", raising=False)
+    assert Config.from_env().llm_wire == "openai"
+
+
+def test_empty_wire_falls_back_to_the_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An exported-but-empty var means "unset", not "invalid"."""
+    from gameplay_agent.config import Config
+
+    monkeypatch.setenv("AOE2_LLM_WIRE", "   ")
+    assert Config.from_env().llm_wire == "openai"
+
+
+# ---------------------------------------------------------------------------
+# AOE2_LLM_BASE_URL
+# ---------------------------------------------------------------------------
+
+
+def test_base_url_is_unset_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """Empty means "use the adapter's endpoint"; a URL here would pin every wire."""
     from gameplay_agent.config import Config
 
-    assert Config().llm_base_url == ""
+    monkeypatch.delenv("AOE2_LLM_BASE_URL", raising=False)
+    assert Config.from_env().llm_base_url == ""

@@ -2,12 +2,18 @@
 
 import os
 from pathlib import Path
-from typing import Literal, cast, get_args
+from typing import Final, Literal, get_args
 
 from pydantic import BaseModel
 
 EffortLevel = Literal["low", "medium", "high"]  # Sonnet 4.6 rejects xhigh/max
 WireName = Literal["anthropic", "openai", "zen"]
+
+# The one credential, whichever vendor is serving.
+KEY_ENV = "AOE2_LLM_API_KEY"
+WIRE_ENV = "AOE2_LLM_WIRE"
+# Derived from the Literal so the valid set is written once.
+_WIRES: Final[tuple[WireName, ...]] = get_args(WireName)
 
 
 def _parse_optional_int(value: str | None) -> int | None:
@@ -25,14 +31,19 @@ def _parse_effort(value: str | None) -> EffortLevel:
 
 
 def _parse_wire(value: str | None) -> WireName:
-    """Parse the wire env var, deriving the valid set from `WireName` itself."""
-    if value in get_args(WireName):
-        return cast("WireName", value)
-    return "openai"
+    """Parse the wire env var. Missing defaults to openai; an unknown name raises.
 
-
-# The one credential, whichever vendor is serving.
-KEY_ENV = "AOE2_LLM_API_KEY"
+    Unlike the other parsers, this one refuses to fall back: a wrong effort costs
+    a knob, a wrong vendor costs a whole run. Config is built at import, so a bad
+    value fails every module that imports it — which is the point.
+    """
+    if value is None or not value.strip():
+        return "openai"
+    normalized = value.strip().lower()
+    if normalized not in _WIRES:
+        expected = ", ".join(repr(wire) for wire in _WIRES)
+        raise ValueError(f"unknown {WIRE_ENV}={value!r}; expected one of {expected}")
+    return normalized
 
 
 class Config(BaseModel):
@@ -42,9 +53,7 @@ class Config(BaseModel):
     screenshot_quality: int = 85  # JPEG quality (1-100)
 
     # LLM settings
-    # Which adapter serves the models below: openai (api.openai.com) |
-    # zen (OpenCode Zen) | anthropic. Each supplies its own endpoint.
-    llm_wire: WireName = "openai"  # AOE2_LLM_WIRE
+    llm_wire: WireName = "openai"  # AOE2_LLM_WIRE; each adapter has its own endpoint
     # Empty means "use the adapter's own endpoint" — only set this to reach a
     # non-default host (a staging gateway, a self-hosted proxy).
     llm_base_url: str = ""  # AOE2_LLM_BASE_URL

@@ -41,7 +41,7 @@ Both raise `ModelRefusedError` so callers handle one exception type.
 
 ## 4.2 Wire Selection
 
-`apps/agent/src/providers/wire_factory.py` is the single place a wire is chosen by name — one match arm per implementation, a lazy import inside each so neither SDK is mandatory, and a `ValueError` naming the valid choices rather than a silent fallback:
+`apps/agent/src/providers/wire_factory.py` is the single place a wire is chosen by name — one match arm per implementation, with a lazy import inside each so neither SDK is mandatory:
 
 ```python
 wire = make_wire(config.llm_wire, model=config.model,
@@ -56,7 +56,12 @@ Three names are valid. `openai` and `zen` share `wire_openai` and differ only in
 | `zen` | `OpenAIWire` | `https://opencode.ai/zen/v1` |
 | `anthropic` | `AnthropicWire` | `https://api.anthropic.com` |
 
-`AOE2_LLM_BASE_URL` overrides the endpoint on either OpenAI-compatible arm; empty means "use the adapter's own". The valid set is the `WireName` Literal in `config.py`, and both `_parse_wire` and the `--wire` CLI choices derive from it, so a fourth adapter is a one-line change.
+`AOE2_LLM_BASE_URL` overrides the endpoint on either OpenAI-compatible arm; empty means "use the adapter's own".
+
+**The `WireName` Literal in `config.py` is the only place the valid set is written.** Two mechanisms keep everything else honest:
+
+- `config._parse_wire` is the sole validator. It normalises case and whitespace, defaults an unset var to `openai`, and **raises** on anything else — the same policy as `evaluation.broker_factory`, because silently falling back would run a whole game on the wrong vendor. The `--wire` CLI choices derive from the same Literal.
+- The factories take `WireName`, not `str`, and end with `case _ as unreachable: assert_never(unreachable)`. Add a fourth name to the Literal and `basedpyright` fails until **both** `make_wire` and `make_text_completer` have an arm for it. Nothing else enforces that pairing.
 
 Selected by env or CLI:
 
@@ -65,7 +70,7 @@ AOE2_LLM_WIRE=zen AOE2_LLM_API_KEY=sk-... AOE2_MODEL=gpt-5.6-luna just agent
 python -m gameplay_agent.main --wire zen
 ```
 
-There is deliberately **no registry of provider classes** — one executor serves every model. `make_text_completer` is the synchronous sibling for the plain prompt-in/text-out callers (memory extraction, prompt mutation); it carries the same arms, so a new adapter must be added to both.
+There is deliberately **no registry of provider classes** — one executor serves every model. `make_text_completer` is the synchronous sibling for the plain prompt-in/text-out callers (memory extraction, prompt mutation); it carries the same arms.
 
 Per-model pricing lives in one table, `providers/pricing.py`, shared by the agent and the arena. An unknown model logs `pricing_unknown_model` rather than silently costing $0.00. The table is keyed by model alone, so a gateway that resells a model at its own rate is priced at the first-party rate — the `api_cost` log event carries `endpoint` so a figure stays attributable.
 
@@ -177,7 +182,7 @@ You add a **wire**, not a provider — the executor stays as it is.
 2. Render `SystemBlock`/`Turn` values onto that API's message shape, and map its usage fields onto `TokenUsage`
 3. Classify its exceptions in `is_api_error` / `is_schema_too_large`
 4. Add the name to the `WireName` Literal in `config.py` — `_parse_wire` and the CLI choices follow automatically
-5. Add one arm to **both** `make_wire` and `make_text_completer` in `providers/wire_factory.py`, with a lazy import so the SDK stays optional
+5. Run `just typecheck`. It now fails in **both** `make_wire` and `make_text_completer`; add an arm to each, with a lazy import so the SDK stays optional
 6. Add the model's rates to `providers/pricing.py`
 
 An OpenAI-compatible endpoint needs only steps 4 and 5: give it a name on the existing `wire_openai` arm with its own default URL, as `zen` does.
