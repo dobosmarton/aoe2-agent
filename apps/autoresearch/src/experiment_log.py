@@ -47,7 +47,22 @@ HEADER = [
     # Near 1.0 = the game was played by the reactive tier alone, so the row's
     # score reflects the fallback policy, not the executor under test (run 12).
     "llm_error_rate",
+    # Turn latency (plan 0.3), and which phase led, as "ocr=11040 detect=890".
+    "turn_latency_p50_ms",
+    "turn_latency_p90_ms",
+    "phase_latency_p50_ms",
+    # Rows of different score versions are NOT comparable (plan 2.2).
+    "score_version",
 ]
+
+SCORE_VERSION = 1
+
+
+def _format_phase_latency(phases: object) -> str:
+    """Render the per-phase p50 map as one cell: "ocr=11040 detect=890"."""
+    if not isinstance(phases, dict) or not phases:
+        return ""
+    return " ".join(f"{name}={float(value):.0f}" for name, value in sorted(phases.items()))
 
 
 def _ensure_results_file() -> None:
@@ -161,6 +176,10 @@ def log_experiment(
         round_num,
         game_in_round,
         f"{float(score.raw_metrics.get('llm_error_rate', 0.0)):.4f}",
+        f"{float(score.raw_metrics.get('turn_latency_p50_ms', 0.0)):.0f}",
+        f"{float(score.raw_metrics.get('turn_latency_p90_ms', 0.0)):.0f}",
+        _format_phase_latency(score.raw_metrics.get("phase_latency_p50_ms")),
+        str(SCORE_VERSION),
     ]
 
     with RESULTS_FILE.open("a", newline="") as f:

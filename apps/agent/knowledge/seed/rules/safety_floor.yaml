@@ -1,0 +1,119 @@
+# The safety floor — game facts, NOT strategy.
+#
+# ADAPTIVE-AGENT-PLAN.md 1.5 keeps every entry here in Python. This file is a
+# manifest, not a rule table: these are vetoes the engine cannot express and the
+# strategist must never be able to rewrite.
+#
+# Plan 6.1: `safety_floor` is NEVER reranked and NEVER retired.
+#
+# The COLD arm of the plan's 6.3 bootstrap experiment starts from this file
+# alone.
+
+invariants:
+
+  - id: farm_key_requires_a_mill
+    enforced_by: "executor.py  _BUILD_PREREQ_CLASS = {\"a\": \"mill\"}"
+    rule: The `a` build key must be refused unless a mill is purchase-confirmed.
+    why: >
+      Without a mill the econ menu's `A` slot is the OUTPOST, not the farm. Run 9
+      built 14 unintended outposts through the unlocked slot after a persistent
+      phantom mill beat the 3-frame sighting threshold.
+    provenance: F-36 + F-37
+    severity: critical
+
+  - id: never_exceed_the_population_cap
+    enforced_by: "executor.py  _GAME_POP_CAP_LIMIT = 200"
+    rule: Houses past a population cap of 200 add nothing and must be refused.
+    why: The game's own maximum.
+    provenance: game rule
+    severity: low
+
+  - id: no_raw_coordinates_after_a_camera_key
+    enforced_by: "executor.py  CAMERA_KEYS = {h, ., ,} + STALE_COORDS_DETAIL"
+    rule: >
+      Refuse a raw x/y click that follows a camera-moving press in the same
+      batch. Use auto_placement, which resolves at click time.
+    why: >
+      Coordinates computed before a camera move land on arbitrary terrain
+      (run 8).
+    provenance: F-33 + T-525
+    severity: critical
+
+  - id: never_send_game_pausing_keys
+    enforced_by: "models.py  _GAME_PAUSING_KEYS = {escape, esc, f10, f3}"
+    rule: These keys are rejected at validation, in every age and every state.
+    why: >
+      Escape with nothing to cancel OPENS the game menu and pauses the game
+      (run 8). F10 IS the menu. F3 is pause. Clear UI state by selecting the
+      TC with `h` instead.
+    provenance: F-32
+    severity: critical
+
+  - id: boar_and_deer_are_never_gather_targets
+    enforced_by: "entity_utils.py  GATHER_CLASSES_BY_KIND"
+    rule: A villager is never right-clicked onto a boar or a deer.
+    why: >
+      A lone right-click on a boar is an ATTACK command and the boar wins — run
+      4 lost three villagers. Deer are excluded too: at real F1 ~0.67 a boar
+      misread as deer is fatal, so species labels are not trusted with villager
+      lives.
+    provenance: F-20
+    severity: critical
+
+  - id: a_farm_is_never_a_gather_target
+    enforced_by: "entity_utils.py  GATHER_CLASSES_BY_KIND"
+    rule: Build a fresh farm for an idle villager; never send one to an existing farm.
+    why: >
+      Each farm supports exactly one villager and clicking an occupied one does
+      nothing. Bare ground misdetected as a farm strands the villager (run 2).
+      The builder auto-farms the field it finishes.
+    provenance: F-12
+    severity: high
+
+  - id: detection_sightings_never_gate_a_build
+    enforced_by: "executor.py  _BuildGates.buildings_confirmed"
+    rule: >
+      Only purchase-grade evidence counts as owned — a wood-delta-confirmed
+      spend or a visually verified placement. Sightings are a context line only.
+    why: >
+      Run 7's flickering phantom poisoned the gates at 1 frame, and run 9's
+      PERSISTENT phantom beat the 3-frame threshold too. Gate evidence must be
+      self-generated.
+    provenance: F-36 + F-29
+    severity: critical
+
+  - id: stop_paying_for_a_build_that_keeps_vanishing
+    enforced_by: "executor.py  _MISSING_STREAK_LIMIT = 3, _MISSING_SUPPRESS_SNAPSHOTS = 5"
+    rule: Suppress a building class after 3 consecutive missing settlements.
+    why: >
+      Run 9 retried a vanishing farm 32 times, each attempt buying an unintended
+      outpost. A streak means something is systematically wrong.
+    provenance: T-530 + F-37
+    severity: high
+
+  - id: schema_bounds_stay_out_of_the_grammar
+    enforced_by: "models.py  field_validator, never Field(ge=, le=)"
+    rule: >
+      Numeric ranges on Action fields are enforced by validators, so the field
+      stays unbounded in the emitted JSON schema.
+    why: >
+      22 bounded ints across the Action union compiled to a constrained-decoding
+      grammar over Anthropic's size limit, and EVERY executor turn 400'd with
+      "compiled grammar is too large" (run 12).
+    provenance: F-40
+    severity: critical
+
+  - id: never_ring_the_town_bell_in_dark_age
+    enforced_by: "prompts/core.md and prompts/ages/dark.md"
+    rule: >
+      `B` garrisons every villager and halts the economy. Permitted only with 3+
+      enemy military at the TC, the TC visibly taking damage, AND age >= Feudal.
+    why: >
+      A single spearman triggered alarm reasoning that rang the bell and
+      collapsed the economy (exp_0013, turn 14). The TC's own arrows handle one
+      stray unit.
+    provenance: exp_0013
+    severity: high
+    note: >
+      This one is currently prompt-enforced, not code-enforced. Phase 1.5 should
+      move it into code, since a rewritten prompt would silently drop it.

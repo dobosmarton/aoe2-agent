@@ -54,6 +54,7 @@ from .turn_phases import (
     _process_response,
     known_buildings_line,
 )
+from .turn_timing import LatencyRecorder
 from .window import ensure_game_focused, get_game_window_rect, is_game_running
 
 log = structlog.stdlib.get_logger()
@@ -267,6 +268,9 @@ async def game_loop(
     iteration = 0
     alarm = False
     focus_failures = 0  # consecutive — reset on every successful focus
+    # Attached to memory so the metrics snapshot carries it into results.tsv.
+    timings = LatencyRecorder()
+    memory.latency = timings
     strategist_task: asyncio.Task | None = None
     pending_plan: _PendingPlan | None = None  # S6: plan from last turn, run this turn
 
@@ -305,93 +309,113 @@ async def game_loop(
                 continue
             focus_failures = 0
 
-            if iteration == 1:
-                # The opening (zoom, select scout, auto-scout) needs no perception —
-                # run it before the first OCR/detection pass, which is the slowest
-                # of the game (engine warm-up), so the scout explores during that
-                # wait instead of after it.
-                ground_actions = validate_actions(_get_ground_commands(iteration))
-                if ground_actions:
-                    await execute_actions(ground_actions)
+            # Timed after the focus gate: focus retries and the paced sleep are
+            # not turn work.
+            with timings.turn(iteration) as turn:
+                if iteration == 1:
+                    # The opening (zoom, select scout, auto-scout) needs no perception —
+                    # run it before the first OCR/detection pass, which is the slowest
+                    # of the game (engine warm-up), so the scout explores during that
+                    # wait instead of after it.
+                    ground_actions = validate_actions(_get_ground_commands(iteration))
+                    if ground_actions:
+                        await execute_actions(ground_actions)
 
-            screenshot, width, height = await _capture_screenshot(
-                overlay,
-                screenshots_dir,
-                iteration,
-            )
+                with turn.phase("capture"):
+                    screenshot, width, height = await _capture_screenshot(
+                        overlay,
+                        screenshots_dir,
+                        iteration,
+                    )
 
-            # Refresh game_state from the resource bar EVERY turn via local OCR,
-            # independent of the slow periodic strategist. Keeping population /
-            # resources current is what makes the housed/pop/resource signals
-            # accurate for the alarm check, strategist, and executor — so e.g. the
-            # build-house path triggers the turn the agent actually gets housed.
-            hud_readings, calib = await read_hud_readings(screenshot, turn=iteration)
-            _sync_turn_state(memory, goal_manager, hud_readings)
-            # Show the OCR reading regions on the debug overlay (--overlay only).
-            if overlay is not None and calib is not None:
-                overlay.set_ocr_fields(calib.field_rects())
+                # Refresh game_state from the resource bar EVERY turn via local OCR,
+                # independent of the slow periodic strategist. Keeping population /
+                # resources current is what makes the housed/pop/resource signals
+                # accurate for the alarm check, strategist, and executor — so e.g. the
+                # build-house path triggers the turn the agent actually gets housed.
+                with turn.phase("ocr"):
+                    hud_readings, calib = await read_hud_readings(screenshot, turn=iteration)
+                    _sync_turn_state(memory, goal_manager, hud_readings)
+                # Show the OCR reading regions on the debug overlay (--overlay only).
+                if overlay is not None and calib is not None:
+                    overlay.set_ocr_fields(calib.field_rects())
 
-            detected_entities = []
-            if detector:
-                detected_entities = await _run_detection(
-                    detector,
-                    screenshot,
+                with turn.phase("detect"):
+                    detected_entities = []
+                    if detector:
+                        detected_entities = await _run_detection(
+                            detector,
+                            screenshot,
+                            iteration,
+                            alarm,
+                        )
+                    # Render every turn the overlay is enabled (even with no
+                    # detections) so the resource-bar OCR boxes stay visible.
+                    if overlay is not None:
+                        overlay.show(detected_entities, get_game_window_rect())
+
+                    entity_summary, _ownership = _classify_entities(detected_entities, screenshot)
+
+                    alarm = (
+                        goal_manager.check_alarm(detected_entities, screenshot_bytes=screenshot)
+                        if detected_entities
+                        else False
+                    )
+
+                strategist_task = _maybe_launch_strategist(
+                    strategist,
                     iteration,
                     alarm,
+                    memory,
+                    goal_manager,
+                    entity_summary,
+                    hud_readings,
+                    known_buildings_line(detected_entities),
+                    goal_logger,
+                    strategist_task,
                 )
-            # Render every turn the overlay is enabled (even with no detections) so
-            # the resource-bar OCR boxes stay visible.
-            if overlay is not None:
-                overlay.show(detected_entities, get_game_window_rect())
 
-            entity_summary, _ownership = _classify_entities(detected_entities, screenshot)
+                context = _build_llm_context(
+                    memory, goal_manager, entity_summary, detected_entities
+                )
 
-            alarm = (
-                goal_manager.check_alarm(detected_entities, screenshot_bytes=screenshot)
-                if detected_entities
-                else False
-            )
-
-            strategist_task = _maybe_launch_strategist(
-                strategist,
-                iteration,
-                alarm,
-                memory,
-                goal_manager,
-                entity_summary,
-                hud_readings,
-                known_buildings_line(detected_entities),
-                goal_logger,
-                strategist_task,
-            )
-
-            context = _build_llm_context(memory, goal_manager, entity_summary, detected_entities)
-
-            # S6: pipeline routine turns — compute this turn's plan while last
-            # turn's committed head executes; combat turns stay synchronous.
-            if _should_pipeline(context, provider):
-                this_task = asyncio.create_task(provider.get_actions(context, width, height))
-                await _run_routine_upkeep(iteration, memory, detected_entities, alarm)
-                if pending_plan is not None:
-                    game_end_reason = await _drain_pending(
-                        pending_plan, memory, goal_manager, iteration, goal_logger, time_budget
-                    )
+                # S6: pipeline routine turns — compute this turn's plan while last
+                # turn's committed head executes; combat turns stay synchronous.
+                if _should_pipeline(context, provider):
+                    this_task = asyncio.create_task(provider.get_actions(context, width, height))
+                    with turn.phase("upkeep"):
+                        await _run_routine_upkeep(iteration, memory, detected_entities, alarm)
+                    if pending_plan is not None:
+                        with turn.phase("deliberate"):
+                            game_end_reason = await _drain_pending(
+                                pending_plan,
+                                memory,
+                                goal_manager,
+                                iteration,
+                                goal_logger,
+                                time_budget,
+                            )
+                        if game_end_reason:
+                            break
+                    pending_plan = _PendingPlan(task=this_task, iteration=iteration)
+                else:
+                    # Combat/tool-loop turn: discard the stale routine plan and
+                    # act synchronously on the current frame.
+                    await _cancel_pending(pending_plan)
+                    pending_plan = None
+                    with turn.phase("upkeep"):
+                        await _run_routine_upkeep(iteration, memory, detected_entities, alarm)
+                    # The LLM round trip sits on the critical path here; plan
+                    # 3.3 removes this branch.
+                    with turn.phase("deliberate"):
+                        response = await provider.get_actions(context, width, height)
+                        actions, game_end_reason = _process_response(
+                            response, memory, goal_manager, iteration, goal_logger, time_budget
+                        )
+                        if not game_end_reason:
+                            await _execute_or_record(response, actions, memory, iteration)
                     if game_end_reason:
                         break
-                pending_plan = _PendingPlan(task=this_task, iteration=iteration)
-            else:
-                # Combat/tool-loop turn: discard the stale routine plan and
-                # act synchronously on the current frame.
-                await _cancel_pending(pending_plan)
-                pending_plan = None
-                await _run_routine_upkeep(iteration, memory, detected_entities, alarm)
-                response = await provider.get_actions(context, width, height)
-                actions, game_end_reason = _process_response(
-                    response, memory, goal_manager, iteration, goal_logger, time_budget
-                )
-                if game_end_reason:
-                    break
-                await _execute_or_record(response, actions, memory, iteration)
 
             await asyncio.sleep(config.loop_delay)
 

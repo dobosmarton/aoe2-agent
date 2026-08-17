@@ -1,0 +1,15 @@
+experiment_id	timestamp	loop	change_description	composite_score	survival	population	age	economy	action_success	game_end_reason	turn_count	accepted	git_sha	memories_loaded	memories_used_count	tournament_id	candidate_id	round	game_in_round	score_version
+exp_0001	2026-03-18T07:09:11+00:00	manual	new-experiment	0.3067	0.5743	0.2000	0.0000	0.0000	0.8438	timeout	11	true	c55f346	1
+exp_0002	2026-03-18T15:37:54+00:00	manual	new-experiment	0.2780	0.5237	0.1600	0.0000	0.0000	0.8091	timeout	14	true	dcc3a60	1
+exp_0003	2026-03-24T13:52:29+00:00	manual	new-experiment	0.2876	0.5005	0.1600	0.0000	0.0000	0.9744	timeout	25	true	dcad83a	1
+exp_0004	2026-03-24T18:59:15+00:00	manual	new-experiment	0.3235	0.5062	0.3000	0.0000	0.0000	0.9662	timeout	28	true	85bd0d1	1
+exp_0005	2026-03-24T19:32:29+00:00	manual	new-experiment	0.3445	0.5036	0.3800	0.0000	0.0000	0.9844	timeout	28	true	dd233a1	1
+exp_0006	2026-03-24T19:54:38+00:00	manual	new-experiment	0.3253	0.5020	0.3000	0.0000	0.0000	0.9965	timeout	30	true	8554b5b	1
+exp_0007	2026-03-26T19:06:05+00:00	manual	new-experiment	0.5371	1.0000	0.5600	0.0000	0.0000	0.9706	timeout	34	true	c40eaca	1
+exp_0008	2026-03-27T08:56:48+00:00	manual	new-experiment	0.4614	1.0000	0.2600	0.0000	0.0000	0.9643	timeout	28	true	f66bcf4	1
+exp_0009	2026-03-28T19:39:32+00:00	manual	new-experiment	0.5975	1.0000	0.8000	0.0000	0.0000	0.9746	timeout	37	true	722fb45	1
+exp_0010	2026-03-28T22:52:26+00:00	manual	new-experiment	0.6203	1.0000	0.9000	0.0000	0.0000	0.9526	timeout	39	true	1246a9c	1
+exp_0011	2026-04-24T20:29:52+00:00	manual	new-experiment	0.5636	1.0000	0.7000	0.0000	0.0000	0.8864	timeout	20	true	7c56575	1
+exp_0012	2026-04-25T08:29:51+00:00	manual	new-experiment	0.6396	1.0000	0.9800	0.0000	0.0000	0.9458	timeout	33	true	7c56575	1
+exp_0013	2026-04-25T08:58:20+00:00	manual	new-experiment	0.6123	1.0000	0.6000	0.3300	0.0000	0.9633	timeout	35	true	398c779	1
+exp_0014	2026-07-11T17:33:43+00:00	manual	Feudal attempt 1	0.3153	0.4211	0.4000	0.0000	0.0626	0.7963	iterations_exhausted	27	true	65c0548	0	0					1

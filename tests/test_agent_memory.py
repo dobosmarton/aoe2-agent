@@ -26,6 +26,7 @@ from gameplay_agent.memory import (
     GameState,
     Turn,
 )
+from gameplay_agent.turn_timing import LatencyRecorder
 
 # ---------------------------------------------------------------------------
 # Layer 1 — dataclass defaults
@@ -341,8 +342,45 @@ def test_metrics_snapshot_keys() -> None:
         "llm_calls",
         "llm_errors",
         "llm_error_rate",
+        # Turn latency (ADAPTIVE-AGENT-PLAN.md 0.3).
+        "turn_latency_p50_ms",
+        "turn_latency_p90_ms",
+        "turn_latency_max_ms",
+        "phase_latency_p50_ms",
     }
     assert set(snap.keys()) == expected_keys
+
+
+def test_metrics_snapshot_latency_is_zero_without_a_recorder() -> None:
+    """The scenario and synth paths attach no recorder, and must still report."""
+    snap = AgentMemory().get_metrics_snapshot()
+    assert snap["turn_latency_p50_ms"] == 0.0
+
+
+def test_metrics_snapshot_phase_map_is_empty_without_a_recorder() -> None:
+    assert AgentMemory().get_metrics_snapshot()["phase_latency_p50_ms"] == {}
+
+
+def test_metrics_snapshot_reports_recorded_turn_latency() -> None:
+    """An attached recorder surfaces in the snapshot."""
+    memory = AgentMemory()
+    memory.latency = _recorder_with_ocr_turns()
+    assert memory.get_metrics_snapshot()["turn_latency_p50_ms"] > 0.0
+
+
+def test_metrics_snapshot_reports_recorded_phase_names() -> None:
+    memory = AgentMemory()
+    memory.latency = _recorder_with_ocr_turns()
+    assert set(memory.get_metrics_snapshot()["phase_latency_p50_ms"]) == {"ocr"}
+
+
+def _recorder_with_ocr_turns(turns: int = 3) -> LatencyRecorder:
+    """A recorder holding `turns` timed turns with one measurable `ocr` phase."""
+    recorder = LatencyRecorder()
+    for iteration in range(turns):
+        with recorder.turn(iteration) as turn, turn.phase("ocr"):
+            time.sleep(0.002)  # an empty phase rounds to 0.0 ms
+    return recorder
 
 
 def test_metrics_snapshot_success_rate_zero_total_no_div_zero() -> None:

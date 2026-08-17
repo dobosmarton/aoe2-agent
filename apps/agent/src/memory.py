@@ -3,7 +3,16 @@
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TypedDict, cast
+from typing import Protocol, TypedDict, cast
+
+from .turn_timing import LatencySnapshot
+
+
+class LatencySource(Protocol):
+    """The game loop's latency recorder, kept structural so tests can stub it."""
+
+    def snapshot(self) -> LatencySnapshot: ...
+
 
 # AoE2 Dark Age starting values
 INITIAL_RESOURCES = {"food": 200, "wood": 200, "gold": 100, "stone": 200}
@@ -107,6 +116,11 @@ class MetricsSnapshot(TypedDict):
     llm_calls: int
     llm_errors: int
     llm_error_rate: float
+    # Turn latency (plan 0.3). 0.0 when no turn was timed.
+    turn_latency_p50_ms: float
+    turn_latency_p90_ms: float
+    turn_latency_max_ms: float
+    phase_latency_p50_ms: dict[str, float]
 
 
 class AgentMemory:
@@ -151,6 +165,9 @@ class AgentMemory:
         # in its reasoning. See _extract_applied_memories in game_loop.py.
         self.memories_loaded: list[str] = []
         self.memories_applied_count: dict[str, int] = {}
+        # Set by the game loop. None on the scenario and synth paths, which run
+        # no timed loop.
+        self.latency: LatencySource | None = None
 
     def add_turn(self, turn: Turn) -> None:
         """Add a turn to working memory."""
@@ -373,6 +390,7 @@ class AgentMemory:
 
     def get_metrics_snapshot(self) -> MetricsSnapshot:
         """Return current cumulative metrics for scoring."""
+        latency = self.latency.snapshot() if self.latency is not None else LatencySnapshot()
         return {
             "survival_time": self.get_game_duration_seconds(),
             "peak_population": self.peak_population,
@@ -394,6 +412,10 @@ class AgentMemory:
             "llm_calls": self.llm_calls,
             "llm_errors": self.llm_errors,
             "llm_error_rate": (self.llm_errors / self.llm_calls if self.llm_calls > 0 else 0.0),
+            "turn_latency_p50_ms": latency.turn_p50_ms,
+            "turn_latency_p90_ms": latency.turn_p90_ms,
+            "turn_latency_max_ms": latency.turn_max_ms,
+            "phase_latency_p50_ms": latency.phase_p50_ms,
         }
 
     def reset(self) -> None:
@@ -416,6 +438,9 @@ class AgentMemory:
         self.game_end_reason = ""
         self.memories_loaded = []
         self.memories_applied_count = {}
+        # Drop the recorder so a reused AgentMemory cannot report last game's
+        # latency; the loop attaches a fresh one.
+        self.latency = None
 
     def create_turn(
         self,

@@ -1,0 +1,89 @@
+# Villager allocation seed — exported from reactive.py `_IDLE_PATTERN_BY_AGE`
+# and `_idle_pattern`, 2026-08-17.
+#
+# reactive.py expresses allocation as a repeating gather PATTERN cycled by
+# population. ADAPTIVE-AGENT-PLAN.md 4.1 replaces the pattern with a target
+# ALLOCATION the strategist sets and the engine enforces against
+# PolicyState.villager_jobs.
+#
+# The ratios below are that pattern converted to counts. They are the DEFAULT
+# the strategist starts from and may override — they are not a floor.
+
+base_allocation:
+  # Dark Age pattern (food, food, food, wood, wood) -> 3:2
+  Dark Age:     {food: 3, wood: 2, gold: 0, stone: 0}
+  # Feudal (food, food, wood, wood, gold) -> 2:2:1
+  Feudal Age:   {food: 2, wood: 2, gold: 1, stone: 0}
+  # Castle (food, wood, gold, food, gold, stone) -> 2:1:2:1
+  Castle Age:   {food: 2, wood: 1, gold: 2, stone: 1}
+  # Imperial (food, wood, gold, gold, stone) -> 1:1:2:1
+  Imperial Age: {food: 1, wood: 1, gold: 2, stone: 1}
+
+# Overrides, applied in this order. The order is load-bearing — see findings.md
+# sections F-8 and F-21, which are a matched pair.
+overrides:
+
+  - id: famine_with_farming_affordable
+    when: food < 60 and wood >= 80
+    allocation: {food: 1, wood: 0, gold: 0, stone: 0}
+    provenance: seed/F-8
+    # Below 60 food, honouring the normal wood/gold slots starves villager
+    # production (run 1, F-8). Wood and gold can wait; the Feudal bank cannot.
+
+  - id: famine_protecting_the_farm_economy
+    when: food < 60 and wood < 80
+    allocation: {food: 2, wood: 1, gold: 0, stone: 0}
+    provenance: seed/F-21
+    # The pure all-food override pinned wood at 0 and locked out the farm
+    # economy the famine needed to end (run 4, F-21). 80 = farm cost 60 plus
+    # the 20 margin from F-23.
+    # THIS RULE MUST OUTRANK THE ONE ABOVE IN A FAMINE WITH LOW WOOD.
+    # Implementing F-8 without F-21 recreates the failure it fixed.
+
+  - id: bank_wood_for_the_binding_build
+    when: wood < wood_bank_target
+    allocation_bias: {wood: +1}
+    provenance: seed/F-23+F-34
+    # One extra wood slot while the binding goal is unaffordable. A farm-only
+    # target let wood plateau at 65 while the lumber camp cost 100 (run 8,
+    # F-34), so the target is the BINDING goal, not the cheapest.
+
+  - id: bank_gold_for_castle
+    when: age == 'Feudal Age' and gold < 200
+    allocation_bias: {gold: +1}
+    provenance: seed/F-46
+    # Ranks BELOW the wood bias: the mining camp that the gold bank needs is
+    # itself a wood purchase.
+
+# The wood bank target, in priority order. Each is cost + _WOOD_BANK_MARGIN (20).
+# The margin exists because six farm attempts failed at wood 48-59 (run 5, F-23)
+# — a purchase must not leave the stock exactly at the boundary.
+wood_bank_target:
+  - {when: "'mill' not in buildings_seen and age == 'Dark Age' and population >= 12", value: 120}
+  - {when: "'lumber_camp' not in buildings_seen and age == 'Dark Age' and population >= 12", value: 120}
+  - {when: "'mining_camp' not in buildings_seen and age == 'Feudal Age'", value: 120}
+  - {when: "'mill' in buildings_seen", value: 80}
+  # else: no wood-gated goal pending -> no target, no bias.
+
+# Idle dispatch sizing (reactive.py `_idle_batch_size`).
+idle_dispatch:
+  blind_batch: 3          # _IDLE_DISPATCH_PER_TURN — used when the digit is unreadable
+  max_batch: 6            # _IDLE_DISPATCH_MAX — caps a mass-idle event
+  distrust_after_turns: 4 # _IDLE_COUNT_SUSPECT_STREAK
+  provenance: seed/F-4
+  # A lit badge that outlives its own count means the digit is under-reading —
+  # it pinned at 1 while 8 villagers idled. Presence is the robust signal, so
+  # never dispatch FEWER than the blind batch on a long streak.
+  # idle_count == null means unreadable. NEVER read it as 0.
+
+# When a food slot finds nothing huntable or foragable on screen, build a fresh
+# farm for that villager instead of falling through to wood.
+food_slot_fallback:
+  build: a                # _FARM_BUILD_KEY
+  max_per_turn: 1
+  provenance: seed/F-12
+  # One per turn: the HUD snapshot the build gate checks does not see this
+  # turn's spend, so a second build could not be cost-checked.
+  # A farm is never a gather TARGET — each supports exactly one villager, and
+  # bare ground misdetected as a farm strands the villager (run 2, F-12). The
+  # builder auto-farms the field it finishes.
