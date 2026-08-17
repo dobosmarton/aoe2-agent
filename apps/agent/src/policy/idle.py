@@ -1,8 +1,4 @@
-"""Idle-villager dispatch — procedural because it reads the entity list.
-
-Ported unchanged from the reactive tier. Phase 4.1 replaces the gather pattern
-with a strategist allocation; the batch sizing and target resolution stay.
-"""
+"""Idle-villager dispatch — procedural because it reads the entity list."""
 
 from __future__ import annotations
 
@@ -14,19 +10,10 @@ from ..entity_utils import (
     first_center_of_class,
     nearest_class_of_kind,
 )
+from . import allocation
 
 if TYPE_CHECKING:
     from .state import PolicyState
-
-# Repeating gather pattern per age. Cycling it yields the age's ratio; seeding
-# the phase on population rotates the choice as villagers are produced.
-_IDLE_PATTERN_BY_AGE: dict[str, tuple[ResourceKind, ...]] = {
-    "Dark Age": ("food", "food", "food", "wood", "wood"),
-    "Feudal Age": ("food", "food", "wood", "wood", "gold"),
-    "Castle Age": ("food", "wood", "gold", "food", "gold", "stone"),
-    "Imperial Age": ("food", "wood", "gold", "gold", "stone"),
-}
-_DEFAULT_IDLE_PATTERN: tuple[ResourceKind, ...] = _IDLE_PATTERN_BY_AGE["Dark Age"]
 
 # Dispatches per turn when only badge PRESENCE is known. Each `.` costs a camera
 # move; the badge re-read next turn drains any remainder.
@@ -41,19 +28,20 @@ _IDLE_COUNT_SUSPECT_STREAK = 4
 # Farms are never gather targets — see entity_utils.GATHER_CLASSES_BY_KIND.
 _FARM_BUILD_KEY = "a"
 
-_FOOD_CRISIS_THRESHOLD = 60
 # The farm is the only build this module costs itself; every other build cost
 # comes from the rule that emits it (see engine.wood_bank_target).
 _FARM_WOOD_COST = 60
 # Headroom above a bank target so a purchase does not land on the cost boundary.
 _WOOD_BANK_MARGIN = 20
-_CASTLE_GOLD_COST = 200
 
 
 def distribute_idle(
-    entities: list[object], state: PolicyState, wood_target: int | None
+    entities: list[object],
+    state: PolicyState,
+    wood_target: int | None,
+    strategist_allocation: allocation.Allocation | None = None,
 ) -> list[dict[str, object]]:
-    """Route idle villagers one at a time, spread across resources by age pattern.
+    """Route idle villagers one at a time toward the target allocation.
 
     Gated on badge presence: False means none idle, None means unread — both
     skip, so an unknown reading never triggers a camera move.
@@ -64,12 +52,14 @@ def distribute_idle(
     if batch == 0:  # the digit says none idle — the colour was a false positive
         return []
 
-    pattern = idle_pattern(state, wood_target)
+    target_mix = allocation.for_state(state, strategist_allocation, wood_target)
+    jobs = dict(state.villager_jobs)
     origin = _tc_origin(entities)
     actions: list[dict[str, object]] = []
     farm_queued = False
-    for index in range(batch):
-        kind = pattern[(state.population + index) % len(pattern)]
+    for _ in range(batch):
+        kind = allocation.next_kind(target_mix, jobs)
+        jobs = allocation.with_one_more(jobs, kind)
         if kind == "food" and not farm_queued and nearest_class_of_kind(entities, "food") is None:
             # One per turn: the HUD snapshot the build gate checks cannot see
             # this turn's spend, so a second build could not be cost-checked.
@@ -120,25 +110,6 @@ def farm_bank_target() -> int:
     entry to derive a cost from.
     """
     return _FARM_WOOD_COST + _WOOD_BANK_MARGIN
-
-
-def idle_pattern(state: PolicyState, wood_target: int | None) -> tuple[ResourceKind, ...]:
-    """Age-keyed gather rotation, overridden during a food famine.
-
-    Famine with wood below a farm's cost keeps a wood slot: the pure all-food
-    override starved wood to 0 and locked out the farm economy (F-21).
-    `wood_target` comes from the engine — see `engine.wood_bank_target`.
-    """
-    if state.food < _FOOD_CRISIS_THRESHOLD:
-        if state.wood < farm_bank_target():
-            return ("food", "food", "wood")
-        return ("food",)
-    pattern = _IDLE_PATTERN_BY_AGE.get(state.age, _DEFAULT_IDLE_PATTERN)
-    if wood_target is not None and state.wood < wood_target:
-        return ("wood", *pattern)
-    if state.age == "Feudal Age" and state.gold < _CASTLE_GOLD_COST:
-        return ("gold", *pattern)
-    return pattern
 
 
 def _tc_origin(entities: list[object]) -> tuple[float, float]:

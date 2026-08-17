@@ -11,8 +11,10 @@ from PIL import Image
 from pydantic import BaseModel, Field
 
 from ..config import config
+from ..entity_utils import RESOURCE_KINDS, ResourceKind
 from ..goals import Goal
 from ..memory import GameState
+from ..policy.allocation import Allocation
 from ..resource_ocr import (
     Backend,
     Calibration,
@@ -44,12 +46,15 @@ class StrategistGoal(BaseModel):
 class StrategistResponse(BaseModel):
     """Structured response from the strategist.
 
-    Goals only — resources/population/age are read locally via OCR
-    (`read_resource_bar`), not by the model.
+    Goals and a villager allocation — resources/population/age are read locally
+    via OCR (`read_resource_bar`), not by the model.
     """
 
     reasoning: str
     goals: list[StrategistGoal]
+    # Target villagers per resource. Empty falls back to the seeded per-age mix,
+    # which is what the LLM-down path runs on.
+    allocation: dict[str, int] = Field(default_factory=dict)
 
 
 def _clean_readings(ocr: dict[str, object]) -> ResourceReadings:
@@ -146,6 +151,14 @@ async def read_hud_readings(
         return {}, None
 
 
+def _as_allocation(targets: dict[str, int]) -> Allocation | None:
+    """The strategist's allocation, or None to fall back to the seeded mix."""
+    clean: dict[ResourceKind, int] = {
+        kind: int(targets[kind]) for kind in RESOURCE_KINDS if int(targets.get(kind, 0)) > 0
+    }
+    return Allocation(targets=clean) if clean else None
+
+
 def get_default_goals(turn: int = 0) -> list[Goal]:
     """Return sensible Dark Age starting goals used before the strategist responds."""
     return [
@@ -197,6 +210,8 @@ class StrategistProvider:
         self._system_prompt: str | None = None
         self._last_alarm_turn: int = 0  # Cooldown tracking
         self._has_run: bool = False  # Track first successful run
+        # Latest parsed allocation; None until the model supplies one.
+        self.last_allocation: Allocation | None = None
 
     def get_system_prompt(self) -> str:
         if self._system_prompt is None:
@@ -341,6 +356,7 @@ Create 3-5 prioritized goals based on the state above. Keep goals that are still
                         created_turn=turn,
                     )
                 )
+            self.last_allocation = _as_allocation(result.allocation)
             self._has_run = True
             return goals, readings
 

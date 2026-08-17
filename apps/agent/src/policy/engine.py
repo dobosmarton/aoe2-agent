@@ -13,6 +13,7 @@ from .rules import Rule, load_rules
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from .allocation import Allocation
     from .state import PolicyState
 
 log = structlog.stdlib.get_logger()
@@ -36,14 +37,14 @@ def decide(
     state: PolicyState,
     alarm: bool,
     rules: Sequence[Rule] | None = None,
+    strategist_allocation: Allocation | None = None,
 ) -> list[dict[str, object]]:
     """Routine actions for this turn. Empty on alarm — the LLM owns combat."""
     if alarm:
         return []
     active = registry() if rules is None else tuple(rules)
-    return matched_actions(state, active) + distribute_idle(
-        entities, state, wood_bank_target(state, active)
-    )
+    idle = distribute_idle(entities, state, wood_bank_target(state, active), strategist_allocation)
+    return matched_actions(state, active) + idle
 
 
 def matched_actions(state: PolicyState, rules: Sequence[Rule]) -> list[dict[str, object]]:

@@ -56,6 +56,7 @@ from .turn_phases import (
     known_buildings_line,
 )
 from .turn_timing import LatencyRecorder
+from .villager_roles import gather_counts, infer_jobs, job_counts
 from .window import ensure_game_focused, get_game_window_rect, is_game_running
 
 log = structlog.stdlib.get_logger()
@@ -120,14 +121,18 @@ async def _execute_or_record(
 async def _run_routine_upkeep(
     iteration: int,
     memory: AgentMemory,
+    goal_manager: GoalManager,
     detected_entities: list[object],
     alarm: bool,
 ) -> None:
     """Routine villager upkeep — the work done in the LLM's in-flight window
     while the turn's plan computes. (Opening ground commands run earlier, before
     the first perception pass — see the iteration-1 block in `game_loop`.)"""
-    policy_state = from_game_state(memory.game_state)
-    routine_cmds = policy_decide(detected_entities, policy_state, alarm)
+    jobs = gather_counts(job_counts(infer_jobs(detected_entities))) if detected_entities else {}
+    policy_state = from_game_state(memory.game_state, villager_jobs=jobs)
+    routine_cmds = policy_decide(
+        detected_entities, policy_state, alarm, strategist_allocation=goal_manager.allocation
+    )
     if routine_cmds:
         routine_actions = validate_actions(routine_cmds)
         if routine_actions:
@@ -386,7 +391,9 @@ async def game_loop(
                 if _should_pipeline(context, provider):
                     this_task = asyncio.create_task(provider.get_actions(context, width, height))
                     with turn.phase("upkeep"):
-                        await _run_routine_upkeep(iteration, memory, detected_entities, alarm)
+                        await _run_routine_upkeep(
+                            iteration, memory, goal_manager, detected_entities, alarm
+                        )
                     if pending_plan is not None:
                         with turn.phase("deliberate"):
                             game_end_reason = await _drain_pending(
@@ -406,7 +413,9 @@ async def game_loop(
                     await _cancel_pending(pending_plan)
                     pending_plan = None
                     with turn.phase("upkeep"):
-                        await _run_routine_upkeep(iteration, memory, detected_entities, alarm)
+                        await _run_routine_upkeep(
+                            iteration, memory, goal_manager, detected_entities, alarm
+                        )
                     # The LLM round trip sits on the critical path here; plan
                     # 3.3 removes this branch.
                     with turn.phase("deliberate"):

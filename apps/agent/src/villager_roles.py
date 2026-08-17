@@ -89,6 +89,11 @@ def infer_jobs(entities: list[object]) -> dict[str, VillagerJob]:
     return jobs
 
 
+def gather_counts(counts: dict[VillagerJob, int]) -> dict[str, int]:
+    """`job_counts` minus `idle`, which is not a resource to allocate toward."""
+    return {kind: n for kind, n in counts.items() if kind != IDLE}
+
+
 def job_counts(jobs: dict[str, VillagerJob]) -> dict[VillagerJob, int]:
     """Count villagers per job (all kinds + idle present, even at zero)."""
     counts: dict[VillagerJob, int] = dict.fromkeys((*RESOURCE_KINDS, IDLE), 0)

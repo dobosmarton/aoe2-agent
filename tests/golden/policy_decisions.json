@@ -72,6 +72,11 @@
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Castle Age|lumber_camp,mill,mining_camp|pop=111/200|food=0|wood=80|gold=200|ord=60|idle=True,8,0|ents=0": [
@@ -108,14 +113,25 @@
  ],
  "Castle Age|lumber_camp,mill,mining_camp|pop=13/15|food=200|wood=0|gold=200|ord=34|idle=True,3,5|ents=4": [
   {
-   "intent": "Select next idle villager \u2192 stone",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to sheep (stone)",
+   "intent": "Send idle villager to sheep (food)",
    "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 gold",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to gold_mine (gold)",
+   "target_class": "gold_mine",
    "type": "right_click"
   },
   {
@@ -127,17 +143,6 @@
   {
    "intent": "Send idle villager to tree (wood)",
    "target_class": "tree",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -201,17 +206,6 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
@@ -220,6 +214,17 @@
   {
    "intent": "Send idle villager to tree (wood)",
    "target_class": "tree",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -272,17 +277,6 @@
    "type": "queue_villager"
   },
   {
-   "intent": "Select next idle villager \u2192 gold",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to gold_mine (gold)",
-   "target_class": "gold_mine",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
@@ -303,18 +297,45 @@
    "intent": "Send idle villager to gold_mine (gold)",
    "target_class": "gold_mine",
    "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 stone",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (stone)",
+   "target_class": "sheep",
+   "type": "right_click"
   }
  ],
  "Castle Age|lumber_camp,mill,mining_camp|pop=38/200|food=60|wood=200|gold=0|ord=29|idle=True,None,0|ents=0": [
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Castle Age|lumber_camp,mill,mining_camp|pop=4/15|food=60|wood=80|gold=0|ord=4|idle=True,8,5|ents=4": [
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
+   "type": "right_click"
   },
   {
    "intent": "Select next idle villager \u2192 gold",
@@ -339,17 +360,6 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
@@ -361,17 +371,6 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 gold",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to gold_mine (gold)",
-   "target_class": "gold_mine",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
@@ -380,6 +379,17 @@
   {
    "intent": "Send idle villager to sheep (food)",
    "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 gold",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to gold_mine (gold)",
+   "target_class": "gold_mine",
    "type": "right_click"
   }
  ],
@@ -417,8 +427,20 @@
    "type": "queue_villager"
   }
  ],
- "Castle Age|lumber_camp,mill,mining_camp|pop=5/30|food=900|wood=200|gold=200|ord=34|idle=True,3,5|ents=0": [],
- "Castle Age|lumber_camp,mill,mining_camp|pop=5/5|food=0|wood=0|gold=0|ord=10|idle=True,None,0|ents=0": [],
+ "Castle Age|lumber_camp,mill,mining_camp|pop=5/30|food=900|wood=200|gold=200|ord=34|idle=True,3,5|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
+ "Castle Age|lumber_camp,mill,mining_camp|pop=5/5|food=0|wood=0|gold=0|ord=10|idle=True,None,0|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
  "Castle Age|lumber_camp,mill,mining_camp|pop=5/5|food=0|wood=80|gold=0|ord=35|idle=None,8,5|ents=4": [
   {
    "building_key": "q",
@@ -447,17 +469,6 @@
  ],
  "Castle Age|lumber_camp,mill,mining_camp|pop=7/15|food=520|wood=15|gold=200|ord=34|idle=True,None,5|ents=4": [
   {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
@@ -466,6 +477,17 @@
   {
    "intent": "Send idle villager to sheep (food)",
    "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 gold",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to gold_mine (gold)",
+   "target_class": "gold_mine",
    "type": "right_click"
   },
   {
@@ -496,14 +518,14 @@
  "Castle Age|lumber_camp,mill,mining_camp|pop=8/25|food=200|wood=0|gold=90|ord=30|idle=None,1,5|ents=4": [],
  "Castle Age|lumber_camp,mill,mining_camp|pop=9/10|food=60|wood=0|gold=90|ord=60|idle=True,1,5|ents=4": [
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   },
   {
@@ -518,19 +540,25 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 food",
+   "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   }
  ],
  "Castle Age|lumber_camp,mill,mining_camp|pop=9/25|food=520|wood=400|gold=200|ord=60|idle=None,8,0|ents=4": [],
- "Castle Age|lumber_camp,mill|pop=1/10|food=60|wood=200|gold=90|ord=30|idle=True,3,0|ents=0": [],
+ "Castle Age|lumber_camp,mill|pop=1/10|food=60|wood=200|gold=90|ord=30|idle=True,3,0|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
  "Castle Age|lumber_camp,mill|pop=1/15|food=200|wood=400|gold=200|ord=60|idle=False,3,5|ents=0": [],
  "Castle Age|lumber_camp,mill|pop=1/15|food=40|wood=60|gold=90|ord=35|idle=None,1,5|ents=4": [],
  "Castle Age|lumber_camp,mill|pop=1/15|food=60|wood=0|gold=0|ord=34|idle=True,None,0|ents=0": [
@@ -585,11 +613,22 @@
   }
  ],
  "Castle Age|lumber_camp,mill|pop=1/5|food=520|wood=100|gold=90|ord=29|idle=False,8,0|ents=0": [],
- "Castle Age|lumber_camp,mill|pop=1/5|food=520|wood=200|gold=90|ord=29|idle=True,8,5|ents=0": [],
+ "Castle Age|lumber_camp,mill|pop=1/5|food=520|wood=200|gold=90|ord=29|idle=True,8,5|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
  "Castle Age|lumber_camp,mill|pop=10/15|food=60|wood=100|gold=200|ord=10|idle=True,1,0|ents=0": [
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Castle Age|lumber_camp,mill|pop=10/25|food=200|wood=100|gold=90|ord=35|idle=False,8,5|ents=0": [],
@@ -604,6 +643,11 @@
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Castle Age|lumber_camp,mill|pop=12/15|food=60|wood=80|gold=0|ord=60|idle=True,0,5|ents=0": [
@@ -624,14 +668,14 @@
  "Castle Age|lumber_camp,mill|pop=13/25|food=0|wood=0|gold=200|ord=30|idle=None,8,0|ents=4": [],
  "Castle Age|lumber_camp,mill|pop=13/30|food=520|wood=400|gold=0|ord=35|idle=True,3,5|ents=4": [
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   },
   {
@@ -646,13 +690,13 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 food",
+   "intent": "Select next idle villager \u2192 stone",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to sheep (food)",
+   "intent": "Send idle villager to sheep (stone)",
    "target_class": "sheep",
    "type": "right_click"
   }
@@ -734,19 +778,14 @@
    "type": "queue_villager"
   }
  ],
- "Castle Age|lumber_camp,mill|pop=2/5|food=900|wood=15|gold=200|ord=29|idle=True,8,0|ents=0": [],
+ "Castle Age|lumber_camp,mill|pop=2/5|food=900|wood=15|gold=200|ord=29|idle=True,8,0|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
  "Castle Age|lumber_camp,mill|pop=20/25|food=60|wood=400|gold=90|ord=34|idle=True,8,5|ents=4": [
-  {
-   "intent": "Select next idle villager \u2192 gold",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to gold_mine (gold)",
-   "target_class": "gold_mine",
-   "type": "right_click"
-  },
   {
    "intent": "Select next idle villager \u2192 food",
    "key": ".",
@@ -781,6 +820,17 @@
    "type": "right_click"
   },
   {
+   "intent": "Select next idle villager \u2192 wood",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
+   "type": "right_click"
+  },
+  {
    "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
@@ -792,14 +842,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 gold",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to gold_mine (gold)",
+   "target_class": "gold_mine",
    "type": "right_click"
   }
  ],
@@ -852,17 +902,6 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 stone",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (stone)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
@@ -871,6 +910,17 @@
   {
    "intent": "Send idle villager to tree (wood)",
    "target_class": "tree",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 stone",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (stone)",
+   "target_class": "sheep",
    "type": "right_click"
   },
   {
@@ -885,14 +935,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 gold",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to gold_mine (gold)",
+   "target_class": "gold_mine",
    "type": "right_click"
   }
  ],
@@ -1014,14 +1064,14 @@
  "Castle Age|lumber_camp,mill|pop=9/25|food=0|wood=400|gold=90|ord=60|idle=None,8,0|ents=0": [],
  "Castle Age|lumber_camp,mill|pop=9/30|food=200|wood=15|gold=0|ord=60|idle=True,3,0|ents=4": [
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   },
   {
@@ -1036,14 +1086,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 food",
+   "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   }
  ],
@@ -1086,17 +1136,6 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 gold",
    "key": ".",
    "rescan": true,
@@ -1105,6 +1144,17 @@
   {
    "intent": "Send idle villager to gold_mine (gold)",
    "target_class": "gold_mine",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 stone",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (stone)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -1153,6 +1203,11 @@
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Castle Age|lumber_camp|pop=19/25|food=40|wood=80|gold=90|ord=35|idle=True,3,5|ents=4": [
@@ -1193,7 +1248,13 @@
  "Castle Age|lumber_camp|pop=19/25|food=60|wood=15|gold=0|ord=60|idle=False,1,5|ents=4": [],
  "Castle Age|lumber_camp|pop=2/10|food=0|wood=60|gold=90|ord=10|idle=None,3,5|ents=4": [],
  "Castle Age|lumber_camp|pop=2/10|food=40|wood=100|gold=200|ord=35|idle=False,0,0|ents=4": [],
- "Castle Age|lumber_camp|pop=2/15|food=60|wood=0|gold=0|ord=30|idle=True,1,0|ents=0": [],
+ "Castle Age|lumber_camp|pop=2/15|food=60|wood=0|gold=0|ord=30|idle=True,1,0|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
  "Castle Age|lumber_camp|pop=2/30|food=200|wood=100|gold=0|ord=35|idle=None,0,0|ents=0": [],
  "Castle Age|lumber_camp|pop=2/5|food=0|wood=60|gold=90|ord=34|idle=None,0,5|ents=4": [],
  "Castle Age|lumber_camp|pop=2/5|food=200|wood=60|gold=90|ord=60|idle=False,None,5|ents=4": [],
@@ -1252,12 +1313,22 @@
    "building_key": "q",
    "intent": "Build house (headroom 4/5)",
    "type": "build"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Castle Age|lumber_camp|pop=4/5|food=900|wood=60|gold=200|ord=60|idle=True,0,5|ents=0": [
   {
    "building_key": "q",
    "intent": "Build house (headroom 4/5)",
+   "type": "build"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
    "type": "build"
   }
  ],
@@ -1296,7 +1367,13 @@
    "type": "right_click"
   }
  ],
- "Castle Age|lumber_camp|pop=5/10|food=60|wood=80|gold=0|ord=29|idle=True,0,5|ents=0": [],
+ "Castle Age|lumber_camp|pop=5/10|food=60|wood=80|gold=0|ord=29|idle=True,0,5|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
  "Castle Age|lumber_camp|pop=5/25|food=900|wood=100|gold=90|ord=10|idle=False,3,0|ents=4": [
   {
    "intent": "Queue villager (reactive)",
@@ -1326,14 +1403,14 @@
  "Castle Age|lumber_camp|pop=6/10|food=520|wood=200|gold=90|ord=60|idle=False,1,0|ents=0": [],
  "Castle Age|lumber_camp|pop=7/25|food=60|wood=80|gold=90|ord=60|idle=True,3,5|ents=4": [
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   },
   {
@@ -1348,13 +1425,13 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 food",
+   "intent": "Select next idle villager \u2192 stone",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to sheep (food)",
+   "intent": "Send idle villager to sheep (stone)",
    "target_class": "sheep",
    "type": "right_click"
   }
@@ -1466,6 +1543,17 @@
    "type": "queue_villager"
   },
   {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
    "intent": "Select next idle villager \u2192 gold",
    "key": ".",
    "rescan": true,
@@ -1484,17 +1572,6 @@
   },
   {
    "intent": "Send idle villager to sheep (stone)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
    "target_class": "sheep",
    "type": "right_click"
   }
@@ -1557,8 +1634,20 @@
    "type": "build"
   }
  ],
- "Castle Age|mill|pop=13/25|food=520|wood=60|gold=90|ord=34|idle=True,0,5|ents=0": [],
- "Castle Age|mill|pop=13/25|food=900|wood=400|gold=90|ord=35|idle=True,3,0|ents=0": [],
+ "Castle Age|mill|pop=13/25|food=520|wood=60|gold=90|ord=34|idle=True,0,5|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
+ "Castle Age|mill|pop=13/25|food=900|wood=400|gold=90|ord=35|idle=True,3,0|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
  "Castle Age|mill|pop=14/15|food=40|wood=400|gold=0|ord=30|idle=True,3,5|ents=4": [
   {
    "building_key": "q",
@@ -1601,14 +1690,14 @@
  ],
  "Castle Age|mill|pop=14/25|food=60|wood=0|gold=200|ord=30|idle=True,1,0|ents=4": [
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -1649,17 +1738,6 @@
  "Castle Age|mill|pop=2/25|food=0|wood=15|gold=200|ord=30|idle=True,0,0|ents=0": [],
  "Castle Age|mill|pop=2/5|food=0|wood=0|gold=0|ord=30|idle=True,3,0|ents=4": [
   {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
@@ -1668,6 +1746,17 @@
   {
    "intent": "Send idle villager to sheep (food)",
    "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 wood",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   },
   {
@@ -1686,14 +1775,25 @@
  "Castle Age|mill|pop=2/5|food=200|wood=400|gold=0|ord=30|idle=None,8,5|ents=4": [],
  "Castle Age|mill|pop=20/25|food=900|wood=0|gold=0|ord=60|idle=True,3,0|ents=4": [
   {
-   "intent": "Select next idle villager \u2192 stone",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to sheep (stone)",
+   "intent": "Send idle villager to sheep (food)",
    "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 gold",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to gold_mine (gold)",
+   "target_class": "gold_mine",
    "type": "right_click"
   },
   {
@@ -1705,17 +1805,6 @@
   {
    "intent": "Send idle villager to tree (wood)",
    "target_class": "tree",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -1792,6 +1881,11 @@
    "building_key": "q",
    "intent": "Build house (headroom 4/5)",
    "type": "build"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Castle Age|mill|pop=5/15|food=40|wood=80|gold=0|ord=30|idle=True,1,5|ents=4": [
@@ -1864,17 +1958,6 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 stone",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (stone)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
@@ -1883,6 +1966,17 @@
   {
    "intent": "Send idle villager to tree (wood)",
    "target_class": "tree",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 stone",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (stone)",
+   "target_class": "sheep",
    "type": "right_click"
   },
   {
@@ -1897,14 +1991,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 gold",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to gold_mine (gold)",
+   "target_class": "gold_mine",
    "type": "right_click"
   }
  ],
@@ -1933,14 +2027,14 @@
    "type": "queue_villager"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   },
   {
@@ -1955,13 +2049,13 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 food",
+   "intent": "Select next idle villager \u2192 stone",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to sheep (food)",
+   "intent": "Send idle villager to sheep (stone)",
    "target_class": "sheep",
    "type": "right_click"
   }
@@ -2066,6 +2160,17 @@
    "type": "queue_villager"
   },
   {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
    "intent": "Select next idle villager \u2192 gold",
    "key": ".",
    "rescan": true,
@@ -2075,6 +2180,122 @@
    "intent": "Send idle villager to gold_mine (gold)",
    "target_class": "gold_mine",
    "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 wood",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 stone",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (stone)",
+   "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 gold",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to gold_mine (gold)",
+   "target_class": "gold_mine",
+   "type": "right_click"
+  }
+ ],
+ "Castle Age|mill|pop=9/10|food=0|wood=0|gold=0|ord=10|idle=False,None,5|ents=4": [],
+ "Castle Age|mill|pop=9/15|food=520|wood=200|gold=0|ord=30|idle=False,8,0|ents=0": [],
+ "Castle Age|mill|pop=9/25|food=60|wood=80|gold=90|ord=30|idle=None,3,0|ents=0": [],
+ "Castle Age||pop=1/10|food=200|wood=200|gold=0|ord=4|idle=False,0,0|ents=0": [
+  {
+   "intent": "Queue villager (reactive)",
+   "type": "queue_villager"
+  }
+ ],
+ "Castle Age||pop=1/5|food=200|wood=400|gold=0|ord=60|idle=True,3,0|ents=4": [
+  {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 gold",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to gold_mine (gold)",
+   "target_class": "gold_mine",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 stone",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (stone)",
+   "target_class": "sheep",
+   "type": "right_click"
+  }
+ ],
+ "Castle Age||pop=10/10|food=0|wood=200|gold=90|ord=60|idle=None,None,0|ents=0": [
+  {
+   "building_key": "q",
+   "intent": "Build house (headroom 10/10)",
+   "type": "build"
+  }
+ ],
+ "Castle Age||pop=10/15|food=40|wood=400|gold=200|ord=60|idle=False,0,0|ents=0": [],
+ "Castle Age||pop=10/15|food=60|wood=60|gold=90|ord=29|idle=False,3,5|ents=0": [],
+ "Castle Age||pop=12/15|food=60|wood=60|gold=200|ord=10|idle=False,8,0|ents=0": [
+  {
+   "intent": "Queue villager (reactive)",
+   "type": "queue_villager"
+  }
+ ],
+ "Castle Age||pop=12/25|food=200|wood=200|gold=90|ord=4|idle=None,3,0|ents=0": [
+  {
+   "intent": "Queue villager (reactive)",
+   "type": "queue_villager"
+  }
+ ],
+ "Castle Age||pop=12/25|food=200|wood=80|gold=90|ord=34|idle=None,1,5|ents=4": [],
+ "Castle Age||pop=13/200|food=900|wood=100|gold=200|ord=60|idle=True,3,5|ents=4": [
+  {
+   "intent": "Queue villager (reactive)",
+   "type": "queue_villager"
   },
   {
    "intent": "Select next idle villager \u2192 food",
@@ -2108,133 +2329,6 @@
    "intent": "Send idle villager to sheep (stone)",
    "target_class": "sheep",
    "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
-   "type": "right_click"
-  }
- ],
- "Castle Age|mill|pop=9/10|food=0|wood=0|gold=0|ord=10|idle=False,None,5|ents=4": [],
- "Castle Age|mill|pop=9/15|food=520|wood=200|gold=0|ord=30|idle=False,8,0|ents=0": [],
- "Castle Age|mill|pop=9/25|food=60|wood=80|gold=90|ord=30|idle=None,3,0|ents=0": [],
- "Castle Age||pop=1/10|food=200|wood=200|gold=0|ord=4|idle=False,0,0|ents=0": [
-  {
-   "intent": "Queue villager (reactive)",
-   "type": "queue_villager"
-  }
- ],
- "Castle Age||pop=1/5|food=200|wood=400|gold=0|ord=60|idle=True,3,0|ents=4": [
-  {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 gold",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to gold_mine (gold)",
-   "target_class": "gold_mine",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
-   "type": "right_click"
-  }
- ],
- "Castle Age||pop=10/10|food=0|wood=200|gold=90|ord=60|idle=None,None,0|ents=0": [
-  {
-   "building_key": "q",
-   "intent": "Build house (headroom 10/10)",
-   "type": "build"
-  }
- ],
- "Castle Age||pop=10/15|food=40|wood=400|gold=200|ord=60|idle=False,0,0|ents=0": [],
- "Castle Age||pop=10/15|food=60|wood=60|gold=90|ord=29|idle=False,3,5|ents=0": [],
- "Castle Age||pop=12/15|food=60|wood=60|gold=200|ord=10|idle=False,8,0|ents=0": [
-  {
-   "intent": "Queue villager (reactive)",
-   "type": "queue_villager"
-  }
- ],
- "Castle Age||pop=12/25|food=200|wood=200|gold=90|ord=4|idle=None,3,0|ents=0": [
-  {
-   "intent": "Queue villager (reactive)",
-   "type": "queue_villager"
-  }
- ],
- "Castle Age||pop=12/25|food=200|wood=80|gold=90|ord=34|idle=None,1,5|ents=4": [],
- "Castle Age||pop=13/200|food=900|wood=100|gold=200|ord=60|idle=True,3,5|ents=4": [
-  {
-   "intent": "Queue villager (reactive)",
-   "type": "queue_villager"
-  },
-  {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 gold",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to gold_mine (gold)",
-   "target_class": "gold_mine",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
-   "type": "right_click"
   }
  ],
  "Castle Age||pop=14/25|food=0|wood=60|gold=200|ord=29|idle=False,3,0|ents=4": [],
@@ -2243,6 +2337,11 @@
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Castle Age||pop=16/25|food=200|wood=400|gold=200|ord=30|idle=False,3,0|ents=4": [],
@@ -2251,6 +2350,11 @@
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Castle Age||pop=17/25|food=0|wood=60|gold=200|ord=10|idle=False,1,5|ents=4": [],
@@ -2269,17 +2373,6 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 gold",
    "key": ".",
    "rescan": true,
@@ -2288,6 +2381,17 @@
   {
    "intent": "Send idle villager to gold_mine (gold)",
    "target_class": "gold_mine",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 stone",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (stone)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -2333,6 +2437,17 @@
  ],
  "Castle Age||pop=28/30|food=520|wood=0|gold=0|ord=60|idle=True,3,5|ents=4": [
   {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
    "intent": "Select next idle villager \u2192 gold",
    "key": ".",
    "rescan": true,
@@ -2351,17 +2466,6 @@
   },
   {
    "intent": "Send idle villager to sheep (stone)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
    "target_class": "sheep",
    "type": "right_click"
   }
@@ -2400,20 +2504,6 @@
    "type": "build"
   },
   {
-   "intent": "Select next idle villager \u2192 stone",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (stone)",
-   "target_class": "sheep",
-   "type": "right_click"
-  }
- ],
- "Castle Age||pop=51/200|food=40|wood=80|gold=0|ord=29|idle=None,8,5|ents=4": [],
- "Castle Age||pop=6/10|food=40|wood=60|gold=200|ord=35|idle=True,None,0|ents=4": [
-  {
    "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
@@ -2423,7 +2513,10 @@
    "intent": "Send idle villager to sheep (food)",
    "target_class": "sheep",
    "type": "right_click"
-  },
+  }
+ ],
+ "Castle Age||pop=51/200|food=40|wood=80|gold=0|ord=29|idle=None,8,5|ents=4": [],
+ "Castle Age||pop=6/10|food=40|wood=60|gold=200|ord=35|idle=True,None,0|ents=4": [
   {
    "intent": "Select next idle villager \u2192 food",
    "key": ".",
@@ -2445,6 +2538,17 @@
    "intent": "Send idle villager to tree (wood)",
    "target_class": "tree",
    "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
+   "type": "right_click"
   }
  ],
  "Castle Age||pop=6/15|food=60|wood=100|gold=200|ord=30|idle=False,1,0|ents=0": [],
@@ -2463,7 +2567,13 @@
  ],
  "Castle Age||pop=7/10|food=200|wood=60|gold=200|ord=29|idle=False,0,0|ents=4": [],
  "Castle Age||pop=7/15|food=40|wood=15|gold=0|ord=29|idle=None,None,0|ents=0": [],
- "Castle Age||pop=7/15|food=900|wood=80|gold=0|ord=35|idle=True,None,5|ents=0": [],
+ "Castle Age||pop=7/15|food=900|wood=80|gold=0|ord=35|idle=True,None,5|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
  "Castle Age||pop=7/30|food=200|wood=15|gold=0|ord=34|idle=None,None,5|ents=0": [],
  "Castle Age||pop=7/30|food=60|wood=0|gold=0|ord=34|idle=None,8,0|ents=4": [],
  "Castle Age||pop=70/200|food=520|wood=200|gold=0|ord=60|idle=False,8,0|ents=4": [
@@ -2486,17 +2596,6 @@
    "type": "build"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
@@ -2505,6 +2604,17 @@
   {
    "intent": "Send idle villager to sheep (food)",
    "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 wood",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   },
   {
@@ -2526,7 +2636,13 @@
   }
  ],
  "Castle Age||pop=8/25|food=60|wood=200|gold=0|ord=29|idle=None,3,0|ents=0": [],
- "Castle Age||pop=8/30|food=900|wood=60|gold=0|ord=60|idle=True,8,0|ents=0": [],
+ "Castle Age||pop=8/30|food=900|wood=60|gold=0|ord=60|idle=True,8,0|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
  "Castle Age||pop=80/200|food=900|wood=200|gold=200|ord=30|idle=False,8,5|ents=0": [
   {
    "intent": "Queue villager (reactive)",
@@ -2537,6 +2653,11 @@
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Castle Age||pop=9/15|food=520|wood=80|gold=200|ord=29|idle=True,None,0|ents=0": [
@@ -2794,17 +2915,6 @@
    "type": "build"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
@@ -2813,6 +2923,17 @@
   {
    "intent": "Send idle villager to sheep (food)",
    "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 wood",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   },
   {
@@ -2893,7 +3014,13 @@
    "type": "build"
   }
  ],
- "Dark Age|lumber_camp,mill,mining_camp|pop=5/5|food=60|wood=0|gold=90|ord=35|idle=True,None,5|ents=0": [],
+ "Dark Age|lumber_camp,mill,mining_camp|pop=5/5|food=60|wood=0|gold=90|ord=35|idle=True,None,5|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
  "Dark Age|lumber_camp,mill,mining_camp|pop=51/200|food=60|wood=80|gold=90|ord=4|idle=True,None,5|ents=0": [
   {
    "intent": "Queue villager (reactive)",
@@ -2911,14 +3038,14 @@
    "type": "queue_villager"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   },
   {
@@ -3013,20 +3140,14 @@
    "building_key": "q",
    "intent": "Build house (headroom 8/10)",
    "type": "build"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Dark Age|lumber_camp,mill,mining_camp|pop=8/15|food=200|wood=15|gold=0|ord=30|idle=True,None,5|ents=4": [
-  {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
   {
    "intent": "Select next idle villager \u2192 food",
    "key": ".",
@@ -3047,6 +3168,17 @@
   {
    "intent": "Send idle villager to tree (wood)",
    "target_class": "tree",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -3075,14 +3207,14 @@
    "type": "press"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   },
   {
@@ -3142,14 +3274,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -3162,6 +3294,11 @@
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Dark Age|lumber_camp,mill,mining_camp|pop=9/10|food=60|wood=200|gold=90|ord=10|idle=False,3,0|ents=0": [
@@ -3220,14 +3357,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 food",
+   "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   },
   {
@@ -3331,6 +3468,11 @@
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Dark Age|lumber_camp,mill|pop=168/200|food=200|wood=0|gold=200|ord=30|idle=None,0,0|ents=4": [],
@@ -3367,17 +3509,6 @@
    "type": "queue_villager"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
@@ -3386,6 +3517,17 @@
   {
    "intent": "Send idle villager to sheep (food)",
    "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 wood",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   },
   {
@@ -3589,14 +3731,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -3621,25 +3763,14 @@
  ],
  "Dark Age|lumber_camp,mill|pop=4/10|food=200|wood=60|gold=200|ord=30|idle=True,8,5|ents=4": [
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   },
   {
@@ -3665,14 +3796,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 food",
+   "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   },
   {
@@ -3684,6 +3815,17 @@
   {
    "intent": "Send idle villager to sheep (food)",
    "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 wood",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   }
  ],
@@ -3708,17 +3850,6 @@
    "type": "build"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
@@ -3727,6 +3858,17 @@
   {
    "intent": "Send idle villager to sheep (food)",
    "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 wood",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   },
   {
@@ -3764,14 +3906,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 food",
+   "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   },
   {
@@ -3824,14 +3966,14 @@
    "type": "press"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -3898,17 +4040,6 @@
    "type": "build"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
@@ -3917,6 +4048,17 @@
   {
    "intent": "Send idle villager to sheep (food)",
    "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 wood",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   },
   {
@@ -3965,17 +4107,6 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
@@ -3984,6 +4115,17 @@
   {
    "intent": "Send idle villager to tree (wood)",
    "target_class": "tree",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -4055,14 +4197,14 @@
    "type": "build"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   },
   {
@@ -4077,14 +4219,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -4119,14 +4261,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 food",
+   "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   },
   {
@@ -4174,14 +4316,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -4196,14 +4338,14 @@
    "type": "build"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   },
   {
@@ -4241,14 +4383,14 @@
    "type": "build"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   },
   {
@@ -4396,14 +4538,14 @@
  ],
  "Dark Age|lumber_camp|pop=28/30|food=520|wood=0|gold=90|ord=30|idle=True,3,5|ents=4": [
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   },
   {
@@ -4418,14 +4560,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -4458,17 +4600,6 @@
    "type": "queue_villager"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
@@ -4477,6 +4608,17 @@
   {
    "intent": "Send idle villager to sheep (food)",
    "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 wood",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   },
   {
@@ -4528,7 +4670,13 @@
  ],
  "Dark Age|lumber_camp|pop=5/10|food=0|wood=60|gold=0|ord=29|idle=True,0,0|ents=0": [],
  "Dark Age|lumber_camp|pop=5/30|food=0|wood=60|gold=200|ord=35|idle=False,0,5|ents=0": [],
- "Dark Age|lumber_camp|pop=5/5|food=0|wood=0|gold=0|ord=29|idle=True,3,5|ents=0": [],
+ "Dark Age|lumber_camp|pop=5/5|food=0|wood=0|gold=0|ord=29|idle=True,3,5|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
  "Dark Age|lumber_camp|pop=5/5|food=0|wood=80|gold=0|ord=34|idle=None,0,0|ents=4": [
   {
    "building_key": "q",
@@ -4546,14 +4694,14 @@
  ],
  "Dark Age|lumber_camp|pop=52/200|food=60|wood=15|gold=200|ord=34|idle=True,1,0|ents=4": [
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -4590,14 +4738,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 food",
+   "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   },
   {
@@ -4629,17 +4777,6 @@
    "type": "queue_villager"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
@@ -4648,6 +4785,17 @@
   {
    "intent": "Send idle villager to sheep (food)",
    "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 wood",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   },
   {
@@ -4715,17 +4863,6 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
@@ -4734,6 +4871,17 @@
   {
    "intent": "Send idle villager to tree (wood)",
    "target_class": "tree",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -4744,7 +4892,13 @@
    "type": "build"
   }
  ],
- "Dark Age|mill|pop=16/25|food=900|wood=15|gold=90|ord=34|idle=True,3,0|ents=0": [],
+ "Dark Age|mill|pop=16/25|food=900|wood=15|gold=90|ord=34|idle=True,3,0|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
  "Dark Age|mill|pop=167/200|food=40|wood=15|gold=200|ord=30|idle=False,3,0|ents=4": [],
  "Dark Age|mill|pop=17/200|food=520|wood=400|gold=200|ord=4|idle=None,None,5|ents=4": [
   {
@@ -4761,6 +4915,11 @@
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Dark Age|mill|pop=189/200|food=520|wood=0|gold=200|ord=30|idle=False,None,5|ents=0": [],
@@ -4773,28 +4932,6 @@
  ],
  "Dark Age|mill|pop=2/10|food=40|wood=0|gold=200|ord=10|idle=True,8,5|ents=4": [
   {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
@@ -4825,6 +4962,28 @@
   {
    "intent": "Send idle villager to sheep (food)",
    "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 wood",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   },
   {
@@ -4911,14 +5070,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -4970,6 +5129,11 @@
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Dark Age|mill|pop=3/25|food=40|wood=0|gold=0|ord=29|idle=None,1,5|ents=0": [],
@@ -4994,14 +5158,14 @@
    "type": "queue_villager"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   },
   {
@@ -5016,14 +5180,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -5117,14 +5281,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -5204,17 +5368,6 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
@@ -5223,6 +5376,17 @@
   {
    "intent": "Send idle villager to tree (wood)",
    "target_class": "tree",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   },
   {
@@ -5305,14 +5469,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -5365,14 +5529,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -5393,7 +5557,13 @@
    "type": "queue_villager"
   }
  ],
- "Dark Age||pop=3/25|food=900|wood=60|gold=200|ord=60|idle=True,None,5|ents=0": [],
+ "Dark Age||pop=3/25|food=900|wood=60|gold=200|ord=60|idle=True,None,5|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
  "Dark Age||pop=3/30|food=520|wood=60|gold=200|ord=4|idle=None,None,0|ents=4": [
   {
    "intent": "Queue villager (reactive)",
@@ -5457,14 +5627,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 food",
+   "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   },
   {
@@ -5510,14 +5680,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 food",
+   "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   },
   {
@@ -5552,17 +5722,6 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
@@ -5571,6 +5730,17 @@
   {
    "intent": "Send idle villager to tree (wood)",
    "target_class": "tree",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -5611,14 +5781,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -5657,6 +5827,11 @@
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Feudal Age|lumber_camp,mill,mining_camp|pop=1/10|food=0|wood=0|gold=0|ord=4|idle=True,8,0|ents=4": [
@@ -5746,17 +5921,6 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
@@ -5765,6 +5929,17 @@
   {
    "intent": "Send idle villager to tree (wood)",
    "target_class": "tree",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 gold",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to gold_mine (gold)",
+   "target_class": "gold_mine",
    "type": "right_click"
   }
  ],
@@ -5846,6 +6021,11 @@
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Feudal Age|lumber_camp,mill,mining_camp|pop=12/200|food=40|wood=400|gold=90|ord=10|idle=False,8,5|ents=4": [],
@@ -5863,14 +6043,14 @@
    "type": "queue_villager"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -5909,14 +6089,14 @@
    "type": "queue_villager"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   },
   {
@@ -6001,14 +6181,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 gold",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to gold_mine (gold)",
+   "target_class": "gold_mine",
    "type": "right_click"
   },
   {
@@ -6025,25 +6205,14 @@
  ],
  "Feudal Age|lumber_camp,mill,mining_camp|pop=3/10|food=520|wood=400|gold=0|ord=29|idle=True,8,0|ents=4": [
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   },
   {
@@ -6058,6 +6227,28 @@
    "type": "right_click"
   },
   {
+   "intent": "Select next idle villager \u2192 wood",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
    "intent": "Select next idle villager \u2192 gold",
    "key": ".",
    "rescan": true,
@@ -6069,25 +6260,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 food",
+   "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   }
  ],
@@ -6218,6 +6398,17 @@
  ],
  "Feudal Age|lumber_camp,mill,mining_camp|pop=6/10|food=60|wood=15|gold=0|ord=60|idle=True,3,5|ents=4": [
   {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
    "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
@@ -6229,25 +6420,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 food",
+   "intent": "Select next idle villager \u2192 gold",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
+   "intent": "Send idle villager to gold_mine (gold)",
+   "target_class": "gold_mine",
    "type": "right_click"
   }
  ],
@@ -6269,17 +6449,6 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
@@ -6288,6 +6457,17 @@
   {
    "intent": "Send idle villager to tree (wood)",
    "target_class": "tree",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 gold",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to gold_mine (gold)",
+   "target_class": "gold_mine",
    "type": "right_click"
   }
  ],
@@ -6345,17 +6525,6 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
@@ -6364,6 +6533,17 @@
   {
    "intent": "Send idle villager to tree (wood)",
    "target_class": "tree",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 gold",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to gold_mine (gold)",
+   "target_class": "gold_mine",
    "type": "right_click"
   }
  ],
@@ -6450,17 +6630,6 @@
  "Feudal Age|lumber_camp,mill|pop=12/30|food=900|wood=15|gold=200|ord=34|idle=False,3,5|ents=0": [],
  "Feudal Age|lumber_camp,mill|pop=120/200|food=60|wood=0|gold=200|ord=60|idle=True,8,0|ents=4": [
   {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
@@ -6469,28 +6638,6 @@
   {
    "intent": "Send idle villager to sheep (food)",
    "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
    "type": "right_click"
   },
   {
@@ -6513,6 +6660,39 @@
   {
    "intent": "Send idle villager to gold_mine (gold)",
    "target_class": "gold_mine",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 wood",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 wood",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   }
  ],
@@ -6630,17 +6810,6 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 gold",
    "key": ".",
    "rescan": true,
@@ -6672,6 +6841,17 @@
    "intent": "Send idle villager to sheep (food)",
    "target_class": "sheep",
    "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 gold",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to gold_mine (gold)",
+   "target_class": "gold_mine",
+   "type": "right_click"
   }
  ],
  "Feudal Age|lumber_camp,mill|pop=2/5|food=520|wood=200|gold=0|ord=60|idle=True,None,5|ents=4": [
@@ -6692,14 +6872,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 gold",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to gold_mine (gold)",
+   "target_class": "gold_mine",
    "type": "right_click"
   },
   {
@@ -6788,6 +6968,11 @@
    "building_key": "e",
    "intent": "Build mining camp (gold drop-off for the Castle Age bank)",
    "type": "build"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Feudal Age|lumber_camp,mill|pop=3/25|food=0|wood=0|gold=0|ord=34|idle=None,None,5|ents=0": [],
@@ -6839,6 +7024,28 @@
    "type": "build"
   },
   {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 gold",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to gold_mine (gold)",
+   "target_class": "gold_mine",
+   "type": "right_click"
+  },
+  {
    "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
@@ -6848,34 +7055,17 @@
    "intent": "Send idle villager to tree (wood)",
    "target_class": "tree",
    "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 gold",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to gold_mine (gold)",
-   "target_class": "gold_mine",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 gold",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to gold_mine (gold)",
-   "target_class": "gold_mine",
-   "type": "right_click"
   }
  ],
  "Feudal Age|lumber_camp,mill|pop=5/15|food=200|wood=15|gold=200|ord=10|idle=True,8,0|ents=0": [
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Feudal Age|lumber_camp,mill|pop=5/5|food=0|wood=0|gold=90|ord=10|idle=True,0,0|ents=0": [],
@@ -6904,17 +7094,6 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
@@ -6923,6 +7102,17 @@
   {
    "intent": "Send idle villager to tree (wood)",
    "target_class": "tree",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -7042,17 +7232,6 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
@@ -7061,6 +7240,17 @@
   {
    "intent": "Send idle villager to tree (wood)",
    "target_class": "tree",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -7109,25 +7299,14 @@
    "type": "build"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   },
   {
@@ -7139,6 +7318,17 @@
   {
    "intent": "Send idle villager to gold_mine (gold)",
    "target_class": "gold_mine",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 wood",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   }
  ],
@@ -7156,17 +7346,6 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
@@ -7175,6 +7354,17 @@
   {
    "intent": "Send idle villager to tree (wood)",
    "target_class": "tree",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -7205,28 +7395,6 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
@@ -7246,6 +7414,28 @@
   {
    "intent": "Send idle villager to gold_mine (gold)",
    "target_class": "gold_mine",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 wood",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   },
   {
@@ -7295,6 +7485,11 @@
   {
    "building_key": "e",
    "intent": "Build mining camp (gold drop-off for the Castle Age bank)",
+   "type": "build"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
    "type": "build"
   }
  ],
@@ -7394,6 +7589,11 @@
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Feudal Age|lumber_camp|pop=170/200|food=900|wood=100|gold=90|ord=29|idle=None,None,0|ents=4": [
@@ -7430,17 +7630,6 @@
  "Feudal Age|lumber_camp|pop=2/5|food=0|wood=0|gold=0|ord=10|idle=False,1,0|ents=4": [],
  "Feudal Age|lumber_camp|pop=2/5|food=40|wood=15|gold=90|ord=4|idle=True,3,5|ents=4": [
   {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
@@ -7449,6 +7638,17 @@
   {
    "intent": "Send idle villager to sheep (food)",
    "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 wood",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   },
   {
@@ -7473,6 +7673,11 @@
    "building_key": "e",
    "intent": "Build mining camp (gold drop-off for the Castle Age bank)",
    "type": "build"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Feudal Age|lumber_camp|pop=22/25|food=900|wood=0|gold=200|ord=60|idle=None,3,5|ents=0": [],
@@ -7480,6 +7685,11 @@
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Feudal Age|lumber_camp|pop=26/30|food=200|wood=400|gold=90|ord=35|idle=True,8,0|ents=4": [
@@ -7500,28 +7710,6 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 gold",
    "key": ".",
    "rescan": true,
@@ -7533,14 +7721,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 gold",
+   "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to gold_mine (gold)",
-   "target_class": "gold_mine",
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   },
   {
@@ -7552,6 +7740,28 @@
   {
    "intent": "Send idle villager to sheep (food)",
    "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 gold",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to gold_mine (gold)",
+   "target_class": "gold_mine",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 wood",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   }
  ],
@@ -7568,17 +7778,6 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
@@ -7587,6 +7786,17 @@
   {
    "intent": "Send idle villager to tree (wood)",
    "target_class": "tree",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -7600,6 +7810,17 @@
   }
  ],
  "Feudal Age|lumber_camp|pop=4/15|food=520|wood=80|gold=0|ord=34|idle=True,None,0|ents=4": [
+  {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
+   "type": "right_click"
+  },
   {
    "intent": "Select next idle villager \u2192 wood",
    "key": ".",
@@ -7621,20 +7842,15 @@
    "intent": "Send idle villager to gold_mine (gold)",
    "target_class": "gold_mine",
    "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
   }
  ],
- "Feudal Age|lumber_camp|pop=4/5|food=200|wood=15|gold=90|ord=35|idle=True,None,5|ents=0": [],
+ "Feudal Age|lumber_camp|pop=4/5|food=200|wood=15|gold=90|ord=35|idle=True,None,5|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
  "Feudal Age|lumber_camp|pop=4/5|food=200|wood=60|gold=90|ord=60|idle=True,0,0|ents=4": [
   {
    "building_key": "q",
@@ -7649,14 +7865,14 @@
    "type": "build"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -7686,20 +7902,14 @@
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Feudal Age|lumber_camp|pop=6/25|food=0|wood=15|gold=90|ord=35|idle=True,3,5|ents=4": [
-  {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
   {
    "intent": "Select next idle villager \u2192 food",
    "key": ".",
@@ -7720,6 +7930,17 @@
   {
    "intent": "Send idle villager to tree (wood)",
    "target_class": "tree",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -7800,6 +8021,11 @@
   {
    "building_key": "e",
    "intent": "Build mining camp (gold drop-off for the Castle Age bank)",
+   "type": "build"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
    "type": "build"
   }
  ],
@@ -7906,6 +8132,11 @@
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Feudal Age|mill|pop=15/30|food=900|wood=400|gold=90|ord=4|idle=None,1,0|ents=4": [
@@ -7923,6 +8154,11 @@
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Feudal Age|mill|pop=17/200|food=0|wood=0|gold=90|ord=4|idle=None,3,0|ents=4": [],
@@ -7930,6 +8166,11 @@
   {
    "building_key": "e",
    "intent": "Build mining camp (gold drop-off for the Castle Age bank)",
+   "type": "build"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
    "type": "build"
   }
  ],
@@ -8074,6 +8315,11 @@
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Feudal Age|mill|pop=37/200|food=40|wood=200|gold=200|ord=29|idle=False,1,0|ents=4": [
@@ -8125,6 +8371,17 @@
    "type": "queue_villager"
   },
   {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
    "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
@@ -8144,17 +8401,6 @@
   {
    "intent": "Send idle villager to gold_mine (gold)",
    "target_class": "gold_mine",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
    "type": "right_click"
   }
  ],
@@ -8187,28 +8433,6 @@
  "Feudal Age|mill|pop=5/25|food=60|wood=0|gold=200|ord=30|idle=None,8,0|ents=0": [],
  "Feudal Age|mill|pop=5/5|food=40|wood=15|gold=200|ord=10|idle=True,8,0|ents=4": [
   {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
@@ -8239,6 +8463,28 @@
   {
    "intent": "Send idle villager to sheep (food)",
    "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 wood",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   },
   {
@@ -8273,14 +8519,14 @@
  ],
  "Feudal Age|mill|pop=5/5|food=60|wood=15|gold=0|ord=29|idle=True,3,0|ents=4": [
   {
-   "intent": "Select next idle villager \u2192 gold",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to gold_mine (gold)",
-   "target_class": "gold_mine",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   },
   {
@@ -8295,14 +8541,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 food",
+   "intent": "Select next idle villager \u2192 gold",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
+   "intent": "Send idle villager to gold_mine (gold)",
+   "target_class": "gold_mine",
    "type": "right_click"
   }
  ],
@@ -8328,6 +8574,17 @@
  ],
  "Feudal Age|mill|pop=6/15|food=520|wood=60|gold=90|ord=60|idle=True,3,0|ents=4": [
   {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
    "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
@@ -8339,25 +8596,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 food",
+   "intent": "Select next idle villager \u2192 gold",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
+   "intent": "Send idle villager to gold_mine (gold)",
+   "target_class": "gold_mine",
    "type": "right_click"
   }
  ],
@@ -8397,14 +8643,14 @@
    "type": "build"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   },
   {
@@ -8454,25 +8700,14 @@
    "type": "build"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   },
   {
@@ -8484,6 +8719,17 @@
   {
    "intent": "Send idle villager to gold_mine (gold)",
    "target_class": "gold_mine",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 wood",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   }
  ],
@@ -8545,6 +8791,11 @@
    "building_key": "e",
    "intent": "Build mining camp (gold drop-off for the Castle Age bank)",
    "type": "build"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Feudal Age||pop=106/200|food=900|wood=100|gold=0|ord=29|idle=False,3,0|ents=0": [
@@ -8558,12 +8809,23 @@
    "type": "build"
   }
  ],
- "Feudal Age||pop=11/15|food=40|wood=0|gold=90|ord=60|idle=True,1,5|ents=0": [],
+ "Feudal Age||pop=11/15|food=40|wood=0|gold=90|ord=60|idle=True,1,5|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
  "Feudal Age||pop=114/200|food=40|wood=15|gold=0|ord=35|idle=False,None,0|ents=4": [],
  "Feudal Age||pop=118/200|food=200|wood=15|gold=200|ord=10|idle=True,8,0|ents=0": [
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Feudal Age||pop=12/15|food=0|wood=60|gold=200|ord=10|idle=True,None,5|ents=0": [
@@ -8578,6 +8840,11 @@
   {
    "building_key": "e",
    "intent": "Build mining camp (gold drop-off for the Castle Age bank)",
+   "type": "build"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
    "type": "build"
   }
  ],
@@ -8628,28 +8895,6 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 gold",
    "key": ".",
    "rescan": true,
@@ -8661,14 +8906,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 gold",
+   "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to gold_mine (gold)",
-   "target_class": "gold_mine",
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   },
   {
@@ -8680,6 +8925,28 @@
   {
    "intent": "Send idle villager to sheep (food)",
    "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 gold",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to gold_mine (gold)",
+   "target_class": "gold_mine",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 wood",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   }
  ],
@@ -8712,14 +8979,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 gold",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to gold_mine (gold)",
+   "target_class": "gold_mine",
    "type": "right_click"
   }
  ],
@@ -8772,7 +9039,13 @@
    "type": "right_click"
   }
  ],
- "Feudal Age||pop=23/25|food=200|wood=0|gold=200|ord=29|idle=True,8,5|ents=0": [],
+ "Feudal Age||pop=23/25|food=200|wood=0|gold=200|ord=29|idle=True,8,5|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
  "Feudal Age||pop=25/30|food=40|wood=80|gold=0|ord=29|idle=None,3,0|ents=4": [],
  "Feudal Age||pop=3/15|food=200|wood=200|gold=200|ord=29|idle=False,8,0|ents=0": [
   {
@@ -8795,14 +9068,14 @@
    "type": "build"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   },
   {
@@ -8879,6 +9152,28 @@
    "type": "build"
   },
   {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 wood",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
+   "type": "right_click"
+  },
+  {
    "intent": "Select next idle villager \u2192 gold",
    "key": ".",
    "rescan": true,
@@ -8887,28 +9182,6 @@
   {
    "intent": "Send idle villager to gold_mine (gold)",
    "target_class": "gold_mine",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -8926,7 +9199,13 @@
   }
  ],
  "Feudal Age||pop=5/10|food=900|wood=15|gold=90|ord=10|idle=None,1,0|ents=0": [],
- "Feudal Age||pop=5/25|food=900|wood=0|gold=90|ord=60|idle=True,8,0|ents=0": [],
+ "Feudal Age||pop=5/25|food=900|wood=0|gold=90|ord=60|idle=True,8,0|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
  "Feudal Age||pop=5/5|food=200|wood=60|gold=90|ord=29|idle=False,None,0|ents=4": [
   {
    "building_key": "q",
@@ -8938,6 +9217,11 @@
   {
    "building_key": "q",
    "intent": "Build house (headroom 5/5)",
+   "type": "build"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
    "type": "build"
   }
  ],
@@ -8955,12 +9239,29 @@
    "type": "build"
   }
  ],
- "Feudal Age||pop=6/25|food=200|wood=80|gold=200|ord=29|idle=True,8,0|ents=0": [],
- "Feudal Age||pop=6/25|food=520|wood=0|gold=0|ord=34|idle=True,None,0|ents=0": [],
+ "Feudal Age||pop=6/25|food=200|wood=80|gold=200|ord=29|idle=True,8,0|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
+ "Feudal Age||pop=6/25|food=520|wood=0|gold=0|ord=34|idle=True,None,0|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
  "Feudal Age||pop=6/25|food=900|wood=80|gold=200|ord=10|idle=True,3,0|ents=0": [
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Feudal Age||pop=62/200|food=200|wood=15|gold=200|ord=4|idle=True,3,0|ents=4": [
@@ -8991,14 +9292,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 gold",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to gold_mine (gold)",
+   "target_class": "gold_mine",
    "type": "right_click"
   }
  ],
@@ -9145,28 +9446,6 @@
  ],
  "Imperial Age|lumber_camp,mill,mining_camp|pop=14/15|food=40|wood=0|gold=90|ord=30|idle=True,8,5|ents=4": [
   {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
@@ -9197,6 +9476,28 @@
   {
    "intent": "Send idle villager to sheep (food)",
    "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 wood",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   },
   {
@@ -9223,6 +9524,11 @@
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Imperial Age|lumber_camp,mill,mining_camp|pop=14/30|food=60|wood=100|gold=90|ord=10|idle=False,8,0|ents=4": [
@@ -9235,6 +9541,11 @@
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Imperial Age|lumber_camp,mill,mining_camp|pop=15/25|food=0|wood=100|gold=200|ord=10|idle=None,3,0|ents=4": [],
@@ -9253,6 +9564,17 @@
   }
  ],
  "Imperial Age|lumber_camp,mill,mining_camp|pop=18/25|food=520|wood=400|gold=200|ord=30|idle=True,None,5|ents=4": [
+  {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
+   "type": "right_click"
+  },
   {
    "intent": "Select next idle villager \u2192 gold",
    "key": ".",
@@ -9274,17 +9596,6 @@
    "intent": "Send idle villager to sheep (stone)",
    "target_class": "sheep",
    "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
-   "type": "right_click"
   }
  ],
  "Imperial Age|lumber_camp,mill,mining_camp|pop=18/30|food=200|wood=100|gold=200|ord=10|idle=False,3,0|ents=4": [
@@ -9297,6 +9608,11 @@
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Imperial Age|lumber_camp,mill,mining_camp|pop=2/15|food=0|wood=200|gold=0|ord=30|idle=None,1,5|ents=4": [],
@@ -9306,17 +9622,6 @@
  "Imperial Age|lumber_camp,mill,mining_camp|pop=2/5|food=200|wood=15|gold=90|ord=34|idle=None,1,0|ents=0": [],
  "Imperial Age|lumber_camp,mill,mining_camp|pop=2/5|food=40|wood=15|gold=200|ord=4|idle=True,None,5|ents=4": [
   {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
@@ -9325,6 +9630,17 @@
   {
    "intent": "Send idle villager to sheep (food)",
    "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 wood",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   },
   {
@@ -9366,17 +9682,6 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 gold",
    "key": ".",
    "rescan": true,
@@ -9385,6 +9690,17 @@
   {
    "intent": "Send idle villager to gold_mine (gold)",
    "target_class": "gold_mine",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 stone",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (stone)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -9405,17 +9721,6 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 gold",
    "key": ".",
    "rescan": true,
@@ -9424,6 +9729,17 @@
   {
    "intent": "Send idle villager to gold_mine (gold)",
    "target_class": "gold_mine",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 stone",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (stone)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -9579,7 +9895,13 @@
  "Imperial Age|lumber_camp,mill,mining_camp|pop=3/15|food=900|wood=400|gold=90|ord=29|idle=False,0,5|ents=0": [],
  "Imperial Age|lumber_camp,mill,mining_camp|pop=3/30|food=200|wood=60|gold=90|ord=34|idle=True,0,0|ents=4": [],
  "Imperial Age|lumber_camp,mill,mining_camp|pop=30/30|food=0|wood=15|gold=90|ord=4|idle=None,8,0|ents=0": [],
- "Imperial Age|lumber_camp,mill,mining_camp|pop=4/10|food=60|wood=0|gold=0|ord=29|idle=True,None,5|ents=0": [],
+ "Imperial Age|lumber_camp,mill,mining_camp|pop=4/10|food=60|wood=0|gold=0|ord=29|idle=True,None,5|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
  "Imperial Age|lumber_camp,mill,mining_camp|pop=4/30|food=200|wood=60|gold=90|ord=34|idle=None,8,0|ents=4": [],
  "Imperial Age|lumber_camp,mill,mining_camp|pop=4/5|food=520|wood=200|gold=0|ord=30|idle=False,8,0|ents=4": [
   {
@@ -9593,6 +9915,11 @@
    "building_key": "q",
    "intent": "Build house (headroom 4/5)",
    "type": "build"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Imperial Age|lumber_camp,mill,mining_camp|pop=5/10|food=60|wood=60|gold=200|ord=10|idle=None,None,0|ents=0": [],
@@ -9604,10 +9931,22 @@
   }
  ],
  "Imperial Age|lumber_camp,mill,mining_camp|pop=5/5|food=0|wood=15|gold=90|ord=60|idle=None,3,5|ents=4": [],
- "Imperial Age|lumber_camp,mill,mining_camp|pop=5/5|food=40|wood=15|gold=200|ord=4|idle=True,3,0|ents=0": [],
+ "Imperial Age|lumber_camp,mill,mining_camp|pop=5/5|food=40|wood=15|gold=200|ord=4|idle=True,3,0|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
  "Imperial Age|lumber_camp,mill,mining_camp|pop=6/10|food=0|wood=60|gold=200|ord=34|idle=None,0,0|ents=0": [],
  "Imperial Age|lumber_camp,mill,mining_camp|pop=7/10|food=0|wood=60|gold=200|ord=60|idle=None,1,5|ents=4": [],
- "Imperial Age|lumber_camp,mill,mining_camp|pop=7/10|food=60|wood=400|gold=200|ord=60|idle=True,None,5|ents=0": [],
+ "Imperial Age|lumber_camp,mill,mining_camp|pop=7/10|food=60|wood=400|gold=200|ord=60|idle=True,None,5|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
  "Imperial Age|lumber_camp,mill,mining_camp|pop=7/25|food=200|wood=400|gold=0|ord=60|idle=False,None,0|ents=0": [],
  "Imperial Age|lumber_camp,mill,mining_camp|pop=7/25|food=520|wood=400|gold=200|ord=30|idle=None,8,5|ents=0": [],
  "Imperial Age|lumber_camp,mill,mining_camp|pop=8/10|food=60|wood=400|gold=200|ord=34|idle=None,0,0|ents=0": [
@@ -9750,14 +10089,14 @@
    "type": "queue_villager"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   },
   {
@@ -9772,14 +10111,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 gold",
+   "intent": "Select next idle villager \u2192 stone",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to gold_mine (gold)",
-   "target_class": "gold_mine",
+   "intent": "Send idle villager to sheep (stone)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -9815,6 +10154,11 @@
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Imperial Age|lumber_camp,mill|pop=11/25|food=520|wood=200|gold=90|ord=4|idle=False,None,0|ents=4": [
@@ -9852,14 +10196,14 @@
    "type": "build"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -9919,6 +10263,17 @@
  ],
  "Imperial Age|lumber_camp,mill|pop=22/25|food=520|wood=60|gold=90|ord=29|idle=True,0,5|ents=4": [
   {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
    "intent": "Select next idle villager \u2192 gold",
    "key": ".",
    "rescan": true,
@@ -9927,17 +10282,6 @@
   {
    "intent": "Send idle villager to gold_mine (gold)",
    "target_class": "gold_mine",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 stone",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (stone)",
-   "target_class": "sheep",
    "type": "right_click"
   },
   {
@@ -9990,14 +10334,14 @@
  ],
  "Imperial Age|lumber_camp,mill|pop=3/5|food=60|wood=0|gold=0|ord=34|idle=True,8,0|ents=4": [
   {
-   "intent": "Select next idle villager \u2192 gold",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to gold_mine (gold)",
-   "target_class": "gold_mine",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   },
   {
@@ -10009,6 +10353,17 @@
   {
    "intent": "Send idle villager to gold_mine (gold)",
    "target_class": "gold_mine",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 wood",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to tree (wood)",
+   "target_class": "tree",
    "type": "right_click"
   },
   {
@@ -10023,25 +10378,14 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 gold",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
+   "intent": "Send idle villager to gold_mine (gold)",
+   "target_class": "gold_mine",
    "type": "right_click"
   },
   {
@@ -10056,7 +10400,13 @@
    "type": "right_click"
   }
  ],
- "Imperial Age|lumber_camp,mill|pop=35/200|food=40|wood=0|gold=200|ord=34|idle=True,None,0|ents=0": [],
+ "Imperial Age|lumber_camp,mill|pop=35/200|food=40|wood=0|gold=200|ord=34|idle=True,None,0|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
  "Imperial Age|lumber_camp,mill|pop=4/10|food=40|wood=200|gold=0|ord=10|idle=None,1,0|ents=0": [],
  "Imperial Age|lumber_camp,mill|pop=4/10|food=60|wood=100|gold=90|ord=60|idle=None,None,5|ents=0": [],
  "Imperial Age|lumber_camp,mill|pop=4/15|food=0|wood=200|gold=90|ord=34|idle=False,None,0|ents=0": [],
@@ -10083,6 +10433,11 @@
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Imperial Age|lumber_camp,mill|pop=5/15|food=520|wood=400|gold=0|ord=60|idle=True,0,0|ents=0": [],
@@ -10090,6 +10445,11 @@
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Imperial Age|lumber_camp,mill|pop=5/30|food=520|wood=100|gold=90|ord=30|idle=None,0,0|ents=4": [],
@@ -10158,25 +10518,14 @@
  ],
  "Imperial Age|lumber_camp|pop=1/5|food=520|wood=15|gold=0|ord=34|idle=True,8,0|ents=4": [
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 gold",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to gold_mine (gold)",
-   "target_class": "gold_mine",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   },
   {
@@ -10202,17 +10551,6 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 wood",
    "key": ".",
    "rescan": true,
@@ -10221,6 +10559,28 @@
   {
    "intent": "Send idle villager to tree (wood)",
    "target_class": "tree",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 gold",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to gold_mine (gold)",
+   "target_class": "gold_mine",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -10299,6 +10659,17 @@
    "type": "build"
   },
   {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
    "intent": "Select next idle villager \u2192 gold",
    "key": ".",
    "rescan": true,
@@ -10317,17 +10688,6 @@
   },
   {
    "intent": "Send idle villager to sheep (stone)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
    "target_class": "sheep",
    "type": "right_click"
   }
@@ -10339,6 +10699,17 @@
    "type": "build"
   },
   {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
    "intent": "Select next idle villager \u2192 gold",
    "key": ".",
    "rescan": true,
@@ -10359,23 +10730,17 @@
    "intent": "Send idle villager to sheep (stone)",
    "target_class": "sheep",
    "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
-   "type": "right_click"
   }
  ],
  "Imperial Age|lumber_camp|pop=14/15|food=60|wood=200|gold=90|ord=29|idle=True,None,0|ents=0": [
   {
    "building_key": "q",
    "intent": "Build house (headroom 14/15)",
+   "type": "build"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
    "type": "build"
   }
  ],
@@ -10402,17 +10767,6 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 gold",
    "key": ".",
    "rescan": true,
@@ -10421,6 +10775,17 @@
   {
    "intent": "Send idle villager to gold_mine (gold)",
    "target_class": "gold_mine",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 stone",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (stone)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -10444,7 +10809,13 @@
  "Imperial Age|lumber_camp|pop=2/15|food=60|wood=15|gold=200|ord=34|idle=None,0,0|ents=4": [],
  "Imperial Age|lumber_camp|pop=2/25|food=0|wood=0|gold=200|ord=4|idle=False,0,5|ents=0": [],
  "Imperial Age|lumber_camp|pop=2/5|food=900|wood=200|gold=0|ord=34|idle=None,None,0|ents=0": [],
- "Imperial Age|lumber_camp|pop=21/25|food=200|wood=15|gold=90|ord=35|idle=True,8,0|ents=0": [],
+ "Imperial Age|lumber_camp|pop=21/25|food=200|wood=15|gold=90|ord=35|idle=True,8,0|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
  "Imperial Age|lumber_camp|pop=22/30|food=0|wood=400|gold=0|ord=30|idle=None,1,5|ents=4": [],
  "Imperial Age|lumber_camp|pop=23/25|food=200|wood=60|gold=0|ord=29|idle=False,8,5|ents=4": [
   {
@@ -10537,17 +10908,6 @@
  "Imperial Age|lumber_camp|pop=4/15|food=40|wood=0|gold=0|ord=29|idle=False,0,5|ents=4": [],
  "Imperial Age|lumber_camp|pop=4/15|food=520|wood=400|gold=200|ord=34|idle=True,3,5|ents=4": [
   {
-   "intent": "Select next idle villager \u2192 stone",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (stone)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
@@ -10559,14 +10919,25 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
+   "intent": "Select next idle villager \u2192 gold",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
+   "intent": "Send idle villager to gold_mine (gold)",
+   "target_class": "gold_mine",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 stone",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (stone)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -10668,7 +11039,13 @@
    "type": "build"
   }
  ],
- "Imperial Age|mill|pop=10/25|food=900|wood=60|gold=200|ord=30|idle=True,1,5|ents=0": [],
+ "Imperial Age|mill|pop=10/25|food=900|wood=60|gold=200|ord=30|idle=True,1,5|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
  "Imperial Age|mill|pop=11/15|food=40|wood=200|gold=200|ord=10|idle=True,0,5|ents=0": [
   {
    "building_key": "a",
@@ -10710,6 +11087,17 @@
    "type": "queue_villager"
   },
   {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
    "intent": "Select next idle villager \u2192 gold",
    "key": ".",
    "rescan": true,
@@ -10730,20 +11118,15 @@
    "intent": "Send idle villager to sheep (stone)",
    "target_class": "sheep",
    "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
-   "target_class": "sheep",
-   "type": "right_click"
   }
  ],
- "Imperial Age|mill|pop=14/25|food=60|wood=15|gold=90|ord=60|idle=True,1,5|ents=0": [],
+ "Imperial Age|mill|pop=14/25|food=60|wood=15|gold=90|ord=60|idle=True,1,5|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
  "Imperial Age|mill|pop=14/25|food=900|wood=15|gold=200|ord=30|idle=None,3,5|ents=0": [],
  "Imperial Age|mill|pop=145/200|food=40|wood=100|gold=200|ord=4|idle=True,1,5|ents=4": [
   {
@@ -10800,10 +11183,22 @@
    "type": "queue_villager"
   }
  ],
- "Imperial Age|mill|pop=2/10|food=520|wood=0|gold=200|ord=30|idle=True,3,0|ents=0": [],
+ "Imperial Age|mill|pop=2/10|food=520|wood=0|gold=200|ord=30|idle=True,3,0|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
  "Imperial Age|mill|pop=2/10|food=60|wood=80|gold=90|ord=30|idle=True,0,0|ents=0": [],
  "Imperial Age|mill|pop=2/5|food=0|wood=15|gold=200|ord=60|idle=None,0,5|ents=0": [],
- "Imperial Age|mill|pop=21/30|food=520|wood=100|gold=0|ord=34|idle=True,0,5|ents=0": [],
+ "Imperial Age|mill|pop=21/30|food=520|wood=100|gold=0|ord=34|idle=True,0,5|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
  "Imperial Age|mill|pop=23/25|food=520|wood=400|gold=200|ord=29|idle=None,None,0|ents=4": [
   {
    "building_key": "q",
@@ -10873,17 +11268,6 @@
  "Imperial Age|mill|pop=4/10|food=40|wood=15|gold=90|ord=30|idle=False,3,0|ents=4": [],
  "Imperial Age|mill|pop=4/10|food=60|wood=80|gold=90|ord=29|idle=True,8,0|ents=4": [
   {
-   "intent": "Select next idle villager \u2192 stone",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (stone)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
@@ -10891,6 +11275,28 @@
   },
   {
    "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 gold",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to gold_mine (gold)",
+   "target_class": "gold_mine",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 stone",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (stone)",
    "target_class": "sheep",
    "type": "right_click"
   },
@@ -10917,24 +11323,13 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 gold",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to gold_mine (gold)",
-   "target_class": "gold_mine",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 stone",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (stone)",
+   "intent": "Send idle villager to sheep (food)",
    "target_class": "sheep",
    "type": "right_click"
   }
@@ -10974,7 +11369,13 @@
    "type": "queue_villager"
   }
  ],
- "Imperial Age|mill|pop=6/15|food=200|wood=400|gold=0|ord=30|idle=True,0,5|ents=0": [],
+ "Imperial Age|mill|pop=6/15|food=200|wood=400|gold=0|ord=30|idle=True,0,5|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
  "Imperial Age|mill|pop=7/10|food=40|wood=15|gold=0|ord=4|idle=False,1,5|ents=0": [],
  "Imperial Age|mill|pop=77/200|food=0|wood=15|gold=200|ord=4|idle=None,0,5|ents=4": [],
  "Imperial Age|mill|pop=8/10|food=200|wood=60|gold=200|ord=4|idle=False,0,0|ents=4": [
@@ -10999,14 +11400,14 @@
    "type": "queue_villager"
   },
   {
-   "intent": "Select next idle villager \u2192 gold",
+   "intent": "Select next idle villager \u2192 food",
    "key": ".",
    "rescan": true,
    "type": "press"
   },
   {
-   "intent": "Send idle villager to gold_mine (gold)",
-   "target_class": "gold_mine",
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -11072,7 +11473,13 @@
   }
  ],
  "Imperial Age||pop=10/15|food=200|wood=15|gold=200|ord=30|idle=None,8,5|ents=0": [],
- "Imperial Age||pop=11/15|food=60|wood=400|gold=90|ord=60|idle=True,None,0|ents=0": [],
+ "Imperial Age||pop=11/15|food=60|wood=400|gold=90|ord=60|idle=True,None,0|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
  "Imperial Age||pop=11/15|food=900|wood=0|gold=200|ord=10|idle=False,0,5|ents=4": [
   {
    "intent": "Queue villager (reactive)",
@@ -11103,7 +11510,13 @@
   }
  ],
  "Imperial Age||pop=13/25|food=0|wood=0|gold=200|ord=29|idle=None,1,5|ents=0": [],
- "Imperial Age||pop=14/15|food=0|wood=15|gold=0|ord=29|idle=True,3,5|ents=0": [],
+ "Imperial Age||pop=14/15|food=0|wood=15|gold=0|ord=29|idle=True,3,5|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
  "Imperial Age||pop=14/15|food=200|wood=100|gold=0|ord=29|idle=False,1,5|ents=0": [
   {
    "building_key": "q",
@@ -11195,6 +11608,11 @@
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Imperial Age||pop=15/25|food=520|wood=400|gold=200|ord=34|idle=False,8,5|ents=4": [],
@@ -11240,12 +11658,22 @@
   {
    "intent": "Queue villager (reactive)",
    "type": "queue_villager"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
   }
  ],
  "Imperial Age||pop=3/5|food=900|wood=200|gold=200|ord=35|idle=True,8,0|ents=0": [
   {
    "building_key": "q",
    "intent": "Build house (headroom 3/5)",
+   "type": "build"
+  },
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
    "type": "build"
   }
  ],
@@ -11265,7 +11693,13 @@
    "type": "build"
   }
  ],
- "Imperial Age||pop=4/5|food=900|wood=15|gold=200|ord=35|idle=True,None,0|ents=0": [],
+ "Imperial Age||pop=4/5|food=900|wood=15|gold=200|ord=35|idle=True,None,0|ents=0": [
+  {
+   "building_key": "a",
+   "intent": "Build farm for idle villager (no forage/huntables visible)",
+   "type": "build"
+  }
+ ],
  "Imperial Age||pop=43/200|food=200|wood=15|gold=200|ord=34|idle=None,3,0|ents=0": [
   {
    "intent": "Queue villager (reactive)",
@@ -11286,17 +11720,6 @@
    "type": "right_click"
   },
   {
-   "intent": "Select next idle villager \u2192 wood",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to tree (wood)",
-   "target_class": "tree",
-   "type": "right_click"
-  },
-  {
    "intent": "Select next idle villager \u2192 gold",
    "key": ".",
    "rescan": true,
@@ -11305,6 +11728,17 @@
   {
    "intent": "Send idle villager to gold_mine (gold)",
    "target_class": "gold_mine",
+   "type": "right_click"
+  },
+  {
+   "intent": "Select next idle villager \u2192 stone",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (stone)",
+   "target_class": "sheep",
    "type": "right_click"
   }
  ],
@@ -11381,6 +11815,17 @@
  ],
  "Imperial Age||pop=8/15|food=520|wood=200|gold=90|ord=60|idle=True,0,5|ents=4": [
   {
+   "intent": "Select next idle villager \u2192 food",
+   "key": ".",
+   "rescan": true,
+   "type": "press"
+  },
+  {
+   "intent": "Send idle villager to sheep (food)",
+   "target_class": "sheep",
+   "type": "right_click"
+  },
+  {
    "intent": "Select next idle villager \u2192 gold",
    "key": ".",
    "rescan": true,
@@ -11399,17 +11844,6 @@
   },
   {
    "intent": "Send idle villager to sheep (stone)",
-   "target_class": "sheep",
-   "type": "right_click"
-  },
-  {
-   "intent": "Select next idle villager \u2192 food",
-   "key": ".",
-   "rescan": true,
-   "type": "press"
-  },
-  {
-   "intent": "Send idle villager to sheep (food)",
    "target_class": "sheep",
    "type": "right_click"
   }

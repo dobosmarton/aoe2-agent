@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import contextlib
 from dataclasses import dataclass
-from typing import Literal, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 import structlog
 
 from .entity_utils import extract_attrs
 from .memory import AGE_SCORES, AgentMemory, GameState
+
+if TYPE_CHECKING:
+    from .policy.allocation import Allocation
 
 log = structlog.stdlib.get_logger()
 
@@ -71,6 +74,9 @@ class GoalManager:
         self._prev_state: dict[str, object] | None = None
         self._resource_readings: dict[str, object] = {}
         self._alarm_active: bool = False
+        # Latest strategist allocation; None until it answers, and for the
+        # whole game when the LLM is down — the seeded per-age mix covers that.
+        self.allocation: Allocation | None = None
 
     def set_goals(self, goals: list[Goal]) -> None:
         """Replace active goals with new ones from strategist.

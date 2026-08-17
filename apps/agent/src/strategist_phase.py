@@ -54,6 +54,7 @@ async def _run_strategist_async(
             known_buildings=known_buildings,
         )
         goal_manager.set_goals(new_goals)
+        goal_manager.allocation = strategist.last_allocation
         goal_logger.log_goals_created(iteration, new_goals)
         if prev_goals:
             goal_logger.log_strategist_update(iteration, prev_goals, new_goals)

@@ -5,10 +5,11 @@ Pure functions over fake entity dicts + GameState. No executor / pyautogui.
 
 from __future__ import annotations
 
+from collections import Counter
+
 import pytest
 from gameplay_agent.entity_utils import nearest_class_of_kind
 from gameplay_agent.memory import GameState
-from gameplay_agent.policy import idle as _idle
 from gameplay_agent.policy.engine import decide as _policy_decide
 from gameplay_agent.policy.idle import resolve_idle_target as _resolve_idle_target
 from gameplay_agent.policy.state import from_game_state
@@ -21,12 +22,35 @@ def decide(entities: list, state: GameState, alarm: bool) -> list[dict]:
     return _policy_decide(entities, from_game_state(state), alarm)
 
 
-def _idle_pattern(state: GameState) -> tuple[str, ...]:
-    """The gather rotation, with the wood target derived as the engine does."""
+def _routed_kinds(state: GameState, count: int = 5) -> tuple[str, ...]:
+    """The next `count` resources the router would staff, in order.
+
+    The Phase 4.1 successor to the old gather-pattern tuple. Routing interleaves
+    rather than blocking, so assert on the ratio and the lead, not the sequence.
+    """
+    from gameplay_agent.policy import allocation
     from gameplay_agent.policy.engine import registry, wood_bank_target
 
     policy_state = from_game_state(state)
-    return _idle.idle_pattern(policy_state, wood_bank_target(policy_state, registry()))
+    target = wood_bank_target(policy_state, registry())
+    mix = allocation.for_state(policy_state, None, target)
+    jobs: dict[str, int] = dict(policy_state.villager_jobs)
+    kinds: list[str] = []
+    for _ in range(count):
+        kind = allocation.next_kind(mix, jobs)
+        jobs = allocation.with_one_more(jobs, kind)
+        kinds.append(kind)
+    return tuple(kinds)
+
+
+# Picks needed to resolve a one-slot bias. Too small a sample hides it: at 5,
+# both a 3:2 and a 3:3 target land 3 food and 2 wood, and Feudal's 3-way split
+# needs more still.
+_BIAS_SAMPLE = 10
+
+
+def _ratio(state: GameState, count: int = 5) -> Counter[str]:
+    return Counter(_routed_kinds(state, count))
 
 
 def _state(
@@ -286,8 +310,8 @@ def test_food_crisis_wood_floor_includes_margin() -> None:
     # Famine wood routing banks a farm's cost PLUS margin: at exactly the cost
     # (run 5, F-23: six attempts failed at 48-59 wood) farms lose the race
     # against the next purchase.
-    assert _idle_pattern(_state(population=22, food=40, wood=65)) == ("food", "food", "wood")
-    assert _idle_pattern(_state(population=22, food=40, wood=85)) == ("food",)
+    assert _ratio(_state(population=22, food=40, wood=65), 3)["wood"] == 1
+    assert _ratio(_state(population=22, food=40, wood=85), 3)["wood"] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -295,19 +319,23 @@ def test_food_crisis_wood_floor_includes_margin() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_wood_below_farm_target_gets_extra_wood_slot() -> None:
-    pattern = _idle_pattern(_state(population=20, wood=50))
-    assert pattern[0] == "wood"
-    assert pattern.count("wood") == 3  # vs 2 in the plain Dark Age rotation
+def test_wood_below_farm_target_gets_more_wood() -> None:
+    """The bank adds a wood slot; it must not take every slot (F-8/F-21)."""
+    banking = _ratio(_state(population=20, wood=50), _BIAS_SAMPLE)
+    banked = _ratio(_state(population=20, wood=200), _BIAS_SAMPLE)
+    assert banking["wood"] > banked["wood"]
+    assert banking["food"] > 0  # never all-wood
 
 
 def test_lumber_camp_goal_raises_the_wood_target() -> None:
     """Run 8 (F-34): wood plateaued at 65 while the camp cost 100 — the bias
     must keep pulling wood until the CAMP is affordable, not just a farm."""
     needs_camp = _state(population=20, wood=110, buildings=frozenset({"mill"}))
-    assert _idle_pattern(needs_camp)[0] == "wood"  # 110 < 100 + margin
     banked = _state(population=20, wood=125, buildings=frozenset({"mill"}))
-    assert _idle_pattern(banked) == ("food", "food", "food", "wood", "wood")
+    assert (
+        _ratio(needs_camp, _BIAS_SAMPLE)["wood"] > _ratio(banked, _BIAS_SAMPLE)["wood"]
+    )  # 110 < 100 + margin
+    assert _ratio(banked) == Counter({"food": 3, "wood": 2})  # Dark Age 3:2
 
 
 @pytest.mark.parametrize(
@@ -324,16 +352,18 @@ def test_no_wood_bias_without_pending_wood_goal(
     population: int, wood: int, buildings: frozenset[str]
 ) -> None:
     state = _state(population=population, wood=wood, buildings=buildings)
-    assert _idle_pattern(state) == ("food", "food", "food", "wood", "wood")
+    assert _ratio(state) == Counter({"food": 3, "wood": 2})  # Dark Age 3:2
 
 
 def test_missing_mill_raises_the_wood_target() -> None:
     """The mill is a Feudal prereq AND the farm unlock, so once the economy is
     established a missing mill banks wood toward it — like the camp (F-41)."""
     needs_mill = _state(population=20, wood=110, buildings=frozenset())
-    assert _idle_pattern(needs_mill)[0] == "wood"  # 110 < 100 + margin
     banked = _state(population=20, wood=125, buildings=frozenset())
-    assert _idle_pattern(banked) == ("food", "food", "food", "wood", "wood")
+    assert (
+        _ratio(needs_mill, _BIAS_SAMPLE)["wood"] > _ratio(banked, _BIAS_SAMPLE)["wood"]
+    )  # 110 < 100 + margin
+    assert _ratio(banked) == Counter({"food": 3, "wood": 2})
 
 
 def test_missing_mining_camp_raises_the_wood_target() -> None:
@@ -342,18 +372,23 @@ def test_missing_mining_camp_raises_the_wood_target() -> None:
     needs_camp = _state(
         population=25, age="Feudal Age", wood=110, buildings=frozenset({"mill", "lumber_camp"})
     )
-    assert _idle_pattern(needs_camp)[0] == "wood"  # 110 < 100 + margin
+    banked = _state(
+        population=25, age="Feudal Age", wood=300, buildings=frozenset({"mill", "lumber_camp"})
+    )
+    assert (
+        _ratio(needs_camp, _BIAS_SAMPLE)["wood"] > _ratio(banked, _BIAS_SAMPLE)["wood"]
+    )  # 110 < 100 + margin
 
 
 def test_feudal_gold_bias_until_castle_gold_banked() -> None:
     """T-538: below 200 gold in Feudal the rotation leads with gold; once the
     Castle gold is banked the base pattern returns. Dark Age never biases."""
     poor = _state(population=25, age="Feudal Age", wood=300)  # factory gold=100
-    assert _idle_pattern(poor)[0] == "gold"
+    assert _ratio(poor, 6)["gold"] > _ratio(poor, 6)["stone"]
     rich = _state(population=25, age="Feudal Age", wood=300)
     rich.resources["gold"] = 250
-    assert _idle_pattern(rich) == ("food", "food", "wood", "wood", "gold")
-    assert _idle_pattern(_state(population=20, wood=300))[0] != "gold"  # Dark Age
+    assert _ratio(rich) == Counter({"food": 2, "wood": 2, "gold": 1})  # Feudal 2:2:1
+    assert _routed_kinds(_state(population=20, wood=300))[0] != "gold"  # Dark Age
 
 
 def test_wood_bias_outranks_gold_bias() -> None:
@@ -361,7 +396,7 @@ def test_wood_bias_outranks_gold_bias() -> None:
     state = _state(
         population=25, age="Feudal Age", wood=50, buildings=frozenset({"mill", "lumber_camp"})
     )
-    assert _idle_pattern(state)[0] == "wood"
+    assert _ratio(state, _BIAS_SAMPLE)["wood"] > _ratio(state, _BIAS_SAMPLE)["gold"]
 
 
 def test_wood_bank_bias_sends_an_idle_to_wood() -> None:
@@ -645,15 +680,16 @@ def test_idle_count_zero_overrides_presence() -> None:
 
 
 def test_idle_distribution_spreads_across_kinds() -> None:
+    """A 3-batch must not dump everyone on one tile — the F-4 blanket bug."""
     entities = [_ent("town_center", (0, 0)), _ent("sheep", (10, 10)), _ent("tree", (20, 20))]
-    # Dark-Age pattern ("food","food","food","wood","wood"); phase = population + i.
-    # pop 22 → phases 2,3,4 → food, wood, wood → sheep, tree, tree (spread in ONE turn).
     turn = decide(entities, _state(population=22, idle_present=True), alarm=False)
     targets = [a["target_class"] for a in turn if a["type"] == "right_click"]
-    assert targets == ["sheep", "tree", "tree"]
-    # pop 20 → phases 0,1,2 → all food → all sheep (rotation shifts by population).
-    turn2 = decide(entities, _state(population=20, idle_present=True), alarm=False)
-    assert [a["target_class"] for a in turn2 if a["type"] == "right_click"] == ["sheep"] * 3
+    assert set(targets) == {"sheep", "tree"}
+
+
+def test_idle_distribution_follows_the_dark_age_ratio() -> None:
+    """3:2 food:wood, whatever order the shortfall router lands them in."""
+    assert _ratio(_state(population=22)) == Counter({"food": 3, "wood": 2})
 
 
 # ---------------------------------------------------------------------------
