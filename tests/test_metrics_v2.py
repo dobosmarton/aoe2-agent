@@ -15,7 +15,10 @@ from autoresearch import metrics
 from autoresearch.metrics import GameScore, compute_score
 from gameplay_agent.memory import AgentMemory, Turn
 
-LEDGER = Path(__file__).parent.parent / "experiments" / "results.tsv"
+# The frozen Phase 0.1 copy of the ledger, NOT the live `experiments/results.tsv`.
+# That one is gitignored (machine-local, the VM owns it) so CI never sees it, and
+# it gains a row every time a game runs — neither is a fixture.
+LEDGER = Path(__file__).parent.parent / "apps" / "agent" / "knowledge" / "seed" / "baseline.tsv"
 
 # The only ledger row that ever reached the Feudal Age, and the Dark Age row
 # that outscored it under v1.
@@ -43,6 +46,11 @@ def _rescore_v1_row(row: dict[str, str]) -> float:
 # ---------------------------------------------------------------------------
 # The inversion, on real recorded games
 # ---------------------------------------------------------------------------
+
+
+def test_the_baseline_is_all_version_one_rows() -> None:
+    """A v2 row in the frozen baseline would make the rescore below meaningless."""
+    assert {r["score_version"] for r in _ledger_rows()} == {"1"}
 
 
 def test_only_one_recorded_game_ever_left_the_dark_age() -> None:
