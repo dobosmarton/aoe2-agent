@@ -16,6 +16,13 @@ if TYPE_CHECKING:
 
 _NO_JOBS: Mapping[str, int] = MappingProxyType({})
 
+
+def _no_jobs() -> Mapping[str, int]:
+    """Shared empty view. A factory because `mappingproxy` is an illegal
+    dataclass default on Python 3.11, where it is still unhashable."""
+    return _NO_JOBS
+
+
 # Villagers the game starts with (mirrors memory.INITIAL_POPULATION).
 _STARTING_VILLAGERS = 4
 
@@ -40,7 +47,7 @@ class PolicyState:
     idle_present: bool | None = None
     idle_count: int | None = None
     idle_streak: int = 0
-    villager_jobs: Mapping[str, int] = _NO_JOBS
+    villager_jobs: Mapping[str, int] = field(default_factory=_no_jobs)
     turn: int = 0
     captured_at: float = field(default_factory=time.monotonic)
 
