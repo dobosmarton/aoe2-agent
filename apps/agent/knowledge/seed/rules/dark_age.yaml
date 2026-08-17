@@ -1,15 +1,17 @@
-# Dark Age seed rules — exported verbatim from reactive.py, 2026-08-17.
+# Dark Age rules — exported from reactive.py, 2026-08-17.
 #
-# Behaviour must be identical to `reactive.decide()`. The 53 tests in
-# tests/test_reactive.py are the proof (ADAPTIVE-AGENT-PLAN.md 1.6).
+# Behaviour must match `reactive.decide()`. The 62 tests in
+# tests/test_reactive.py are the proof (ADAPTIVE-AGENT-PLAN.md 1.5).
 #
 # `weight` reproduces the group order in `reactive.decide`:
-#   age up (100) > house (90) > queue (80) > Feudal prep (70) > idle (40)
-# Weights are hand-seeded here. Phase 6.1 replaces them with ablation results.
+#   age up 100 > house 90 > queue 80 > mill 72 > camp 70 > mining camp 60 > idle 40
+# Hand-seeded. Phase 6.1 replaces them with ablation results.
 #
-# Every rule carries `provenance: seed/<tag>`. See ../findings.md for the run
-# review behind each one. Per plan 0.2, a seed rule is exempt from retirement
-# until it has been ablated at least once.
+# The house rule is age-agnostic and lives here because the Dark Age is where it
+# first bites; the registry is one flat list, so the file split is for reading.
+#
+# See ../findings.md for the run review behind each `provenance` tag. Per plan
+# 0.2 a seed rule is exempt from retirement until it has been ablated once.
 
 - id: age_up_feudal
   when: >
@@ -34,7 +36,10 @@
 
 - id: house_when_headroom_gone
   when: population_cap < 200 and (population_cap - population) <= 2
-  then: {type: build, building_key: q, intent: Build house}
+  then:
+    type: build
+    building_key: q
+    intent: "Build house (headroom {population}/{population_cap})"
   weight: 90
   cost: {wood: 25}
   max_state_age_ms: 4000
@@ -66,9 +71,13 @@
 
 - id: feudal_prep_mill
   when: age == 'Dark Age' and population >= 12 and 'mill' not in buildings_seen
-  then: {type: build, building_key: w, intent: Build mill (Feudal prereq + farm unlock)}
+  then:
+    type: build
+    building_key: w
+    intent: "Build mill (Feudal prerequisite + farm/food unlock)"
   weight: 72
   cost: {wood: 100}
+  bank_wood: true
   max_state_age_ms: 4000
   provenance: seed/F-41+F-26
   enabled: true
@@ -80,33 +89,27 @@
   # One build per turn — the executor's unique-building gate rejects re-emits.
 
 - id: feudal_prep_lumber_camp
-  when: age == 'Dark Age' and population >= 12 and 'lumber_camp' not in buildings_seen
-  then: {type: build, building_key: r, intent: Build lumber camp (Feudal prereq + wood income)}
+  when: >
+    age == 'Dark Age' and population >= 12
+    and 'mill' in buildings_seen and 'lumber_camp' not in buildings_seen
+  then:
+    type: build
+    building_key: r
+    intent: "Build lumber camp (Feudal prerequisite + wood income)"
   weight: 70
   cost: {wood: 100}
+  bank_wood: true
   max_state_age_ms: 4000
   provenance: seed/F-26+F-34
   enabled: true
   stats: {fired: 0, ablation_delta: null, ablation_ci: null}
   # The second qualifying building. Houses do NOT count (F-26).
-  # Doubles as a wood-income boost via the closer drop-off.
-  # Weight sits just under the mill so the reservation walk in plan 1.3
-  # reproduces reactive.py's mill-first ordering when wood only covers one.
+  # `'mill' in buildings_seen` makes this EXCLUSIVE with feudal_prep_mill, which
+  # is how reactive.py's if/elif behaved: one prep build per turn, mill first.
+  # Dropping that clause emits both when neither stands.
 
-- id: idle_distribute_dark
-  when: idle_present
-  then: {type: distribute_idle, intent: Route idle villagers by allocation}
-  weight: 40
-  cost: {}
-  max_state_age_ms: 8000
-  provenance: seed/F-4
-  enabled: true
-  stats: {fired: 0, ablation_delta: null, ablation_ci: null}
-  # Target resolution stays in Python (plan 1.3.1) — it reads the entity list,
-  # not the state. See entity_utils.nearest_class_of_kind.
-  # Batch: the badge COUNT sizes it when readable (cap 6), else a blind 3.
-  # After 4 consecutive lit turns the count is distrusted and floored at 3 — the
-  # digit pinned at 1 while 8 villagers idled (F-4). idle_count None means
-  # unreadable and must never be read as 0.
-  # Loosest freshness budget in the file: a slightly stale idle badge costs one
-  # wasted keypress, and `.` past the last idle villager is a harmless no-op.
+# Idle dispatch (weight 40) is NOT a rule. It reads the entity list, not the
+# state, so it cannot be declarative — see policy/idle.py and plan 1.3.1.
+# The engine appends its output after every rule, which is where reactive.py
+# put it. Its constants (batch 3/6, distrust streak 4, gather ratios, famine
+# overrides) live in allocation.yaml and idle.py.

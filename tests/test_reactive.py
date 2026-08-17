@@ -1,4 +1,4 @@
-"""Unit tests for S5 deterministic reactive tier (gameplay_agent/reactive.py).
+"""Unit tests for the deterministic policy tier (gameplay_agent/policy/).
 
 Pure functions over fake entity dicts + GameState. No executor / pyautogui.
 """
@@ -8,9 +8,25 @@ from __future__ import annotations
 import pytest
 from gameplay_agent.entity_utils import nearest_class_of_kind
 from gameplay_agent.memory import GameState
-from gameplay_agent.reactive import _idle_pattern, _resolve_idle_target, decide
+from gameplay_agent.policy import idle as _idle
+from gameplay_agent.policy.engine import decide as _policy_decide
+from gameplay_agent.policy.idle import resolve_idle_target as _resolve_idle_target
+from gameplay_agent.policy.state import from_game_state
 
 from tests.factories import make_entity as _ent
+
+
+def decide(entities: list, state: GameState, alarm: bool) -> list[dict]:
+    """Drive the engine from a GameState, as the game loop does."""
+    return _policy_decide(entities, from_game_state(state), alarm)
+
+
+def _idle_pattern(state: GameState) -> tuple[str, ...]:
+    """The gather rotation, with the wood target derived as the engine does."""
+    from gameplay_agent.policy.engine import registry, wood_bank_target
+
+    policy_state = from_game_state(state)
+    return _idle.idle_pattern(policy_state, wood_bank_target(policy_state, registry()))
 
 
 def _state(
@@ -191,13 +207,18 @@ def test_house_not_built(population: int, population_cap: int) -> None:
     assert all(a.get("building_key") != "q" for a in actions)
 
 
-def test_feudal_prereq_classes_match_world_sim() -> None:
+def test_age_up_rule_requires_exactly_the_world_sims_prereqs() -> None:
     """Drift guard (V-4): run 6 proved the sim knew the requirement the agent
-    lacked — keep the two encodings pinned together."""
+    lacked. Asserted behaviorally now that the set lives in the rule trigger."""
     from evaluation.world_sim import FEUDAL_PREREQ_BUILDINGS
-    from gameplay_agent import reactive
+    from gameplay_agent.policy.engine import registry
 
-    assert reactive._FEUDAL_PREREQ_CLASSES == FEUDAL_PREREQ_BUILDINGS
+    age_up = next(r for r in registry() if r.id == "age_up_feudal")
+    banked = _state(population=22, food=520, buildings=FEUDAL_PREREQ_BUILDINGS)
+    assert age_up.matches(from_game_state(banked))
+    for missing in FEUDAL_PREREQ_BUILDINGS:
+        short = FEUDAL_PREREQ_BUILDINGS - {missing}
+        assert not age_up.matches(from_game_state(_state(22, food=520, buildings=short)))
 
 
 @pytest.mark.parametrize(
@@ -433,29 +454,44 @@ def test_reactive_tier_alone_builds_mining_camp_in_feudal() -> None:
     assert state.buildings.count("mining_camp") == 1
 
 
-def test_reactive_build_constants_match_executor_tables() -> None:
-    """Drift guard (V-4 seed): the reactive tier duplicates build keys/costs to
-    stay dependency-free — this pins every copy to the executor's tables."""
+def test_every_build_rule_declares_the_executors_wood_cost() -> None:
+    """Drift guard (V-4 successor): a rule's declared `cost` drives reservation,
+    so it must equal the executor's table — and this covers rules added later."""
     from gameplay_agent import executor as ex
-    from gameplay_agent import reactive
+    from gameplay_agent.policy.engine import registry
 
-    assert ex._BUILD_WOOD_COST["a"] == reactive._FARM_WOOD_COST
-    assert ex._BUILD_WOOD_COST["r"] == reactive._LUMBER_CAMP_WOOD_COST
-    assert ex._BUILD_WOOD_COST["w"] == reactive._MILL_WOOD_COST
-    assert ex._BUILD_WOOD_COST["e"] == reactive._MINING_CAMP_WOOD_COST
-    assert ex.BUILD_KEY_TO_CLASS[reactive._FARM_BUILD_KEY] == "farm"
-    assert ex.BUILD_KEY_TO_CLASS[reactive._LUMBER_CAMP_BUILD_KEY] == "lumber_camp"
-    assert ex.BUILD_KEY_TO_CLASS[reactive._MILL_BUILD_KEY] == "mill"
-    assert ex.BUILD_KEY_TO_CLASS[reactive._MINING_CAMP_BUILD_KEY] == "mining_camp"
-    assert ex.BUILD_KEY_TO_CLASS[reactive._HOUSE_BUILD_KEY] == "house"
-    # The reactive house trigger must stay INSIDE the executor's allow band,
-    # or every emit would be rejected as ample headroom.
-    assert reactive._HOUSE_HEADROOM_TRIGGER <= ex._HOUSE_HEADROOM_MAX
-    assert reactive._GAME_POP_CAP_LIMIT == ex._GAME_POP_CAP_LIMIT
-    # The executor's order gate backstops the reactive per-age targets (F-38,
-    # T-538) — whole-map pin, and the message map must cover the same ages.
-    assert reactive._VILLAGER_TARGET_BY_AGE == ex._VILLAGER_ORDER_TARGET_BY_AGE
+    build_rules = [r for r in registry() if r.actions[0].get("type") == "build"]
+    assert build_rules, "registry has no build rules — the loader is broken"
+    for rule in build_rules:
+        key = str(rule.actions[0]["building_key"])
+        assert rule.cost.get("wood") == ex._BUILD_WOOD_COST[key], rule.id
+
+
+def test_the_farm_is_the_only_cost_idle_still_owns() -> None:
+    """Every other build cost now comes from the rule that emits it (V-4).
+
+    The farm has no rule — the idle path emits it directly — so this is the one
+    copy left, and it must track the executor's table.
+    """
+    from gameplay_agent import executor as ex
+    from gameplay_agent.policy import idle
+
+    assert ex._BUILD_WOOD_COST["a"] == idle._FARM_WOOD_COST
+    assert ex.BUILD_KEY_TO_CLASS[idle._FARM_BUILD_KEY] == "farm"
     assert ex._VILLAGER_ORDER_TARGET_BY_AGE.keys() == ex._NEXT_AGE.keys()
+
+
+def test_house_rule_stays_inside_the_executors_allow_band() -> None:
+    """A trigger above _HOUSE_HEADROOM_MAX would have every emit rejected."""
+    from gameplay_agent import executor as ex
+    from gameplay_agent.policy.engine import registry
+
+    house = next(r for r in registry() if r.id == "house_when_headroom_gone")
+    for headroom in range(ex._HOUSE_HEADROOM_MAX + 1):
+        state = from_game_state(_state(population=30 - headroom, population_cap=30))
+        if house.matches(state):
+            return
+    raise AssertionError("house rule never fires inside the executor's allow band")
 
 
 # ---------------------------------------------------------------------------

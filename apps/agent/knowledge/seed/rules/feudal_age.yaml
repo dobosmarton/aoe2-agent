@@ -1,5 +1,5 @@
-# Feudal Age seed rules — exported verbatim from reactive.py, 2026-08-17.
-# See ../findings.md for the run review behind each rule.
+# Feudal Age and later — exported from reactive.py, 2026-08-17.
+# See ../findings.md for the run review behind each provenance tag.
 
 - id: queue_villager_feudal
   when: age == 'Feudal Age' and villagers_ordered < 35 and villagers_ordered < population_cap
@@ -10,15 +10,34 @@
   provenance: seed/F-11
   enabled: true
   stats: {fired: 0, ablation_delta: null, ablation_ci: null}
-  # 35 in Feudal, against 30 in Dark. Run 13 reached Feudal and the flat Dark
+  # 35 in Feudal against 30 in Dark. Run 13 reached Feudal and the flat Dark
   # target of 30 overruled this one, while the rejection message still taught
   # "bank for the Feudal Age" IN Feudal (T-538).
 
+- id: queue_villager_later_ages
+  when: >
+    age != 'Dark Age' and age != 'Feudal Age'
+    and villagers_ordered < population_cap
+  then: {type: queue_villager, intent: Queue villager (reactive)}
+  weight: 80
+  cost: {food: 50}
+  max_state_age_ms: 6000
+  provenance: seed/F-38
+  enabled: true
+  stats: {fired: 0, ablation_delta: null, ablation_ci: null}
+  # Castle and Imperial have no order cap of their own: reactive.py's
+  # _orders_below_target falls back to population_cap for any age outside the
+  # {Dark: 30, Feudal: 35} map. Only the food gate applies there.
+
 - id: castle_prep_mining_camp
   when: age == 'Feudal Age' and 'mining_camp' not in buildings_seen
-  then: {type: build, building_key: e, intent: Build mining camp (gold drop-off for the Castle bank)}
+  then:
+    type: build
+    building_key: e
+    intent: "Build mining camp (gold drop-off for the Castle Age bank)"
   weight: 60
   cost: {wood: 100}
+  bank_wood: true
   max_state_age_ms: 4000
   provenance: seed/F-46
   enabled: true
@@ -26,6 +45,6 @@
   # Castle research needs 800 food AND 200 gold; gold is the scarce half.
   # Run 13 sat 25 minutes in Feudal with 1833 wood banked idle and gold parked
   # at 90, because no tier ever built a mining camp (F-46).
-  # Absence-gated on buildings_seen so it stops re-emitting once confirmed. A
-  # SECOND camp at another gold pile stays a deliberate LLM decision —
-  # mining_camp is intentionally absent from the executor's unique-building gate.
+  # Absence-gated so it stops re-emitting once confirmed. A SECOND camp at
+  # another gold pile stays a deliberate LLM decision — mining_camp is
+  # intentionally absent from the executor's unique-building gate.

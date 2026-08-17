@@ -15,7 +15,6 @@ if TYPE_CHECKING:
     from .providers.base import LLMResult
     from .providers.executor_provider import ExecutorProvider
 
-from . import reactive
 from .config import config
 from .detection_phase import (
     DETECTION_AVAILABLE,
@@ -43,6 +42,8 @@ from .goal_logger import GoalLogger
 from .goals import GoalManager
 from .memory import AgentMemory
 from .models import validate_actions
+from .policy.engine import decide as policy_decide
+from .policy.state import from_game_state
 from .providers.strategist import StrategistProvider, get_default_goals, read_hud_readings
 from .resource_ocr import warm_up_ocr
 from .screen import capture_screenshot, save_screenshot
@@ -125,7 +126,8 @@ async def _run_routine_upkeep(
     """Routine villager upkeep — the work done in the LLM's in-flight window
     while the turn's plan computes. (Opening ground commands run earlier, before
     the first perception pass — see the iteration-1 block in `game_loop`.)"""
-    routine_cmds = reactive.decide(detected_entities, memory.game_state, alarm)
+    policy_state = from_game_state(memory.game_state)
+    routine_cmds = policy_decide(detected_entities, policy_state, alarm)
     if routine_cmds:
         routine_actions = validate_actions(routine_cmds)
         if routine_actions:
