@@ -51,6 +51,11 @@ overlay-update.zip
 # the work lands. Kept out of git so stale planning docs don't accumulate.
 docs/plan/
 
+# Root markdown is scratch by default — plans and notes stay machine-local.
+# README.md is the one shared root doc; canonical docs live under docs/.
+/*.md
+!/README.md
+
 # Claude Code per-user state — `scheduled_tasks.lock`, `settings.local.json`,
 # anything else the harness writes locally. Machine-specific, no value to
 # other contributors. Equivalent of `.vscode/` for the Claude Code workflow.
