@@ -50,6 +50,7 @@ overlay-update.zip
 # feature is in flight; replaced by canonical docs under docs/design/ when
 # the work lands. Kept out of git so stale planning docs don't accumulate.
 docs/plan/
+ADAPTIVE-AGENT-PLAN.md
 
 # Claude Code per-user state — `scheduled_tasks.lock`, `settings.local.json`,
 # anything else the harness writes locally. Machine-specific, no value to
