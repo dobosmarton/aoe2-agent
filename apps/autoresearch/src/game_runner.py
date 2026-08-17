@@ -65,11 +65,11 @@ async def run_game(
     log.info(
         "game_complete",
         composite_score=score.composite,
-        survival=score.survival,
-        population=score.population,
         age=score.age,
+        age_speed=score.age_speed,
         economy=score.economy,
         action_success=score.action_success,
+        survival=score.survival,
         end_reason=metrics["game_end_reason"],
         turns=metrics["turn_count"],
     )
@@ -207,11 +207,11 @@ def main() -> None:
     print("\n--- Game Complete ---")
     print(f"Experiment:     {result['experiment_id']}")
     print(f"Composite:      {score.composite:.4f}")
-    print(f"Survival:       {score.survival:.4f}")
-    print(f"Population:     {score.population:.4f}")
     print(f"Age:            {score.age:.4f}")
+    print(f"Age speed:      {score.age_speed:.4f}")
     print(f"Economy:        {score.economy:.4f}")
     print(f"Action Success: {score.action_success:.4f}")
+    print(f"Survival:       {score.survival:.4f}")
     print(f"End Reason:     {result['metrics']['game_end_reason']}")
     print(f"Turns:          {result['metrics']['turn_count']}")
 

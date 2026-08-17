@@ -63,11 +63,11 @@ class _Candidate:
         if not self.games:
             return (0.0, 0.0, 0.0, 0.0, 0.0)
         return (
-            mean(g.survival for g in self.games),
-            mean(g.population for g in self.games),
             mean(g.age for g in self.games),
+            mean(g.age_speed for g in self.games),
             mean(g.economy for g in self.games),
             mean(g.action_success for g in self.games),
+            mean(g.survival for g in self.games),
         )
 
 

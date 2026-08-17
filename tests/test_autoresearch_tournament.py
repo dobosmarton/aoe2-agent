@@ -27,11 +27,11 @@ def _run(coro: Awaitable[object]) -> object:
 def _score(composite: float) -> GameScore:
     return GameScore(
         composite=composite,
-        survival=0.0,
-        population=0.0,
         age=0.0,
+        age_speed=0.0,
         economy=0.0,
         action_success=0.0,
+        survival=0.0,
         raw_metrics={},
     )
 
@@ -192,19 +192,19 @@ def test_tournament_logs_each_trial(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _game(
     composite: float,
-    survival: float = 0.0,
-    population: float = 0.0,
     age: float = 0.0,
+    age_speed: float = 0.0,
     economy: float = 0.0,
     action_success: float = 0.0,
+    survival: float = 0.0,
 ) -> GameScore:
     return GameScore(
         composite=composite,
-        survival=survival,
-        population=population,
         age=age,
+        age_speed=age_speed,
         economy=economy,
         action_success=action_success,
+        survival=survival,
         raw_metrics={},
     )
 

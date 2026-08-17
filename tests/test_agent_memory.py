@@ -342,7 +342,10 @@ def test_metrics_snapshot_keys() -> None:
         "llm_calls",
         "llm_errors",
         "llm_error_rate",
-        # Turn latency (ADAPTIVE-AGENT-PLAN.md 0.3).
+        # Age timings (plan 2.1).
+        "feudal_time_s",
+        "castle_time_s",
+        # Turn latency (plan 0.3).
         "turn_latency_p50_ms",
         "turn_latency_p90_ms",
         "turn_latency_max_ms",

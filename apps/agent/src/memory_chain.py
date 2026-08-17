@@ -297,7 +297,9 @@ class MemoryChain:
         metrics = memory.get_metrics_snapshot()
         parts.append(f"Game Result: {metrics['game_end_reason'] or 'unknown'}")
         parts.append(
-            f"Score: {score.composite:.4f} (survival={score.survival:.2f}, pop={score.population:.2f}, age={score.age:.2f}, economy={score.economy:.2f}, actions={score.action_success:.2f})"
+            f"Score: {score.composite:.4f} (age={score.age:.2f}, "
+            f"age_speed={score.age_speed:.2f}, economy={score.economy:.2f}, "
+            f"actions={score.action_success:.2f}, survival={score.survival:.2f})"
         )
         parts.append(f"Duration: {metrics['survival_time']:.0f}s, Turns: {metrics['turn_count']}")
         parts.append(

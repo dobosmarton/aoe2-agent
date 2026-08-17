@@ -18,7 +18,10 @@ import structlog
 log = structlog.stdlib.get_logger()
 
 _FRONTIER_PATH = Path(__file__).parent.parent / "experiments" / "pareto_frontier.json"
-AXES: tuple[str, ...] = ("survival", "population", "age", "economy", "action_success")
+# Must match GameScore's component fields. `population` left in plan 2.3: as an
+# axis it kept pop-heavy, slow candidates alive through halving on a metric the
+# composite no longer values.
+AXES: tuple[str, ...] = ("age", "age_speed", "economy", "action_success", "survival")
 
 Vector = tuple[float, float, float, float, float]
 

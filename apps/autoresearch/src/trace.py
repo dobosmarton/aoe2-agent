@@ -68,11 +68,11 @@ def build_game_trace(memory: AgentMemory, score: GameScore) -> GameTrace:
         for t in memory.working_memory
     ]
     components = {
-        "survival": score.survival,
-        "population": score.population,
         "age": score.age,
+        "age_speed": score.age_speed,
         "economy": score.economy,
         "action_success": score.action_success,
+        "survival": score.survival,
     }
     end_reason = str(score.raw_metrics.get("game_end_reason", ""))
     return GameTrace(

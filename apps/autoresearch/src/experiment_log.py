@@ -26,6 +26,8 @@ HEADER = [
     "change_description",
     "composite_score",
     "survival",
+    # `population` left the score in v2 (plan 2.3). The column stays because the
+    # v1 rows hold real values in it; v2 rows write it empty.
     "population",
     "age",
     "economy",
@@ -51,11 +53,22 @@ HEADER = [
     "turn_latency_p50_ms",
     "turn_latency_p90_ms",
     "phase_latency_p50_ms",
-    # Rows of different score versions are NOT comparable (plan 2.2).
+    # Rows of different score versions are NOT comparable (plan 2.3).
     "score_version",
+    # How fast the agent left the Dark Age. Empty on v1 rows, which never
+    # recorded an age-up time.
+    "age_speed",
+    "feudal_time_s",
 ]
 
-SCORE_VERSION = 1
+# 2 = age-weighted (plan 2.3). Version 1 weighted survival 0.30 and population
+# 0.25 against age 0.20, which ranked the only Feudal game 3rd of 14.
+SCORE_VERSION = 2
+
+
+def _format_seconds(value: object) -> str:
+    """Whole seconds, or empty when the age was never reached."""
+    return f"{value:.0f}" if isinstance(value, (int, float)) else ""
 
 
 def _format_phase_latency(phases: object) -> str:
@@ -161,7 +174,7 @@ def log_experiment(
         change_description,
         f"{score.composite:.4f}",
         f"{score.survival:.4f}",
-        f"{score.population:.4f}",
+        "",  # population — scored in v1 only
         f"{score.age:.4f}",
         f"{score.economy:.4f}",
         f"{score.action_success:.4f}",
@@ -180,6 +193,8 @@ def log_experiment(
         f"{float(score.raw_metrics.get('turn_latency_p90_ms', 0.0)):.0f}",
         _format_phase_latency(score.raw_metrics.get("phase_latency_p50_ms")),
         str(SCORE_VERSION),
+        f"{score.age_speed:.4f}",
+        _format_seconds(score.raw_metrics.get("feudal_time_s")),
     ]
 
     with RESULTS_FILE.open("a", newline="") as f:

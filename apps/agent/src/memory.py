@@ -116,6 +116,9 @@ class MetricsSnapshot(TypedDict):
     llm_calls: int
     llm_errors: int
     llm_error_rate: float
+    # Seconds to reach each age; None when the age was never reached (plan 2.1).
+    feudal_time_s: float | None
+    castle_time_s: float | None
     # Turn latency (plan 0.3). 0.0 when no turn was timed.
     turn_latency_p50_ms: float
     turn_latency_p90_ms: float
@@ -157,6 +160,8 @@ class AgentMemory:
         self.llm_errors: int = 0
         self._llm_error_streak: int = 0
         self.highest_age: str = "Dark Age"
+        # Seconds from game start to the FIRST reading of each age.
+        self.age_times: dict[str, float] = {}
         self.game_start_time: datetime | None = None
         self.game_end_reason: str = ""  # "victory", "defeat", "timeout", ""
         # Cross-game memory attribution. memories_loaded is the list of titles
@@ -248,6 +253,9 @@ class AgentMemory:
         if not age:
             return
         self.game_state.current_age = age
+        # First arrival only — the strategist re-reports the same age every turn.
+        if age not in self.age_times and self.game_start_time is not None:
+            self.age_times[age] = self.get_game_duration_seconds()
         if AGE_SCORES.get(age, 0) > AGE_SCORES.get(self.highest_age, 0):
             self.highest_age = age
 
@@ -412,6 +420,8 @@ class AgentMemory:
             "llm_calls": self.llm_calls,
             "llm_errors": self.llm_errors,
             "llm_error_rate": (self.llm_errors / self.llm_calls if self.llm_calls > 0 else 0.0),
+            "feudal_time_s": self.age_times.get("Feudal Age"),
+            "castle_time_s": self.age_times.get("Castle Age"),
             "turn_latency_p50_ms": latency.turn_p50_ms,
             "turn_latency_p90_ms": latency.turn_p90_ms,
             "turn_latency_max_ms": latency.turn_max_ms,
@@ -434,6 +444,7 @@ class AgentMemory:
         self.llm_errors = 0
         self._llm_error_streak = 0
         self.highest_age = "Dark Age"
+        self.age_times = {}
         self.game_start_time = None
         self.game_end_reason = ""
         self.memories_loaded = []

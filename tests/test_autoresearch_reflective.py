@@ -26,15 +26,15 @@ if TYPE_CHECKING:
 
 
 def _score(**over: float) -> GameScore:
-    base = {"survival": 0.5, "population": 0.2, "age": 0.0, "economy": 0.1, "action_success": 0.4}
+    base = {"age": 0.0, "age_speed": 0.0, "economy": 0.1, "action_success": 0.4, "survival": 0.5}
     base.update(over)
     return GameScore(
         composite=0.3,
-        survival=base["survival"],
-        population=base["population"],
         age=base["age"],
+        age_speed=base["age_speed"],
         economy=base["economy"],
         action_success=base["action_success"],
+        survival=base["survival"],
         raw_metrics={"game_end_reason": "timeout"},
     )
 
