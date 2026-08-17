@@ -1,9 +1,8 @@
-"""Composite scoring for autoresearch experiments.
+"""Composite scoring — turns an AgentMemory metrics snapshot into one 0-1 score."""
 
-Converts raw game metrics from AgentMemory into a single 0-1 score
-that can be compared across experiments (like val_bpb in autoresearch).
-"""
+from __future__ import annotations
 
+from collections.abc import Mapping  # runtime use: the `Metrics` alias below
 from dataclasses import dataclass
 
 # Normalization caps — scores saturate at these values
@@ -12,10 +11,9 @@ MAX_FOOD_GATHERED = 5000
 # A human Dark-to-Feudal is about this; faster than the reference scores 1.0.
 REFERENCE_AGE_UP_SECONDS = 600.0
 
-# Score weights — must sum to 1.0. Version 2 (plan 2.3): age progress and age
-# SPEED carry the score. Under version 1 (survival 0.30, population 0.25, age
-# 0.20) the only game that ever reached Feudal ranked 3rd of 14, behind two
-# games that never left the Dark Age.
+# Weights must sum to 1.0. Version 2 (plan 2.3) puts age progress and age SPEED
+# in charge: under v1 (survival 0.30, population 0.25, age 0.20) the only game
+# that ever reached Feudal ranked 3rd of 14, behind two that never aged up.
 WEIGHT_AGE = 0.40
 WEIGHT_AGE_SPEED = 0.25
 WEIGHT_ECONOMY = 0.20
@@ -29,10 +27,14 @@ AGE_SCORES = {
     "Imperial Age": 1.0,
 }
 
+# The snapshot crosses an untyped boundary (OCR, LLM observations), so values
+# are read as `object` and narrowed rather than trusted.
+Metrics = Mapping[str, object]
 
-@dataclass
+
+@dataclass(frozen=True, slots=True)
 class GameScore:
-    """Breakdown of a game's composite score."""
+    """A game's composite score and its components."""
 
     composite: float
     age: float
@@ -40,44 +42,40 @@ class GameScore:
     economy: float
     action_success: float
     survival: float
-    raw_metrics: dict
+    raw_metrics: Metrics
 
 
-def _age_speed(metrics: dict) -> float:
+def _number(metrics: Metrics, key: str, default: float = 0.0) -> float:
+    """A numeric field, or `default` when absent or non-numeric."""
+    value = metrics.get(key)
+    return float(value) if isinstance(value, (int, float)) else default
+
+
+def _age_speed(metrics: Metrics) -> float:
     """How fast the agent left the Dark Age; 0.0 when it never did."""
-    seconds = metrics.get("feudal_time_s")
-    if not isinstance(seconds, (int, float)) or seconds <= 0:
-        return 0.0
-    return min(1.0, REFERENCE_AGE_UP_SECONDS / seconds)
+    seconds = _number(metrics, "feudal_time_s")
+    return min(1.0, REFERENCE_AGE_UP_SECONDS / seconds) if seconds > 0 else 0.0
 
 
-def _age_progress(metrics: dict) -> float:
-    """Age reached, with a victory scored as Imperial.
+def _age_progress(metrics: Metrics) -> float:
+    """Age reached, counting a victory as Imperial.
 
-    A victory is NOT allowed to set the composite to 1.0. It arrives via
-    `observations.game_state`, the same executor channel `memory.update_age`
-    refuses to trust for age, so one hallucination would top a tournament
-    permanently.
+    A victory must never set the composite to 1.0: it arrives on
+    `observations.game_state`, the channel `memory.update_age` refuses to trust
+    for age, so one hallucination would top a tournament permanently.
     """
     if metrics.get("game_end_reason") == "victory":
         return 1.0
-    return metrics.get("age_score", 0.0)
+    return _number(metrics, "age_score")
 
 
-def compute_score(metrics: dict) -> GameScore:
-    """Compute composite game score from AgentMemory metrics snapshot.
-
-    Args:
-        metrics: Output of AgentMemory.get_metrics_snapshot()
-
-    Returns:
-        GameScore with composite score and per-component breakdown.
-    """
+def compute_score(metrics: Metrics) -> GameScore:
+    """Score one game from `AgentMemory.get_metrics_snapshot()`."""
     age = _age_progress(metrics)
     age_speed = _age_speed(metrics)
-    economy = min(metrics.get("total_food_gathered", 0) / MAX_FOOD_GATHERED, 1.0)
-    action_success = metrics.get("action_success_rate", 0.0)
-    survival = min(metrics.get("survival_time", 0) / MAX_SURVIVAL_SECONDS, 1.0)
+    economy = min(_number(metrics, "total_food_gathered") / MAX_FOOD_GATHERED, 1.0)
+    action_success = _number(metrics, "action_success_rate")
+    survival = min(_number(metrics, "survival_time") / MAX_SURVIVAL_SECONDS, 1.0)
 
     composite = (
         WEIGHT_AGE * age

@@ -5,6 +5,7 @@ Maintains experiments/results.tsv with one row per experiment.
 
 import csv
 import subprocess
+from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -64,6 +65,21 @@ HEADER = [
 # 2 = age-weighted (plan 2.3). Version 1 weighted survival 0.30 and population
 # 0.25 against age 0.20, which ranked the only Feudal game 3rd of 14.
 SCORE_VERSION = 2
+
+
+def _metric(score: GameScore, key: str, default: float = 0.0) -> float:
+    """A numeric metric, or `default` when absent or non-numeric."""
+    value = score.raw_metrics.get(key)
+    return float(value) if isinstance(value, (int, float)) else default
+
+
+def _memories_used_count(metrics: Mapping[str, object]) -> int:
+    """Total `[applied: …]` tags across every loaded memory."""
+    used = metrics.get("memories_used")
+    if not isinstance(used, dict):
+        return 0
+    counts: Iterable[object] = used.values()
+    return sum(v for v in counts if isinstance(v, int))
 
 
 def _format_seconds(value: object) -> str:
@@ -163,9 +179,8 @@ def log_experiment(
     if git_sha is None:
         git_sha = get_git_sha()
 
-    memories_used = score.raw_metrics.get("memories_used", {}) or {}
-    memories_loaded = score.raw_metrics.get("memories_loaded", []) or []
-    memories_used_count = sum(int(v) for v in memories_used.values())
+    memories_loaded = score.raw_metrics.get("memories_loaded")
+    loaded_count = len(memories_loaded) if isinstance(memories_loaded, list) else 0
 
     row = [
         experiment_id,
@@ -178,19 +193,19 @@ def log_experiment(
         f"{score.age:.4f}",
         f"{score.economy:.4f}",
         f"{score.action_success:.4f}",
-        score.raw_metrics.get("game_end_reason", ""),
-        str(score.raw_metrics.get("turn_count", 0)),
+        str(score.raw_metrics.get("game_end_reason", "")),
+        f"{_metric(score, 'turn_count'):.0f}",
         "true" if accepted else "false",
         git_sha if accepted else "(reverted)",
-        str(len(memories_loaded)),
-        str(memories_used_count),
+        str(loaded_count),
+        str(_memories_used_count(score.raw_metrics)),
         tournament_id,
         candidate_id,
         round_num,
         game_in_round,
-        f"{float(score.raw_metrics.get('llm_error_rate', 0.0)):.4f}",
-        f"{float(score.raw_metrics.get('turn_latency_p50_ms', 0.0)):.0f}",
-        f"{float(score.raw_metrics.get('turn_latency_p90_ms', 0.0)):.0f}",
+        f"{_metric(score, 'llm_error_rate'):.4f}",
+        f"{_metric(score, 'turn_latency_p50_ms'):.0f}",
+        f"{_metric(score, 'turn_latency_p90_ms'):.0f}",
         _format_phase_latency(score.raw_metrics.get("phase_latency_p50_ms")),
         str(SCORE_VERSION),
         f"{score.age_speed:.4f}",

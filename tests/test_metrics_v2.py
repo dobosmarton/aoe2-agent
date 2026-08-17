@@ -1,18 +1,19 @@
 """The v2 objective, checked against the committed experiment ledger.
 
-Version 1 weighted survival 0.30 and population 0.25 against age 0.20. Only 1 of
-the 14 recorded games ever left the Dark Age, and under v1 it ranked 3rd —
-behind two games that never aged up at all. These tests pin the fix.
+Under v1 the only game that ever reached Feudal ranked 3rd of 14, behind two
+that never aged up. These tests pin the fix.
 """
 
 from __future__ import annotations
 
 import csv
+import time
 from pathlib import Path
 
 import pytest
 from autoresearch import metrics
 from autoresearch.metrics import GameScore, compute_score
+from gameplay_agent.memory import AgentMemory, Turn
 
 LEDGER = Path(__file__).parent.parent / "experiments" / "results.tsv"
 
@@ -158,32 +159,28 @@ def test_pareto_no_longer_ranks_on_population() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _memory_at_dark_age() -> object:
-    from gameplay_agent.memory import AgentMemory, Turn
-
+def _started_game() -> AgentMemory:
+    """A memory whose clock is running — `add_turn` starts it."""
     memory = AgentMemory()
     memory.add_turn(Turn(iteration=1, timestamp="t", reasoning="r", actions=[]))
     return memory
 
 
 def test_reaching_an_age_records_the_time() -> None:
-    memory = _memory_at_dark_age()
-    memory.update_age("Feudal Age")  # pyright: ignore[reportAttributeAccessIssue]
-    assert memory.get_metrics_snapshot()["feudal_time_s"] is not None  # pyright: ignore[reportAttributeAccessIssue]
+    memory = _started_game()
+    memory.update_age("Feudal Age")
+    assert memory.get_metrics_snapshot()["feudal_time_s"] is not None
 
 
 def test_an_age_never_reached_has_no_time() -> None:
-    memory = _memory_at_dark_age()
-    assert memory.get_metrics_snapshot()["feudal_time_s"] is None  # pyright: ignore[reportAttributeAccessIssue]
+    assert _started_game().get_metrics_snapshot()["feudal_time_s"] is None
 
 
 def test_only_the_first_arrival_at_an_age_is_stamped() -> None:
     """The strategist re-reports the same age every turn."""
-    import time as _time
-
-    memory = _memory_at_dark_age()
-    memory.update_age("Feudal Age")  # pyright: ignore[reportAttributeAccessIssue]
-    first = memory.age_times["Feudal Age"]  # pyright: ignore[reportAttributeAccessIssue]
-    _time.sleep(0.01)
-    memory.update_age("Feudal Age")  # pyright: ignore[reportAttributeAccessIssue]
-    assert memory.age_times["Feudal Age"] == first  # pyright: ignore[reportAttributeAccessIssue]
+    memory = _started_game()
+    memory.update_age("Feudal Age")
+    first = memory.age_times["Feudal Age"]
+    time.sleep(0.01)
+    memory.update_age("Feudal Age")
+    assert memory.age_times["Feudal Age"] == first
