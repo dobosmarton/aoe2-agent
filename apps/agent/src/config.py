@@ -1,6 +1,7 @@
 """Configuration settings for the AoE2 LLM Agent."""
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Literal, get_args
 
@@ -14,6 +15,35 @@ KEY_ENV = "AOE2_LLM_API_KEY"
 WIRE_ENV = "AOE2_LLM_WIRE"
 # Derived from the Literal so the valid set is written once.
 _WIRES: Final[tuple[WireName, ...]] = get_args(WireName)
+
+
+@dataclass(frozen=True, slots=True)
+class WireModels:
+    """The 3 model roles one vendor serves."""
+
+    executor: str  # every turn — pick speed
+    strategist: str  # every 3-10 turns — pick reasoning
+    memory: str  # post-game only — pick price
+
+
+# OpenCode Zen resells the same GPT models over the OpenAI request shape.
+_GPT_MODELS: Final = WireModels(
+    executor="gpt-5.6-luna",
+    strategist="gpt-5.6-terra",
+    memory="gpt-5.6-luna",
+)
+
+# The defaults follow the wire because a model name belongs to its vendor:
+# "gpt-5.6-luna" against the Anthropic endpoint fails every call.
+_MODELS_BY_WIRE: Final[dict[WireName, WireModels]] = {
+    "openai": _GPT_MODELS,
+    "zen": _GPT_MODELS,
+    "anthropic": WireModels(
+        executor="claude-haiku-4-5",
+        strategist="claude-sonnet-5",
+        memory="claude-haiku-4-5",
+    ),
+}
 
 
 def _parse_optional_int(value: str | None) -> int | None:
@@ -65,21 +95,21 @@ class Config(BaseModel):
     # non-default host (a staging gateway, a self-hosted proxy).
     llm_base_url: str = ""  # AOE2_LLM_BASE_URL
     llm_api_key: str = ""  # AOE2_LLM_API_KEY — the only credential
-    model: str = "gpt-5.6-luna"  # Executor
+    model: str = _GPT_MODELS.executor  # AOE2_MODEL
     max_tokens: int = 1536
     max_tool_iterations: int = 7  # Max tool calls per game turn in agentic loop
     executor_effort: EffortLevel = "low"  # reasoning effort for the executor tool loop
-    strategist_model: str = "gpt-5.6-luna"  # Strategist: deeper reasoning
+    strategist_model: str = _GPT_MODELS.strategist  # AOE2_STRATEGIST_MODEL
     strategist_interval: int = 10  # Run strategist every N turns
-    # Post-game memory extraction and prompt mutation: a cheap model is enough.
-    memory_model: str = "gpt-5.6-luna"  # AOE2_MEMORY_MODEL
+    memory_model: str = _GPT_MODELS.memory  # AOE2_MEMORY_MODEL
     # Resource bar is read locally (Claude vision dropped). Backend: rapidocr
     # (pip-only, runs on onnxruntime) | tesseract (needs binary) | template.
     ocr_backend: str = "rapidocr"  # AOE2_OCR_BACKEND
 
     # Determinism knobs (Phase 3). Pin model snapshots via AOE2_MODEL /
     # AOE2_STRATEGIST_MODEL to a dated form rather than the floating family
-    # alias for reproducible runs.
+    # alias for reproducible runs. pricing.py keys on the exact name, so a
+    # dated snapshot costs $0.00 until it is added there.
     # Unset means "do not send it", so each model applies its own default. The
     # gpt-5.6 family rejects every value but 1, so a hardcoded 0.0 made every
     # call a 400 (run 2026_08_15_1: 88 of 88 failed).
@@ -122,15 +152,18 @@ class Config(BaseModel):
     @classmethod
     def from_env(cls) -> "Config":
         """Load configuration from environment variables."""
+        wire = _parse_wire(os.environ.get(WIRE_ENV))
+        models = _MODELS_BY_WIRE[wire]
+        # An exported-but-empty override means "unset", as it does for the wire.
         return cls(
-            llm_wire=_parse_wire(os.environ.get("AOE2_LLM_WIRE")),
+            llm_wire=wire,
             llm_base_url=os.environ.get("AOE2_LLM_BASE_URL", ""),
             llm_api_key=os.environ.get(KEY_ENV, ""),
-            model=os.environ.get("AOE2_MODEL", "gpt-5.6-luna"),
+            model=os.environ.get("AOE2_MODEL") or models.executor,
             executor_effort=_parse_effort(os.environ.get("AOE2_EXECUTOR_EFFORT")),
-            strategist_model=os.environ.get("AOE2_STRATEGIST_MODEL", "gpt-5.6-luna"),
+            strategist_model=os.environ.get("AOE2_STRATEGIST_MODEL") or models.strategist,
             strategist_interval=int(os.environ.get("AOE2_STRATEGIST_INTERVAL", "10")),
-            memory_model=os.environ.get("AOE2_MEMORY_MODEL", "gpt-5.6-luna"),
+            memory_model=os.environ.get("AOE2_MEMORY_MODEL") or models.memory,
             ocr_backend=os.environ.get("AOE2_OCR_BACKEND", "rapidocr"),
             loop_delay=float(os.environ.get("AOE2_LOOP_DELAY", "0.3")),
             save_screenshots=os.environ.get("AOE2_SAVE_SCREENSHOTS", "true").lower() == "true",

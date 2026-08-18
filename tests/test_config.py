@@ -139,3 +139,82 @@ def test_base_url_is_unset_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.delenv("AOE2_LLM_BASE_URL", raising=False)
     assert Config.from_env().llm_base_url == ""
+
+
+# ---------------------------------------------------------------------------
+# Model defaults per wire
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def unpinned_models(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Clear the 3 model overrides; a shell export would mask the default."""
+    for name in ("AOE2_MODEL", "AOE2_STRATEGIST_MODEL", "AOE2_MEMORY_MODEL"):
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.mark.usefixtures("unpinned_models")
+def test_openai_wire_runs_the_fast_executor(monkeypatch: pytest.MonkeyPatch) -> None:
+    from gameplay_agent.config import Config
+
+    monkeypatch.setenv("AOE2_LLM_WIRE", "openai")
+    assert Config.from_env().model == "gpt-5.6-luna"
+
+
+@pytest.mark.usefixtures("unpinned_models")
+def test_openai_wire_runs_the_strong_strategist(monkeypatch: pytest.MonkeyPatch) -> None:
+    from gameplay_agent.config import Config
+
+    monkeypatch.setenv("AOE2_LLM_WIRE", "openai")
+    assert Config.from_env().strategist_model == "gpt-5.6-terra"
+
+
+@pytest.mark.usefixtures("unpinned_models")
+def test_anthropic_wire_runs_the_fast_executor(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A gpt name against the Anthropic endpoint fails every call."""
+    from gameplay_agent.config import Config
+
+    monkeypatch.setenv("AOE2_LLM_WIRE", "anthropic")
+    assert Config.from_env().model == "claude-haiku-4-5"
+
+
+@pytest.mark.usefixtures("unpinned_models")
+def test_anthropic_wire_runs_the_strong_strategist(monkeypatch: pytest.MonkeyPatch) -> None:
+    from gameplay_agent.config import Config
+
+    monkeypatch.setenv("AOE2_LLM_WIRE", "anthropic")
+    assert Config.from_env().strategist_model == "claude-sonnet-5"
+
+
+def test_strategist_override_beats_the_wire_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    from gameplay_agent.config import Config
+
+    monkeypatch.setenv("AOE2_LLM_WIRE", "openai")
+    monkeypatch.setenv("AOE2_STRATEGIST_MODEL", "kimi-k2.7-code")
+    assert Config.from_env().strategist_model == "kimi-k2.7-code"
+
+
+def test_empty_model_falls_back_to_the_wire_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An exported-but-empty var means "unset", the same rule AOE2_LLM_WIRE follows."""
+    from gameplay_agent.config import Config
+
+    monkeypatch.setenv("AOE2_LLM_WIRE", "openai")
+    monkeypatch.setenv("AOE2_MODEL", "")
+    assert Config.from_env().model == "gpt-5.6-luna"
+
+
+@pytest.mark.parametrize("wire", ["anthropic", "openai", "zen"])
+@pytest.mark.usefixtures("unpinned_models")
+def test_every_default_model_has_a_price(wire: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An unpriced default reads $0.00, which makes a run look free."""
+    from gameplay_agent.config import Config
+    from gameplay_agent.providers.pricing import price_for
+
+    monkeypatch.setenv("AOE2_LLM_WIRE", wire)
+    resolved = Config.from_env()
+    unpriced = [
+        name
+        for name in (resolved.model, resolved.strategist_model, resolved.memory_model)
+        if price_for(name).input == 0.0
+    ]
+    assert unpriced == []

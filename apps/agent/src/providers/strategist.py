@@ -25,6 +25,7 @@ from ..resource_ocr import (
     read_resource_bar,
 )
 from .base import ChatRequest, ChatWire, SystemBlock, UserTurn, text_of_blocks
+from .pricing import cost_usd
 from .wire_factory import make_wire
 
 log = structlog.stdlib.get_logger()
@@ -257,10 +258,13 @@ class StrategistProvider:
             ),
             StrategistResponse,
         )
+        # Nothing else prices these calls, and this is the dearer of the 2 models.
         log.info(
             "strategist_usage",
+            model=self.model,
             input_tokens=usage.input_tokens,
             output_tokens=usage.output_tokens,
+            cost_usd=round(cost_usd(self.model, usage), 4),
         )
         return parsed
 

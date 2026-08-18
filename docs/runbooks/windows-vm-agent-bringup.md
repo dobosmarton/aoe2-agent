@@ -76,7 +76,7 @@ You should see structured logs like:
 
 ```
 detector_initialized   mode=remote server=http://192.168.64.1:8420
-game_loop_start        detection=True executor_model=gpt-5.6-luna
+game_loop_start        detection=True executor_model=gpt-5.6-luna strategist_model=gpt-5.6-terra
 iteration_start        iteration=1
 screenshot_captured    width=1920 height=1080
 detection_complete     entity_count=12
@@ -106,10 +106,10 @@ These are accumulated failure modes from many bring-up attempts:
 
 | Env var | Default | When to change |
 |---|---|---|
-| `AOE2_MODEL` | `claude-sonnet-4-6` | Pin to a dated snapshot for reproducibility (autoresearch runs). |
+| `AOE2_MODEL` | `gpt-5.6-luna` | Executor: fast, runs every turn. Pin to a dated snapshot for reproducibility (autoresearch runs). |
 | `AOE2_EXECUTOR_EFFORT` | `low` | `medium`/`high` for deeper executor reasoning at higher latency. |
-| `AOE2_STRATEGIST_MODEL` | `claude-sonnet-4-6` | Same. |
-| `AOE2_STRATEGIST_INTERVAL` | `10` | Lower (e.g. 5) for tighter goal updates; higher (20+) to save Sonnet cost. |
+| `AOE2_STRATEGIST_MODEL` | `gpt-5.6-terra` | Strategist: strong, runs every 3-10 turns. Same pinning advice. |
+| `AOE2_STRATEGIST_INTERVAL` | `10` | Lower (e.g. 5) for tighter goal updates; higher (20+) to save strategist cost. |
 | `AOE2_LOOP_DELAY` | `0.3` | Slow CPU? Bump to 1.0. Fast CPU and you want more turns/min? 0.1. |
 | `AOE2_SAVE_SCREENSHOTS` | `true` | `false` if disk is filling up. |
 | `AOE2_TEMPERATURE` | `0.0` | Raise for output diversity at reproducibility cost. |

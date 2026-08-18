@@ -16,7 +16,7 @@ The agent splits decision-making into two models:
 
 **Executor (Sonnet)** — Runs every turn. Receives only text: YOLO entity list, cached resource readings, active goals, memory context, and game knowledge. Returns structured actions (clicks, key presses) validated as Pydantic models. `build` is a **coordinate-free** action — the model picks the building, the executor auto-places it near the Town Center — and a no-actions turn falls back to building a house when housed, so the economy never freezes at the population cap. Routine turns take a fast single-shot call; combat/housing turns take an agentic tool loop (see [Chapter 4 §4.3](../part2-llm-integration/04-provider-pattern.md)).
 
-The split separates concerns: the strategist owns slow, periodic goal-setting; the executor owns rapid, per-turn tactics. Both tiers are text-only — the strategist reads the HUD via local OCR, the executor reads the YOLO entity list. Both run `gpt-5.6-luna` over an OpenAI-compatible wire by default (Claude remains one env var away), and a per-call `effort` knob (default `low`) keeps the executor fast.
+The split separates concerns: the strategist owns slow, periodic goal-setting; the executor owns rapid, per-turn tactics. Both tiers are text-only — the strategist reads the HUD via local OCR, the executor reads the YOLO entity list. Both run over an OpenAI-compatible wire by default (Claude remains one env var away), on separate models: the executor takes the fast `gpt-5.6-luna`, the strategist the stronger `gpt-5.6-terra`, and a per-call `effort` knob (default `low`) keeps the executor fast.
 
 ## 1.2 Component Map
 
@@ -104,9 +104,9 @@ Configuration uses a Pydantic `BaseModel` with environment variable overrides (`
 | `llm_api_key` | `AOE2_LLM_API_KEY` | `""` | Model API authentication |
 | `llm_wire` | `AOE2_LLM_WIRE` | `openai` | Adapter: `openai`, `zen` or `anthropic` |
 | `llm_base_url` | `AOE2_LLM_BASE_URL` | `""` | Endpoint override; empty uses the adapter's own |
-| `model` | `AOE2_MODEL` | `gpt-5.6-luna` | Executor model (instruction-following) |
+| `model` | `AOE2_MODEL` | `gpt-5.6-luna` | Executor model (fast; runs every turn) |
 | `executor_effort` | `AOE2_EXECUTOR_EFFORT` | `low` | Executor `output_config` effort (`low`/`medium`/`high`) |
-| `strategist_model` | `AOE2_STRATEGIST_MODEL` | `gpt-5.6-luna` | Strategist model (deeper reasoning) |
+| `strategist_model` | `AOE2_STRATEGIST_MODEL` | `gpt-5.6-terra` | Strategist model (strong; deeper reasoning) |
 | `strategist_interval` | `AOE2_STRATEGIST_INTERVAL` | `10` | Run strategist every N turns |
 | `max_tokens` | — | `1536` | Max response tokens per executor call |
 | `max_tool_iterations` | — | `7` | Max tool roundtrips per turn (tool-loop path) |
@@ -118,6 +118,8 @@ Configuration uses a Pydantic `BaseModel` with environment variable overrides (`
 | `action_delay` | — | `0.05` | Seconds between individual actions |
 | `pipeline_commit_max` | `AOE2_PIPELINE_COMMIT_MAX` | `2` | Actions committed per pipelined (routine) turn; the tail is discarded |
 | `save_screenshots` | `AOE2_SAVE_SCREENSHOTS` | `true` | Log screenshots to disk |
+
+The 3 model defaults follow `AOE2_LLM_WIRE`, because a model name belongs to its vendor: the `anthropic` wire serves `claude-haiku-4-5` to the executor and `claude-sonnet-5` to the strategist. `config._MODELS_BY_WIRE` holds the table. An env override still wins per role.
 
 `AOE2_LLM_WIRE` tolerates case and surrounding whitespace, so `ZEN` and `" zen "` both resolve. An unrecognised name raises at startup rather than falling back — `config._parse_wire` is the only validator, and a silent fallback would play a whole game on a vendor nobody chose:
 

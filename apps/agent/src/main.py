@@ -80,7 +80,10 @@ def main() -> None:
         type=str,
         default=None,
         choices=list(get_args(WireName)),
-        help="Adapter serving the model (default: AOE2_LLM_WIRE, else openai)",
+        help=(
+            "Adapter serving the model (default: AOE2_LLM_WIRE, else openai). "
+            "Adapter only — the models still follow AOE2_LLM_WIRE."
+        ),
     )
     parser.add_argument(
         "--test",

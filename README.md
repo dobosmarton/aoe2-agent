@@ -119,9 +119,9 @@ ValueError: unknown AOE2_LLM_WIRE='zzz'; expected one of 'anthropic', 'openai', 
 | `AOE2_LLM_API_KEY` | — | Model API authentication (required) |
 | `AOE2_LLM_WIRE` | `openai` | Adapter: `openai`, `zen` (OpenCode Zen) or `anthropic` |
 | `AOE2_LLM_BASE_URL` | — | Endpoint override; empty uses the adapter's own |
-| `AOE2_MODEL` | `gpt-5.6-luna` | Executor model |
+| `AOE2_MODEL` | `gpt-5.6-luna` | Executor model (fast; runs every turn) |
 | `AOE2_EXECUTOR_EFFORT` | `low` | Executor effort (`low`/`medium`/`high`) |
-| `AOE2_STRATEGIST_MODEL` | `gpt-5.6-luna` | Strategist model |
+| `AOE2_STRATEGIST_MODEL` | `gpt-5.6-terra` | Strategist model (strong; runs every 3-10 turns) |
 | `AOE2_STRATEGIST_INTERVAL` | `10` | Run strategist every N turns |
 | `AOE2_LOOP_DELAY` | `0.3` | Seconds between iterations |
 | `AOE2_SAVE_SCREENSHOTS` | `true` | Save screenshots to logs/ |
@@ -176,7 +176,8 @@ Three knobs to make runs as reproducible as the model vendor and the Python stac
 
 - **`AOE2_TEMPERATURE`** is unset by default, which means the field is not sent and each model applies its own. Set `0.0` for the lowest variance on adapters that allow it. The `gpt-5.6` family does **not**: it accepts only its default of 1 and returns `400 unsupported_value` for anything else, so there is no low-variance setting available on the current default model.
 - **`AOE2_SEED=<int>`** seeds the local RNG used in `executor.py`'s build-retry jitter and Phase 1's `world_sim.render()` default fallback. Two runs with the same seed produce the same RNG sequence. Leave unset to get today's stochastic behavior (OS entropy). **Not passed to the model API** — neither adapter's call path accepts `seed=`; this is purely for the local code paths.
-- **Pin model snapshots.** Set `AOE2_MODEL` and `AOE2_STRATEGIST_MODEL` to a dated snapshot rather than the floating family alias. Floating tags can move under you between runs.
+- **Pin model snapshots.** Set `AOE2_MODEL` and `AOE2_STRATEGIST_MODEL` to a dated snapshot rather than the floating family alias. Floating tags can move under you between runs. `providers/pricing.py` keys on the exact name, so add the dated name there too or every cost figure reads $0.00.
+- **The defaults follow the wire.** A model name belongs to its vendor, so `AOE2_LLM_WIRE=anthropic` defaults the executor to `claude-haiku-4-5` and the strategist to `claude-sonnet-5`. `config._MODELS_BY_WIRE` holds the table; an env override still wins per role.
 
 ### Synthetic Arena infrastructure (optional)
 

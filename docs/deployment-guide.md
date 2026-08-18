@@ -227,7 +227,7 @@ python -m gameplay_agent --test
 You should see logs like:
 ```
 detector_initialized         mode=remote server=http://192.168.64.1:8420
-game_loop_start              detection=True executor_model=gpt-5.6-luna
+game_loop_start              detection=True executor_model=gpt-5.6-luna strategist_model=gpt-5.6-terra
 iteration_start              iteration=1
 screenshot_captured           width=1920 height=1080
 detection_complete           entity_count=12
@@ -288,12 +288,14 @@ The remote detector logs `remote_detector_unavailable` and falls back to local O
 | `AOE2_LLM_WIRE` | `openai` | VM | Adapter: `openai`, `zen` (OpenCode Zen) or `anthropic`. An unknown name raises at startup |
 | `AOE2_LLM_BASE_URL` | `""` | VM | Endpoint override; empty uses the adapter's own |
 | `AOE2_DETECTION_HOST` | `""` | VM | Detection server URL, e.g. `http://192.168.64.1:8420` |
-| `AOE2_MODEL` | `gpt-5.6-luna` | VM | Executor LLM model |
+| `AOE2_MODEL` | `gpt-5.6-luna` | VM | Executor LLM model (fast; runs every turn) |
 | `AOE2_EXECUTOR_EFFORT` | `low` | VM | Executor effort (`low`/`medium`/`high`) |
-| `AOE2_STRATEGIST_MODEL` | `gpt-5.6-luna` | VM | Strategist LLM model |
+| `AOE2_STRATEGIST_MODEL` | `gpt-5.6-terra` | VM | Strategist LLM model (strong; runs every 3-10 turns) |
 | `AOE2_STRATEGIST_INTERVAL` | `10` | VM | Run strategist every N turns |
 | `AOE2_LOOP_DELAY` | `0.3` | VM | Seconds between game loop iterations |
 | `AOE2_SAVE_SCREENSHOTS` | `true` | VM | Save screenshots to `logs/` |
+
+The 3 model defaults follow `AOE2_LLM_WIRE`, because a model name belongs to its vendor. `AOE2_LLM_WIRE=anthropic` defaults the executor to `claude-haiku-4-5` and the strategist to `claude-sonnet-5`. `config._MODELS_BY_WIRE` holds the table.
 
 ### Server CLI Flags
 
