@@ -70,9 +70,16 @@ def _as_int(value: object) -> int:
 
 
 def from_game_state(
-    state: GameState, *, villager_jobs: Mapping[str, int] | None = None
+    state: GameState,
+    *,
+    captured_at: float,
+    villager_jobs: Mapping[str, int] | None = None,
 ) -> PolicyState:
-    """Build from the real game's `memory.GameState`."""
+    """Build from the real game's `memory.GameState`.
+
+    `captured_at` is when the frame was grabbed, not when this call runs.
+    Required: letting it default made every `max_state_age_ms` a tautology.
+    """
     resources = state.resources
     jobs = _NO_JOBS if villager_jobs is None else MappingProxyType(dict(villager_jobs))
     return PolicyState(
@@ -89,6 +96,7 @@ def from_game_state(
         idle_count=state.idle_count,
         idle_streak=state.idle_streak,
         villager_jobs=jobs,
+        captured_at=captured_at,
     )
 
 

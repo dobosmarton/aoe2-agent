@@ -161,7 +161,7 @@ The single-loop invariant breaks the moment you call into blocking code (the syn
 
 Structured logging via structlog with colored console output, configured in `apps/agent/src/main.py`.
 
-Key log events: `iteration_start`, `screenshot_captured`, `detection_complete`, `strategist_response`, `strategist_goals_updated`, `llm_response`, `actions_executed`, `routine_executed`, `pipeline_head_committed`, `action_verification`, `alarm_triggered`, `turn_reward`.
+Key log events: `iteration_start`, `screenshot_captured`, `detection_complete`, `strategist_response`, `strategist_goals_updated`, `llm_response`, `actions_executed`, `routine_decided`, `policy_rule_stale`, `pipeline_head_committed`, `action_verification`, `alarm_triggered`, `turn_reward`.
 
 ---
 

@@ -3,12 +3,21 @@
 from __future__ import annotations
 
 import textwrap
+import time
 from pathlib import Path  # noqa: TC003  -- runtime use: tmp_path fixture annotations
 
 import pytest
+from gameplay_agent.memory import GameState
 from gameplay_agent.policy.engine import decide, matched_actions, registry
 from gameplay_agent.policy.rules import RuleError, load_rules
-from gameplay_agent.policy.state import PolicyState
+from gameplay_agent.policy.state import PolicyState, from_game_state
+
+
+def _populated() -> GameState:
+    """A game state the `population > 0` fixture rule matches."""
+    state = GameState()
+    state.population = 1
+    return state
 
 
 def _write(tmp_path: Path, body: str) -> Path:
@@ -178,6 +187,27 @@ def test_a_stale_snapshot_skips_the_rule(tmp_path: Path) -> None:
     assert matched_actions(stale, load_rules([path])) == []
 
 
+@pytest.fixture
+def budgeted_rule(tmp_path: Path) -> Path:
+    """One rule that matches a populated state and allows a 1-second-old one."""
+    return _write(tmp_path, _rule("population > 0", max_state_age_ms=1000))
+
+
+def test_an_old_frame_skips_a_budgeted_rule(budgeted_rule: Path) -> None:
+    """Until plan 3b `from_game_state` stamped its own call time, so no state aged."""
+    aged = from_game_state(_populated(), captured_at=time.monotonic() - 10.0)
+    assert matched_actions(aged, load_rules([budgeted_rule])) == []
+
+
+def test_a_stale_skip_leaves_a_trace(
+    budgeted_rule: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A rule that stops firing must not stop silently."""
+    aged = from_game_state(_populated(), captured_at=time.monotonic() - 10.0)
+    matched_actions(aged, load_rules([budgeted_rule]))
+    assert "policy_rule_stale" in capsys.readouterr().out
+
+
 def test_alarm_emits_nothing() -> None:
     assert decide([], PolicyState(population=20, population_cap=30), alarm=True) == []
 
@@ -201,11 +231,8 @@ def test_villager_jobs_cannot_be_mutated_through_the_mapping() -> None:
 
 def test_villager_jobs_copies_the_caller_s_dict() -> None:
     """A later write by the caller must not reach a snapshot already taken."""
-    from gameplay_agent.memory import GameState
-    from gameplay_agent.policy.state import from_game_state
-
     jobs = {"food": 3}
-    state = from_game_state(GameState(), villager_jobs=jobs)
+    state = from_game_state(GameState(), captured_at=time.monotonic(), villager_jobs=jobs)
     jobs["food"] = 999
     assert state.villager_jobs["food"] == 3
 

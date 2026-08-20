@@ -17,6 +17,7 @@ from __future__ import annotations
 import itertools
 import json
 import random
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -101,7 +102,8 @@ def _cases() -> list[tuple[str, list[dict[str, object]]]]:
     entity_sets = _entity_sets()
     out: list[tuple[str, list[dict[str, object]]]] = []
     for case in _EDGE_CASES:
-        actions = decide([], from_game_state(case.to_game_state()), alarm=False)
+        fresh = from_game_state(case.to_game_state(), captured_at=time.monotonic())
+        actions = decide([], fresh, alarm=False)
         out.append((f"edge|{case.name}", actions))
     for age, buildings in itertools.product(_AGES, _BUILDING_SETS):
         for _ in range(_CASES_PER_COMBINATION):
@@ -130,7 +132,8 @@ def _cases() -> list[tuple[str, list[dict[str, object]]]]:
                 f"|idle={state.idle_present},{state.idle_count},{state.idle_streak}"
                 f"|ents={len(entities)}"
             )
-            out.append((key, decide(entities, from_game_state(state), alarm=False)))
+            fresh = from_game_state(state, captured_at=time.monotonic())
+            out.append((key, decide(entities, fresh, alarm=False)))
     return out
 
 

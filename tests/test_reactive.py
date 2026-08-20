@@ -5,6 +5,7 @@ Pure functions over fake entity dicts + GameState. No executor / pyautogui.
 
 from __future__ import annotations
 
+import time
 from collections import Counter
 
 import pytest
@@ -19,7 +20,7 @@ from tests.factories import make_entity as _ent
 
 def decide(entities: list, state: GameState, alarm: bool) -> list[dict]:
     """Drive the engine from a GameState, as the game loop does."""
-    return _policy_decide(entities, from_game_state(state), alarm)
+    return _policy_decide(entities, from_game_state(state, captured_at=time.monotonic()), alarm)
 
 
 def _routed_kinds(state: GameState, count: int = 5) -> tuple[str, ...]:
@@ -31,7 +32,7 @@ def _routed_kinds(state: GameState, count: int = 5) -> tuple[str, ...]:
     from gameplay_agent.policy import allocation
     from gameplay_agent.policy.engine import registry, wood_bank_target
 
-    policy_state = from_game_state(state)
+    policy_state = from_game_state(state, captured_at=time.monotonic())
     target = wood_bank_target(policy_state, registry())
     mix = allocation.for_state(policy_state, None, target)
     jobs: dict[str, int] = dict(policy_state.villager_jobs)
@@ -239,10 +240,11 @@ def test_age_up_rule_requires_exactly_the_world_sims_prereqs() -> None:
 
     age_up = next(r for r in registry() if r.id == "age_up_feudal")
     banked = _state(population=22, food=520, buildings=FEUDAL_PREREQ_BUILDINGS)
-    assert age_up.matches(from_game_state(banked))
+    assert age_up.matches(from_game_state(banked, captured_at=time.monotonic()))
     for missing in FEUDAL_PREREQ_BUILDINGS:
         short = FEUDAL_PREREQ_BUILDINGS - {missing}
-        assert not age_up.matches(from_game_state(_state(22, food=520, buildings=short)))
+        without_prereq = _state(22, food=520, buildings=short)
+        assert not age_up.matches(from_game_state(without_prereq, captured_at=time.monotonic()))
 
 
 @pytest.mark.parametrize(
@@ -523,7 +525,9 @@ def test_house_rule_stays_inside_the_executors_allow_band() -> None:
 
     house = next(r for r in registry() if r.id == "house_when_headroom_gone")
     for headroom in range(ex._HOUSE_HEADROOM_MAX + 1):
-        state = from_game_state(_state(population=30 - headroom, population_cap=30))
+        state = from_game_state(
+            _state(population=30 - headroom, population_cap=30), captured_at=time.monotonic()
+        )
         if house.matches(state):
             return
     raise AssertionError("house rule never fires inside the executor's allow band")

@@ -1,12 +1,17 @@
 # Feudal Age and later — exported from reactive.py, 2026-08-17.
 # See ../findings.md for the run review behind each provenance tag.
+#
+# `max_state_age_ms` is provisional at 30000 on every rule. The declared
+# 2000-6000 budgets were seeded for the act loop; today's coupled tick spans
+# OCR and detection, so enforcing them would skip the rule, not the stale
+# reading. Real numbers once the act loop lands.
 
 - id: queue_villager_feudal
   when: age == 'Feudal Age' and villagers_ordered < 35 and villagers_ordered < population_cap
   then: {type: queue_villager, intent: Queue villager (reactive)}
   weight: 80
   cost: {food: 50}
-  max_state_age_ms: 6000
+  max_state_age_ms: 30000
   provenance: seed/F-11
   enabled: true
   stats: {fired: 0, ablation_delta: null, ablation_ci: null}
@@ -21,7 +26,7 @@
   then: {type: queue_villager, intent: Queue villager (reactive)}
   weight: 80
   cost: {food: 50}
-  max_state_age_ms: 6000
+  max_state_age_ms: 30000
   provenance: seed/F-38
   enabled: true
   stats: {fired: 0, ablation_delta: null, ablation_ci: null}
@@ -38,7 +43,7 @@
   weight: 60
   cost: {wood: 100}
   bank_wood: true
-  max_state_age_ms: 4000
+  max_state_age_ms: 30000
   provenance: seed/F-46
   enabled: true
   stats: {fired: 0, ablation_delta: null, ablation_ci: null}

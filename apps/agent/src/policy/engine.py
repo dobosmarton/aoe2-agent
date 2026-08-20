@@ -55,7 +55,8 @@ def matched_actions(state: PolicyState, rules: Sequence[Rule]) -> list[dict[str,
         if not rule.enabled or not rule.matches(state):
             continue
         if not rule.is_fresh(state):
-            log.debug("policy_rule_stale", rule=rule.id, age_ms=round(state.age_ms))
+            # info, unlike the drop below: contention is routine, staleness is not.
+            log.info("policy_rule_stale", rule=rule.id, age_ms=round(state.age_ms))
             continue
         if not _can_afford(rule, balance):
             log.debug("policy_rule_unaffordable", rule=rule.id, cost=rule.cost, have=balance)

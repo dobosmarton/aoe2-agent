@@ -12,6 +12,11 @@
 #
 # See ../findings.md for the run review behind each `provenance` tag. Per plan
 # 0.2 a seed rule is exempt from retirement until it has been ablated once.
+#
+# `max_state_age_ms` is provisional at 30000 on every rule. The declared
+# 2000-6000 budgets were seeded for the act loop; today's coupled tick spans
+# OCR and detection, so enforcing them would skip the rule, not the stale
+# reading. Real numbers once the act loop lands.
 
 - id: age_up_feudal
   when: >
@@ -22,7 +27,7 @@
     - {type: press, key: z, intent: Research Feudal Age (reactive)}
   weight: 100
   cost: {food: 500}
-  max_state_age_ms: 2000
+  max_state_age_ms: 30000
   provenance: seed/F-26+F-27+F-32
   enabled: true
   stats: {fired: 0, ablation_delta: null, ablation_ci: null}
@@ -32,7 +37,8 @@
   # menu when nothing needs cancelling (run 8, F-32).
   # Gated on the two-building requirement so the press fires once when it can
   # succeed; run 6 spammed 14 no-ops against a greyed button (F-26).
-  # Tight freshness budget: a stale food reading here spends the wrong turn.
+  # Wants the tightest freshness budget of the 8 — a stale food reading here
+  # spends the wrong turn. 2000 ms returns once the act loop lands.
 
 - id: house_when_headroom_gone
   when: population_cap < 200 and (population_cap - population) <= 2
@@ -42,7 +48,7 @@
     intent: "Build house (headroom {population}/{population_cap})"
   weight: 90
   cost: {wood: 25}
-  max_state_age_ms: 4000
+  max_state_age_ms: 30000
   provenance: seed/F-45
   enabled: true
   stats: {fired: 0, ablation_delta: null, ablation_ci: null}
@@ -57,7 +63,7 @@
   then: {type: queue_villager, intent: Queue villager (reactive)}
   weight: 80
   cost: {food: 50}
-  max_state_age_ms: 6000
+  max_state_age_ms: 30000
   provenance: seed/F-38+F-16+F-11
   enabled: true
   stats: {fired: 0, ablation_delta: null, ablation_ci: null}
@@ -78,7 +84,7 @@
   weight: 72
   cost: {wood: 100}
   bank_wood: true
-  max_state_age_ms: 4000
+  max_state_age_ms: 30000
   provenance: seed/F-41+F-26
   enabled: true
   stats: {fired: 0, ablation_delta: null, ablation_ci: null}
@@ -99,7 +105,7 @@
   weight: 70
   cost: {wood: 100}
   bank_wood: true
-  max_state_age_ms: 4000
+  max_state_age_ms: 30000
   provenance: seed/F-26+F-34
   enabled: true
   stats: {fired: 0, ablation_delta: null, ablation_ci: null}

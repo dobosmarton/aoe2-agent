@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -124,20 +125,27 @@ async def _run_routine_upkeep(
     goal_manager: GoalManager,
     detected_entities: list[object],
     alarm: bool,
+    *,
+    captured_at: float,
 ) -> None:
     """Routine villager upkeep — the work done in the LLM's in-flight window
     while the turn's plan computes. (Opening ground commands run earlier, before
     the first perception pass — see the iteration-1 block in `game_loop`.)"""
     jobs = gather_counts(job_counts(infer_jobs(detected_entities))) if detected_entities else {}
-    policy_state = from_game_state(memory.game_state, villager_jobs=jobs)
+    policy_state = from_game_state(memory.game_state, captured_at=captured_at, villager_jobs=jobs)
     routine_cmds = policy_decide(
         detected_entities, policy_state, alarm, strategist_allocation=goal_manager.allocation
     )
-    if routine_cmds:
-        routine_actions = validate_actions(routine_cmds)
-        if routine_actions:
-            await execute_actions(routine_actions)
-            log.info("routine_executed", iteration=iteration, count=len(routine_actions))
+    routine_actions = validate_actions(routine_cmds)
+    # Logged even when empty: a turn where every rule was skipped is the one worth seeing.
+    log.info(
+        "routine_decided",
+        iteration=iteration,
+        actions=len(routine_actions),
+        state_age_ms=round(policy_state.age_ms),
+    )
+    if routine_actions:
+        await execute_actions(routine_actions)
 
 
 def _register_focus_failure(memory: AgentMemory, failures: int) -> tuple[int, bool]:
@@ -329,6 +337,8 @@ async def game_loop(
                         await execute_actions(ground_actions)
 
                 with turn.phase("capture"):
+                    # `_capture_screenshot` has no await, so this stamps the frame.
+                    captured_at = time.monotonic()
                     screenshot, width, height = await _capture_screenshot(
                         overlay,
                         screenshots_dir,
@@ -392,7 +402,12 @@ async def game_loop(
                     this_task = asyncio.create_task(provider.get_actions(context, width, height))
                     with turn.phase("upkeep"):
                         await _run_routine_upkeep(
-                            iteration, memory, goal_manager, detected_entities, alarm
+                            iteration,
+                            memory,
+                            goal_manager,
+                            detected_entities,
+                            alarm,
+                            captured_at=captured_at,
                         )
                     if pending_plan is not None:
                         with turn.phase("deliberate"):
@@ -414,7 +429,12 @@ async def game_loop(
                     pending_plan = None
                     with turn.phase("upkeep"):
                         await _run_routine_upkeep(
-                            iteration, memory, goal_manager, detected_entities, alarm
+                            iteration,
+                            memory,
+                            goal_manager,
+                            detected_entities,
+                            alarm,
+                            captured_at=captured_at,
                         )
                     # The LLM round trip sits on the critical path here; plan
                     # 3.3 removes this branch.
