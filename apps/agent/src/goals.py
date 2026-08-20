@@ -12,6 +12,8 @@ from .entity_utils import extract_attrs
 from .memory import AGE_SCORES, AgentMemory, GameState
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from .policy.allocation import Allocation
 
 log = structlog.stdlib.get_logger()
@@ -280,12 +282,12 @@ class GoalManager:
 
     # --- Alarm system ---
 
-    def check_alarm(self, detected_entities: list, screenshot_bytes: bytes | None = None) -> bool:
+    def check_alarm(self, detected_entities: list, ownership: Mapping[str, tuple]) -> bool:
         """Scan YOLO entities for enemy military threats.
 
-        Uses color-based ownership detection (if screenshot available) to
-        distinguish own units (blue) from enemy units. Only triggers alarm
-        on confirmed enemy military.
+        `ownership` is the detection pass's colour classification, keyed by
+        entity id. It is passed in rather than recomputed: classifying the same
+        frame twice cost 15 s of the detect phase (run 2026-08-20).
 
         Returns True if enemy threat detected, also injects emergency goals.
         """
@@ -300,23 +302,17 @@ class GoalManager:
             self._alarm_active = False
             return False
 
-        # Step 2: Filter by ownership using color detection
+        # Step 2: Filter by ownership. An empty map means the classifier failed
+        # or never ran, and an unclassified candidate stays a threat.
         threats_found = []
-        if screenshot_bytes:
-            try:
-                from detection.inference.ownership import Owner, classify_entities
+        if ownership:
+            from detection.inference.ownership import Owner
 
-                results = classify_entities(screenshot_bytes, candidates, THREAT_CLASSES)
-                for eid, (owner, _ratio) in results.items():
-                    if owner == Owner.ENEMY or owner == Owner.UNKNOWN:
-                        threats_found.append(eid)
-            except Exception as e:
-                log.warning("ownership_check_failed", error=str(e))
-                # Fallback: treat all candidates as threats
-                for entity in candidates:
-                    threats_found.append(extract_attrs(entity).class_name)
+            candidate_ids = {extract_attrs(e).entity_id for e in candidates}
+            for eid, (owner, _ratio) in ownership.items():
+                if eid in candidate_ids and owner in (Owner.ENEMY, Owner.UNKNOWN):
+                    threats_found.append(eid)
         else:
-            # No screenshot — legacy behavior (all military = threat)
             for entity in candidates:
                 threats_found.append(extract_attrs(entity).class_name)
 

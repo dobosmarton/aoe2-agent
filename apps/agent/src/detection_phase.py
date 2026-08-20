@@ -233,11 +233,15 @@ async def _run_detection(
         return []
 
 
-def _classify_entities(
+async def _classify_entities(
     detected_entities: list,
     screenshot: bytes,
 ) -> tuple[str, dict]:
-    """Build entity summary and classify ownership of military units."""
+    """Build entity summary and classify ownership of military units.
+
+    The classifier is CPU-bound, so it runs in a thread: it was the last such
+    step left on the event loop.
+    """
     ownership_results: dict = {}
     if not detected_entities:
         return "", ownership_results
@@ -247,7 +251,9 @@ def _classify_entities(
 
         from .goals import THREAT_CLASSES
 
-        ownership_results = classify_ownership(screenshot, detected_entities, THREAT_CLASSES)
+        ownership_results = await asyncio.to_thread(
+            classify_ownership, screenshot, detected_entities, THREAT_CLASSES
+        )
     except Exception:
         pass
 

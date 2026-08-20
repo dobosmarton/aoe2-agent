@@ -370,7 +370,7 @@ def test_get_resource_context_renders_status_block() -> None:
 
 def test_check_alarm_no_threats_returns_false() -> None:
     m = GoalManager()
-    assert m.check_alarm([]) is False
+    assert m.check_alarm([], {}) is False
     assert m._alarm_active is False
 
 
@@ -381,7 +381,7 @@ def test_check_alarm_low_confidence_filtered_out() -> None:
             id="x", class_name="archer_line", center=(0, 0), confidence=ALARM_CONFIDENCE_GATE - 0.1
         )
     ]
-    assert m.check_alarm(entities) is False  # below confidence gate
+    assert m.check_alarm(entities, {}) is False  # below confidence gate
 
 
 def test_check_alarm_below_threshold_no_alarm() -> None:
@@ -389,7 +389,7 @@ def test_check_alarm_below_threshold_no_alarm() -> None:
     (commit 97b4f06 documented this threshold)."""
     m = GoalManager()
     entities = [_FakeEntity(id="x", class_name="spearman_line", center=(0, 0), confidence=0.9)]
-    assert m.check_alarm(entities) is False
+    assert m.check_alarm(entities, {}) is False
     assert m._alarm_active is False
 
 
@@ -399,7 +399,7 @@ def test_check_alarm_three_threats_triggers_and_injects_emergency_goal() -> None
         _FakeEntity(id=f"e{i}", class_name="archer_line", center=(0, 0), confidence=0.9)
         for i in range(3)
     ]
-    assert m.check_alarm(entities) is True
+    assert m.check_alarm(entities, {}) is True
     assert m._alarm_active is True
     # Emergency "Defend base" goal pushed to front
     assert m.active_goals[0].name == "Defend base"
@@ -413,8 +413,8 @@ def test_check_alarm_does_not_double_inject_emergency_goal() -> None:
         _FakeEntity(id=f"e{i}", class_name="archer_line", center=(0, 0), confidence=0.9)
         for i in range(3)
     ]
-    m.check_alarm(entities)
-    m.check_alarm(entities)  # second call
+    m.check_alarm(entities, {})
+    m.check_alarm(entities, {})  # second call
     defend_count = sum(1 for g in m.active_goals if g.name == "Defend base")
     assert defend_count == 1
 
@@ -425,9 +425,9 @@ def test_check_alarm_resets_when_threats_disappear() -> None:
         _FakeEntity(id=f"e{i}", class_name="archer_line", center=(0, 0), confidence=0.9)
         for i in range(3)
     ]
-    m.check_alarm(entities)
+    m.check_alarm(entities, {})
     assert m._alarm_active is True
-    m.check_alarm([])  # threats gone
+    m.check_alarm([], {})  # threats gone
     assert m._alarm_active is False
 
 
@@ -438,4 +438,41 @@ def test_check_alarm_non_threat_class_ignored() -> None:
         _FakeEntity(id=f"v{i}", class_name="villager", center=(0, 0), confidence=0.99)
         for i in range(10)
     ]
-    assert m.check_alarm(entities) is False
+    assert m.check_alarm(entities, {}) is False
+
+
+def test_check_alarm_reuses_the_detection_passes_ownership() -> None:
+    """Classifying the same frame twice cost 15 s of the detect phase."""
+    from detection.inference.ownership import Owner
+
+    entities = [
+        _FakeEntity(id=f"s{i}", class_name="scout_line", center=(0, 0), confidence=0.99)
+        for i in range(3)
+    ]
+    ownership = {f"s{i}": (Owner.ENEMY, 0.0) for i in range(3)}
+    assert GoalManager().check_alarm(entities, ownership) is True
+
+
+def test_check_alarm_ignores_ownership_for_entities_that_are_not_candidates() -> None:
+    """The detection pass classifies every entity; only the gated ones count."""
+    from detection.inference.ownership import Owner
+
+    villagers = [
+        _FakeEntity(id=f"v{i}", class_name="villager", center=(0, 0), confidence=0.99)
+        for i in range(5)
+    ]
+    ownership = {f"v{i}": (Owner.ENEMY, 0.0) for i in range(5)}
+    assert GoalManager().check_alarm(villagers, ownership) is False
+
+
+def test_check_alarm_treats_an_own_unit_as_no_threat() -> None:
+    """The run misread the player's own scout as an enemy — from a stale frame,
+    but the filter must still respect the classifier's answer."""
+    from detection.inference.ownership import Owner
+
+    entities = [
+        _FakeEntity(id=f"s{i}", class_name="scout_line", center=(0, 0), confidence=0.99)
+        for i in range(3)
+    ]
+    ownership = {f"s{i}": (Owner.OWN, 0.9) for i in range(3)}
+    assert GoalManager().check_alarm(entities, ownership) is False

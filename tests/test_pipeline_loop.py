@@ -160,7 +160,11 @@ def _patch_loop_seams(monkeypatch, tmp_path, executed, context_text):
     monkeypatch.setattr(gl, "ensure_game_focused", lambda: True)
     monkeypatch.setattr(gl, "_init_frame_differ", lambda: None)
     monkeypatch.setattr(gl, "_capture_screenshot", _capture)
-    monkeypatch.setattr(gl, "_classify_entities", lambda *_a, **_k: ("", {}))
+
+    async def _classify(*_a, **_k):
+        return "", {}
+
+    monkeypatch.setattr(gl, "_classify_entities", _classify)
     monkeypatch.setattr(gl, "_maybe_launch_strategist", lambda *_a, **_k: None)
     monkeypatch.setattr(gl, "_build_llm_context", lambda *_a, **_k: context_text)
     monkeypatch.setattr(
@@ -278,3 +282,38 @@ def test_cancelled_loop_labels_end_reason_interrupted(monkeypatch, tmp_path):
             )
         )
     assert memory.game_end_reason == "interrupted"
+
+
+# ---------------------------------------------------------------------------
+# Warm-ups — deferred SDK imports must not land on the event loop
+# ---------------------------------------------------------------------------
+#
+# The OpenAI client hides 115 modules behind `client.chat`. Importing them
+# inside the first strategist call blocked the loop for 2 minutes and turned a
+# turn into 244 s (run 2026-08-20, upkeep_ms=134206).
+
+
+def test_a_failing_wire_warm_up_does_not_stop_the_game(monkeypatch, tmp_path):
+    """Warm-up is opportunistic, exactly as warm_up_ocr is."""
+    executed = []
+    _patch_loop_seams(monkeypatch, tmp_path, executed, "routine economy turn")
+
+    def _boom() -> None:
+        raise RuntimeError("no SDK on this host")
+
+    provider = _FakePipelineProvider()
+    monkeypatch.setattr(provider.wire, "warm_up", _boom)
+    memory = _run(gl.game_loop(provider, max_iterations=1, use_detection=False, use_overlay=False))
+    assert memory.game_end_reason != "error"
+
+
+def test_the_wire_is_warmed_before_the_first_call(monkeypatch, tmp_path):
+    """The whole point: pay the import once, off the loop, not inside a turn."""
+    executed = []
+    _patch_loop_seams(monkeypatch, tmp_path, executed, "routine economy turn")
+
+    warmed: list[bool] = []
+    provider = _FakePipelineProvider()
+    monkeypatch.setattr(provider.wire, "warm_up", lambda: warmed.append(True))
+    _run(gl.game_loop(provider, max_iterations=1, use_detection=False, use_overlay=False))
+    assert warmed == [True]

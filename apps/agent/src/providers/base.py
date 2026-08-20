@@ -215,6 +215,15 @@ class ChatWire(Protocol):
         """Run one structured-output call validated against `schema`."""
         ...
 
+    def warm_up(self) -> None:
+        """Pay the SDK's deferred imports now, off the event loop.
+
+        Blocking and synchronous — call it in a thread. The OpenAI client defers
+        115 modules behind `client.chat`, and doing that inside the first call
+        froze the whole loop for 2 minutes on the VM (run 2026-08-20).
+        """
+        ...
+
     def is_api_error(self, exc: Exception) -> bool:
         """Whether `exc` came from the provider rather than our own code."""
         ...

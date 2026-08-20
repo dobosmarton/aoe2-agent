@@ -215,6 +215,10 @@ class AnthropicWire:
             raise ModelRefusedError(f"{self.model} refused the request")
         return cast("ModelT", response.parsed_output), self._usage_of(response)
 
+    def warm_up(self) -> None:
+        """Touch the deferred `messages` tree, as the OpenAI wire does."""
+        _ = self.client.messages
+
     def is_api_error(self, exc: Exception) -> bool:
         return isinstance(exc, anthropic.APIError)
 

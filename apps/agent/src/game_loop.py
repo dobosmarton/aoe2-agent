@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import structlog
 
 if TYPE_CHECKING:
-    from .providers.base import LLMResult
+    from .providers.base import ChatWire, LLMResult
     from .providers.executor_provider import ExecutorProvider
 
 from .config import config
@@ -148,6 +148,16 @@ async def _run_routine_upkeep(
         await execute_actions(routine_actions)
 
 
+def _warm_up_wire(wire: ChatWire) -> None:
+    """Warm the wire, or log why it could not. A warm-up never stops a game."""
+    try:
+        started = time.monotonic()
+        wire.warm_up()
+        log.info("wire_warmed", seconds=round(time.monotonic() - started, 1))
+    except Exception as e:
+        log.warning("wire_warmup_failed", error=str(e))
+
+
 def _register_focus_failure(memory: AgentMemory, failures: int) -> tuple[int, bool]:
     """Count one focus failure; True means give up (lost_focus recorded)."""
     failures += 1
@@ -251,6 +261,11 @@ async def game_loop(
     ocr_warmup_task: asyncio.Task[None] | None = None
     if config.ocr_backend == "rapidocr":
         ocr_warmup_task = asyncio.create_task(asyncio.to_thread(warm_up_ocr))
+
+    # Same reason, different SDK: the OpenAI client defers 115 modules behind
+    # `client.chat`, and importing them inside the first call blocked the loop
+    # for 2 minutes (run 2026-08-20, upkeep_ms=134206).
+    wire_warmup_task = asyncio.create_task(asyncio.to_thread(_warm_up_wire, provider.wire))
 
     overlay = None
     if use_overlay:
@@ -371,10 +386,12 @@ async def game_loop(
                     if overlay is not None:
                         overlay.show(detected_entities, get_game_window_rect())
 
-                    entity_summary, _ownership = _classify_entities(detected_entities, screenshot)
+                    entity_summary, ownership = await _classify_entities(
+                        detected_entities, screenshot
+                    )
 
                     alarm = (
-                        goal_manager.check_alarm(detected_entities, screenshot_bytes=screenshot)
+                        goal_manager.check_alarm(detected_entities, ownership)
                         if detected_entities
                         else False
                     )
@@ -474,10 +491,11 @@ async def game_loop(
         # Discard any pipelined plan still in flight (S6). The warm-up thread
         # itself can't be interrupted — cancelling just stops waiting on it.
         await _cancel_pending(pending_plan)
-        if ocr_warmup_task is not None and not ocr_warmup_task.done():
-            ocr_warmup_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await ocr_warmup_task
+        for warmup in (ocr_warmup_task, wire_warmup_task):
+            if warmup is not None and not warmup.done():
+                warmup.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await warmup
         if overlay:
             overlay.close()
         # Exits that bypass both except clauses (e.g. CancelledError, a

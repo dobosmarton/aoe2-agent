@@ -212,6 +212,10 @@ class OpenAIWire:
             raise ValueError(f"{self.model} returned no parsable {schema.__name__}")
         return message.parsed, self._usage_of(response)
 
+    def warm_up(self) -> None:
+        """Touch the deferred `chat` tree so the first call does not import it."""
+        _ = self.client.chat
+
     def is_api_error(self, exc: Exception) -> bool:
         return isinstance(exc, openai.APIError)
 
