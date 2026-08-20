@@ -11,7 +11,12 @@ import asyncio
 import pytest
 from gameplay_agent.memory import GameState
 from gameplay_agent.providers import strategist as strat_mod
-from gameplay_agent.providers.strategist import StrategistProvider, StrategistResponse
+from gameplay_agent.providers.strategist import (
+    StrategistProvider,
+    StrategistResponse,
+    VillagerTargets,
+    as_allocation,
+)
 
 
 class _RecordingApi:
@@ -82,3 +87,27 @@ def test_no_readings_self_ocr_eval_path(
     )
     assert ocr_calls == [b"png"]
     assert readings == {"food": 7}
+
+
+# ---------------------------------------------------------------------------
+# as_allocation — the fixed-key model back into the policy tier's Allocation
+# ---------------------------------------------------------------------------
+#
+# `allocation` was a dict[str, int] until 2026-08-20, which 400'd every OpenAI
+# call (an open object has no `properties`). A fixed-key model can never be
+# empty, so the all-zero answer must still route to the seeded per-age mix.
+
+
+def test_an_all_zero_target_falls_back_to_the_seeded_mix() -> None:
+    """The model says nothing by leaving every field at 0."""
+    assert as_allocation(VillagerTargets()) is None
+
+
+def test_a_declared_target_becomes_an_allocation() -> None:
+    targets = VillagerTargets(food=6, wood=4)
+    assert as_allocation(targets).targets == {"food": 6, "wood": 4}
+
+
+def test_a_zero_resource_is_left_out_rather_than_targeted_at_zero() -> None:
+    """`share()` divides by the total, so a 0 entry would only add noise."""
+    assert "stone" not in as_allocation(VillagerTargets(food=6)).targets

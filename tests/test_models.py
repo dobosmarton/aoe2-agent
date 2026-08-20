@@ -27,7 +27,8 @@ from gameplay_agent.models import (
     validate_action,
     validate_actions,
 )
-from pydantic import ValidationError
+from gameplay_agent.providers.strategist import StrategistResponse
+from pydantic import BaseModel, ValidationError
 
 # ---------------------------------------------------------------------------
 # Layer 1 — per-action validation (happy paths)
@@ -272,9 +273,7 @@ def test_llm_response_with_no_actions() -> None:
 
 
 def test_llm_response_default_observations() -> None:
-    resp = LLMResponse()
-    assert resp.observations.game_state == "playing"
-    assert resp.observations.resources == {}
+    assert LLMResponse().observations.game_state == "playing"
 
 
 def test_llm_response_passes_through_already_validated_actions() -> None:
@@ -291,7 +290,6 @@ def test_llm_response_passes_through_already_validated_actions() -> None:
 
 def test_observations_defaults() -> None:
     obs = Observations()
-    assert obs.resources == {}
     assert obs.game_state == "playing"
     assert obs.idle_tc is False
     assert obs.events == []
@@ -299,7 +297,6 @@ def test_observations_defaults() -> None:
 
 def test_observations_full_payload() -> None:
     obs = Observations(
-        resources={"food": 200, "wood": 150},
         population="8/15",
         age="Dark Age",
         idle_tc=True,
@@ -307,7 +304,7 @@ def test_observations_full_payload() -> None:
         game_state="playing",
         events=["villager_idle"],
     )
-    assert obs.resources["food"] == 200
+    assert obs.population == "8/15"
     assert obs.idle_tc is True
 
 
@@ -359,3 +356,33 @@ def test_coordinate_ranges_still_enforced_by_validator() -> None:
     # and valid values still pass through unchanged
     assert DragAction(type="drag", start_x=1, start_y=2, end_x=3, end_y=4).end_x == 3
     assert WaitAction(type="wait", ms=1000).ms == 1000
+
+
+# ---------------------------------------------------------------------------
+# Open objects — the other schema shape that 400s every call
+# ---------------------------------------------------------------------------
+#
+# OpenAI strict structured outputs requires every object to declare `properties`.
+# A `dict[str, int]` field emits `{"type":"object","additionalProperties":{...}}`
+# with none, and the server rejects the whole request. Two such fields cost a
+# whole game on 2026-08-20: llm_calls=1, llm_errors=1, llm_error_rate=1.0.
+# Same reasoning as the bounds tests above — catch it here, not on a burned run.
+
+
+def _open_objects(model: type[BaseModel]) -> list[str]:
+    """Names of object properties that declare no `properties` of their own."""
+    schema = model.model_json_schema()
+    found: list[str] = []
+    for owner, node in [("", schema), *schema.get("$defs", {}).items()]:
+        for name, prop in node.get("properties", {}).items():
+            if isinstance(prop, dict) and prop.get("type") == "object" and "properties" not in prop:
+                found.append(f"{owner}.{name}" if owner else name)
+    return found
+
+
+def test_llm_response_declares_no_open_objects() -> None:
+    assert _open_objects(LLMResponse) == []
+
+
+def test_strategist_response_declares_no_open_objects() -> None:
+    assert _open_objects(StrategistResponse) == []

@@ -472,7 +472,7 @@ def test_warm_up_ocr_never_raises(monkeypatch):
     def _boom() -> object:
         raise RuntimeError("no engine on this host")
 
-    monkeypatch.setattr(ro, "_rapidocr_engine", _boom)
+    monkeypatch.setattr(ro, "_field_engine", _boom)
     ro.warm_up_ocr()  # must not raise
 
 
@@ -489,7 +489,7 @@ def test_warm_up_ocr_runs_one_inference(monkeypatch):
 
         return engine
 
-    monkeypatch.setattr(ro, "_rapidocr_engine", _fake_engine)
+    monkeypatch.setattr(ro, "_field_engine", _fake_engine)
     ro.warm_up_ocr()
     assert len(calls) == 1
 

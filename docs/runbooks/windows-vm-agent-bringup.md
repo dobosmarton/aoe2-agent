@@ -87,6 +87,27 @@ actions_executed       iteration=1 total=3 successful=3
 
 If you see those five lines, the bring-up worked. If you don't, jump to the symptom matrix below.
 
+## Recording a game
+
+`python -m gameplay_agent` plays but writes **no ledger row**. To record one, run
+the experiment wrapper instead — it plays the same game and appends to
+`experiments/results.tsv`:
+
+```cmd
+just experiment "what changed since the last row"
+```
+
+Flags: `--max-iterations N`, `--time-budget SECONDS`, `--overlay`.
+
+For a run you intend to compare on latency, turn off the two costs that are not
+gameplay:
+
+```cmd
+set AOE2_SAVE_SCREENSHOTS=false   :: the JPEG write is inline in the capture phase
+```
+
+and leave `--overlay` off — it costs a window hide/show every turn.
+
 ## Symptom matrix
 
 These are accumulated failure modes from many bring-up attempts:
@@ -97,10 +118,13 @@ These are accumulated failure modes from many bring-up attempts:
 | Agent starts but `detector_initialized` shows `mode=local`, not `remote` | `AOE2_DETECTION_HOST` not set or unreachable | `printenv AOE2_DETECTION_HOST` on the VM; `curl` the URL; check Mac firewall. |
 | `game_not_found` on first iteration | AoE2 window not detected | Click the AoE2 window once. Don't minimize it. Run the agent from Command Prompt, not from inside an IDE that might steal focus. |
 | `could_not_focus_game` | Focus race | Add a 2-second `time.sleep` between starting AoE2 and the agent. Easier: focus the AoE2 window manually, then `Win+R`, switch to Command Prompt, hit enter. |
-| Coordinates clearly off (clicks land in the wrong place) | Game is fullscreen at unexpected resolution, or DPI scaling is on | Run AoE2 in windowed mode at 1920×1080. Turn off Windows DPI scaling for AoE2. |
+| Coordinates clearly off (clicks land in the wrong place) | Game is fullscreen at unexpected resolution, or DPI scaling is on | Run AoE2 in windowed mode at 1920×1080. Turn off Windows DPI scaling for AoE2. **Check first that `apps/agent/src/resource_ocr_assets/calibration.<W>x<H>.yaml` exists for the target resolution** — only 3024×1672 and 3024×1964 ship one, and without a match every turn pays a full-width OCR scan. |
 | Agent picks the wrong screen on multi-monitor VM | `mss` picks monitor 1 by default | Pass `--monitor 0` (primary), or set `AOE2_MONITOR_INDEX` if you've wired it up. |
 | Detection works on Mac but VM gets `Connection refused` | Server bound to `127.0.0.1` instead of `0.0.0.0` | Restart the server with `--host 0.0.0.0` (it's the default for `just server`, but easy to override and forget). |
 | Detection works once, then connection drops repeatedly | macOS firewall is challenging the server | System Settings → Network → Firewall → allow incoming for the Python binary. |
+| `Invalid schema for response_format` on every turn, `llm_error_rate=1.0` | A model field emits an open object (`dict[str, int]`), which OpenAI strict mode rejects | Fixed 2026-08-20. `tests/test_models.py` now fails on any new one — run `just check` before a VM run. |
+| `warning: Using incompatible environment (.venv) due to --no-sync` | `--no-sync` reused a venv built for a different Python; the project pins 3.11 | Drop `--no-sync`, or run `uv sync` first. |
+| OCR dominates the turn (`ocr_ms` in the tens of seconds) | The resolution has no `calibration.<W>x<H>.yaml`, so auto-detect scans the full-width band every turn | Add a calibration for that resolution, or run at one that has one. |
 
 ## Variables you might want to tune
 

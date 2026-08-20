@@ -310,9 +310,11 @@ Action = Annotated[
 
 
 class Observations(BaseModel):
-    """Game observations extracted by LLM."""
+    """Game observations extracted by LLM.
 
-    resources: dict[str, int] = Field(default_factory=dict)
+    No `resources`: OCR owns them, and an echoed value overwrote the OCR reading.
+    """
+
     population: str = ""
     age: str = ""
     idle_tc: bool = False

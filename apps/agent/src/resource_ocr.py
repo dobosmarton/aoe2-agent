@@ -37,7 +37,7 @@ import threading
 from dataclasses import dataclass
 from itertools import pairwise
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, NamedTuple, NotRequired, TypedDict, cast
+from typing import TYPE_CHECKING, Final, Literal, NamedTuple, NotRequired, TypedDict, cast
 
 import numpy as np
 from PIL import Image
@@ -416,22 +416,46 @@ def _read_field_tesseract(field_img: np.ndarray, *, whitelist: str, binarize: bo
     return ""
 
 
-_RAPIDOCR_ENGINE = None
+_ENGINES: dict[str, RapidOCR] = {}
 # Serializes engine construction: the startup warm-up thread (warm_up_ocr) and the
 # first read_hud_readings worker race here; without the lock both would build the
-# ~10 s engine.
-_RAPIDOCR_ENGINE_LOCK = threading.Lock()
+# same engine, and the build took 32 s on the VM.
+_ENGINE_LOCK = threading.Lock()
+
+# RapidOCR's stock `limit_type: min` scales an image UP until its shortest side
+# reaches 736, so a 552x336 field crop became 1216x736 and the 6 field reads cost
+# more pixels than the whole screenshot. Capping the LONGEST side leaves the crop
+# alone: 3852 -> 845 ms per frame over the real fixtures, identical readings.
+_FIELD_LIMITS: Final = {
+    "det_limit_type": "max",
+    "det_limit_side_len": 3072,
+    "use_cls": False,  # the HUD never tilts
+}
 
 
-def _rapidocr_engine() -> RapidOCR:
-    """Lazily build the RapidOCR engine (expensive init — reuse across calls)."""
-    global _RAPIDOCR_ENGINE
-    with _RAPIDOCR_ENGINE_LOCK:
-        if _RAPIDOCR_ENGINE is None:
+def _engine(name: str, **settings: object) -> RapidOCR:
+    """One cached engine per name. Init is expensive, so build it once."""
+    with _ENGINE_LOCK:
+        if name not in _ENGINES:
             from rapidocr_onnxruntime import RapidOCR
 
-            _RAPIDOCR_ENGINE = RapidOCR()
-        return _RAPIDOCR_ENGINE
+            _ENGINES[name] = RapidOCR(**settings)
+        return _ENGINES[name]
+
+
+def _field_engine() -> RapidOCR:
+    """The engine for one tight field crop."""
+    return _engine("field", **_FIELD_LIMITS)
+
+
+def _band_engine() -> RapidOCR:
+    """The engine for the full-width bar band that auto-calibration scans.
+
+    Stock settings on purpose: the band is wide and short, and the min-side
+    upscale is what makes its digits big enough to detect. Built only when no
+    `calibration.<W>x<H>.yaml` matches, so a pinned resolution never pays for it.
+    """
+    return _engine("band")
 
 
 def warm_up_ocr() -> None:
@@ -450,7 +474,7 @@ def warm_up_ocr() -> None:
     log = structlog.stdlib.get_logger()
     try:
         started = time.monotonic()
-        engine = _rapidocr_engine()
+        engine = _field_engine()
         engine(np.zeros((32, 96, 3), dtype=np.uint8))
         log.info("ocr_engine_warmed", seconds=round(time.monotonic() - started, 1))
     except Exception as e:
@@ -463,7 +487,7 @@ def _read_field_rapidocr(field_img: np.ndarray, *, whitelist: str, binarize: boo
     """
     pil = _preprocess_for_ocr(field_img, pad=20, binarize=binarize).convert("RGB")
     # RapidOCR.__call__ is untyped — cast to the structural result shape we rely on.
-    raw, _elapse = cast("tuple[_OcrResult | None, object]", _rapidocr_engine()(np.asarray(pil)))
+    raw, _elapse = cast("tuple[_OcrResult | None, object]", _field_engine()(np.asarray(pil)))
     if not raw:
         return ""
     return _filter_charset("".join(line[1] for line in raw), whitelist)
@@ -753,7 +777,7 @@ def autodetect_calibration(
     except Exception:  # any decode failure (truncated/empty bytes) → caller falls back
         return None
     h, w = cast("tuple[int, int]", rgb.shape[:2])
-    dets = _detect(_rapidocr_engine(), rgb, top_frac)
+    dets = _detect(_band_engine(), rgb, top_frac)
     main, pop, age = _extract(dets)
     centers = _column_centers([b.x0 for b in main])
     pitch = (centers[-1] - centers[0]) / (len(centers) - 1) if len(centers) >= 2 else 150

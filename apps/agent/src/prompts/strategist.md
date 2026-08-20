@@ -30,10 +30,11 @@ You are not the tactician — the executor's age-specific prompt knows the build
 
 ## Output Format
 
-Return JSON with reasoning and goals:
+Return JSON with reasoning, goals, and a villager allocation:
 ```json
 {
   "reasoning": "Brief analysis of current game state and strategy",
+  "allocation": {"food": 6, "wood": 4, "gold": 0, "stone": 0},
   "goals": [
     {
       "name": "Grow population to 15",
@@ -52,6 +53,15 @@ Return JSON with reasoning and goals:
   ]
 }
 ```
+
+## Allocation
+
+`allocation` is how many villagers each resource should have — a target, not a
+delta. The agent routes idle villagers toward whichever resource is furthest
+below it. Set all four to 0 to leave the per-age default alone.
+
+Dark Age is 6-8 food, 3-4 wood, 0 gold, 0 stone. Gold matters from Feudal, when
+the Castle Age costs 200.
 
 ## Rules
 

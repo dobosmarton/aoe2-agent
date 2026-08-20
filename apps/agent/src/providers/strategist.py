@@ -44,6 +44,23 @@ class StrategistGoal(BaseModel):
     priority: int = Field(ge=1, le=10)
 
 
+class VillagerTargets(BaseModel):
+    """Villagers wanted per resource.
+
+    Fixed keys, not a dict: OpenAI structured outputs 400s on an open object.
+    Plain ints — a bound would grow the compiled grammar (F-40).
+    """
+
+    food: int = 0
+    wood: int = 0
+    gold: int = 0
+    stone: int = 0
+
+    def per_kind(self) -> dict[ResourceKind, int]:
+        """The targets keyed the way the policy tier names resources."""
+        return {"food": self.food, "wood": self.wood, "gold": self.gold, "stone": self.stone}
+
+
 class StrategistResponse(BaseModel):
     """Structured response from the strategist.
 
@@ -53,9 +70,8 @@ class StrategistResponse(BaseModel):
 
     reasoning: str
     goals: list[StrategistGoal]
-    # Target villagers per resource. Empty falls back to the seeded per-age mix,
-    # which is what the LLM-down path runs on.
-    allocation: dict[str, int] = Field(default_factory=dict)
+    # All zero falls back to the seeded per-age mix, which the LLM-down path runs on.
+    allocation: VillagerTargets = Field(default_factory=VillagerTargets)
 
 
 def _clean_readings(ocr: dict[str, object]) -> ResourceReadings:
@@ -152,11 +168,14 @@ async def read_hud_readings(
         return {}, None
 
 
-def _as_allocation(targets: dict[str, int]) -> Allocation | None:
-    """The strategist's allocation, or None to fall back to the seeded mix."""
-    clean: dict[ResourceKind, int] = {
-        kind: int(targets[kind]) for kind in RESOURCE_KINDS if int(targets.get(kind, 0)) > 0
-    }
+def as_allocation(targets: VillagerTargets) -> Allocation | None:
+    """The strategist's allocation, or None to fall back to the seeded mix.
+
+    A fixed-key model is never empty, so the all-zero answer the model gives
+    when it has no opinion must still map to None.
+    """
+    declared = targets.per_kind()
+    clean = {kind: declared[kind] for kind in RESOURCE_KINDS if declared[kind] > 0}
     return Allocation(targets=clean) if clean else None
 
 
@@ -360,7 +379,7 @@ Create 3-5 prioritized goals based on the state above. Keep goals that are still
                         created_turn=turn,
                     )
                 )
-            self.last_allocation = _as_allocation(result.allocation)
+            self.last_allocation = as_allocation(result.allocation)
             self._has_run = True
             return goals, readings
 
