@@ -26,7 +26,7 @@ from gameplay_agent.memory import (
     GameState,
     Turn,
 )
-from gameplay_agent.turn_timing import LatencyRecorder
+from gameplay_agent.turn_timing import ACT_LOOP, TURN_LOOP, LatencyRecorder
 
 # ---------------------------------------------------------------------------
 # Layer 1 — dataclass defaults
@@ -345,11 +345,14 @@ def test_metrics_snapshot_keys() -> None:
         # Age timings (plan 2.1).
         "feudal_time_s",
         "castle_time_s",
-        # Turn latency (plan 0.3).
+        # Latency (plan 0.3, plan 3).
         "turn_latency_p50_ms",
         "turn_latency_p90_ms",
         "turn_latency_max_ms",
         "phase_latency_p50_ms",
+        "act_latency_p95_ms",
+        "perceive_latency_p50_ms",
+        "loop_arch",
     }
     assert set(snap.keys()) == expected_keys
 
@@ -381,7 +384,7 @@ def _recorder_with_ocr_turns(turns: int = 3) -> LatencyRecorder:
     """A recorder holding `turns` timed turns with one measurable `ocr` phase."""
     recorder = LatencyRecorder()
     for iteration in range(turns):
-        with recorder.turn(iteration) as turn, turn.phase("ocr"):
+        with recorder.tick(TURN_LOOP, iteration) as tick, tick.phase("ocr"):
             time.sleep(0.002)  # an empty phase rounds to 0.0 ms
     return recorder
 
@@ -553,3 +556,20 @@ def test_reset_clears_metric_state():
     assert memory.total_food_gathered == 0 and memory.executed_actions == 0
     memory.record_food_reading(300)  # fresh baseline, not a +100 delta
     assert memory.total_food_gathered == 0
+
+
+def test_loop_arch_reads_turn_before_the_cutover() -> None:
+    """The single-tick loop and the act loop do not measure the same thing."""
+    memory = AgentMemory()
+    memory.latency = _recorder_with_ocr_turns()
+    assert memory.get_metrics_snapshot()["loop_arch"] == "turn"
+
+
+def test_loop_arch_reads_clocks_once_the_act_loop_records() -> None:
+    """Presence, not duration: a fast act tick still rounds to 0.0 ms."""
+    recorder = LatencyRecorder()
+    with recorder.tick(ACT_LOOP, 0):
+        pass
+    memory = AgentMemory()
+    memory.latency = recorder
+    assert memory.get_metrics_snapshot()["loop_arch"] == "clocks"

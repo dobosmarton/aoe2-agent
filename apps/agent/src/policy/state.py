@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+from ..turn_timing import elapsed_ms
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -54,7 +56,7 @@ class PolicyState:
     @property
     def age_ms(self) -> float:
         """Milliseconds since this snapshot was taken."""
-        return (time.monotonic() - self.captured_at) * 1000.0
+        return elapsed_ms(self.captured_at)
 
 
 def _as_int(value: object) -> int:

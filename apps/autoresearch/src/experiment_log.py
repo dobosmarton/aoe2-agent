@@ -60,6 +60,11 @@ HEADER = [
     # recorded an age-up time.
     "age_speed",
     "feudal_time_s",
+    # Phase 3 latency. The turn_latency_* columns above only compare within
+    # one `loop_arch`: "turn" times a coupled tick, "clocks" the act loop.
+    "act_latency_p95_ms",
+    "perceive_latency_p50_ms",
+    "loop_arch",
 ]
 
 # 2 = age-weighted (plan 2.3). Version 1 weighted survival 0.30 and population
@@ -210,6 +215,9 @@ def log_experiment(
         str(SCORE_VERSION),
         f"{score.age_speed:.4f}",
         _format_seconds(score.raw_metrics.get("feudal_time_s")),
+        f"{_metric(score, 'act_latency_p95_ms'):.0f}",
+        f"{_metric(score, 'perceive_latency_p50_ms'):.0f}",
+        str(score.raw_metrics.get("loop_arch", "")),
     ]
 
     with RESULTS_FILE.open("a", newline="") as f:

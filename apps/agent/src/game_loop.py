@@ -55,7 +55,7 @@ from .turn_phases import (
     _process_response,
     known_buildings_line,
 )
-from .turn_timing import LatencyRecorder
+from .turn_timing import TURN_LOOP, LatencyRecorder
 from .villager_roles import gather_counts, infer_jobs, job_counts
 from .window import ensure_game_focused, get_game_window_rect, is_game_running
 
@@ -318,7 +318,7 @@ async def game_loop(
 
             # Timed after the focus gate: focus retries and the paced sleep are
             # not turn work.
-            with timings.turn(iteration) as turn:
+            with timings.tick(TURN_LOOP, iteration) as turn:
                 if iteration == 1:
                     # The opening (zoom, select scout, auto-scout) needs no perception —
                     # run it before the first OCR/detection pass, which is the slowest

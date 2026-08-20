@@ -1,8 +1,10 @@
-"""Per-phase turn latency for the game loop (ADAPTIVE-AGENT-PLAN.md 0.3).
+"""Per-loop, per-phase latency for one game (ADAPTIVE-AGENT-PLAN.md 0.3).
 
-with recorder.turn(iteration) as turn:
-    with turn.phase("ocr"):
+with recorder.tick(PERCEIVE_LOOP, n) as tick:
+    with tick.phase("ocr"):
         ...
+
+One recorder holds every loop: latency is one question about one game.
 """
 
 from __future__ import annotations
@@ -11,7 +13,7 @@ import time
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final, Literal
 
 import structlog
 
@@ -20,35 +22,71 @@ if TYPE_CHECKING:
 
 log = structlog.stdlib.get_logger()
 
+
+def elapsed_ms(since: float) -> float:
+    """Milliseconds since a `time.monotonic()` stamp."""
+    return (time.monotonic() - since) * MS_PER_SECOND
+
+
 MS_PER_SECOND = 1000.0
 P50 = 0.50
 P90 = 0.90
+P95 = 0.95
 
-# Ordering for the phase percentiles. Phase names are not validated, so adding
-# one costs nothing; an unlisted phase is simply absent from the snapshot.
-PHASE_ORDER: tuple[str, ...] = ("capture", "ocr", "detect", "upkeep", "deliberate")
+# "turn" is the single-tick loop, until Phase 3 replaces it with the other 3.
+LoopName = Literal["turn", "act", "perceive", "deliberate"]
+
+TURN_LOOP: Final[LoopName] = "turn"
+ACT_LOOP: Final[LoopName] = "act"
+PERCEIVE_LOOP: Final[LoopName] = "perceive"
+DELIBERATE_LOOP: Final[LoopName] = "deliberate"
+
+# Phases each loop reports, in display order. Listing a phase is what makes it
+# visible: an unlisted name is timed and logged, but dropped from the snapshot.
+PHASES_BY_LOOP: Final[dict[LoopName, tuple[str, ...]]] = {
+    TURN_LOOP: ("capture", "ocr", "detect", "upkeep", "deliberate"),
+    ACT_LOOP: ("decide", "execute"),
+    PERCEIVE_LOOP: ("capture", "ocr", "detect"),
+    DELIBERATE_LOOP: ("context", "strategist", "executor"),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class LoopLatency:
+    """Percentiles for one loop over one game, in milliseconds."""
+
+    p50_ms: float = 0.0
+    p90_ms: float = 0.0
+    p95_ms: float = 0.0
+    max_ms: float = 0.0
+    phase_p50_ms: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
 class LatencySnapshot:
-    """Turn and per-phase percentiles for one game."""
+    """Every loop that recorded a tick this game."""
 
-    turn_p50_ms: float = 0.0
-    turn_p90_ms: float = 0.0
-    turn_max_ms: float = 0.0
-    phase_p50_ms: dict[str, float] = field(default_factory=dict)
+    loops: dict[LoopName, LoopLatency] = field(default_factory=dict)
+
+    def of(self, loop: LoopName) -> LoopLatency:
+        """That loop's percentiles, or an empty record when it never ran."""
+        return self.loops.get(loop, LoopLatency())
 
 
-def _percentile(samples: Sequence[float], fraction: float) -> float:
-    """Nearest-rank percentile of a sorted sequence; 0.0 when empty."""
+def percentile(samples: Sequence[float], fraction: float) -> float:
+    """Nearest-rank percentile of a sorted sequence; 0.0 when empty.
+
+    Nearest-rank has no interpolation, so below n=20 `int(n * P95)` clamps to
+    the last index: p95 and max agree on a short game.
+    """
     if not samples:
         return 0.0
     return samples[min(len(samples) - 1, int(len(samples) * fraction))]
 
 
 @dataclass(slots=True)
-class TurnTimings:
-    """Phase durations for one turn, in milliseconds."""
+class TickTimings:
+    """Phase durations for one tick of one loop, in milliseconds."""
 
     phases: dict[str, float] = field(default_factory=dict)
     _started: float = field(default_factory=time.perf_counter)
@@ -65,7 +103,7 @@ class TurnTimings:
 
     @property
     def total_ms(self) -> float:
-        """Wall clock since the turn started, not the sum of the phases.
+        """Wall clock since the tick started, not the sum of the phases.
 
         The gap between phases is what unmeasured work looks like — keep it.
         """
@@ -73,45 +111,70 @@ class TurnTimings:
 
 
 class LatencyRecorder:
-    """Collects turn and phase latency across one game."""
+    """Collects tick and phase latency for every loop across one game."""
 
     def __init__(self) -> None:
-        self._phase_samples: dict[str, list[float]] = defaultdict(list)
-        self._turn_samples: list[float] = []
+        self._ticks: dict[LoopName, list[float]] = defaultdict(list)
+        self._phases: dict[tuple[LoopName, str], list[float]] = defaultdict(list)
 
     @contextmanager
-    def turn(self, iteration: int) -> Iterator[TurnTimings]:
-        """Time one turn and log its breakdown, including when the turn raises."""
-        timings = TurnTimings()
+    def tick(self, loop: LoopName, iteration: int) -> Iterator[TickTimings]:
+        """Time one tick and log its breakdown, including when the tick raises."""
+        timings = TickTimings()
         try:
             yield timings
         finally:
-            self._record(timings, iteration)
+            self._record(loop, timings, iteration)
 
-    def _record(self, timings: TurnTimings, iteration: int) -> None:
+    def _record(self, loop: LoopName, timings: TickTimings, iteration: int) -> None:
         total = timings.total_ms
-        self._turn_samples.append(total)
+        self._ticks[loop].append(total)
         for name, elapsed in timings.phases.items():
-            self._phase_samples[name].append(elapsed)
+            self._phases[loop, name].append(elapsed)
         log.info(
-            "turn_latency",
+            "loop_latency",
+            loop=loop,
             iteration=iteration,
             total_ms=round(total),
             **{f"{name}_ms": round(value) for name, value in timings.phases.items()},
         )
 
     def snapshot(self) -> LatencySnapshot:
-        """Percentiles so far."""
-        turns = sorted(self._turn_samples)
-        if not turns:
-            return LatencySnapshot()
+        """Percentiles so far, for every loop that recorded a tick."""
         return LatencySnapshot(
-            turn_p50_ms=round(_percentile(turns, P50), 1),
-            turn_p90_ms=round(_percentile(turns, P90), 1),
-            turn_max_ms=round(turns[-1], 1),
+            loops={loop: self._loop_latency(loop) for loop in sorted(self._ticks)}
+        )
+
+    def _loop_latency(self, loop: LoopName) -> LoopLatency:
+        ticks = sorted(self._ticks[loop])
+        return LoopLatency(
+            p50_ms=round(percentile(ticks, P50), 1),
+            p90_ms=round(percentile(ticks, P90), 1),
+            p95_ms=round(percentile(ticks, P95), 1),
+            max_ms=round(ticks[-1], 1) if ticks else 0.0,
             phase_p50_ms={
-                name: round(_percentile(sorted(self._phase_samples[name]), P50), 1)
-                for name in PHASE_ORDER
-                if self._phase_samples.get(name)
+                name: round(percentile(sorted(self._phases[loop, name]), P50), 1)
+                for name in PHASES_BY_LOOP.get(loop, ())
+                if self._phases.get((loop, name))
             },
         )
+
+
+__all__ = [
+    "ACT_LOOP",
+    "DELIBERATE_LOOP",
+    "MS_PER_SECOND",
+    "P50",
+    "P90",
+    "P95",
+    "PERCEIVE_LOOP",
+    "PHASES_BY_LOOP",
+    "TURN_LOOP",
+    "LatencyRecorder",
+    "LatencySnapshot",
+    "LoopLatency",
+    "LoopName",
+    "TickTimings",
+    "elapsed_ms",
+    "percentile",
+]

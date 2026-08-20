@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Protocol, TypedDict, cast
 
-from .turn_timing import LatencySnapshot
+from .turn_timing import ACT_LOOP, PERCEIVE_LOOP, TURN_LOOP, LatencySnapshot
 
 
 class LatencySource(Protocol):
@@ -119,11 +119,15 @@ class MetricsSnapshot(TypedDict):
     # Seconds to reach each age; None when the age was never reached (plan 2.1).
     feudal_time_s: float | None
     castle_time_s: float | None
-    # Turn latency (plan 0.3). 0.0 when no turn was timed.
+    # Latency (plan 0.3). 0.0 when that loop recorded no tick. The turn_*
+    # fields cover the single-tick loop; loop_arch names the architecture.
     turn_latency_p50_ms: float
     turn_latency_p90_ms: float
     turn_latency_max_ms: float
     phase_latency_p50_ms: dict[str, float]
+    act_latency_p95_ms: float
+    perceive_latency_p50_ms: float
+    loop_arch: str
 
 
 class AgentMemory:
@@ -399,6 +403,9 @@ class AgentMemory:
     def get_metrics_snapshot(self) -> MetricsSnapshot:
         """Return current cumulative metrics for scoring."""
         latency = self.latency.snapshot() if self.latency is not None else LatencySnapshot()
+        turn = latency.of(TURN_LOOP)
+        act = latency.of(ACT_LOOP)
+        perceive = latency.of(PERCEIVE_LOOP)
         return {
             "survival_time": self.get_game_duration_seconds(),
             "peak_population": self.peak_population,
@@ -422,10 +429,14 @@ class AgentMemory:
             "llm_error_rate": (self.llm_errors / self.llm_calls if self.llm_calls > 0 else 0.0),
             "feudal_time_s": self.age_times.get("Feudal Age"),
             "castle_time_s": self.age_times.get("Castle Age"),
-            "turn_latency_p50_ms": latency.turn_p50_ms,
-            "turn_latency_p90_ms": latency.turn_p90_ms,
-            "turn_latency_max_ms": latency.turn_max_ms,
-            "phase_latency_p50_ms": latency.phase_p50_ms,
+            "turn_latency_p50_ms": turn.p50_ms,
+            "turn_latency_p90_ms": turn.p90_ms,
+            "turn_latency_max_ms": turn.max_ms,
+            "phase_latency_p50_ms": turn.phase_p50_ms,
+            "act_latency_p95_ms": act.p95_ms,
+            "perceive_latency_p50_ms": perceive.p50_ms,
+            # Presence, not duration: a fast act tick still rounds to 0.0 ms.
+            "loop_arch": "clocks" if ACT_LOOP in latency.loops else TURN_LOOP,
         }
 
     def reset(self) -> None:
