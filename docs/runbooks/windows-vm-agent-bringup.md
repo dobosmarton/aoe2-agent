@@ -99,14 +99,17 @@ just experiment "what changed since the last row"
 
 Flags: `--max-iterations N`, `--time-budget SECONDS`, `--overlay`.
 
-For a run you intend to compare on latency, turn off the two costs that are not
-gameplay:
+Leave `AOE2_SAVE_SCREENSHOTS` on. `save_screenshot` (`screen.py:51`) writes bytes
+that `capture_screenshot` already encoded — measured at 3.4 ms per frame against
+a `capture_ms` of 2000-6000, so turning it off buys nothing and costs you the
+frames `log_to_scenario.py` builds fixtures from.
 
-```cmd
-set AOE2_SAVE_SCREENSHOTS=false   :: the JPEG write is inline in the capture phase
-```
+What does make `capture_ms` seconds long is grabbing and encoding a 3024x1672
+region inside a VM. The lever there is the resolution, and a smaller one needs a
+matching `calibration.<W>x<H>.yaml` first — see the coordinate row below.
 
-and leave `--overlay` off — it costs a window hide/show every turn.
+Drop `--overlay` for a timed run: it draws a window and hides it again every
+turn. Its cost has not been measured.
 
 ## Symptom matrix
 
