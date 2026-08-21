@@ -15,7 +15,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
-import os
 import sys
 import time
 from dataclasses import dataclass, field
@@ -42,7 +41,6 @@ from gameplay_agent.test_isolation import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-REPO = Path(__file__).resolve().parent.parent
 
 # ---------------------------------------------------------------------------
 # Constants — named so a future reader doesn't have to guess
@@ -57,23 +55,6 @@ SUMMARY_SEPARATOR_WIDTH = 60
 ANSI_GREEN = "\033[32m"
 ANSI_RED = "\033[31m"
 ANSI_RESET = "\033[0m"
-
-
-# ---------------------------------------------------------------------------
-# Tiny .env loader (no python-dotenv dep)
-# ---------------------------------------------------------------------------
-
-
-def _load_dotenv() -> None:
-    env_path = REPO / ".env"
-    if not env_path.exists():
-        return
-    for line in env_path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
 # ---------------------------------------------------------------------------
@@ -508,7 +489,6 @@ def _parse_args() -> _RunnerArgs:
 
 
 def main() -> int:
-    _load_dotenv()
     if not config.llm_api_key:
         print(f"ERROR: {KEY_ENV} not set (checked env + .env file).")
         return 1

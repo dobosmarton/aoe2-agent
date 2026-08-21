@@ -541,9 +541,8 @@ def test_scenario_runs(fixture_path):
     For variant fixtures, fails if ANY variant fails — the failure message
     aggregates per-variant details so all problems surface at once.
     """
-    from gameplay_agent.scenario_runner import _load_dotenv, run_scenario
+    from gameplay_agent.scenario_runner import run_scenario
 
-    _load_dotenv()
     if not os.environ.get("AOE2_LLM_API_KEY"):
         pytest.skip("AOE2_LLM_API_KEY not set")
 

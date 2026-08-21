@@ -18,7 +18,6 @@ import os
 from pathlib import Path
 
 import pytest
-from gameplay_agent.scenario_runner import _load_dotenv
 from gameplay_agent.strategist_eval import (
     all_vision_fixtures,
     evaluate_resource_readings,
@@ -170,7 +169,6 @@ def test_vision_fixture_lint(fixture_path):
 @pytest.mark.parametrize("fixture_path", all_vision_fixtures(), ids=lambda p: p.stem)
 def test_strategist_vision_reading(fixture_path):
     """Run the real strategist against a labeled screenshot."""
-    _load_dotenv()
     if not os.environ.get("AOE2_LLM_API_KEY"):
         pytest.skip("AOE2_LLM_API_KEY not set")
 

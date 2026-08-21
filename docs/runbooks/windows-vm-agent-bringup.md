@@ -47,15 +47,31 @@ curl -s http://<that-ip>:8420/health
 
 ### On the VM (Command Prompt)
 
+Do this once. The agent reads `.env` at startup, so a later session needs no
+`set` lines at all.
+
+```cmd
+cd %USERPROFILE%\aoe2-llm-arena\agent
+copy .env.example .env
+notepad .env
+```
+
+Fill in two values and save:
+
+```
+# The key must match AOE2_LLM_WIRE (default: openai).
+AOE2_LLM_API_KEY=your-key-here
+AOE2_DETECTION_HOST=http://192.168.64.1:8420
+```
+
+`.env` is gitignored, and an exported variable still beats it — so
+`set AOE2_STRATEGIST_INTERVAL=3` overrides the file for that one window.
+
+Every session after that:
+
 ```cmd
 cd %USERPROFILE%\aoe2-llm-arena\agent
 venv\Scripts\activate
-
-set AOE2_LLM_API_KEY=your-key-here    :: must match AOE2_LLM_WIRE (default: openai)
-set AOE2_DETECTION_HOST=http://192.168.64.1:8420
-:: Optional knobs
-set AOE2_STRATEGIST_INTERVAL=10
-set AOE2_SAVE_SCREENSHOTS=true
 
 :: Sanity: can the VM reach the Mac?
 curl http://192.168.64.1:8420/health
@@ -126,6 +142,7 @@ These are accumulated failure modes from many bring-up attempts:
 | Detection works on Mac but VM gets `Connection refused` | Server bound to `127.0.0.1` instead of `0.0.0.0` | Restart the server with `--host 0.0.0.0` (it's the default for `just server`, but easy to override and forget). |
 | Detection works once, then connection drops repeatedly | macOS firewall is challenging the server | System Settings → Network → Firewall → allow incoming for the Python binary. |
 | `Invalid schema for response_format` on every turn, `llm_error_rate=1.0` | A model field emits an open object (`dict[str, int]`), which OpenAI strict mode rejects | Fixed 2026-08-20. `tests/test_models.py` now fails on any new one — run `just check` before a VM run. |
+| `missing_api_key` although `.env` holds the key | The agent takes the first `.env` at or above `apps/agent/src/`. A stray `apps/agent/.env` shadows the one at the repo root | Delete the stray file, or put the key in it. |
 | `warning: Using incompatible environment (.venv) due to --no-sync` | `--no-sync` reused a venv built for a different Python; the project pins 3.11 | Drop `--no-sync`, or run `uv sync` first. |
 | OCR dominates the turn (`ocr_ms` in the tens of seconds) | The resolution has no `calibration.<W>x<H>.yaml`, so auto-detect scans the full-width band every turn | Add a calibration for that resolution, or run at one that has one. |
 

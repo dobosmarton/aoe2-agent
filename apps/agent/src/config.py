@@ -7,6 +7,8 @@ from typing import Final, Literal, get_args
 
 from pydantic import BaseModel
 
+from .env_file import load_env_file
+
 EffortLevel = Literal["low", "medium", "high"]  # Sonnet 4.6 rejects xhigh/max
 WireName = Literal["anthropic", "openai", "zen"]
 
@@ -175,5 +177,6 @@ class Config(BaseModel):
         )
 
 
-# Global config instance
+# Global config instance. The file load comes first: `from_env` reads `os.environ`.
+load_env_file()
 config = Config.from_env()
