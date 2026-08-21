@@ -386,3 +386,42 @@ def test_llm_response_declares_no_open_objects() -> None:
 
 def test_strategist_response_declares_no_open_objects() -> None:
     assert _open_objects(StrategistResponse) == []
+
+
+# ---------------------------------------------------------------------------
+# Vendor-unsupported schema keywords — the third shape that 400s every call
+# ---------------------------------------------------------------------------
+#
+# OpenAI strict mode accepts anyOf, pattern, format, minimum, maximum, minItems
+# and maxItems. It rejects `oneOf`, which a Discriminator("type") union emits,
+# and does not support minLength/maxLength. Run 2026_08_21_1 lost a whole game
+# to the first: llm_calls=98, llm_errors=98, llm_error_rate=1.0. Same reasoning
+# as the bounds tests above — catch it here, not on a burned run.
+
+
+def _schema_text(model: type[BaseModel]) -> str:
+    import json
+
+    return json.dumps(model.model_json_schema())
+
+
+@pytest.mark.parametrize("keyword", ["oneOf", "minLength", "maxLength"])
+def test_llm_response_schema_omits_unsupported_keywords(keyword: str) -> None:
+    assert f'"{keyword}"' not in _schema_text(LLMResponse)
+
+
+def test_the_action_union_is_still_a_union() -> None:
+    """Dropping the discriminator must not drop a branch — anyOf keeps all 9."""
+    items = LLMResponse.model_json_schema()["properties"]["actions"]["items"]
+    assert len(items["anyOf"]) == 9
+
+
+def test_key_length_still_enforced_by_validator() -> None:
+    """Dropping schema bounds must NOT drop enforcement."""
+    with pytest.raises(ValidationError):
+        PressAction(type="press", key="x" * 21)
+
+
+def test_building_key_length_still_enforced_by_validator() -> None:
+    with pytest.raises(ValidationError):
+        BuildAction(type="build", building_key="abc")

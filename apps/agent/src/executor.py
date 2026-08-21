@@ -9,7 +9,7 @@ import time
 from collections import Counter
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import cast
+from typing import Literal, cast
 
 import pyautogui
 import structlog
@@ -155,6 +155,10 @@ _VILLAGER_ORDER_TARGET_BY_AGE: dict[str, int] = {"Dark Age": 30, "Feudal Age": 3
 _NEXT_AGE: dict[str, str] = {"Dark Age": "Feudal Age", "Feudal Age": "Castle Age"}
 
 
+# How `_select_villager_step` picked the villager that builds.
+SelectionMode = Literal["click", "idle_press", "unknown"]
+
+
 # A placement whose foundation wasn't visually confirmed, awaiting settlement
 # against the HUD wood spend (2026-07-11 run 2, F-11: YOLO can't see foundations,
 # so a fresh rescan reports almost every REAL placement as failed — that false
@@ -165,6 +169,10 @@ class _PendingPlacement:
     wood_cost: int
     wood_before: int  # wood per the HUD snapshot when the placement was made
     noted_at_snapshot: int  # snapshot_count the wood_before reading belongs to
+    # How the villager was selected and where the click landed, so a missing
+    # settlement names its own cause.
+    selected_by: SelectionMode = "unknown"
+    point: tuple[int, int] = (0, 0)
     settles_left: int = _PLACEMENT_SETTLE_ATTEMPTS
 
 
@@ -185,6 +193,10 @@ class _BuildGates:
 
     population: tuple[int, int] | None = None
     resources: dict[str, int] | None = None
+    # This iteration's idle-villager reading, and how the last build acted on
+    # it — see _select_villager_step, which owns both.
+    idle_present: bool | None = None
+    selected_by: SelectionMode = "unknown"
     buildings_confirmed: set[str] = field(default_factory=set)
     # Frames each gate-relevant building class has been detected in —
     # informational only (the context line reports classes past
@@ -211,7 +223,13 @@ class _BuildGates:
 _build_gates = _BuildGates()
 
 
-def observe_hud(population: int, population_cap: int, resources: Mapping[str, int]) -> None:
+def observe_hud(
+    population: int,
+    population_cap: int,
+    resources: Mapping[str, int],
+    *,
+    idle_present: bool | None = None,
+) -> None:
     """Feed this turn's HUD reading into the build gates.
 
     Not just a cache write: the fresh wood value first updates the gather-income
@@ -224,6 +242,7 @@ def observe_hud(population: int, population_cap: int, resources: Mapping[str, in
     _settle_pending_placements(resources.get("wood"))
     _build_gates.population = (population, population_cap)
     _build_gates.resources = dict(resources)
+    _build_gates.idle_present = idle_present
 
 
 def observe_age(age: str) -> None:
@@ -273,7 +292,7 @@ def _expected_income(noted_at_snapshot: int) -> float:
     return ema * elapsed
 
 
-def _note_pending_placement(building_key: str) -> None:
+def _note_pending_placement(building_key: str, *, point: tuple[int, int] = (0, 0)) -> None:
     """Queue an unconfirmed placement for wood-delta settlement next snapshot."""
     cls = BUILD_KEY_TO_CLASS.get(building_key)
     cost = _BUILD_WOOD_COST.get(building_key)
@@ -289,6 +308,8 @@ def _note_pending_placement(building_key: str) -> None:
             wood_cost=cost,
             wood_before=wood_before,
             noted_at_snapshot=_build_gates.snapshot_count,
+            selected_by=_build_gates.selected_by,
+            point=point,
         )
     )
 
@@ -345,6 +366,9 @@ def _settle_pending_placements(wood_now: int | None) -> None:
                 wood_now=wood_now,
                 cost=pending.wood_cost,
                 income_estimate=round(income, 1),
+                selected_by=pending.selected_by,
+                x=pending.point[0],
+                y=pending.point[1],
             )
     _build_gates.pending_placements = still_pending
 
@@ -893,18 +917,41 @@ def build_menu_steps(
     ]
 
 
+def _select_villager_step(intent: str) -> dict[str, object]:
+    """Select the villager that will build, and record how (`selected_by`).
+
+    "." is preferred: it takes an IDLE villager and re-centers the camera, so
+    the placement resolves after the jump (F-33). But "." is a no-op when
+    nothing is idle, and every build ends by pressing "h" — the Town Center then
+    stays selected and the next "q" queues a villager instead of opening the
+    menu. Run 2026_08_21_1 lost 19 of 25 placements that way.
+    """
+    nothing_is_idle = _build_gates.idle_present is False  # None = no reading yet
+    _build_gates.selected_by = "click" if nothing_is_idle else "idle_press"
+    if nothing_is_idle:
+        return {
+            "type": "click",
+            "target_class": "villager",
+            "intent": f"Select villager ({intent})",
+        }
+    return {
+        "type": "press",
+        "key": ".",
+        "rescan": True,
+        "intent": f"Select idle villager ({intent})",
+    }
+
+
 def build_steps(building_key: str, intent: str) -> list[dict[str, object]]:
-    """Press/click sequence for a build: select idle villager → open the economic
+    """Press/click sequence for a build: select a villager → open the economic
     build menu → pick the building → place it.
 
     Shared by the single-shot build handler (`_handle_build`), the tool-loop
     build composite (`executor_provider.ExecutorProvider._execute_build`), and the housed
-    fallback, so the steps live in exactly one place. The `.` select re-centers
-    the camera on the villager, so it rescans and the placement resolves after
-    the jump (F-33).
+    fallback, so the steps live in exactly one place.
     """
     return [
-        {"type": "press", "key": ".", "rescan": True, "intent": f"Select idle villager ({intent})"},
+        _select_villager_step(intent),
         *build_menu_steps(building_key, intent),
     ]
 
@@ -979,7 +1026,7 @@ async def _finish_build_placement(
             # NOT reported as failure: the model can't see foundations, and a
             # false "failed" makes the LLM rebuild what already exists (the
             # run-2 duplicate mill). The wood spend settles it next snapshot.
-            _note_pending_placement(building_key)
+            _note_pending_placement(building_key, point=point)
             return ActionResult(
                 True,
                 "placement not visually confirmed (foundations aren't detectable); "

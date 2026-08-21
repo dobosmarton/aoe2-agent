@@ -188,7 +188,12 @@ def _sync_turn_state(
     game_state.idle_streak = (game_state.idle_streak + 1) if game_state.idle_present else 0
     game_state.buildings_seen = confirmed_buildings()
     game_state.villagers_ordered = villagers_ordered()
-    observe_hud(game_state.population, game_state.population_cap, game_state.resources)
+    observe_hud(
+        game_state.population,
+        game_state.population_cap,
+        game_state.resources,
+        idle_present=game_state.idle_present,
+    )
     observe_age(game_state.current_age)
 
 

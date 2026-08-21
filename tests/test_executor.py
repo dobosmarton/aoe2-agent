@@ -958,3 +958,27 @@ def test_build_steps_sequence() -> None:
     assert steps[3]["auto_placement"] is True  # placement resolved at click time (F-33)
     assert "x" not in steps[3]  # no pre-computed spot survives the camera jump
     assert steps[4]["key"] == "h"  # UI-state hygiene without the game menu
+
+
+def test_build_selects_by_click_when_nothing_is_idle(fake_pyautogui: _FakePyautogui) -> None:
+    """'.' is a no-op with nothing idle, so the leftover TC eats the next 'q'."""
+    ex.observe_hud(10, 30, {}, idle_present=False)
+    assert ex.build_steps("w", "build mill")[0]["target_class"] == "villager"
+
+
+def test_build_presses_dot_when_a_villager_is_idle(fake_pyautogui: _FakePyautogui) -> None:
+    """An idle villager is the better builder, and '.' re-centers the camera (F-33)."""
+    ex.observe_hud(10, 30, {}, idle_present=True)
+    assert ex.build_steps("w", "build mill")[0]["key"] == "."
+
+
+def test_selection_mode_is_recorded_when_the_step_is_built(
+    fake_pyautogui: _FakePyautogui,
+) -> None:
+    """Not re-derived at settlement: the pipeline runs a build one turn after it
+    is planned, and `_sync_turn_state` refreshes idle_present in between."""
+    ex.observe_hud(10, 30, {"wood": 200}, idle_present=False)
+    ex.build_steps("w", "build mill")  # planned in this turn: selects by click
+    ex.observe_hud(10, 30, {"wood": 200}, idle_present=True)  # next turn's sync
+    ex._note_pending_placement("w", point=(11, 22))  # the build finally runs
+    assert ex._build_gates.pending_placements[0].selected_by == "click"

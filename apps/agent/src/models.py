@@ -1,10 +1,9 @@
 """Pydantic models for action validation."""
 
-from typing import Annotated, Literal
+from typing import Literal
 
 from pydantic import (
     BaseModel,
-    Discriminator,
     Field,
     PrivateAttr,
     ValidationError,
@@ -28,6 +27,19 @@ from pydantic import (
 _MAX_X = 7680
 _MAX_Y = 4320
 _MAX_WAIT_MS = 5000
+
+# String lengths stay out of the schema for a second vendor reason: OpenAI
+# strict mode supports pattern, format, minimum, maximum, minItems and maxItems,
+# but NOT minLength/maxLength. `_check_length` enforces the same bounds.
+_MAX_KEY_LEN = 20
+_MAX_BUILDING_KEY_LEN = 2
+
+
+def _check_length(value: str, hi: int, name: str) -> str:
+    """Enforce 1 <= len(value) <= hi. Kept schema-free — see the module note."""
+    if not (1 <= len(value) <= hi):
+        raise ValueError(f"{name} must be 1 to {hi} characters")
+    return value
 
 
 def _in_range(value: int | None, hi: int, name: str) -> int | None:
@@ -118,7 +130,7 @@ class PressAction(BaseModel):
     """Keyboard press action."""
 
     type: Literal["press"]
-    key: str = Field(min_length=1, max_length=20)
+    key: str  # Length enforced by validate_key, not Field bounds — see module note.
     modifiers: list[str] = Field(
         default_factory=list, description="Modifier keys, e.g. ['ctrl', 'shift']"
     )
@@ -131,6 +143,7 @@ class PressAction(BaseModel):
     @classmethod
     def validate_key(cls, v: str) -> str:
         """Validate key is a valid pyautogui key."""
+        v = _check_length(v, _MAX_KEY_LEN, "key")
         # Common valid keys for pyautogui
         valid_special_keys = {
             "enter",
@@ -273,11 +286,16 @@ class BuildAction(BaseModel):
 
     type: Literal["build"]
     building_key: str = Field(
-        min_length=1,
-        max_length=2,
         description="Build hotkey: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm",
     )
     intent: str = ""
+
+    # Length-enforced via a validator (not Field bounds) to keep minLength and
+    # maxLength out of the schema — see the module note.
+    @field_validator("building_key")
+    @classmethod
+    def _check_building_key(cls, v: str) -> str:
+        return _check_length(v, _MAX_BUILDING_KEY_LEN, "building_key")
 
 
 class QueueVillagerAction(BaseModel):
@@ -292,10 +310,11 @@ class QueueVillagerAction(BaseModel):
     intent: str = ""
 
 
-# Discriminated union ensures the JSON schema uses oneOf + discriminator on "type",
-# preventing the model from confusing field names across action types
-# (e.g., using DragAction's x1/y1 for ClickAction instead of x/y).
-Action = Annotated[
+# A PLAIN union, not Discriminator("type"): a discriminator renders as `oneOf`,
+# which OpenAI strict mode rejects — 98 of 98 executor calls 400'd in run
+# 2026_08_21_1. Plain, pydantic emits the supported `anyOf`, and `type` stays a
+# Literal on every member.
+Action = (
     ClickAction
     | RightClickAction
     | PressAction
@@ -304,9 +323,8 @@ Action = Annotated[
     | DragAction
     | WaitAction
     | ScrollAction
-    | DetectAction,
-    Discriminator("type"),
-]
+    | DetectAction
+)
 
 
 class Observations(BaseModel):
