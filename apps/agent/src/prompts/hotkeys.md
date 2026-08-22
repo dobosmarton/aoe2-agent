@@ -29,9 +29,23 @@
 - Q: Queue Villager (50 food)
 - B: Ring Town Bell (garrison all nearby villagers)
 - Z: Research Age Up
-- A: Research Loom
+- A: Research Loom (50 gold)
+- W: Research Wheelbarrow (175 food + 50 wood, Feudal)
 - V: All Back to Work (ungarrison)
 - F: Go Back to Work
+
+### Economy technologies
+
+Prefer the `research` composite over these presses: it goes to the building,
+presses the key, and REPORTS BACK whether the cost actually left your resources.
+A raw press cannot tell a working button from a greyed-out one.
+
+- castle_age (800 food + 200 gold) — also needs 2 Feudal-Age buildings standing
+- loom (50 gold)
+- wheelbarrow (175 food + 50 wood)
+- horse_collar (75 food + 75 wood) — Mill, faster farms
+- double_bit_axe (100 food + 50 wood) — Lumber Camp, faster wood
+- gold_mining (100 food + 75 wood) — Mining Camp, faster gold
 
 ### Villager Build — Economic (select villager, press Q)
 - Q: House (25 wood)

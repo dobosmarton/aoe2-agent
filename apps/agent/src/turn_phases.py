@@ -25,6 +25,8 @@ import structlog
 from .entity_utils import extract_attrs
 from .executor import (
     CAMERA_KEYS,
+    CASTLE_PREREQ_COUNT,
+    FEUDAL_PREREQ_CLASSES,
     build_steps,
     clear_detected_entities,
     confirmed_buildings,
@@ -128,6 +130,7 @@ def _build_llm_context(
         )
         entity_context += _villager_jobs_line(detected_entities)
         entity_context += known_buildings_line(detected_entities)
+        entity_context += castle_gate_line(memory.game_state.current_age)
         context = entity_context + "\n" + context
 
     return context
@@ -148,6 +151,25 @@ def _villager_jobs_line(detected_entities: list[object] | None) -> str:
         return ""
     breakdown = " ".join(f"{kind}={n}" for kind, n in working.items())
     return f"Villagers by job (approx, from proximity): {breakdown}\n"
+
+
+def castle_gate_line(age: str) -> str:
+    """One line of the Castle Age's building requirement, as a count.
+
+    A FACT, not an instruction: the prompt already explains what the gate means,
+    and every tier can read a number. Run 2026_08_21_2 pressed the age-up key 10
+    times with the resources banked and zero qualifying buildings standing.
+    Silent outside Feudal, where the gate does not apply yet.
+    """
+    if not age.startswith("Feudal"):
+        return ""
+    have = sorted(confirmed_buildings() & FEUDAL_PREREQ_CLASSES)
+    names = " ".join(have) if have else "none"
+    return (
+        f"Feudal-Age buildings: {len(have)}/{CASTLE_PREREQ_COUNT} ({names}) — "
+        f"the Castle Age needs {CASTLE_PREREQ_COUNT} of "
+        f"{', '.join(sorted(FEUDAL_PREREQ_CLASSES))}\n"
+    )
 
 
 def known_buildings_line(detected_entities: list[object] | None) -> str:

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
 
 import pytest
+from gameplay_agent.models import Observations
 from gameplay_agent.providers.base import (
     AssistantTurn,
     ChatRequest,
@@ -170,6 +171,30 @@ def test_tool_calls_ignored_when_finish_reason_is_not_tool_calls(wire: OpenAIWir
     result = _run(wire.tool_turn(request, []))
     assert result.tool_calls == ()
     assert result.wants_more_tools is False
+
+
+def test_tool_turn_sends_no_reasoning_effort(wire: OpenAIWire) -> None:
+    """Function tools plus reasoning_effort are unsupported on this endpoint —
+    the pair 400'd all 18 tool-loop turns of run 2026_08_21_2."""
+    create = AsyncMock(return_value=_completion())
+    wire.client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    request = ChatRequest(system=(), turns=(UserTurn("hi"),), max_tokens=64, temperature=None)
+    _run(wire.tool_turn(request, []))
+    assert create.await_args.kwargs["reasoning_effort"] == "none"
+
+
+def test_structured_output_still_sends_the_configured_effort(wire: OpenAIWire) -> None:
+    """Only the TOOL path is affected — this one carries no tools."""
+    message = SimpleNamespace(refusal=None, parsed=Observations())
+    parse = AsyncMock(
+        return_value=SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=_usage())
+    )
+    wire.client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=parse)))
+    request = ChatRequest(
+        system=(), turns=(UserTurn("hi"),), max_tokens=64, temperature=None, effort="high"
+    )
+    _run(wire.parse_structured(request, Observations))
+    assert parse.await_args.kwargs["reasoning_effort"] == "high"
 
 
 def test_schema_size_fallback_never_fires_on_this_wire(wire: OpenAIWire) -> None:

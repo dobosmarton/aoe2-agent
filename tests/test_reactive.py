@@ -514,7 +514,7 @@ def test_the_farm_is_the_only_cost_idle_still_owns() -> None:
     from gameplay_agent.policy import idle
 
     assert ex._BUILD_WOOD_COST["a"] == idle._FARM_WOOD_COST
-    assert ex.BUILD_KEY_TO_CLASS[idle._FARM_BUILD_KEY] == "farm"
+    assert ex.building_class(ex.ECON_MENU, idle._FARM_BUILD_KEY) == "farm"
     assert ex._VILLAGER_ORDER_TARGET_BY_AGE.keys() == ex._NEXT_AGE.keys()
 
 

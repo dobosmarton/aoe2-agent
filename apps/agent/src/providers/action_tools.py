@@ -1,9 +1,9 @@
 """Tool-schema definitions for the executor's tool-use loop.
 
-These are pure data: twelve tools, of which seven are single-step actions
+These are pure data: thirteen tools, of which seven are single-step actions
 (click, right_click, press, drag, wait, scroll, detect) and five expand to
-multi-step sequences (build, send_villager, send_all_idle, queue_villager,
-reassign_villager). The composite tools collapse common multi-step UI flows into
+multi-step sequences (build, research, send_villager, send_all_idle,
+queue_villager, reassign_villager). The composite tools collapse common multi-step UI flows into
 a single tool call so the model doesn't pay per-step API roundtrip latency for
 predictable sequences.
 
@@ -130,17 +130,53 @@ _ACTION_TOOLS: list[dict] = [
     # --- Composite tools (multi-step sequences, no intermediate API roundtrips) ---
     {
         "name": "build",
-        "description": "Composite: select idle villager → open economic build menu → press building_key → place the building on open ground near your Town Center. Building keys: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm. Placement is chosen by the executor AFTER the camera settles — you cannot pass coordinates (selecting the villager moves the camera, so any spot you compute now would be stale). ALWAYS use this instead of press(.)+press(q)+press(key)+click() separately.",
+        "description": "Composite: select a villager → open a build menu → press building_key → place the building on open ground near your Town Center. Menus: menu='q' economic (q=House w=Mill e=Mining Camp r=Lumber Camp a=Farm s=Blacksmith t=Dock), menu='w' military (q=Barracks w=Archery Range e=Stable), menu='v' advanced (d=Market). Barracks, Archery Range, Stable, Blacksmith and Market are the Feudal-Age buildings the Castle Age requires two of. Placement is chosen by the executor AFTER the camera settles — you cannot pass coordinates (selecting the villager moves the camera, so any spot you compute now would be stale). ALWAYS use this instead of a manual press+click sequence.",
         "input_schema": {
             "type": "object",
             "properties": {
+                "menu": {
+                    "type": "string",
+                    "enum": ["q", "w", "v"],
+                    "description": "Build menu: q=economic, w=military, v=advanced",
+                },
                 "building_key": {
                     "type": "string",
-                    "description": "Hotkey for the building: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm",
+                    "description": "Key within that menu — see the tool description",
                 },
                 "intent": {"type": "string", "description": "What you are building and why"},
             },
-            "required": ["building_key", "intent"],
+            "required": ["menu", "building_key", "intent"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "research",
+        "description": (
+            "Composite: go to the building that researches this technology, then press its "
+            "panel key. Named, not keyed — the executor owns the hotkeys. The HUD spend "
+            "confirms it next turn: if the cost never leaves your resources the button was "
+            "greyed out, and the failure detail says so. Do NOT re-press a pending research. "
+            "castle_age needs 800 food + 200 gold AND two Feudal-Age buildings standing "
+            "(barracks, archery_range, stable, blacksmith or market)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "tech": {
+                    "type": "string",
+                    "enum": [
+                        "castle_age",
+                        "loom",
+                        "wheelbarrow",
+                        "horse_collar",
+                        "double_bit_axe",
+                        "gold_mining",
+                    ],
+                    "description": "Technology to research",
+                },
+                "intent": {"type": "string", "description": "Why you are researching it"},
+            },
+            "required": ["tech", "intent"],
             "additionalProperties": False,
         },
     },

@@ -410,10 +410,13 @@ def test_llm_response_schema_omits_unsupported_keywords(keyword: str) -> None:
     assert f'"{keyword}"' not in _schema_text(LLMResponse)
 
 
-def test_the_action_union_is_still_a_union() -> None:
-    """Dropping the discriminator must not drop a branch — anyOf keeps all 9."""
+def test_the_action_union_carries_every_action_type() -> None:
+    """Dropping the discriminator must not drop a branch. Pinned to the dispatch
+    map, not a literal count, so a new action type cannot be half-added."""
+    from gameplay_agent.models import _ACTION_TYPE_MAP
+
     items = LLMResponse.model_json_schema()["properties"]["actions"]["items"]
-    assert len(items["anyOf"]) == 9
+    assert len(items["anyOf"]) == len(_ACTION_TYPE_MAP)
 
 
 def test_key_length_still_enforced_by_validator() -> None:

@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 from ..config import config
 from ..entity_utils import ResourceKind
 from ..executor import (
+    ECON_MENU,
     STALE_COORDS_DETAIL,
     build_menu_steps,
     build_rejection,
@@ -448,11 +449,12 @@ class ExecutorProvider:
         inp = block.arguments
         intent = str(inp.get("intent", "Build"))
         building_key = cast("str", inp["building_key"])
-        rejection = build_rejection(building_key, intent)
+        menu = str(inp.get("menu") or ECON_MENU)
+        rejection = build_rejection(building_key, intent, menu=menu)
         if rejection is not None:
             action_dict = {"type": "build", **inp}
             return action_dict, self._make_tool_result(block, False, rejection)
-        steps = build_steps(building_key, intent)
+        steps = build_steps(building_key, intent, menu=menu)
         return await self._run_composite(block, "build", steps)
 
     def _refuse_raw_send(self, block: ToolCall, name: str) -> tuple[dict, ToolOutcome]:

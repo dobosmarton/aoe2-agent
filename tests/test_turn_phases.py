@@ -23,6 +23,7 @@ from gameplay_agent.turn_phases import (
     _fallback_actions,
     _get_ground_commands,
     _process_response,
+    castle_gate_line,
     known_buildings_line,
 )
 
@@ -332,3 +333,29 @@ def test_process_response_success_response_is_not_an_error():
     assert snap["llm_calls"] == 1
     assert snap["llm_errors"] == 0
     assert snap["llm_error_rate"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# castle_gate_line — the Castle Age requirement as a fact
+# ---------------------------------------------------------------------------
+#
+# Run 2026_08_21_2 banked 2610 food and 910 gold and pressed the age-up key 10
+# times with ZERO qualifying buildings standing. The gate was in the prompt as
+# prose; every tier can read a number.
+
+
+def test_castle_gate_line_counts_only_qualifying_classes(build_gates) -> None:
+    """Mills, houses and camps are Dark Age buildings and never count."""
+    ex.record_confirmed_buildings(["mill", "house", "lumber_camp"])
+    assert castle_gate_line("Feudal Age").startswith("Feudal-Age buildings: 0/2 (none)")
+
+
+def test_castle_gate_line_names_what_is_standing(build_gates) -> None:
+    ex.record_confirmed_buildings(["barracks", "market"])
+    assert castle_gate_line("Feudal Age").startswith("Feudal-Age buildings: 2/2 (barracks market)")
+
+
+def test_castle_gate_line_is_silent_outside_feudal(build_gates) -> None:
+    """The gate does not apply in the Dark Age; a line about it is noise."""
+    ex.record_confirmed_buildings(["barracks"])
+    assert castle_gate_line("Dark Age") == ""

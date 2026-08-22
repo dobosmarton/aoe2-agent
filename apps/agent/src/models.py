@@ -101,8 +101,13 @@ class ClickAction(PointTargetAction):
     type: Literal["click"]
     building_key: str | None = Field(
         default=None,
-        description="Econ build-menu key when this click places a building — carried "
+        description="Build-menu key when this click places a building — carried "
         "through validation so the executor can verify the placement landed",
+    )
+    menu: Literal["q", "w", "v"] = Field(
+        default="q",
+        description="Which menu building_key belongs to — the same key means "
+        "different buildings in different menus",
     )
     auto_placement: bool = Field(
         default=False,
@@ -277,7 +282,7 @@ class DetectAction(BaseModel):
 
 
 class BuildAction(BaseModel):
-    """Build a structure via the economic build menu, auto-placed near the Town Center.
+    """Build a structure via a build menu, auto-placed near the Town Center.
 
     Coordinate-free on purpose: x,y are omitted because the text-only model can't see
     open ground — the executor picks the placement (near the TC, with retry). Available
@@ -285,8 +290,13 @@ class BuildAction(BaseModel):
     """
 
     type: Literal["build"]
+    menu: Literal["q", "w", "v"] = Field(
+        default="q",
+        description="Build menu: q=economic (default), w=military, v=advanced",
+    )
     building_key: str = Field(
-        description="Build hotkey: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm",
+        description="Key within the menu. q: q=House w=Mill e=Mining Camp r=Lumber Camp "
+        "a=Farm s=Blacksmith t=Dock. w: q=Barracks w=Archery Range e=Stable. v: d=Market",
     )
     intent: str = ""
 
@@ -296,6 +306,20 @@ class BuildAction(BaseModel):
     @classmethod
     def _check_building_key(cls, v: str) -> str:
         return _check_length(v, _MAX_BUILDING_KEY_LEN, "building_key")
+
+
+class ResearchAction(BaseModel):
+    """Research one technology: go to its building, press its panel key.
+
+    Named, not keyed: the executor owns the hotkeys, and a name it does not know
+    comes back as a failure detail instead of a stray keystroke.
+    """
+
+    type: Literal["research"]
+    tech: str = Field(
+        description="castle_age, loom, wheelbarrow, horse_collar, double_bit_axe, gold_mining",
+    )
+    intent: str = ""
 
 
 class QueueVillagerAction(BaseModel):
@@ -319,6 +343,7 @@ Action = (
     | RightClickAction
     | PressAction
     | BuildAction
+    | ResearchAction
     | QueueVillagerAction
     | DragAction
     | WaitAction
@@ -346,6 +371,7 @@ _ACTION_TYPE_MAP: dict[str, type[Action]] = {
     "right_click": RightClickAction,
     "press": PressAction,
     "build": BuildAction,
+    "research": ResearchAction,
     "queue_villager": QueueVillagerAction,
     "drag": DragAction,
     "wait": WaitAction,

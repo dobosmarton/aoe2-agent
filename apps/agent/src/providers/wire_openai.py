@@ -174,10 +174,12 @@ class OpenAIWire:
             messages=self._render_messages(request),  # pyright: ignore[reportArgumentType]
             tools=to_openai_tools(tools),  # pyright: ignore[reportArgumentType]
             temperature=_temperature(request.temperature),
-            # Reasoning models reject the classic `max_tokens`. `reasoning_effort`
-            # is sent even where support is uncertain: a loud 400 beats silently
-            # dropping a knob the operator set (surfaces via the T-533 alarm).
-            reasoning_effort=request.effort,
+            # NOT request.effort: "Function tools with reasoning_effort are not
+            # supported for gpt-5.6-luna in /v1/chat/completions" 400'd all 18
+            # tool-loop turns of run 2026_08_21_2. The vendor names "none" as the
+            # fix; /v1/responses is the other, and costs a parse-path migration.
+            reasoning_effort="none",
+            # Reasoning models reject the classic `max_tokens`.
             max_completion_tokens=request.max_tokens,
         )
 

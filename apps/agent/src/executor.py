@@ -125,11 +125,129 @@ _INCOME_EMA_WEIGHT = 0.5
 # Stale-OCR grace: identical wood readings a pending placement survives before
 # it is settled anyway.
 _PLACEMENT_SETTLE_ATTEMPTS = 3
+# A house settles on the population cap, not the wood delta: 25 wood against a
+# 20-wood slack leaves a 5-wood margin on an ESTIMATED income. Run 2026_08_21_2
+# built 6 houses and the wood test called 9 confirmed and 21 missing.
+_HOUSE_CLASS = "house"
+_HOUSE_CAP_STEP = 5  # cap gained per completed house
+# Houses need more grace than the wood path: a house takes ~25 s to CONSTRUCT
+# before the cap moves, on top of OCR lag, against a ~13 s turn.
+_HOUSE_SETTLE_ATTEMPTS = 5
 # Distinct detection frames before a building class is REPORTED as sighted
 # (context line only — sightings never gate builds: run 9, F-36, a persistent
 # phantom mill beat any count threshold and 14 outposts got built through the
 # unlocked farm slot).
 _SIGHTING_MIN_FRAMES = 3
+# Build-menu key → detected building class, used to verify a placement actually
+# landed (the class appears in the entity cache after a rescan). One map per
+# menu, because the same key means different things: econ `w` is the Mill,
+# military `w` is the Archery Range.
+#
+# Tower, wall and castle are deliberately absent from the V menu. core.md warns
+# that a tower is stolen economy, and the outpost slot has cost two runs.
+ECON_MENU = "q"
+MILITARY_MENU = "w"
+ADVANCED_MENU = "v"
+
+_MENU_BUILDINGS: dict[str, dict[str, str]] = {
+    ECON_MENU: {
+        "q": "house",
+        "w": "mill",
+        "e": "mining_camp",
+        "r": "lumber_camp",
+        "a": "farm",
+        "s": "blacksmith",
+        "t": "dock",
+    },
+    MILITARY_MENU: {
+        "q": "barracks",
+        "w": "archery_range",
+        "e": "stable",
+    },
+    ADVANCED_MENU: {
+        "d": "market",
+    },
+}
+
+_MENU_NAMES: dict[str, str] = {
+    ECON_MENU: "Open economic build menu",
+    MILITARY_MENU: "Open military build menu",
+    ADVANCED_MENU: "Open advanced build menu",
+}
+
+
+def building_class(menu: str, key: str) -> str | None:
+    """The class one menu key places, or None if the menu has no such entry."""
+    return _MENU_BUILDINGS.get(menu, {}).get(key)
+
+
+# The Castle Age needs two buildings FROM the Feudal Age standing; houses, mills
+# and camps are Dark Age and do not count. Run 2026_08_21_2 built none of these
+# and the age-up stayed greyed out for 13 minutes.
+FEUDAL_PREREQ_CLASSES: frozenset[str] = frozenset(
+    {"barracks", "archery_range", "stable", "blacksmith", "market"}
+)
+CASTLE_PREREQ_COUNT = 2
+
+
+# ---------------------------------------------------------------------------
+# Technologies — the research counterpart of the build menus
+# ---------------------------------------------------------------------------
+
+# A research is confirmed when the cost resource falls by at least this fraction
+# of its price. A fraction, not an exact match, because the HUD reading lags and
+# the economy keeps earning; half is wide enough to survive that and still tell
+# an 800-food age-up apart from a 50-food villager.
+_RESEARCH_CONFIRM_FRACTION = 0.5
+# Snapshots a pending research waits for the HUD to move before it is judged.
+_RESEARCH_SETTLE_ATTEMPTS = 3
+
+
+@dataclass(frozen=True, slots=True)
+class Tech:
+    """One researchable item: where to go, which key, what it costs.
+
+    `research_key` is the panel SLOT under the grid layout, because AoE2:DE
+    assigns no default hotkey to an upgrade. A wrong slot is no longer silent —
+    the settlement reports it once instead of letting it be retried blind.
+    """
+
+    goto_key: str
+    research_key: str
+    goto_modifiers: tuple[str, ...] = ()
+    food: int = 0
+    gold: int = 0
+    wood: int = 0
+
+
+_TECHS: dict[str, Tech] = {
+    # Town Center — both keys documented in prompts/hotkeys.md.
+    "castle_age": Tech(goto_key="h", research_key="z", food=800, gold=200),
+    "loom": Tech(goto_key="h", research_key="a", gold=50),
+    "wheelbarrow": Tech(goto_key="h", research_key="w", food=175, wood=50),
+    # Drop-off buildings: go-to keys documented, slot keys read off the panel.
+    "horse_collar": Tech(
+        goto_key="i", goto_modifiers=("ctrl",), research_key="q", food=75, wood=75
+    ),
+    "double_bit_axe": Tech(
+        goto_key="z", goto_modifiers=("ctrl",), research_key="q", food=100, wood=50
+    ),
+    "gold_mining": Tech(
+        goto_key="g", goto_modifiers=("ctrl",), research_key="q", food=100, wood=75
+    ),
+}
+
+
+@dataclass
+class _PendingResearch:
+    """A research awaiting confirmation from the HUD resource drop."""
+
+    name: str
+    tech: Tech
+    before: dict[str, int]
+    settles_left: int = _RESEARCH_SETTLE_ATTEMPTS
+
+
 # Circuit breaker (T-530): consecutive missing settlements for one building
 # class before its builds are suppressed, and how many HUD snapshots the
 # suppression lasts. Run 9: 32 identical farm attempts each burned resources.
@@ -158,6 +276,10 @@ _NEXT_AGE: dict[str, str] = {"Dark Age": "Feudal Age", "Feudal Age": "Castle Age
 # How `_select_villager_step` picked the villager that builds.
 SelectionMode = Literal["click", "idle_press", "unknown"]
 
+# What one HUD snapshot says about a pending placement. "undecided" is not a
+# miss: the reading cannot answer yet, so the placement waits out `settles_left`.
+Verdict = Literal["confirmed", "missing", "undecided"]
+
 
 # A placement whose foundation wasn't visually confirmed, awaiting settlement
 # against the HUD wood spend (2026-07-11 run 2, F-11: YOLO can't see foundations,
@@ -169,11 +291,16 @@ class _PendingPlacement:
     wood_cost: int
     wood_before: int  # wood per the HUD snapshot when the placement was made
     noted_at_snapshot: int  # snapshot_count the wood_before reading belongs to
+    cap_before: int = 0  # population cap at the same snapshot — the house signal
     # How the villager was selected and where the click landed, so a missing
     # settlement names its own cause.
     selected_by: SelectionMode = "unknown"
     point: tuple[int, int] = (0, 0)
     settles_left: int = _PLACEMENT_SETTLE_ATTEMPTS
+
+    @property
+    def is_house(self) -> bool:
+        return self.building_class == _HOUSE_CLASS
 
 
 @dataclass
@@ -188,7 +315,8 @@ class _BuildGates:
     the gates at 1 frame, and run 9's PERSISTENT phantom beat the 3-frame
     threshold too (F-36) — a mill-less econ menu then builds OUTPOSTS through
     the unlocked farm slot, so gate evidence must be self-generated.
-    pending_placements: builds awaiting wood-delta settlement.
+    pending_placements: builds awaiting wood-delta settlement; pending_research
+    is its technology counterpart, settled on the food/gold drop.
     """
 
     population: tuple[int, int] | None = None
@@ -211,6 +339,11 @@ class _BuildGates:
     # the snapshot count until which a repeatedly-missing class stays blocked.
     missing_streaks: dict[str, int] = field(default_factory=dict)
     suppressed_until: dict[str, int] = field(default_factory=dict)
+    # The research counterparts: awaiting settlement, proven paid for, and the
+    # snapshot until which a proven miss stays blocked.
+    pending_research: list[_PendingResearch] = field(default_factory=list)
+    researched: set[str] = field(default_factory=set)
+    research_blocked_until: dict[str, int] = field(default_factory=dict)
     snapshot_count: int = 0
     # Villagers ordered so far (T-531) — self-generated ground truth that
     # leads the delivered HUD population by the TC queue depth.
@@ -239,7 +372,10 @@ def observe_hud(
     """
     _build_gates.snapshot_count += 1
     _observe_wood_income(resources.get("wood"))
-    _settle_pending_placements(resources.get("wood"))
+    # Both readings are passed in, not read off the gates: settlement runs
+    # BEFORE the snapshot is replaced, which is the ordering the deltas need.
+    _settle_pending_placements(resources.get("wood"), population_cap)
+    _settle_pending_research(resources)
     _build_gates.population = (population, population_cap)
     _build_gates.resources = dict(resources)
     _build_gates.idle_present = idle_present
@@ -292,85 +428,209 @@ def _expected_income(noted_at_snapshot: int) -> float:
     return ema * elapsed
 
 
-def _note_pending_placement(building_key: str, *, point: tuple[int, int] = (0, 0)) -> None:
+def _note_pending_placement(
+    building_key: str, *, menu: str = ECON_MENU, point: tuple[int, int] = (0, 0)
+) -> None:
     """Queue an unconfirmed placement for wood-delta settlement next snapshot."""
-    cls = BUILD_KEY_TO_CLASS.get(building_key)
-    cost = _BUILD_WOOD_COST.get(building_key)
+    cls = building_class(menu, building_key)
+    cost = _WOOD_COST_BY_CLASS.get(cls or "")
     wood_before = (_build_gates.resources or {}).get("wood")
     if cls is None or cost is None or wood_before is None:
         # No wood baseline to settle against — the placement stays unconfirmed
         # for good, despite the caller's "settled next turn" detail. Say so.
         log.debug("placement_pending_dropped", building_key=building_key)
         return
+    _, cap_before = _build_gates.population or (0, 0)
+    is_house = cls == _HOUSE_CLASS
     _build_gates.pending_placements.append(
         _PendingPlacement(
             building_class=cls,
             wood_cost=cost,
             wood_before=wood_before,
             noted_at_snapshot=_build_gates.snapshot_count,
+            cap_before=cap_before,
             selected_by=_build_gates.selected_by,
             point=point,
+            settles_left=_HOUSE_SETTLE_ATTEMPTS if is_house else _PLACEMENT_SETTLE_ATTEMPTS,
         )
     )
 
 
-def _settle_pending_placements(wood_now: int | None) -> None:
+def _settle_pending_placements(wood_now: int | None, cap_now: int) -> None:
     """Confirm or drop pending placements using the game's own ledger — the HUD.
 
-    A placement that consumed its wood cost DID succeed regardless of what
-    detection saw (the resource bar is authoritative; the vision model can't
-    see foundations). Estimated gather income since the baseline reading is
-    deducted from the observed delta first — run 13 (F-45) gathered +140 wood
-    across a 25-wood house settlement, so the raw delta alone judged every
-    real purchase MISSING and the circuit breaker locked out five building
-    classes. Judged FIFO, erring toward confirmation: a false "failed" report
-    is what caused the duplicate mill, while a false success merely delays
-    the retry by a turn. An unchanged wood reading is treated as stale OCR
-    and re-checked next snapshot (up to `settles_left` times). Confirmed
-    spend is deducted per shared baseline before judging the next entry, so
-    one wood drop confirms at most one pending of a given cost — run 3
-    (F-17) settled two mills off a single purchase.
+    A placement that consumed its cost DID succeed regardless of what detection
+    saw (the HUD is authoritative; the vision model can't see foundations).
+    Houses settle on the population cap and every other class on the wood delta
+    — see `_house_verdict` and `_wood_verdict`. Judged FIFO, erring toward
+    confirmation: a false "failed" report is what caused the duplicate mill,
+    while a false success merely delays the retry by a turn. An "undecided"
+    reading waits for the next snapshot, up to `settles_left` times.
+
+    A missing wood reading stops the whole pass, houses included: one OCR frame
+    supplies both numbers, so an unreadable wood value means an unreliable cap.
     """
     if not _build_gates.pending_placements or wood_now is None:
         return
     still_pending: list[_PendingPlacement] = []
     spend_by_baseline: dict[int, int] = {}
+    claimed_cap: dict[int, int] = {}
     for pending in _build_gates.pending_placements:
-        if wood_now == pending.wood_before and pending.settles_left > 0:
+        verdict = (
+            _house_verdict(pending, cap_now, claimed_cap)
+            if pending.is_house
+            else _wood_verdict(pending, wood_now, spend_by_baseline)
+        )
+        if verdict == "undecided" and pending.settles_left > 0:
             pending.settles_left -= 1
             still_pending.append(pending)
             continue
-        spent = spend_by_baseline.get(pending.wood_before, 0)
-        income = _expected_income(pending.noted_at_snapshot)
-        purchased = (
-            wood_now - income
-            <= pending.wood_before - spent - pending.wood_cost + _PLACEMENT_INCOME_SLACK
-        )
-        if purchased:
-            spend_by_baseline[pending.wood_before] = spent + pending.wood_cost
+        evidence = _settlement_evidence(pending, wood_now, cap_now)
+        if verdict == "confirmed":
             record_confirmed_buildings([pending.building_class])
-            log.info(
-                "build_purchase_confirmed",
-                building=pending.building_class,
-                wood_before=pending.wood_before,
-                wood_now=wood_now,
-                cost=pending.wood_cost,
-                income_estimate=round(income, 1),
-            )
+            log.info("build_purchase_confirmed", **evidence)
         else:
             _note_missing_settlement(pending.building_class)
             log.warning(
                 "build_purchase_missing",
-                building=pending.building_class,
-                wood_before=pending.wood_before,
-                wood_now=wood_now,
-                cost=pending.wood_cost,
-                income_estimate=round(income, 1),
+                **evidence,
                 selected_by=pending.selected_by,
                 x=pending.point[0],
                 y=pending.point[1],
             )
     _build_gates.pending_placements = still_pending
+
+
+def _house_verdict(pending: _PendingPlacement, cap_now: int, claimed: dict[int, int]) -> Verdict:
+    """Confirmed once the population cap has risen by a whole house.
+
+    Never "missing": an unmoved cap means the house may still be under
+    construction. `claimed` stops one +10 jump from confirming three pending
+    houses — the cap analogue of `spend_by_baseline` (run 3, F-17).
+    """
+    already = claimed.get(pending.cap_before, 0)
+    if cap_now - pending.cap_before - already < _HOUSE_CAP_STEP:
+        return "undecided"
+    claimed[pending.cap_before] = already + _HOUSE_CAP_STEP
+    return "confirmed"
+
+
+def _wood_verdict(
+    pending: _PendingPlacement, wood_now: int, spend_by_baseline: dict[int, int]
+) -> Verdict:
+    """Whether the HUD wood delta covers this placement's cost.
+
+    An unchanged reading is stale OCR, not a miss.
+
+    Estimated gather income is deducted from the delta first — run 13 (F-45)
+    gathered +140 wood across a 25-wood house settlement, so the raw delta alone
+    judged every real purchase MISSING and the circuit breaker locked out five
+    classes. Confirmed spend is deducted per shared baseline, so one wood drop
+    confirms at most one pending of a given cost.
+    """
+    if wood_now == pending.wood_before:
+        return "undecided"
+    spent = spend_by_baseline.get(pending.wood_before, 0)
+    income = _expected_income(pending.noted_at_snapshot)
+    budget = pending.wood_before - spent - pending.wood_cost + _PLACEMENT_INCOME_SLACK
+    if wood_now - income > budget:
+        return "missing"
+    spend_by_baseline[pending.wood_before] = spent + pending.wood_cost
+    return "confirmed"
+
+
+def _settlement_evidence(
+    pending: _PendingPlacement, wood_now: int, cap_now: int
+) -> dict[str, object]:
+    """The numbers the settlement judged on, for either log line."""
+    if pending.is_house:
+        return {
+            "building": pending.building_class,
+            "cap_before": pending.cap_before,
+            "cap_now": cap_now,
+        }
+    return {
+        "building": pending.building_class,
+        "wood_before": pending.wood_before,
+        "wood_now": wood_now,
+        "cost": pending.wood_cost,
+        "income_estimate": round(_expected_income(pending.noted_at_snapshot), 1),
+    }
+
+
+def _note_pending_research(name: str, tech: Tech) -> None:
+    """Queue a research for HUD settlement next snapshot."""
+    before = _build_gates.resources
+    if before is None:
+        log.debug("research_pending_dropped", tech=name)
+        return
+    _build_gates.pending_research.append(
+        _PendingResearch(name=name, tech=tech, before=dict(before))
+    )
+
+
+def _settle_pending_research(resources: Mapping[str, int]) -> None:
+    """Confirm or report each pending research against the HUD resource drop.
+
+    This is the feedback a raw `press` never had: a keystroke always "succeeds",
+    so a greyed-out button looked identical to a working one. Run 2026_08_21_2
+    pressed the age-up key 10 times over 4 minutes on that blind spot.
+    """
+    if not _build_gates.pending_research:
+        return
+    still_pending: list[_PendingResearch] = []
+    for pending in _build_gates.pending_research:
+        verdict = _research_verdict(pending, resources)
+        if verdict == "undecided" and pending.settles_left > 0:
+            pending.settles_left -= 1
+            still_pending.append(pending)
+            continue
+        if verdict == "confirmed":
+            _build_gates.researched.add(pending.name)
+            log.info("research_confirmed", tech=pending.name)
+        else:
+            until = _build_gates.snapshot_count + _MISSING_SUPPRESS_SNAPSHOTS
+            _build_gates.research_blocked_until[pending.name] = until
+            log.warning(
+                "research_missing",
+                tech=pending.name,
+                until_snapshot=until,
+                **_research_costs(pending.tech),
+            )
+    _build_gates.pending_research = still_pending
+
+
+def _research_verdict(pending: _PendingResearch, resources: Mapping[str, int]) -> Verdict:
+    """Confirmed once every cost resource has fallen far enough to have paid.
+
+    ANY unchanged cost reading is stale OCR, not a refusal: a frame where food
+    updated but gold did not once reported a paid-for age-up as missing.
+    """
+    shortfalls = []
+    for kind, price in _research_costs(pending.tech).items():
+        now = resources.get(kind)
+        was = pending.before.get(kind)
+        if now is None or was is None or now == was:
+            return "undecided"
+        shortfalls.append(was - now < price * _RESEARCH_CONFIRM_FRACTION)
+    return "missing" if any(shortfalls) else "confirmed"
+
+
+def _research_costs(tech: Tech) -> dict[str, int]:
+    """The non-zero prices of one technology, keyed by resource."""
+    return {
+        kind: price
+        for kind, price in (("food", tech.food), ("gold", tech.gold), ("wood", tech.wood))
+        if price
+    }
+
+
+def _is_pop_capped() -> bool:
+    """Whether the HUD shows no population headroom. False with no reading yet."""
+    if _build_gates.population is None:
+        return False
+    population, cap = _build_gates.population
+    return cap > 0 and population >= cap
 
 
 def _clear_missing_streak(building_class: str) -> None:
@@ -386,7 +646,13 @@ def _note_missing_settlement(building_class: str) -> None:
     — each one buying an unintended outpost. A streak means something is
     systematically wrong (phantom prerequisite, blocked ground), so stop
     paying for retries and force a pause the LLM can reason about.
+
+    Never suppresses a house while pop-capped: a house is the ONLY way out, so
+    the pause becomes a deadlock. Run 2026_08_21_2 sat at 35/35 for the last 10
+    minutes of a 25-minute game with houses suppressed 13 times.
     """
+    if building_class == _HOUSE_CLASS and _is_pop_capped():
+        return
     streak = _build_gates.missing_streaks.get(building_class, 0) + 1
     _build_gates.missing_streaks[building_class] = streak
     if streak >= _MISSING_STREAK_LIMIT:
@@ -484,20 +750,20 @@ def reset_build_gates() -> None:
     _build_gates = _BuildGates()
 
 
-def build_rejection(building_key: str, intent: str = "") -> str | None:
+def build_rejection(building_key: str, intent: str = "", *, menu: str = ECON_MENU) -> str | None:
     """Reason this build cannot work right now (logged), or None when allowed.
 
     The single log site for `build_rejected` — every caller (single-shot build
     handler, tool-loop build composite, reassign composite) shapes its own
     failure return but shares this check + log, so the event schema can't drift.
     """
-    reason = _rejection_reason(building_key)
+    reason = _rejection_reason(building_key, menu)
     if reason is not None:
         log.info("build_rejected", building_key=building_key, reason=reason, intent=intent)
     return reason
 
 
-def _rejection_reason(building_key: str) -> str | None:
+def _rejection_reason(building_key: str, menu: str) -> str | None:
     """Five gates: suppressed after a missing-settlement streak, unique
     building already standing, house with ample pop-cap headroom (wasted
     wood), missing prerequisite (without a mill the farm key selects the
@@ -506,7 +772,7 @@ def _rejection_reason(building_key: str) -> str | None:
     detail so the next turn plans around it instead of re-issuing the same
     doomed build.
     """
-    cls = BUILD_KEY_TO_CLASS.get(building_key)
+    cls = building_class(menu, building_key)
     if cls is None:
         return None
     suppressed_until = _build_gates.suppressed_until.get(cls, 0)
@@ -540,7 +806,7 @@ def _rejection_reason(building_key: str) -> str | None:
             f"{cls} unavailable: requires a completed {prereq} and none has been "
             f"seen yet — build a {prereq} first"
         )
-    cost = _BUILD_WOOD_COST.get(building_key)
+    cost = _WOOD_COST_BY_CLASS.get(cls)
     if cost is not None and _build_gates.resources is not None:
         wood = _build_gates.resources.get("wood")
         if wood is not None and wood < cost:
@@ -606,7 +872,7 @@ def _resolve_coords(action_dict: dict[str, object]) -> tuple[str, tuple[int, int
             # authorised this build is no longer in frame. The trailing `h` press
             # in build_menu_steps still clears the open menu.
             return (
-                f"no visible resource to anchor the {BUILD_KEY_TO_CLASS.get(key, key)} on",
+                f"no visible resource to anchor the {building_class(ECON_MENU, key) or key} on",
                 None,
             )
         return ("", placement)
@@ -696,18 +962,6 @@ UI_MARGIN_TOP: int = 160
 UI_MARGIN_BOTTOM: int = 240
 UI_MARGIN_SIDE: int = 40
 
-# Economic build-menu key → detected building class, used to verify a placement
-# actually landed (the class appears in the entity cache after a rescan).
-BUILD_KEY_TO_CLASS: dict[str, str] = {
-    "q": "house",
-    "w": "mill",
-    "e": "mining_camp",
-    "r": "lumber_camp",
-    "a": "farm",
-    "s": "blacksmith",
-    "t": "dock",
-}
-
 # Drop-off camps are worthless away from their resource, so they anchor on it
 # instead of the town centre. A key absent here keeps the TC anchor.
 _BUILD_ANCHOR_CLASSES: dict[str, frozenset[str]] = {
@@ -723,20 +977,34 @@ _ANCHOR_OPTIONAL_KEYS: frozenset[str] = frozenset({"w"})
 _RESOURCE_REQUIRED_KEYS: frozenset[str] = frozenset(_BUILD_ANCHOR_CLASSES) - _ANCHOR_OPTIONAL_KEYS
 
 # Building classes that can serve as build-gate evidence (see
-# record_confirmed_buildings) — the econ buildings the agent itself can place.
-_GATE_BUILDING_CLASSES: frozenset[str] = frozenset(BUILD_KEY_TO_CLASS.values())
+# record_confirmed_buildings) — every building the agent itself can place.
+# Menu-wide, not econ-only: a barracks that cannot become evidence can never
+# count toward the Castle Age's two-building requirement.
+_GATE_BUILDING_CLASSES: frozenset[str] = frozenset(
+    cls for menu in _MENU_BUILDINGS.values() for cls in menu.values()
+)
 
-# Wood cost per econ-menu entry (all seven are wood-only). Literals on purpose:
-# packages/data's aoe2.db holds the full cost table, but the build gate must not
-# depend on a DB handle, and these seven haven't changed in years.
+# Wood cost per building class (every one of these is wood-only). Literals on
+# purpose: packages/data's aoe2.db holds the full cost table, but the build gate
+# must not depend on a DB handle, and these costs haven't changed in years.
+_WOOD_COST_BY_CLASS: dict[str, int] = {
+    "house": 25,
+    "farm": 60,
+    "mill": 100,
+    "mining_camp": 100,
+    "lumber_camp": 100,
+    "blacksmith": 150,
+    "dock": 150,
+    "barracks": 175,
+    "archery_range": 175,
+    "stable": 175,
+    "market": 175,
+}
+
+# The econ menu's costs by key — the shape the reactive rules' `cost` blocks and
+# their drift test read.
 _BUILD_WOOD_COST: dict[str, int] = {
-    "q": 25,  # house
-    "w": 100,  # mill
-    "e": 100,  # mining camp
-    "r": 100,  # lumber camp
-    "a": 60,  # farm
-    "s": 150,  # blacksmith
-    "t": 150,  # dock
+    key: _WOOD_COST_BY_CLASS[cls] for key, cls in _MENU_BUILDINGS[ECON_MENU].items()
 }
 
 # Menu entries that only exist once a prerequisite building is COMPLETED.
@@ -885,27 +1153,30 @@ def build_menu_steps(
     building_key: str,
     intent: str,
     *,
-    menu_intent: str = "Open economic build menu",
+    menu: str = ECON_MENU,
+    menu_intent: str = "",
 ) -> list[dict[str, object]]:
     """Menu → building → place → select-TC sequence, for an ALREADY-selected villager.
 
-    The tail every build shares: open the economic build menu (q), pick the
-    building, click the placement (with `building_key` attached so `_handle_click`
-    verifies the structure landed), then select the TC so no menu is left open
-    to re-map later keystrokes. The placement is resolved AT CLICK TIME
-    (`auto_placement`) so a camera move earlier in the sequence can't strand it
-    on stale coordinates (run 8, F-33: the mill rose wherever the idle villager
-    stood). `build_steps` prepends the idle-villager select;
+    The tail every build shares: open a build menu, pick the building, click the
+    placement (with `building_key` and `menu` attached so `_handle_click` verifies
+    the structure landed), then select the TC so no menu is left open to re-map
+    later keystrokes. The placement is resolved AT CLICK TIME (`auto_placement`)
+    so a camera move earlier in the sequence can't strand it on stale coordinates
+    (run 8, F-33: the mill rose wherever the idle villager stood). `build_steps`
+    prepends the idle-villager select;
     `executor_provider.ExecutorProvider._execute_reassign_villager` prepends its own
     worker-click instead — the menu/place sequence lives in exactly one place.
     """
     return [
-        {"type": "press", "key": "q", "intent": menu_intent},
+        {"type": "press", "key": menu, "intent": menu_intent or _MENU_NAMES[menu]},
         {"type": "press", "key": building_key, "intent": f"Select building ({intent})"},
         {
             "type": "click",
             "auto_placement": True,
-            "building_key": building_key,  # lets _handle_click verify the placement landed
+            # Both, so _handle_click can verify the placement landed.
+            "building_key": building_key,
+            "menu": menu,
             "intent": f"Place building ({intent})",
         },
         # Always leave the UI in a clean state: a menu left open re-maps later
@@ -915,6 +1186,65 @@ def build_menu_steps(
         # paused the game (run 8, F-32).
         {"type": "press", "key": "h", "intent": f"Select TC to clear build UI ({intent})"},
     ]
+
+
+def research_steps(name: str, intent: str) -> list[dict[str, object]]:
+    """Go to the building that researches `name`, then press its panel key.
+
+    Two steps, one place — shared by the single-shot handler and the tool-loop
+    composite, exactly as `build_steps` is.
+    """
+    tech = _TECHS[name]
+    return [
+        {
+            "type": "press",
+            "key": tech.goto_key,
+            "modifiers": list(tech.goto_modifiers),
+            "rescan": True,
+            "intent": f"Go to the {name} building ({intent})",
+        },
+        {"type": "press", "key": tech.research_key, "intent": f"Research {name} ({intent})"},
+    ]
+
+
+def research_rejection(name: str) -> str | None:
+    """Reason this research cannot work now (logged), or None when allowed.
+
+    The counterpart of `build_rejection`: the reason reaches the LLM as the
+    action's failure detail, so a technology that has already been paid for — or
+    one the HUD proved did not take — is not retried blind.
+    """
+    reason = _research_rejection_reason(name)
+    if reason is not None:
+        log.info("research_rejected", tech=name, reason=reason)
+    return reason
+
+
+def _research_rejection_reason(name: str) -> str | None:
+    """Four gates: unknown name, already paid for, blocked after a proven miss,
+    already awaiting settlement — then affordability."""
+    tech = _TECHS.get(name)
+    if tech is None:
+        return f"unknown technology {name!r}; known: {', '.join(sorted(_TECHS))}"
+    if name in _build_gates.researched:
+        return f"{name} is already researched — the HUD showed it paid for"
+    blocked_until = _build_gates.research_blocked_until.get(name, 0)
+    if _build_gates.snapshot_count < blocked_until:
+        return (
+            f"{name} did not take last time: the cost never left the HUD, so the "
+            f"button was greyed out. Satisfy its requirement — retryable in "
+            f"{blocked_until - _build_gates.snapshot_count} turns"
+        )
+    if any(p.name == name for p in _build_gates.pending_research):
+        return f"{name} is already awaiting HUD settlement — don't re-press it"
+    resources = _build_gates.resources
+    if resources is None:
+        return None
+    for kind, price in _research_costs(tech).items():
+        have = resources.get(kind)
+        if have is not None and have < price:
+            return f"{name} unavailable: costs {price} {kind}, you have {have}"
+    return None
 
 
 def _select_villager_step(intent: str) -> dict[str, object]:
@@ -942,7 +1272,9 @@ def _select_villager_step(intent: str) -> dict[str, object]:
     }
 
 
-def build_steps(building_key: str, intent: str) -> list[dict[str, object]]:
+def build_steps(
+    building_key: str, intent: str, *, menu: str = ECON_MENU
+) -> list[dict[str, object]]:
     """Press/click sequence for a build: select a villager → open the economic
     build menu → pick the building → place it.
 
@@ -952,7 +1284,7 @@ def build_steps(building_key: str, intent: str) -> list[dict[str, object]]:
     """
     return [
         _select_villager_step(intent),
-        *build_menu_steps(building_key, intent),
+        *build_menu_steps(building_key, intent, menu=menu),
     ]
 
 
@@ -1017,16 +1349,18 @@ async def _finish_build_placement(
         total_seconds=round(_build_retry_total_seconds, 1),
     )
     building_key = action_dict.get("building_key")
+    menu = str(action_dict.get("menu") or ECON_MENU)
     if isinstance(building_key, str):
-        landed = await _verify_build_placement(building_key, point)
-        if landed is True:
+        cls = building_class(menu, building_key)
+        landed = await _verify_build_placement(cls, point)
+        if landed is True and cls is not None:
             # The building is real — usable as prerequisite evidence.
-            record_confirmed_buildings([BUILD_KEY_TO_CLASS[building_key]])
+            record_confirmed_buildings([cls])
         elif landed is False:
             # NOT reported as failure: the model can't see foundations, and a
             # false "failed" makes the LLM rebuild what already exists (the
             # run-2 duplicate mill). The wood spend settles it next snapshot.
-            _note_pending_placement(building_key, point=point)
+            _note_pending_placement(building_key, menu=menu, point=point)
             return ActionResult(
                 True,
                 "placement not visually confirmed (foundations aren't detectable); "
@@ -1058,18 +1392,17 @@ def _count_class_near(class_name: str, point: tuple[int, int]) -> int:
     )
 
 
-async def _verify_build_placement(building_key: str, point: tuple[int, int]) -> bool | None:
-    """Rescan and check whether a NEW building of the expected class appeared near
+async def _verify_build_placement(expected: str | None, point: tuple[int, int]) -> bool | None:
+    """Rescan and check whether a NEW building of `expected` class appeared near
     `point` — the count must increase, so a pre-existing neighbor (e.g. an old
     farm inside the radius) can't vouch for a new one.
 
     Returns True on a confirmed appearance, False when the rescan saw no new
-    one, None when unverifiable (unknown key / no rescan callback). False is
+    one, None when unverifiable (unknown class / no rescan callback). False is
     NOT proof of failure: foundations aren't detectable by the vision model, so
-    the caller settles unconfirmed placements against the HUD wood spend
-    instead (see _settle_pending_placements).
+    the caller settles unconfirmed placements against the HUD spend instead
+    (see _settle_pending_placements).
     """
-    expected = BUILD_KEY_TO_CLASS.get(building_key)
     if expected is None or _rescan_fn is None:
         return None
     before = _count_class_near(expected, point)
@@ -1213,14 +1546,41 @@ async def _handle_build(action_dict: dict[str, object], intent: str) -> ActionRe
     key = action_dict.get("building_key")
     if not isinstance(key, str) or not key:
         return ActionResult(False, "build: missing building_key")
-    rejection = build_rejection(key, intent)
+    menu = str(action_dict.get("menu") or ECON_MENU)
+    rejection = build_rejection(key, intent, menu=menu)
     if rejection is not None:
         return ActionResult(False, rejection)
-    for step in build_steps(key, intent):
+    for step in build_steps(key, intent, menu=menu):
         result = await execute_action(step)
         if not result.success:
             return ActionResult(False, f"build failed at: {step.get('intent', '')}")
     return ActionResult(True, f"built ({intent})")
+
+
+async def _handle_research(action_dict: dict[str, object], intent: str) -> ActionResult:
+    """Research a technology, then leave it pending HUD settlement.
+
+    Reports success optimistically for the same reason a placement does: the
+    press has landed and only the next HUD reading can say whether it paid. A
+    refusal the gates already know about comes back as a failure detail, so the
+    LLM plans around it instead of re-pressing (run 2026_08_21_2, 10 blind
+    age-up presses).
+    """
+    name = action_dict.get("tech")
+    if not isinstance(name, str) or not name:
+        return ActionResult(False, "research: missing tech")
+    rejection = research_rejection(name)
+    if rejection is not None:
+        return ActionResult(False, rejection)
+    for step in research_steps(name, intent):
+        result = await execute_action(step)
+        if not result.success:
+            return ActionResult(False, f"research failed at: {step.get('intent', '')}")
+    _note_pending_research(name, _TECHS[name])
+    return ActionResult(
+        True,
+        f"{name} pressed; the HUD spend settles it next turn — do not re-press it",
+    )
 
 
 async def _handle_queue_villager(action_dict: dict[str, object], intent: str) -> ActionResult:
@@ -1255,6 +1615,7 @@ _ACTION_HANDLERS: dict[
     "right_click": _handle_right_click,
     "press": _handle_press,
     "build": _handle_build,
+    "research": _handle_research,
     "queue_villager": _handle_queue_villager,
     "drag": _handle_drag,
     "scroll": _handle_scroll,

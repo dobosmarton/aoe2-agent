@@ -595,16 +595,17 @@ def test_confirmed_purchase_clears_missing_streak(fake_pyautogui: _FakePyautogui
     assert ex.build_rejection("a") is None  # 2 misses after a success ≠ streak of 3
 
 
-def test_income_masked_house_purchase_still_confirms(fake_pyautogui: _FakePyautogui) -> None:
-    """Run 13 (F-45/T-537): a 30-villager economy gathered +140 wood across a
-    25-wood house settlement, so the raw delta judged every real purchase
-    MISSING and the breaker locked out five building classes. Estimated
-    income is deducted from the observed delta before judging."""
+def test_income_masked_purchase_still_confirms(fake_pyautogui: _FakePyautogui) -> None:
+    """Run 13 (F-45/T-537): a 30-villager economy gathered +140 wood across one
+    settlement, so the raw delta judged every real purchase MISSING and the
+    breaker locked out five building classes. Estimated income is deducted from
+    the observed delta before judging. A farm, not a house — houses settle on
+    the population cap now."""
     _observe_wood(0)
     _observe_wood(140)  # clean window → income estimate 140/snapshot
-    ex._note_pending_placement("q")  # house, 25 wood, baseline 140
-    ex.observe_hud(28, 30, {"wood": 255})  # +115 observed = +140 income, -25 spend
-    assert "house" in ex._build_gates.buildings_confirmed
+    ex._note_pending_placement("a")  # farm, 60 wood, baseline 140
+    ex.observe_hud(28, 30, {"wood": 220})  # +80 observed = +140 income, -60 spend
+    assert "farm" in ex._build_gates.buildings_confirmed
 
 
 def test_income_alone_does_not_confirm_a_vanished_placement(
@@ -612,9 +613,9 @@ def test_income_alone_does_not_confirm_a_vanished_placement(
 ) -> None:
     _observe_wood(0)
     _observe_wood(140)
-    ex._note_pending_placement("q")
+    ex._note_pending_placement("a")
     ex.observe_hud(28, 30, {"wood": 285})  # income only — nothing was spent
-    assert "house" not in ex._build_gates.buildings_confirmed
+    assert "farm" not in ex._build_gates.buildings_confirmed
 
 
 def test_income_estimate_frozen_while_placement_pending(fake_pyautogui: _FakePyautogui) -> None:
@@ -982,3 +983,195 @@ def test_selection_mode_is_recorded_when_the_step_is_built(
     ex.observe_hud(10, 30, {"wood": 200}, idle_present=True)  # next turn's sync
     ex._note_pending_placement("w", point=(11, 22))  # the build finally runs
     assert ex._build_gates.pending_placements[0].selected_by == "click"
+
+
+# ---------------------------------------------------------------------------
+# House settlement — the population cap, not the wood delta
+# ---------------------------------------------------------------------------
+#
+# A house costs 25 wood against a 20-wood slack, so the whole wood margin is 5
+# wood of an ESTIMATED income. Run 2026_08_21_2 built 6 houses (cap 5→15→20→25
+# →30→35) while the wood test reported 9 confirmed and 21 missing. The cap moves
+# by exactly 5 per completed house and OCR reads it every turn.
+
+
+def _place_house(cap: int, population: int = 10) -> None:
+    """Note one house against a HUD showing `population`/`cap`."""
+    ex.observe_hud(population, cap, {"wood": 200})
+    ex._note_pending_placement("q")
+
+
+def test_a_cap_rise_confirms_a_house_even_when_wood_rose(
+    fake_pyautogui: _FakePyautogui,
+) -> None:
+    """The exact case the wood test gets wrong: income hides the 25-wood spend."""
+    _place_house(cap=20)
+    ex.observe_hud(10, 25, {"wood": 400})  # cap +5, wood UP
+    assert "house" in ex._build_gates.buildings_confirmed
+
+
+def test_an_unmoved_cap_leaves_the_house_missing(fake_pyautogui: _FakePyautogui) -> None:
+    """Asserts the streak, not the absence of a confirmation: only a JUDGED
+    miss sets it, so an entry stuck pending forever cannot pass this."""
+    _place_house(cap=20)
+    for _ in range(ex._HOUSE_SETTLE_ATTEMPTS + 1):
+        ex.observe_hud(10, 20, {"wood": 400})
+    assert ex._build_gates.missing_streaks["house"] == 1
+
+
+def test_a_house_waits_out_its_construction_time(fake_pyautogui: _FakePyautogui) -> None:
+    """A house raises no cap until it finishes, so an unmoved cap is not a miss."""
+    _place_house(cap=20)
+    ex.observe_hud(10, 20, {"wood": 400})
+    assert ex._build_gates.pending_placements  # still waiting, not judged
+
+
+def test_a_cap_jump_leaves_the_unpaid_house_pending(
+    fake_pyautogui: _FakePyautogui,
+) -> None:
+    """A +10 jump is 2 houses, not 3 — the cap analogue of F-17's two mills."""
+    ex.observe_hud(10, 20, {"wood": 200})
+    for _ in range(3):
+        ex._note_pending_placement("q")
+    ex.observe_hud(10, 30, {"wood": 200})  # cap +10
+    assert len(ex._build_gates.pending_placements) == 1
+
+
+def test_a_non_house_still_settles_on_wood(fake_pyautogui: _FakePyautogui) -> None:
+    """The cap path is house-only; every other class keeps the wood delta."""
+    _observe_wood(200)
+    ex._note_pending_placement("w")  # mill, 100 wood
+    _observe_wood(100)
+    assert "mill" in ex._build_gates.buildings_confirmed
+
+
+def test_houses_are_not_suppressed_while_pop_capped(fake_pyautogui: _FakePyautogui) -> None:
+    """A house is the only way out of a pop cap, so the pause is a deadlock —
+    run 2026_08_21_2 sat at 35/35 for the last 10 minutes with houses blocked."""
+    for _ in range(ex._MISSING_STREAK_LIMIT + 1):
+        _place_house(cap=20, population=20)  # housed: 20/20
+        for _ in range(ex._HOUSE_SETTLE_ATTEMPTS + 1):
+            ex.observe_hud(20, 20, {"wood": 400})
+    # The streak proves the guard returned early — the misses were judged.
+    assert ex._build_gates.missing_streaks.get("house", 0) == 0
+    assert "house" not in ex._build_gates.suppressed_until
+
+
+# ---------------------------------------------------------------------------
+# Research — the feedback a raw press never had
+# ---------------------------------------------------------------------------
+#
+# Run 2026_08_21_2 pressed the age-up key 10 times over 4 minutes with 3x the
+# resources banked. Every press "succeeded" because a keystroke always lands;
+# nothing could tell a working button from a greyed-out one.
+
+
+def _research(tech: str, before: dict[str, int]) -> None:
+    """Note one pending research against a HUD showing `before`."""
+    ex.observe_hud(10, 30, before)
+    ex._note_pending_research(tech, ex._TECHS[tech])
+
+
+def test_a_matching_resource_drop_confirms_the_research(fake_pyautogui: _FakePyautogui) -> None:
+    _research("castle_age", {"food": 900, "gold": 300})
+    ex.observe_hud(10, 30, {"food": 100, "gold": 100})
+    assert "castle_age" in ex._build_gates.researched
+
+
+def test_no_resource_drop_reports_the_research_missing(fake_pyautogui: _FakePyautogui) -> None:
+    """The greyed-out button: resources kept RISING while the key was pressed."""
+    _research("castle_age", {"food": 900, "gold": 300})
+    for _ in range(ex._RESEARCH_SETTLE_ATTEMPTS + 1):
+        ex.observe_hud(10, 30, {"food": 2600, "gold": 900})
+    assert "castle_age" in ex._build_gates.research_blocked_until
+
+
+def test_an_unmoved_reading_waits_rather_than_failing(fake_pyautogui: _FakePyautogui) -> None:
+    """Identical readings are stale OCR, not a refusal."""
+    _research("loom", {"food": 500, "gold": 300})
+    ex.observe_hud(10, 30, {"food": 500, "gold": 300})
+    assert ex._build_gates.pending_research
+
+
+def test_a_failed_research_is_refused_next_time(fake_pyautogui: _FakePyautogui) -> None:
+    """The whole point: one failure, then a reason — not 10 blind retries."""
+    _research("castle_age", {"food": 900, "gold": 300})
+    for _ in range(ex._RESEARCH_SETTLE_ATTEMPTS + 1):
+        ex.observe_hud(10, 30, {"food": 2600, "gold": 900})
+    reason = ex.research_rejection("castle_age")
+    assert reason is not None and "greyed out" in reason
+
+
+def test_a_blocked_research_becomes_retryable(fake_pyautogui: _FakePyautogui) -> None:
+    """The block must expire. castle_age fails for want of 2 Feudal buildings;
+    once the agent builds them, a permanent refusal is the same deadlock one
+    level up."""
+    _research("castle_age", {"food": 900, "gold": 300})
+    for _ in range(ex._RESEARCH_SETTLE_ATTEMPTS + 1):
+        ex.observe_hud(10, 30, {"food": 2600, "gold": 900})
+    for _ in range(ex._MISSING_SUPPRESS_SNAPSHOTS):
+        ex.observe_hud(10, 30, {"food": 2600, "gold": 900})
+    assert ex.research_rejection("castle_age") is None
+
+
+def test_a_half_updated_reading_stays_undecided(fake_pyautogui: _FakePyautogui) -> None:
+    """Food fell by the full 800, gold's reading has not caught up. The age-up
+    was paid for — reporting it missing here blocked it for the whole game."""
+    _research("castle_age", {"food": 900, "gold": 300})
+    ex.observe_hud(10, 30, {"food": 100, "gold": 300})
+    assert ex._build_gates.pending_research
+
+
+def test_a_pending_research_is_not_re_pressed(fake_pyautogui: _FakePyautogui) -> None:
+    _research("castle_age", {"food": 900, "gold": 300})
+    reason = ex.research_rejection("castle_age")
+    assert reason is not None and "awaiting HUD settlement" in reason
+
+
+def test_an_unaffordable_research_is_refused(fake_pyautogui: _FakePyautogui) -> None:
+    ex.observe_hud(10, 30, {"food": 100, "gold": 10})
+    reason = ex.research_rejection("castle_age")
+    assert reason is not None and "costs 800 food" in reason
+
+
+def test_research_steps_go_to_the_building_then_press_its_key(
+    fake_pyautogui: _FakePyautogui,
+) -> None:
+    """Ctrl-Z goes to the Lumber Camp; `q` is the upgrade slot in its panel."""
+    steps = ex.research_steps("double_bit_axe", "faster wood")
+    assert [(s["key"], s.get("modifiers", [])) for s in steps] == [("z", ["ctrl"]), ("q", [])]
+
+
+# ---------------------------------------------------------------------------
+# Build menus — the same placement machinery for military and advanced
+# ---------------------------------------------------------------------------
+
+
+def test_the_military_menu_opens_before_its_building_key(
+    fake_pyautogui: _FakePyautogui,
+) -> None:
+    """Barracks is w→q. Without the menu the same `q` would build a House."""
+    steps = ex.build_steps("q", "barracks", menu=ex.MILITARY_MENU)
+    assert [s.get("key") for s in steps[:3]] == [".", "w", "q"]
+
+
+def test_the_econ_menu_stays_the_default(fake_pyautogui: _FakePyautogui) -> None:
+    steps = ex.build_steps("w", "mill")
+    assert [s.get("key") for s in steps[:3]] == [".", "q", "w"]
+
+
+def test_the_same_key_means_different_buildings_per_menu() -> None:
+    assert ex.building_class("q", "w") == "mill"
+    assert ex.building_class("w", "w") == "archery_range"
+
+
+@pytest.mark.parametrize("cls", ["market", "barracks", "archery_range", "stable"])
+def test_every_placeable_building_can_become_gate_evidence(cls: str) -> None:
+    """A class the agent can place but cannot PROVE can never count toward the
+    Castle Age's two-building requirement. The gate set was econ-only before."""
+    assert cls in ex._GATE_BUILDING_CLASSES
+
+
+def test_a_building_the_agent_cannot_place_is_still_filtered() -> None:
+    """The set is evidence the agent generated itself, not anything detected."""
+    assert "town_center" not in ex._GATE_BUILDING_CLASSES

@@ -39,9 +39,11 @@ Missing Castle Age leaves you with no knights, no monks, no unique units, and no
 
 You need 200 gold for Castle Age, plus 50–100 per tech, plus 25–50 per military unit. Gold is the gating resource — defend the gold-on-gold ratio.
 
-**Loom:** if not yet researched, do it now (TC: H → A, 50 gold). Toughens villagers.
+**Loom:** if not yet researched, do it now (`research` with `tech="loom"`, 50 gold).
+Toughens villagers. The same composite researches horse_collar, double_bit_axe and
+gold_mining — each one permanently speeds up a gathering line.
 
-**Blacksmith / Market:** both count as Feudal-Age prereq buildings. Blacksmith (`build` with `building_key="s"`, 150 wood) unlocks military upgrades; Market (V→D, 175 wood) unlocks emergency trading.
+**Blacksmith / Market:** both count as Feudal-Age prereq buildings. Blacksmith (`build` `menu="q"` `building_key="s"`, 150 wood) unlocks military upgrades; Market (`build` `menu="v"` `building_key="d"`, 175 wood) unlocks emergency trading.
 
 ## Build Menus
 
@@ -77,20 +79,18 @@ Note: the `build` composite ONLY works for the economic (Q) menu. Military and a
 ]
 ```
 
-**Build Barracks** (W-menu — can't use composite, manual sequence required):
+**Build Barracks or Market** (both count toward the Castle Age gate):
 ```json
 [
-  {"type": "press", "key": ".", "rescan": true, "intent": "Select idle villager"},
-  {"type": "press", "key": "w", "intent": "Military build menu"},
-  {"type": "press", "key": "q", "intent": "Select Barracks (175 wood)"},
-  {"type": "click", "x": 1400, "y": 900, "intent": "Place Barracks on open ground"}
+  {"type": "build", "menu": "w", "building_key": "q", "intent": "Barracks (175 wood) — Castle prereq 1 of 2"},
+  {"type": "build", "menu": "v", "building_key": "d", "intent": "Market (175 wood) — Castle prereq 2 of 2"}
 ]
 ```
 
 **Research Castle Age** (when the Age-up Gate fires):
 ```json
-[
-  {"type": "press", "key": "h", "rescan": true, "intent": "Go to TC"},
-  {"type": "press", "key": "z", "intent": "Research Castle Age (800 food + 200 gold)"}
-]
+[{"type": "research", "tech": "castle_age", "intent": "800 food + 200 gold banked, 2 Feudal buildings up"}]
 ```
+The HUD spend confirms it next turn. If the cost never leaves your resources the
+button was greyed out — read the failure detail, fix the requirement, and do NOT
+press it again in the meantime.
