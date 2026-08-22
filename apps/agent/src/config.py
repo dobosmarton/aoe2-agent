@@ -137,6 +137,9 @@ class Config(BaseModel):
     adaptive_sahi: bool = False  # SAHI hurts v6 at retina res (scale mismatch); single-pass wins
     full_sahi_interval: int = 5  # Force full SAHI scan every N turns (only if adaptive_sahi=True)
     detection_host: str = ""  # Remote CoreML server URL (e.g., "http://192.168.64.1:8420")
+    # Serve a mid-turn rescan from the cached static map when the camera only
+    # panned, instead of re-detecting. AOE2_RESCAN_CACHE=false to A/B it.
+    rescan_cache: bool = True
 
     # Timing settings
     loop_delay: float = (
@@ -170,6 +173,7 @@ class Config(BaseModel):
             loop_delay=float(os.environ.get("AOE2_LOOP_DELAY", "0.3")),
             save_screenshots=os.environ.get("AOE2_SAVE_SCREENSHOTS", "true").lower() == "true",
             detection_host=os.environ.get("AOE2_DETECTION_HOST", ""),
+            rescan_cache=os.environ.get("AOE2_RESCAN_CACHE", "true").lower() == "true",
             detection_model=os.environ.get("AOE2_DETECTION_MODEL", "aoe2_yolo_v9"),
             temperature=_parse_optional_float(os.environ.get("AOE2_TEMPERATURE")),
             seed=_parse_optional_int(os.environ.get("AOE2_SEED")),

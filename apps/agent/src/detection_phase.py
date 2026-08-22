@@ -36,9 +36,11 @@ if TYPE_CHECKING:
     Detector = EntityDetector | RemoteDetector
 
 from .config import config
-from .entity_utils import build_entity_summary
+from .entity_utils import CLASSES_BY_KIND, build_entity_summary
 from .executor import (
+    GATE_BUILDING_CLASSES,
     clear_detected_entities,
+    get_detected_entities,
     set_detected_entities,
     set_rescan_fn,
     set_rescan_full_fn,
@@ -113,6 +115,39 @@ def _init_detector() -> Detector | None:
         return None
 
 
+# Classes that never move, so a cached position stays valid once translated by
+# the camera pan. Animals are excluded by name: CLASSES_BY_KIND["food"] mixes
+# berry bushes with sheep, boar and deer.
+_HERD_CLASSES: frozenset[str] = frozenset({"sheep", "boar", "deer"})
+STATIC_CLASSES: frozenset[str] = (
+    frozenset().union(*CLASSES_BY_KIND.values()) | GATE_BUILDING_CLASSES
+) - _HERD_CLASSES
+
+# Phase-correlation confidence below which a pan is not trusted. Run
+# 2026_08_22_1 measured a bimodal split (p50 0.82, p10 0.25); anything from 0.5
+# to 0.7 divides the same 36 of 59 turn-to-turn pairs.
+PAN_CONFIDENCE_MIN = 0.7
+
+
+def _translated_static(entities: list[dict], shift: tuple[float, float]) -> list[dict]:
+    """The static entities, moved by the camera pan.
+
+    `shift` is how far the CONTENT moved, so it adds. Mobile classes are dropped
+    rather than translated: a villager that walked is worse than one the caller
+    knows it has not been told about.
+    """
+    dx, dy = shift
+    moved: list[dict] = []
+    for entity in entities:
+        if entity.get("class") not in STATIC_CLASSES:
+            continue
+        cx, cy = entity.get("center", (0, 0))
+        shifted = dict(entity)
+        shifted["center"] = (int(cx + dx), int(cy + dy))
+        moved.append(shifted)
+    return moved
+
+
 def _init_frame_differ() -> FrameDiffer | None:
     """Initialize frame differ for skipping redundant rescans."""
     try:
@@ -135,7 +170,8 @@ def _register_rescan_callbacks(
             overlay.hide()
         screenshot, _, _ = capture_screenshot(quality=RESCAN_SCREENSHOT_QUALITY)
 
-        if frame_differ and not frame_differ.has_changed(screenshot):
+        change = frame_differ.compare(screenshot) if frame_differ else None
+        if change and not change.changed:
             if (
                 detector.tracker
                 and detector.tracker.get_confidence() > TRACKER_CONFIDENCE_THRESHOLD
@@ -149,6 +185,27 @@ def _register_rescan_callbacks(
             log.debug("rescan_skipped", reason="no_change")
             if overlay:
                 overlay.show(detector._previous_entities, get_game_window_rect())
+                return
+
+        # The view only panned, so the static map is still known — translate it
+        # rather than pay for a detection (run 2026_08_22_1: 112 of 212).
+        if (
+            config.rescan_cache
+            and change
+            and change.response >= PAN_CONFIDENCE_MIN
+            and (cached := get_detected_entities())
+        ):
+            translated = _translated_static(cached, change.shift)
+            if translated:
+                set_detected_entities(translated)
+                log.debug(
+                    "rescan_translated",
+                    entity_count=len(translated),
+                    shift=[round(v) for v in change.shift],
+                    response=round(change.response, 3),
+                )
+                if overlay:
+                    overlay.show(translated, get_game_window_rect())
                 return
 
         entities = await _invoke_detector(detector, "detect_fast_multi", screenshot)

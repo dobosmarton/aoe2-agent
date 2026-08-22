@@ -692,7 +692,7 @@ def record_building_sightings(classes: Iterable[str]) -> None:
     any frame-count threshold (run 9, F-36 — a phantom mill unlocked 14
     outposts). Purchase-grade evidence goes through record_confirmed_buildings.
     """
-    for cls in set(classes) & _GATE_BUILDING_CLASSES:
+    for cls in set(classes) & GATE_BUILDING_CLASSES:
         _build_gates.building_sightings[cls] = _build_gates.building_sightings.get(cls, 0) + 1
 
 
@@ -703,7 +703,7 @@ def record_confirmed_buildings(classes: Iterable[str]) -> None:
     Proof the build path works also lifts any T-530 suppression: run 13
     (F-45) kept a class suppressed after it was verified standing because
     only the wood-delta path cleared the streak."""
-    proven = set(classes) & _GATE_BUILDING_CLASSES
+    proven = set(classes) & GATE_BUILDING_CLASSES
     _build_gates.buildings_confirmed.update(proven)
     for cls in proven:
         _clear_missing_streak(cls)
@@ -1022,7 +1022,7 @@ _RESOURCE_REQUIRED_KEYS: frozenset[str] = frozenset(_BUILD_ANCHOR_CLASSES) - _AN
 # record_confirmed_buildings) — every building the agent itself can place.
 # Menu-wide, not econ-only: a barracks that cannot become evidence can never
 # count toward the Castle Age's two-building requirement.
-_GATE_BUILDING_CLASSES: frozenset[str] = frozenset(
+GATE_BUILDING_CLASSES: frozenset[str] = frozenset(
     cls for menu in _MENU_BUILDINGS.values() for cls in menu.values()
 )
 

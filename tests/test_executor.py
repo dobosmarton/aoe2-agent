@@ -1173,12 +1173,12 @@ def test_the_same_key_means_different_buildings_per_menu() -> None:
 def test_every_placeable_building_can_become_gate_evidence(cls: str) -> None:
     """A class the agent can place but cannot PROVE can never count toward the
     Castle Age's two-building requirement. The gate set was econ-only before."""
-    assert cls in ex._GATE_BUILDING_CLASSES
+    assert cls in ex.GATE_BUILDING_CLASSES
 
 
 def test_a_building_the_agent_cannot_place_is_still_filtered() -> None:
     """The set is evidence the agent generated itself, not anything detected."""
-    assert "town_center" not in ex._GATE_BUILDING_CLASSES
+    assert "town_center" not in ex.GATE_BUILDING_CLASSES
 
 
 # ---------------------------------------------------------------------------
@@ -1208,4 +1208,4 @@ def test_every_tech_names_the_building_it_needs(name: str) -> None:
     """A goto with nothing to select sends the research key to whatever was
     selected before — the silent failure this table exists to prevent."""
     tech = ex._TECHS[name]
-    assert tech.requires == "" or tech.requires in ex._GATE_BUILDING_CLASSES
+    assert tech.requires == "" or tech.requires in ex.GATE_BUILDING_CLASSES
