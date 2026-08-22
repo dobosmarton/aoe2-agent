@@ -27,6 +27,7 @@ from .executor import (
     CAMERA_KEYS,
     CASTLE_PREREQ_COUNT,
     FEUDAL_PREREQ_CLASSES,
+    blocked_actions,
     build_steps,
     clear_detected_entities,
     confirmed_buildings,
@@ -131,6 +132,7 @@ def _build_llm_context(
         entity_context += _villager_jobs_line(detected_entities)
         entity_context += known_buildings_line(detected_entities)
         entity_context += castle_gate_line(memory.game_state.current_age)
+        entity_context += blocked_actions_line()
         context = entity_context + "\n" + context
 
     return context
@@ -151,6 +153,19 @@ def _villager_jobs_line(detected_entities: list[object] | None) -> str:
         return ""
     breakdown = " ".join(f"{kind}={n}" for kind, n in working.items())
     return f"Villagers by job (approx, from proximity): {breakdown}\n"
+
+
+def blocked_actions_line() -> str:
+    """One line of what the executor will refuse this turn.
+
+    A FACT beside the other two, not a rule: the agent chooses what to do with
+    it. Run 2026_08_22_1 spent 94 of its 138 refused actions on state it could
+    not see.
+    """
+    blocked = blocked_actions()
+    if not blocked:
+        return ""
+    return "Currently refused: " + " ".join(blocked) + "\n"
 
 
 def castle_gate_line(age: str) -> str:

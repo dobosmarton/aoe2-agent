@@ -15,8 +15,10 @@ also stubbed so tests don't sleep or depend on a focused game window.
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+import gameplay_agent
 import pytest
 from gameplay_agent import executor as ex
 
@@ -24,6 +26,8 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from gameplay_agent.executor import ActionResult
+
+_PROMPTS = Path(gameplay_agent.__file__).parent / "prompts"
 
 # ---------------------------------------------------------------------------
 # Test infra
@@ -1175,3 +1179,33 @@ def test_every_placeable_building_can_become_gate_evidence(cls: str) -> None:
 def test_a_building_the_agent_cannot_place_is_still_filtered() -> None:
     """The set is evidence the agent generated itself, not anything detected."""
     assert "town_center" not in ex._GATE_BUILDING_CLASSES
+
+
+# ---------------------------------------------------------------------------
+# Hotkey drift — the doc the LLM reads vs the keys the executor presses
+# ---------------------------------------------------------------------------
+# `hotkeys.md` was wrong about Wheelbarrow and nothing caught it; run
+# 2026_08_22_1 paid 15 failed researches for the gap.
+
+
+def _hotkeys_md() -> str:
+    return (_PROMPTS / "hotkeys.md").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("name", sorted(ex._TECHS))
+def test_hotkeys_doc_matches_the_tech_table(name: str) -> None:
+    """Every _TECHS row must appear in the doc with the same keys."""
+    tech = ex._TECHS[name]
+    goto = f"Ctrl-{tech.goto_key.upper()}" if tech.goto_modifiers else tech.goto_key.upper()
+    rows = [line for line in _hotkeys_md().splitlines() if line.startswith(f"| {name} |")]
+    assert rows, f"hotkeys.md has no row for {name}"
+    assert f"| {goto} |" in rows[0]
+    assert f"| {tech.research_key.upper()} |" in rows[0]
+
+
+@pytest.mark.parametrize("name", sorted(ex._TECHS))
+def test_every_tech_names_the_building_it_needs(name: str) -> None:
+    """A goto with nothing to select sends the research key to whatever was
+    selected before — the silent failure this table exists to prevent."""
+    tech = ex._TECHS[name]
+    assert tech.requires == "" or tech.requires in ex._GATE_BUILDING_CLASSES

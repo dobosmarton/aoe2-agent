@@ -215,25 +215,44 @@ class Tech:
     goto_key: str
     research_key: str
     goto_modifiers: tuple[str, ...] = ()
+    # Building the goto key selects; empty means the Town Center, which always
+    # stands. With none standing the goto selects nothing and the research key
+    # hits the previous selection — that lost all 5 gold_mining attempts.
+    requires: str = ""
     food: int = 0
     gold: int = 0
     wood: int = 0
 
 
+# Every key verified against the game's own hotkey screen, 2026-08-22. The goto
+# keys are its Cycle Commands; the research keys its per-building groups.
 _TECHS: dict[str, Tech] = {
-    # Town Center — both keys documented in prompts/hotkeys.md.
     "castle_age": Tech(goto_key="h", research_key="z", food=800, gold=200),
     "loom": Tech(goto_key="h", research_key="a", gold=50),
-    "wheelbarrow": Tech(goto_key="h", research_key="w", food=175, wood=50),
-    # Drop-off buildings: go-to keys documented, slot keys read off the panel.
+    "wheelbarrow": Tech(goto_key="h", research_key="s", food=175, wood=50),
     "horse_collar": Tech(
-        goto_key="i", goto_modifiers=("ctrl",), research_key="q", food=75, wood=75
+        goto_key="i",
+        goto_modifiers=("ctrl",),
+        research_key="q",
+        requires="mill",
+        food=75,
+        wood=75,
     ),
     "double_bit_axe": Tech(
-        goto_key="z", goto_modifiers=("ctrl",), research_key="q", food=100, wood=50
+        goto_key="z",
+        goto_modifiers=("ctrl",),
+        research_key="q",
+        requires="lumber_camp",
+        food=100,
+        wood=50,
     ),
     "gold_mining": Tech(
-        goto_key="g", goto_modifiers=("ctrl",), research_key="q", food=100, wood=75
+        goto_key="g",
+        goto_modifiers=("ctrl",),
+        research_key="q",
+        requires="mining_camp",
+        food=100,
+        wood=75,
     ),
 }
 
@@ -739,6 +758,29 @@ def sighted_buildings() -> frozenset[str]:
     )
 
 
+def blocked_actions() -> list[str]:
+    """Refusals the LLM cannot work out for itself: suppressed builds, blocked
+    researches, then finished ones, alphabetical within each group.
+
+    Read off the gate state rather than the rejection helpers, which log — a
+    context line must stay side-effect free. Affordability is absent on purpose:
+    the resources sit two lines above it.
+    """
+    now = _build_gates.snapshot_count
+    blocked = [
+        f"{cls} (suppressed {until - now} turns)"
+        for cls, until in sorted(_build_gates.suppressed_until.items())
+        if now < until
+    ]
+    blocked += [
+        f"{name} (retryable in {until - now} turns)"
+        for name, until in sorted(_build_gates.research_blocked_until.items())
+        if now < until
+    ]
+    blocked += [f"{name} (already researched)" for name in sorted(_build_gates.researched)]
+    return blocked
+
+
 def pending_placement_counts() -> Counter[str]:
     """Building classes awaiting wood-delta settlement, by count."""
     return Counter(p.building_class for p in _build_gates.pending_placements)
@@ -1141,7 +1183,18 @@ def default_build_placement(building_key: str) -> tuple[int, int] | None:
     resource = _resource_anchor(building_key)
     if resource is not None:
         candidates = _open_ground_candidates(resource, RESOURCE_RING_RADII)
-        return candidates[0] if candidates else resource
+        # The fallback puts the camp ON its mine, where nothing can be built —
+        # a suspect for run 2026_08_22_1's 12 misses. Logged, not guessed at.
+        point = candidates[0] if candidates else resource
+        log.debug(
+            "anchored_placement",
+            building_key=building_key,
+            anchor=resource,
+            point=point,
+            offset=round(math.dist(resource, point)),
+            candidates=len(candidates),
+        )
+        return point
     if building_key in _RESOURCE_REQUIRED_KEYS:
         return None
     anchor = _home_anchor()
@@ -1221,8 +1274,9 @@ def research_rejection(name: str) -> str | None:
 
 
 def _research_rejection_reason(name: str) -> str | None:
-    """Four gates: unknown name, already paid for, blocked after a proven miss,
-    already awaiting settlement — then affordability."""
+    """Five gates, in order: unknown name, already paid for, blocked after a
+    proven miss, already awaiting settlement, its building not standing — then
+    affordability."""
     tech = _TECHS.get(name)
     if tech is None:
         return f"unknown technology {name!r}; known: {', '.join(sorted(_TECHS))}"
@@ -1237,6 +1291,11 @@ def _research_rejection_reason(name: str) -> str | None:
         )
     if any(p.name == name for p in _build_gates.pending_research):
         return f"{name} is already awaiting HUD settlement — don't re-press it"
+    if tech.requires and tech.requires not in _build_gates.buildings_confirmed:
+        return (
+            f"{name} is researched at a {tech.requires} and none is confirmed "
+            f"standing — build a {tech.requires} first"
+        )
     resources = _build_gates.resources
     if resources is None:
         return None
