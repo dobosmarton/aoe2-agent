@@ -142,13 +142,16 @@ class Config(BaseModel):
     rescan_cache: bool = True
 
     # Timing settings
-    loop_delay: float = (
-        0.3  # Seconds between decisions (pipeline latency provides additional pacing)
-    )
     action_delay: float = 0.05  # Seconds between actions
 
-    # Phase 2 tuning
-    pipeline_commit_max: int = 2  # S6: actions committed per pipelined turn (tail discarded)
+    # The three clocks (ADAPTIVE-AGENT-PLAN.md 3). Pacing is a raceable variant
+    # dimension (docs/design/synthetic-arena-analysis.md), so all three take an
+    # env override.
+    act_interval: float = 0.1  # AOE2_ACT_INTERVAL — seconds between act ticks
+    perceive_interval: float = 0.5  # AOE2_PERCEIVE_INTERVAL — seconds between frames
+    # AOE2_DELIBERATE_INTERVAL — perceive ticks between executor sanity checks.
+    # The exception triggers (alarm, housed, stuck) fire regardless.
+    deliberate_interval: int = 10
 
     # Logging
     log_dir: Path = Path("logs")
@@ -170,14 +173,15 @@ class Config(BaseModel):
             strategist_interval=int(os.environ.get("AOE2_STRATEGIST_INTERVAL", "10")),
             memory_model=os.environ.get("AOE2_MEMORY_MODEL") or models.memory,
             ocr_backend=os.environ.get("AOE2_OCR_BACKEND", "rapidocr"),
-            loop_delay=float(os.environ.get("AOE2_LOOP_DELAY", "0.3")),
+            act_interval=float(os.environ.get("AOE2_ACT_INTERVAL", "0.1")),
+            perceive_interval=float(os.environ.get("AOE2_PERCEIVE_INTERVAL", "0.5")),
+            deliberate_interval=int(os.environ.get("AOE2_DELIBERATE_INTERVAL", "10")),
             save_screenshots=os.environ.get("AOE2_SAVE_SCREENSHOTS", "true").lower() == "true",
             detection_host=os.environ.get("AOE2_DETECTION_HOST", ""),
             rescan_cache=os.environ.get("AOE2_RESCAN_CACHE", "true").lower() == "true",
             detection_model=os.environ.get("AOE2_DETECTION_MODEL", "aoe2_yolo_v9"),
             temperature=_parse_optional_float(os.environ.get("AOE2_TEMPERATURE")),
             seed=_parse_optional_int(os.environ.get("AOE2_SEED")),
-            pipeline_commit_max=int(os.environ.get("AOE2_PIPELINE_COMMIT_MAX", "2")),
         )
 
 

@@ -61,8 +61,30 @@ class _FakePyautogui:
         return [c[0] for c in self.calls]
 
 
+class _Clock:
+    """The monotonic clock the build gates read, driven by the test.
+
+    Build-gate deadlines are wall clock, not a count of HUD snapshots, so a
+    test that used to say "5 more snapshots" now says how much time passed.
+    """
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
 @pytest.fixture
-def fake_pyautogui(monkeypatch: pytest.MonkeyPatch) -> _FakePyautogui:
+def clock(monkeypatch: pytest.MonkeyPatch) -> _Clock:
+    """Freeze `executor._now`. Every test gets it; only some drive it."""
+    frozen = _Clock()
+    monkeypatch.setattr(ex, "_now", lambda: frozen.now)
+    return frozen
+
+
+@pytest.fixture
+def fake_pyautogui(monkeypatch: pytest.MonkeyPatch, clock: _Clock) -> _FakePyautogui:
     """Replace `executor.pyautogui` with a recorder; stub side-effecty deps."""
     fake = _FakePyautogui()
     monkeypatch.setattr(ex, "pyautogui", fake)
@@ -578,13 +600,11 @@ def test_missing_streak_suppresses_the_build(fake_pyautogui: _FakePyautogui) -> 
     assert reason is not None and "suppressed" in reason
 
 
-def test_suppression_expires_after_window(fake_pyautogui: _FakePyautogui) -> None:
+def test_suppression_expires_after_window(fake_pyautogui: _FakePyautogui, clock: _Clock) -> None:
     ex.record_confirmed_buildings(["mill"])
     _observe_wood(200)
-    wood = _run_missing_settlements("a", count=3, wood=200)
-    for _ in range(5):  # _MISSING_SUPPRESS_SNAPSHOTS quiet turns pass
-        wood += 5
-        _observe_wood(wood)
+    _run_missing_settlements("a", count=3, wood=200)
+    clock.advance(ex._MISSING_SUPPRESS_SECONDS + 1)
     assert ex.build_rejection("a") is None  # one retry allowed again
 
 
@@ -1014,12 +1034,14 @@ def test_a_cap_rise_confirms_a_house_even_when_wood_rose(
     assert "house" in ex._build_gates.buildings_confirmed
 
 
-def test_an_unmoved_cap_leaves_the_house_missing(fake_pyautogui: _FakePyautogui) -> None:
+def test_an_unmoved_cap_leaves_the_house_missing(
+    fake_pyautogui: _FakePyautogui, clock: _Clock
+) -> None:
     """Asserts the streak, not the absence of a confirmation: only a JUDGED
     miss sets it, so an entry stuck pending forever cannot pass this."""
     _place_house(cap=20)
-    for _ in range(ex._HOUSE_SETTLE_ATTEMPTS + 1):
-        ex.observe_hud(10, 20, {"wood": 400})
+    clock.advance(ex._HOUSE_SETTLE_SECONDS + 1)
+    ex.observe_hud(10, 20, {"wood": 400})
     assert ex._build_gates.missing_streaks["house"] == 1
 
 
@@ -1028,6 +1050,25 @@ def test_a_house_waits_out_its_construction_time(fake_pyautogui: _FakePyautogui)
     _place_house(cap=20)
     ex.observe_hud(10, 20, {"wood": 400})
     assert ex._build_gates.pending_placements  # still waiting, not judged
+
+
+def test_fast_snapshots_do_not_expire_a_placement(
+    fake_pyautogui: _FakePyautogui, clock: _Clock
+) -> None:
+    """The grace is time, not a count of readings.
+
+    Phase 3 runs perception on its own clock, so a house that used to see 5 HUD
+    readings in ~65 s now sees dozens in the same span. Counting them judged
+    every real build MISSING and the circuit breaker locked the class out.
+    """
+    _place_house(cap=20)
+    for _ in range(50):
+        clock.advance(0.5)
+        ex.observe_hud(10, 20, {"wood": 400})  # cap unmoved: undecided every time
+    assert ex._build_gates.pending_placements  # 25 s of readings, still waiting
+    clock.advance(ex._HOUSE_SETTLE_SECONDS)
+    ex.observe_hud(10, 20, {"wood": 400})
+    assert not ex._build_gates.pending_placements  # past the deadline, judged
 
 
 def test_a_cap_jump_leaves_the_unpaid_house_pending(
@@ -1049,13 +1090,15 @@ def test_a_non_house_still_settles_on_wood(fake_pyautogui: _FakePyautogui) -> No
     assert "mill" in ex._build_gates.buildings_confirmed
 
 
-def test_houses_are_not_suppressed_while_pop_capped(fake_pyautogui: _FakePyautogui) -> None:
+def test_houses_are_not_suppressed_while_pop_capped(
+    fake_pyautogui: _FakePyautogui, clock: _Clock
+) -> None:
     """A house is the only way out of a pop cap, so the pause is a deadlock —
     run 2026_08_21_2 sat at 35/35 for the last 10 minutes with houses blocked."""
     for _ in range(ex._MISSING_STREAK_LIMIT + 1):
         _place_house(cap=20, population=20)  # housed: 20/20
-        for _ in range(ex._HOUSE_SETTLE_ATTEMPTS + 1):
-            ex.observe_hud(20, 20, {"wood": 400})
+        clock.advance(ex._HOUSE_SETTLE_SECONDS + 1)
+        ex.observe_hud(20, 20, {"wood": 400})
     # The streak proves the guard returned early — the misses were judged.
     assert ex._build_gates.missing_streaks.get("house", 0) == 0
     assert "house" not in ex._build_gates.suppressed_until
@@ -1082,11 +1125,13 @@ def test_a_matching_resource_drop_confirms_the_research(fake_pyautogui: _FakePya
     assert "castle_age" in ex._build_gates.researched
 
 
-def test_no_resource_drop_reports_the_research_missing(fake_pyautogui: _FakePyautogui) -> None:
+def test_no_resource_drop_reports_the_research_missing(
+    fake_pyautogui: _FakePyautogui, clock: _Clock
+) -> None:
     """The greyed-out button: resources kept RISING while the key was pressed."""
     _research("castle_age", {"food": 900, "gold": 300})
-    for _ in range(ex._RESEARCH_SETTLE_ATTEMPTS + 1):
-        ex.observe_hud(10, 30, {"food": 2600, "gold": 900})
+    clock.advance(ex._RESEARCH_SETTLE_SECONDS + 1)
+    ex.observe_hud(10, 30, {"food": 2600, "gold": 900})
     assert "castle_age" in ex._build_gates.research_blocked_until
 
 
@@ -1097,24 +1142,27 @@ def test_an_unmoved_reading_waits_rather_than_failing(fake_pyautogui: _FakePyaut
     assert ex._build_gates.pending_research
 
 
-def test_a_failed_research_is_refused_next_time(fake_pyautogui: _FakePyautogui) -> None:
+def test_a_failed_research_is_refused_next_time(
+    fake_pyautogui: _FakePyautogui, clock: _Clock
+) -> None:
     """The whole point: one failure, then a reason — not 10 blind retries."""
     _research("castle_age", {"food": 900, "gold": 300})
-    for _ in range(ex._RESEARCH_SETTLE_ATTEMPTS + 1):
-        ex.observe_hud(10, 30, {"food": 2600, "gold": 900})
+    clock.advance(ex._RESEARCH_SETTLE_SECONDS + 1)
+    ex.observe_hud(10, 30, {"food": 2600, "gold": 900})
     reason = ex.research_rejection("castle_age")
     assert reason is not None and "greyed out" in reason
 
 
-def test_a_blocked_research_becomes_retryable(fake_pyautogui: _FakePyautogui) -> None:
+def test_a_blocked_research_becomes_retryable(
+    fake_pyautogui: _FakePyautogui, clock: _Clock
+) -> None:
     """The block must expire. castle_age fails for want of 2 Feudal buildings;
     once the agent builds them, a permanent refusal is the same deadlock one
     level up."""
     _research("castle_age", {"food": 900, "gold": 300})
-    for _ in range(ex._RESEARCH_SETTLE_ATTEMPTS + 1):
-        ex.observe_hud(10, 30, {"food": 2600, "gold": 900})
-    for _ in range(ex._MISSING_SUPPRESS_SNAPSHOTS):
-        ex.observe_hud(10, 30, {"food": 2600, "gold": 900})
+    clock.advance(ex._RESEARCH_SETTLE_SECONDS + 1)
+    ex.observe_hud(10, 30, {"food": 2600, "gold": 900})
+    clock.advance(ex._MISSING_SUPPRESS_SECONDS + 1)
     assert ex.research_rejection("castle_age") is None
 
 
@@ -1227,13 +1275,13 @@ def test_a_pending_placement_reserves_its_wood(fake_pyautogui: _FakePyautogui) -
 
 
 def test_wood_is_free_again_once_the_placement_settles(
-    fake_pyautogui: _FakePyautogui,
+    fake_pyautogui: _FakePyautogui, clock: _Clock
 ) -> None:
     """The reservation cannot outlive the placement that made it."""
     ex.observe_hud(10, 20, {"wood": 125})
     ex._note_pending_placement("r")
-    for _ in range(ex._PLACEMENT_SETTLE_ATTEMPTS + 1):
-        ex.observe_hud(10, 20, {"wood": 25})  # the camp was bought
+    clock.advance(ex._PLACEMENT_SETTLE_SECONDS + 1)
+    ex.observe_hud(10, 20, {"wood": 25})  # the camp was bought
     assert not ex._build_gates.pending_placements  # precondition: it settled
     ex.observe_hud(10, 20, {"wood": 125})
     assert ex.build_rejection("w") is None

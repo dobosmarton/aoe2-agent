@@ -285,7 +285,8 @@ def test_orders_capped_by_population_cap() -> None:
 def test_food_crisis_forces_all_idle_slots_to_food() -> None:
     entities = [_ent("town_center", (0, 0)), _ent("sheep", (10, 10)), _ent("tree", (20, 20))]
     # pop 22 phases would be food, wood, wood — the crisis override sends all to food.
-    actions = decide(entities, _state(population=22, idle_present=True, food=40), alarm=False)
+    state = _state(population=22, idle_present=True, idle_count=3, food=40)
+    actions = decide(entities, state, alarm=False)
     targets = [a["target_class"] for a in actions if a["type"] == "right_click"]
     assert targets == ["sheep"] * 3
 
@@ -301,9 +302,8 @@ def test_food_crisis_with_no_wood_reserves_a_wood_slot() -> None:
     locked out the farm economy. With wood below a farm's cost, the override
     routes 2:1 food:wood instead."""
     entities = [_ent("town_center", (0, 0)), _ent("sheep", (10, 10)), _ent("tree", (20, 20))]
-    actions = decide(
-        entities, _state(population=22, idle_present=True, food=40, wood=0), alarm=False
-    )
+    state = _state(population=22, idle_present=True, idle_count=3, food=40, wood=0)
+    actions = decide(entities, state, alarm=False)
     targets = sorted(a["target_class"] for a in actions if a["type"] == "right_click")
     assert targets == ["sheep", "sheep", "tree"]  # exactly one wood slot per 3-batch
 
@@ -405,7 +405,8 @@ def test_wood_bank_bias_sends_an_idle_to_wood() -> None:
     entities = [_ent("town_center", (0, 0)), _ent("sheep", (10, 10)), _ent("tree", (20, 20))]
     # pop 20 with plain rotation is all-food (see spread test below); the
     # bank bias must route at least one dispatch to wood.
-    actions = decide(entities, _state(population=20, idle_present=True, wood=50), alarm=False)
+    state = _state(population=20, idle_present=True, idle_count=3, wood=50)
+    actions = decide(entities, state, alarm=False)
     targets = [a["target_class"] for a in actions if a["type"] == "right_click"]
     assert "tree" in targets
 
@@ -567,9 +568,9 @@ def test_sheep_preferred_boar_and_deer_ignored() -> None:
 
 def test_idle_dispatches_single_dot_not_blanket() -> None:
     entities = [_ent("town_center", (0, 0)), _ent("sheep", (10, 10))]
-    # pop 22 = at Dark-Age cap (no queue); badge present → a batch of single-`.` sends.
+    # pop 22 = at Dark-Age cap (no queue); badge present → one single-`.` send.
     actions = decide(entities, _state(population=22, idle_present=True), alarm=False)
-    assert _types(actions) == ["press", "right_click"] * 3  # _IDLE_DISPATCH_PER_TURN
+    assert _types(actions) == ["press", "right_click"]  # _IDLE_DISPATCH_PER_DECISION
     press = actions[0]
     assert press["key"] == "." and "modifiers" not in press  # single idle, not Shift-.
     assert press.get("rescan") is True
@@ -609,7 +610,8 @@ def test_idle_never_targets_farms_builds_one_instead() -> None:
 
 def test_idle_food_turn_prefers_huntables_over_farm_build() -> None:
     entities = [_ent("town_center", (0, 0)), _ent("sheep", (10, 10)), _ent("farm", (20, 20))]
-    actions = decide(entities, _state(population=20, idle_present=True), alarm=False)
+    state = _state(population=20, idle_present=True, idle_count=3)
+    actions = decide(entities, state, alarm=False)
     # pop 20 → all-food phases: sheep is targeted, no farm build, farm untouched.
     targets = [a["target_class"] for a in actions if a["type"] == "right_click"]
     assert targets == ["sheep"] * 3
@@ -624,11 +626,12 @@ def test_idle_farm_build_capped_at_one_per_turn() -> None:
     assert [a["type"] for a in actions] == ["build"]
 
 
-def test_idle_dispatch_capped_per_turn() -> None:
+def test_idle_dispatch_capped_per_decision() -> None:
     entities = [_ent("town_center", (0, 0)), _ent("sheep", (10, 10)), _ent("tree", (20, 20))]
     actions = decide(entities, _state(population=22, idle_present=True), alarm=False)
-    # Presence only (no count) → a fixed _IDLE_DISPATCH_PER_TURN (3) batch.
-    assert _types(actions) == ["press", "right_click"] * 3
+    # Presence only (no count) → _IDLE_DISPATCH_PER_DECISION, which is 1: the act
+    # loop decides again on the next frame, after the camera has settled.
+    assert _types(actions) == ["press", "right_click"]
 
 
 def test_idle_batch_sized_by_badge_count() -> None:
@@ -657,14 +660,14 @@ def test_idle_count_distrusted_on_long_streak() -> None:
     # Badge lit 4+ turns while the digit reads 1 — the 2026-07-11 failure (digit
     # pinned at 1 with 8 idle). Floor the batch at the blind presence default.
     state = _state(population=22, idle_present=True, idle_count=1, idle_streak=4)
-    assert _types(decide(entities, state, alarm=False)) == ["press", "right_click"] * 3
+    assert _types(decide(entities, state, alarm=False)) == ["press", "right_click"]
 
 
 def test_idle_count_zero_distrusted_on_long_streak() -> None:
     entities = [_ent("town_center", (0, 0)), _ent("sheep", (10, 10))]
     # A pinned 0 with a lit badge is the same sensor fault as a pinned 1.
     state = _state(population=22, idle_present=True, idle_count=0, idle_streak=4)
-    assert _types(decide(entities, state, alarm=False)) == ["press", "right_click"] * 3
+    assert _types(decide(entities, state, alarm=False)) == ["press", "right_click"]
 
 
 def test_idle_count_gate_never_reduces_batch() -> None:
@@ -686,7 +689,8 @@ def test_idle_count_zero_overrides_presence() -> None:
 def test_idle_distribution_spreads_across_kinds() -> None:
     """A 3-batch must not dump everyone on one tile — the F-4 blanket bug."""
     entities = [_ent("town_center", (0, 0)), _ent("sheep", (10, 10)), _ent("tree", (20, 20))]
-    turn = decide(entities, _state(population=22, idle_present=True), alarm=False)
+    state = _state(population=22, idle_present=True, idle_count=3)
+    turn = decide(entities, state, alarm=False)
     targets = [a["target_class"] for a in turn if a["type"] == "right_click"]
     assert set(targets) == {"sheep", "tree"}
 

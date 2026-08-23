@@ -22,6 +22,13 @@ from .window import ensure_game_focused, get_game_window_rect
 
 log = structlog.stdlib.get_logger()
 
+
+def _now() -> float:
+    """Monotonic seconds; one seam, so a test can advance the clock. Build-gate
+    deadlines are wall clock because perception has its own cadence (Phase 3)."""
+    return time.monotonic()
+
+
 # Configure pyautogui for better game compatibility
 pyautogui.FAILSAFE = False
 pyautogui.PAUSE = 0.02
@@ -122,17 +129,18 @@ _PLACEMENT_INCOME_SLACK = 20
 # windows with no pending spend). 0.5 tracks the fast income ramp of a
 # growing villager count while smoothing single-frame OCR blips.
 _INCOME_EMA_WEIGHT = 0.5
-# Stale-OCR grace: identical wood readings a pending placement survives before
-# it is settled anyway.
-_PLACEMENT_SETTLE_ATTEMPTS = 3
+# Stale-OCR grace: how long a pending placement waits for the wood reading to
+# move before it is settled anyway. 30 s is what the old 3-snapshot grace bought
+# at the measured 9.6 s turn (run 2026_08_22_2).
+_PLACEMENT_SETTLE_SECONDS = 30.0
 # A house settles on the population cap, not the wood delta: 25 wood against a
 # 20-wood slack leaves a 5-wood margin on an ESTIMATED income. Run 2026_08_21_2
 # built 6 houses and the wood test called 9 confirmed and 21 missing.
 _HOUSE_CLASS = "house"
 _HOUSE_CAP_STEP = 5  # cap gained per completed house
 # Houses need more grace than the wood path: a house takes ~25 s to CONSTRUCT
-# before the cap moves, on top of OCR lag, against a ~13 s turn.
-_HOUSE_SETTLE_ATTEMPTS = 5
+# before the cap moves, and OCR lag sits on top of that.
+_HOUSE_SETTLE_SECONDS = 50.0
 # Distinct detection frames before a building class is REPORTED as sighted
 # (context line only — sightings never gate builds: run 9, F-36, a persistent
 # phantom mill beat any count threshold and 14 outposts got built through the
@@ -199,8 +207,8 @@ CASTLE_PREREQ_COUNT = 2
 # the economy keeps earning; half is wide enough to survive that and still tell
 # an 800-food age-up apart from a 50-food villager.
 _RESEARCH_CONFIRM_FRACTION = 0.5
-# Snapshots a pending research waits for the HUD to move before it is judged.
-_RESEARCH_SETTLE_ATTEMPTS = 3
+# How long a pending research waits for the HUD to move before it is judged.
+_RESEARCH_SETTLE_SECONDS = 30.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -264,14 +272,15 @@ class _PendingResearch:
     name: str
     tech: Tech
     before: dict[str, int]
-    settles_left: int = _RESEARCH_SETTLE_ATTEMPTS
+    # Monotonic instant after which an undecided reading is judged anyway.
+    settle_deadline: float = 0.0
 
 
 # Circuit breaker (T-530): consecutive missing settlements for one building
-# class before its builds are suppressed, and how many HUD snapshots the
-# suppression lasts. Run 9: 32 identical farm attempts each burned resources.
+# class before its builds are suppressed, and how long the suppression lasts.
+# Run 9: 32 identical farm attempts each burned resources.
 _MISSING_STREAK_LIMIT = 3
-_MISSING_SUPPRESS_SNAPSHOTS = 5
+_MISSING_SUPPRESS_SECONDS = 50.0
 # Villager-order ledger (T-531). Orders lead the HUD population by the TC
 # queue depth (~25 s per villager vs a ~10 s turn), so a brake on DELIVERED
 # population overshoots: run 11 (F-38) pressed q 36 times, every one at pop
@@ -296,14 +305,14 @@ _NEXT_AGE: dict[str, str] = {"Dark Age": "Feudal Age", "Feudal Age": "Castle Age
 SelectionMode = Literal["click", "idle_press", "unknown"]
 
 # What one HUD snapshot says about a pending placement. "undecided" is not a
-# miss: the reading cannot answer yet, so the placement waits out `settles_left`.
+# miss: the reading cannot answer yet, so the placement waits for its deadline.
 Verdict = Literal["confirmed", "missing", "undecided"]
 
 
 # A placement whose foundation wasn't visually confirmed, awaiting settlement
 # against the HUD wood spend (2026-07-11 run 2, F-11: YOLO can't see foundations,
 # so a fresh rescan reports almost every REAL placement as failed — that false
-# negative caused a duplicate mill). Mutable on purpose: settles_left counts down.
+# negative caused a duplicate mill).
 @dataclass
 class _PendingPlacement:
     building_class: str
@@ -315,7 +324,8 @@ class _PendingPlacement:
     # settlement names its own cause.
     selected_by: SelectionMode = "unknown"
     point: tuple[int, int] = (0, 0)
-    settles_left: int = _PLACEMENT_SETTLE_ATTEMPTS
+    # Monotonic instant after which an undecided reading is judged anyway.
+    settle_deadline: float = 0.0
 
     @property
     def is_house(self) -> bool:
@@ -355,14 +365,14 @@ class _BuildGates:
     # from the observed delta so gather income can't mask a purchase (T-537).
     wood_income_per_snapshot: float | None = None
     # Circuit breaker (T-530): consecutive missing settlements per class, and
-    # the snapshot count until which a repeatedly-missing class stays blocked.
+    # the monotonic instant until which a repeatedly-missing class stays blocked.
     missing_streaks: dict[str, int] = field(default_factory=dict)
-    suppressed_until: dict[str, int] = field(default_factory=dict)
+    suppressed_until: dict[str, float] = field(default_factory=dict)
     # The research counterparts: awaiting settlement, proven paid for, and the
-    # snapshot until which a proven miss stays blocked.
+    # instant until which a proven miss stays blocked.
     pending_research: list[_PendingResearch] = field(default_factory=list)
     researched: set[str] = field(default_factory=set)
-    research_blocked_until: dict[str, int] = field(default_factory=dict)
+    research_blocked_until: dict[str, float] = field(default_factory=dict)
     snapshot_count: int = 0
     # Villagers ordered so far (T-531) — self-generated ground truth that
     # leads the delivered HUD population by the TC queue depth.
@@ -470,7 +480,8 @@ def _note_pending_placement(
             cap_before=cap_before,
             selected_by=_build_gates.selected_by,
             point=point,
-            settles_left=_HOUSE_SETTLE_ATTEMPTS if is_house else _PLACEMENT_SETTLE_ATTEMPTS,
+            settle_deadline=_now()
+            + (_HOUSE_SETTLE_SECONDS if is_house else _PLACEMENT_SETTLE_SECONDS),
         )
     )
 
@@ -484,7 +495,7 @@ def _settle_pending_placements(wood_now: int | None, cap_now: int) -> None:
     — see `_house_verdict` and `_wood_verdict`. Judged FIFO, erring toward
     confirmation: a false "failed" report is what caused the duplicate mill,
     while a false success merely delays the retry by a turn. An "undecided"
-    reading waits for the next snapshot, up to `settles_left` times.
+    reading waits for the next snapshot, until `settle_deadline` passes.
 
     A missing wood reading stops the whole pass, houses included: one OCR frame
     supplies both numbers, so an unreadable wood value means an unreliable cap.
@@ -500,8 +511,7 @@ def _settle_pending_placements(wood_now: int | None, cap_now: int) -> None:
             if pending.is_house
             else _wood_verdict(pending, wood_now, spend_by_baseline)
         )
-        if verdict == "undecided" and pending.settles_left > 0:
-            pending.settles_left -= 1
+        if verdict == "undecided" and _now() < pending.settle_deadline:
             still_pending.append(pending)
             continue
         evidence = _settlement_evidence(pending, wood_now, cap_now)
@@ -584,7 +594,12 @@ def _note_pending_research(name: str, tech: Tech) -> None:
         log.debug("research_pending_dropped", tech=name)
         return
     _build_gates.pending_research.append(
-        _PendingResearch(name=name, tech=tech, before=dict(before))
+        _PendingResearch(
+            name=name,
+            tech=tech,
+            before=dict(before),
+            settle_deadline=_now() + _RESEARCH_SETTLE_SECONDS,
+        )
     )
 
 
@@ -600,20 +615,18 @@ def _settle_pending_research(resources: Mapping[str, int]) -> None:
     still_pending: list[_PendingResearch] = []
     for pending in _build_gates.pending_research:
         verdict = _research_verdict(pending, resources)
-        if verdict == "undecided" and pending.settles_left > 0:
-            pending.settles_left -= 1
+        if verdict == "undecided" and _now() < pending.settle_deadline:
             still_pending.append(pending)
             continue
         if verdict == "confirmed":
             _build_gates.researched.add(pending.name)
             log.info("research_confirmed", tech=pending.name)
         else:
-            until = _build_gates.snapshot_count + _MISSING_SUPPRESS_SNAPSHOTS
-            _build_gates.research_blocked_until[pending.name] = until
+            _build_gates.research_blocked_until[pending.name] = _now() + _MISSING_SUPPRESS_SECONDS
             log.warning(
                 "research_missing",
                 tech=pending.name,
-                until_snapshot=until,
+                retry_in_s=round(_MISSING_SUPPRESS_SECONDS),
                 **_research_costs(pending.tech),
             )
     _build_gates.pending_research = still_pending
@@ -675,13 +688,12 @@ def _note_missing_settlement(building_class: str) -> None:
     streak = _build_gates.missing_streaks.get(building_class, 0) + 1
     _build_gates.missing_streaks[building_class] = streak
     if streak >= _MISSING_STREAK_LIMIT:
-        until = _build_gates.snapshot_count + _MISSING_SUPPRESS_SNAPSHOTS
-        _build_gates.suppressed_until[building_class] = until
+        _build_gates.suppressed_until[building_class] = _now() + _MISSING_SUPPRESS_SECONDS
         log.warning(
             "build_suppressed",
             building=building_class,
             missing_streak=streak,
-            until_snapshot=until,
+            retry_in_s=round(_MISSING_SUPPRESS_SECONDS),
         )
 
 
@@ -766,14 +778,14 @@ def blocked_actions() -> list[str]:
     context line must stay side-effect free. Affordability is absent on purpose:
     the resources sit two lines above it.
     """
-    now = _build_gates.snapshot_count
+    now = _now()
     blocked = [
-        f"{cls} (suppressed {until - now} turns)"
+        f"{cls} (suppressed {round(until - now)}s)"
         for cls, until in sorted(_build_gates.suppressed_until.items())
         if now < until
     ]
     blocked += [
-        f"{name} (retryable in {until - now} turns)"
+        f"{name} (retryable in {round(until - now)}s)"
         for name, until in sorted(_build_gates.research_blocked_until.items())
         if now < until
     ]
@@ -810,7 +822,7 @@ def _committed_wood() -> int:
 
     The reading refreshes once per turn, so without this a second build sees
     money the first already spent — run 2026_08_22_2 had 125 wood and committed
-    200. Self-limiting: a pending placement is judged within `settles_left`.
+    200. Self-limiting: a pending placement is judged by its settle deadline.
     """
     return sum(p.wood_cost for p in _build_gates.pending_placements)
 
@@ -827,12 +839,12 @@ def _rejection_reason(building_key: str, menu: str) -> str | None:
     cls = building_class(menu, building_key)
     if cls is None:
         return None
-    suppressed_until = _build_gates.suppressed_until.get(cls, 0)
-    if _build_gates.snapshot_count < suppressed_until:
+    suppressed_until = _build_gates.suppressed_until.get(cls, 0.0)
+    if _now() < suppressed_until:
         streak = _build_gates.missing_streaks.get(cls, 0)
         return (
             f"{cls} builds suppressed for "
-            f"{suppressed_until - _build_gates.snapshot_count} more turns: "
+            f"{round(suppressed_until - _now())} more seconds: "
             f"{streak} placements in a row vanished without the wood being spent — "
             "something is systematically wrong (blocked ground, or the "
             "prerequisite isn't really standing)"
@@ -1299,12 +1311,12 @@ def _research_rejection_reason(name: str) -> str | None:
         return f"unknown technology {name!r}; known: {', '.join(sorted(_TECHS))}"
     if name in _build_gates.researched:
         return f"{name} is already researched — the HUD showed it paid for"
-    blocked_until = _build_gates.research_blocked_until.get(name, 0)
-    if _build_gates.snapshot_count < blocked_until:
+    blocked_until = _build_gates.research_blocked_until.get(name, 0.0)
+    if _now() < blocked_until:
         return (
             f"{name} did not take last time: the cost never left the HUD, so the "
             f"button was greyed out. Satisfy its requirement — retryable in "
-            f"{blocked_until - _build_gates.snapshot_count} turns"
+            f"{round(blocked_until - _now())} seconds"
         )
     if any(p.name == name for p in _build_gates.pending_research):
         return f"{name} is already awaiting HUD settlement — don't re-press it"

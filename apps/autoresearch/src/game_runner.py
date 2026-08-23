@@ -32,7 +32,7 @@ async def run_game(
 
     Args:
         time_budget: Maximum game duration in seconds (None = no limit)
-        max_iterations: Maximum turns (None = no limit)
+        max_iterations: Maximum perception frames (None = no limit)
         use_detection: Whether to use YOLO detection
         game_id: Experiment ID for memory attribution
         extract_memories: Whether to extract memory fragments after the game
@@ -124,7 +124,7 @@ async def run_and_log(
         loop: Which loop this belongs to (manual, prompt, context, strategy)
         description: What changed for this experiment
         time_budget: Maximum game duration in seconds
-        max_iterations: Maximum turns
+        max_iterations: Maximum perception frames
 
     Returns:
         Dict with metrics, score, and experiment_id
@@ -171,7 +171,7 @@ def main() -> None:
         "--max-iterations",
         type=int,
         default=None,
-        help="Maximum number of turns (default: no limit)",
+        help="Maximum perception frames, NOT turns (default: no limit)",
     )
     parser.add_argument(
         "--experiment-id",

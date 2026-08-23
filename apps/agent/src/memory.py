@@ -178,14 +178,17 @@ class AgentMemory:
         # no timed loop.
         self.latency: LatencySource | None = None
 
+    def start_game(self) -> None:
+        """Start the game clock. `survival_time` and every `age_times` entry
+        hang off it, so a game with no LLM turn would score 0 on both."""
+        if self.game_start_time is None:
+            self.game_start_time = datetime.now(UTC)
+
     def add_turn(self, turn: Turn) -> None:
         """Add a turn to working memory."""
         self.working_memory.append(turn)
         self.turn_count += 1
-
-        # Start timer on first turn
-        if self.game_start_time is None:
-            self.game_start_time = datetime.now(UTC)
+        self.start_game()  # the `--test` path has no supervisor to start it
 
         # Track cumulative actions
         self.total_actions += len(turn.actions)

@@ -66,7 +66,7 @@ async def main_async(args: _AgentArgs) -> None:
         )
     else:
         # Run main game loop
-        log.info("starting_game_loop", loop_delay=config.loop_delay)
+        log.info("starting_game_loop", act_interval=config.act_interval)
         await game_loop(provider, max_iterations=args.iterations, use_overlay=args.overlay)
 
 
@@ -94,7 +94,8 @@ def main() -> None:
         "--iterations",
         type=int,
         default=None,
-        help="Maximum number of iterations (default: unlimited)",
+        help="Maximum perception frames, NOT LLM turns (default: unlimited). "
+        "Use the game runner's --time-budget to bound a real game.",
     )
     parser.add_argument(
         "--overlay",

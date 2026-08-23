@@ -219,7 +219,10 @@ def test_build_llm_context_omits_goal_block_when_empty():
 
 
 @pytest.fixture
-def build_gates():
+def build_gates(monkeypatch: pytest.MonkeyPatch):
+    """Fresh gates and a frozen clock — the suppression deadlines are wall
+    clock, so a test sets `_now() + seconds`, not a snapshot count."""
+    monkeypatch.setattr(ex, "_now", lambda: 1000.0)
     ex.reset_build_gates()
     yield
     ex.reset_build_gates()
@@ -369,15 +372,13 @@ def test_castle_gate_line_is_silent_outside_feudal(build_gates) -> None:
 
 
 def test_blocked_line_names_a_suppressed_build(build_gates) -> None:
-    ex._build_gates.snapshot_count = 10
-    ex._build_gates.suppressed_until["mining_camp"] = 13
-    assert blocked_actions_line() == "Currently refused: mining_camp (suppressed 3 turns)\n"
+    ex._build_gates.suppressed_until["mining_camp"] = ex._now() + 30
+    assert blocked_actions_line() == "Currently refused: mining_camp (suppressed 30s)\n"
 
 
 def test_blocked_line_names_a_blocked_research(build_gates) -> None:
-    ex._build_gates.snapshot_count = 10
-    ex._build_gates.research_blocked_until["horse_collar"] = 12
-    assert "horse_collar (retryable in 2 turns)" in blocked_actions_line()
+    ex._build_gates.research_blocked_until["horse_collar"] = ex._now() + 20
+    assert "horse_collar (retryable in 20s)" in blocked_actions_line()
 
 
 def test_blocked_line_names_a_finished_research(build_gates) -> None:
@@ -390,15 +391,14 @@ def test_blocked_line_omits_what_the_context_already_says(build_gates) -> None:
     """Affordability is derivable — the resources sit two lines above. Pairs an
     unaffordable technology with a blocked one, so only the filter can pass it."""
     ex.observe_hud(10, 30, {"food": 10, "gold": 10})  # castle_age unaffordable
-    ex._build_gates.research_blocked_until["horse_collar"] = ex._build_gates.snapshot_count + 2
+    ex._build_gates.research_blocked_until["horse_collar"] = ex._now() + 20
     line = blocked_actions_line()
     assert "horse_collar" in line
     assert "castle_age" not in line
 
 
 def test_an_expired_block_stops_being_reported(build_gates) -> None:
-    ex._build_gates.snapshot_count = 20
-    ex._build_gates.suppressed_until["farm"] = 13  # long past
+    ex._build_gates.suppressed_until["farm"] = ex._now() - 30  # long past
     assert blocked_actions_line() == ""
 
 
@@ -409,8 +409,7 @@ def test_nothing_refused_emits_no_header(build_gates) -> None:
 def test_the_blocked_line_logs_nothing(build_gates, capsys) -> None:
     """A context line must not emit build_rejected events — that is why it reads
     the gate state instead of calling the rejection helpers."""
-    ex._build_gates.snapshot_count = 10
-    ex._build_gates.suppressed_until["farm"] = 13
+    ex._build_gates.suppressed_until["farm"] = ex._now() + 30
     capsys.readouterr()
     blocked_actions_line()
     assert capsys.readouterr().out == ""

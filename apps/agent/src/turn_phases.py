@@ -29,7 +29,6 @@ from .executor import (
     FEUDAL_PREREQ_CLASSES,
     blocked_actions,
     build_steps,
-    clear_detected_entities,
     confirmed_buildings,
     execute_actions,
     get_detected_entities,
@@ -471,5 +470,3 @@ async def _execute_turn_actions(
             fb_results = await execute_actions(fallback_actions)
             fb_success = sum(1 for r in fb_results if r.success)
             memory.record_action_results(fb_success, len(fallback_actions))
-
-    clear_detected_entities()

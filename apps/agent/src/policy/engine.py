@@ -39,7 +39,7 @@ def decide(
     rules: Sequence[Rule] | None = None,
     strategist_allocation: Allocation | None = None,
 ) -> list[dict[str, object]]:
-    """Routine actions for this turn. Empty on alarm — the LLM owns combat."""
+    """Routine actions for this frame. Empty on alarm — the LLM owns combat."""
     if alarm:
         return []
     active = registry() if rules is None else tuple(rules)
@@ -63,6 +63,8 @@ def matched_actions(state: PolicyState, rules: Sequence[Rule]) -> list[dict[str,
             continue
         for resource, amount in rule.cost.items():
             balance[resource] -= amount
+        # Phase 6.1 counts firings from this line, so every fired rule logs one.
+        log.debug("policy_rule_fired", rule=rule.id, weight=rule.weight)
         actions.extend(rule.render(state))
     return actions
 

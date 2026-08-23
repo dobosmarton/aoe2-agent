@@ -15,11 +15,12 @@ from . import allocation
 if TYPE_CHECKING:
     from .state import PolicyState
 
-# Dispatches per turn when only badge PRESENCE is known. Each `.` costs a camera
-# move; the badge re-read next turn drains any remainder.
-_IDLE_DISPATCH_PER_TURN = 3
-# Cap when the badge COUNT is readable, so a mass-idle event cannot blow the
-# turn's action budget.
+# Dispatches per decision when only badge PRESENCE is known. One, because the
+# act loop decides on every frame: the badge re-read drains any remainder, and
+# each `.` costs a camera move the next decision has to wait out.
+_IDLE_DISPATCH_PER_DECISION = 1
+# Cap when the badge COUNT is readable, so a mass-idle event cannot blow one
+# decision's action budget.
 _IDLE_DISPATCH_MAX = 6
 # A lit badge outliving its own count means the digit is under-reading (F-4).
 _IDLE_COUNT_SUSPECT_STREAK = 4
@@ -61,8 +62,8 @@ def distribute_idle(
         kind = allocation.next_kind(target_mix, jobs)
         jobs = allocation.with_one_more(jobs, kind)
         if kind == "food" and not farm_queued and nearest_class_of_kind(entities, "food") is None:
-            # One per turn: the HUD snapshot the build gate checks cannot see
-            # this turn's spend, so a second build could not be cost-checked.
+            # One per decision: the HUD snapshot the build gate checks cannot
+            # see this spend, so a second build could not be cost-checked.
             actions.append(
                 {
                     "type": "build",
@@ -96,10 +97,10 @@ def distribute_idle(
 def _idle_batch_size(state: PolicyState) -> int:
     """The badge count when trusted, else the blind batch. 0 means none idle."""
     if state.idle_count is None:
-        return _IDLE_DISPATCH_PER_TURN
+        return _IDLE_DISPATCH_PER_DECISION
     batch = min(state.idle_count, _IDLE_DISPATCH_MAX)
     if state.idle_streak >= _IDLE_COUNT_SUSPECT_STREAK:
-        batch = max(batch, _IDLE_DISPATCH_PER_TURN)
+        batch = max(batch, _IDLE_DISPATCH_PER_DECISION)
     return batch
 
 
