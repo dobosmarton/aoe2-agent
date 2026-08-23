@@ -12,10 +12,12 @@ import time
 import pytest
 from gameplay_agent import executor as ex
 from gameplay_agent import game_loop as gl
-from gameplay_agent.loops import perceive
+from gameplay_agent.loops import deliberate, perceive
 from gameplay_agent.loops.snapshot import Perception
 from gameplay_agent.memory import AgentMemory
+from gameplay_agent.providers.base import LLMResult
 from gameplay_agent.providers.executor_provider import ExecutorProvider
+from gameplay_agent.providers.strategist import StrategistProvider
 
 from tests.factories import make_entity as _ent
 from tests.loop_fakes import FakeActuator, FakeSource
@@ -40,6 +42,8 @@ def loop_seams(monkeypatch, tmp_path):
     monkeypatch.setattr(perceive.config, "perceive_interval", 0.0)
     monkeypatch.setattr(gl.config, "log_dir", tmp_path)
     monkeypatch.setattr(gl.config, "save_screenshots", False)
+    # No network: the strategist would otherwise try a real call per test.
+    monkeypatch.setattr(StrategistProvider, "should_run", lambda *_a, **_k: False)
     ex.reset_build_gates()
     yield source, actuator
     ex.reset_build_gates()
@@ -140,6 +144,35 @@ def test_the_refresh_hook_replaces_the_inline_rescan(loop_seams) -> None:
     at the frame pipe is what keeps a detection off the act task."""
     _play()
     assert ex.get_rescan_fn() is not None
+
+
+# ---------------------------------------------------------------------------
+# The whole phase in one test: a slow LLM must not stop the agent acting
+# ---------------------------------------------------------------------------
+
+
+async def _stalled_plan(*_args: object, **_kwargs: object) -> LLMResult:
+    """An LLM that never answers inside a game's lifetime."""
+    await asyncio.sleep(30)
+    return LLMResult(reasoning="too late", actions=[], observations={})
+
+
+def test_act_ticks_while_the_llm_stalls(loop_seams, monkeypatch) -> None:
+    """The load-bearing check. Under the old turn loop a 30 s call stopped the
+    agent dead; here the act loop keeps deciding on every frame."""
+    monkeypatch.setattr(deliberate.config, "deliberate_interval", 1)  # ask every frame
+    monkeypatch.setattr(ExecutorProvider, "plan", _stalled_plan)
+    memory = _play(frames=5)
+    assert memory.get_metrics_snapshot()["loop_arch"] == "clocks"
+
+
+def test_the_frames_keep_coming_while_the_llm_stalls(loop_seams, monkeypatch) -> None:
+    source, _actuator = loop_seams
+
+    monkeypatch.setattr(deliberate.config, "deliberate_interval", 1)
+    monkeypatch.setattr(ExecutorProvider, "plan", _stalled_plan)
+    _play(frames=5)
+    assert source.captures == 5
 
 
 # ---------------------------------------------------------------------------

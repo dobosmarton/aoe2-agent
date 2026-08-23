@@ -302,16 +302,7 @@ class AgentMemory:
                     line += f"\n  Result: {turn.verification[:150]}"
                 recent_lines.append(line)
 
-            # Stuck-loop detection: count consecutive failures
-            no_change_count = 0
-            for turn in reversed(recent_turns):
-                if turn.verification and (
-                    "no visible change" in turn.verification or "FAILED" in turn.verification
-                ):
-                    no_change_count += 1
-                else:
-                    break
-
+            no_change_count = self.no_change_streak()
             header = "## Recent Decisions\n"
             if no_change_count >= STUCK_LOOP_THRESHOLD:
                 header = f"## Recent Decisions\n**WARNING: Last {no_change_count} actions had NO EFFECT. You MUST try a completely different approach — different target, different task, or press H to reset.**\n"
@@ -319,6 +310,21 @@ class AgentMemory:
             parts.append(header + "\n".join(recent_lines))
 
         return "\n\n".join(parts)
+
+    def no_change_streak(self) -> int:
+        """Trailing turns whose actions had no visible effect.
+
+        The deliberate loop's "stuck" trigger and the prompt warning read the
+        same count, so a change to one cannot drift from the other.
+        """
+        streak = 0
+        for turn in reversed(self.working_memory):
+            if not turn.verification:
+                break
+            if "no visible change" not in turn.verification and "FAILED" not in turn.verification:
+                break
+            streak += 1
+        return streak
 
     def _format_game_state(self) -> str:
         """Format game state for display."""

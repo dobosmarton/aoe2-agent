@@ -6,7 +6,7 @@ Owns the four pieces the game loop runs once per iteration:
     (zoom on turn 1). Pure function of the iteration number.
   - `_build_llm_context`: stitches memory + goals + entities into the prompt
     string the executor sees. Mirrors `evaluation.context_builder._build_context`.
-  - `_process_response`: parses the LLM's response, strips the
+  - `record_llm_turn`: parses the LLM's response, strips the
     `[applied: ...]` memory-attribution prefix, snapshots state for reward
     computation, and returns `(actions, game_end_reason | None)`.
   - `_execute_turn_actions`: runs the validated actions through the executor
@@ -214,17 +214,17 @@ def known_buildings_line(detected_entities: list[object] | None) -> str:
     return "Known buildings: " + " ".join(segments) + "\n"
 
 
-def _process_response(
+def record_llm_turn(
     response: LLMResult,
     memory: AgentMemory,
     goal_manager: GoalManager,
     iteration: int,
     goal_logger: GoalLogger,
-    time_budget: float | None,
-) -> tuple[list[dict[str, object]], str | None]:
-    """Parse LLM response, update memory/goals, check for game-over.
+) -> list[dict[str, object]]:
+    """Parse one LLM answer and book the turn it belongs to.
 
-    Returns (actions, game_end_reason). game_end_reason is None if game continues.
+    Every metric that scales with LLM turns hangs off `create_turn` here —
+    `turn_count`, the goal reward, and the saved trace. Returns its actions.
     """
     reasoning = response.get("reasoning", "")
     observations = response.get("observations", {})
@@ -285,18 +285,21 @@ def _process_response(
     if reward["total"] != 0:
         log.info("turn_reward", iteration=iteration, **reward)
 
-    game_state = observations.get("game_state", "playing") if observations else "playing"
-    if game_state in ("victory", "defeat"):
-        memory.game_end_reason = game_state
-        log.info("game_over_detected", result=game_state, iteration=iteration)
-        return actions, game_state
+    return actions
 
-    if time_budget and memory.get_game_duration_seconds() >= time_budget:
-        memory.game_end_reason = "timeout"
-        log.info("time_budget_reached", seconds=time_budget, iteration=iteration)
-        return actions, "timeout"
 
-    return actions, None
+def check_game_over(response: LLMResult, memory: AgentMemory, iteration: int) -> str | None:
+    """The end reason the LLM just reported, or None.
+
+    `observations.game_state` is the only game-over signal the agent has; the
+    supervisor owns the time budget.
+    """
+    observations = response.get("observations", {})
+    state = observations.get("game_state", "playing") if observations else "playing"
+    if state in ("victory", "defeat"):
+        log.info("game_over_detected", result=state, iteration=iteration)
+        return str(state)
+    return None
 
 
 # ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@
 
 These cover the pure (or near-pure) helpers that drive a single iteration:
 applied-memory parsing, hardcoded ground/maintenance commands, LLM context
-assembly. The async/state-mutating pieces (`_process_response`,
+assembly. The async/state-mutating pieces (`record_llm_turn`,
 `_execute_turn_actions`) are exercised indirectly via the evaluation runner;
 direct tests for them would need extensive AgentMemory + GoalManager mocking
 without much marginal coverage gain.
@@ -22,10 +22,10 @@ from gameplay_agent.turn_phases import (
     _extract_applied_memories,
     _fallback_actions,
     _get_ground_commands,
-    _process_response,
     blocked_actions_line,
     castle_gate_line,
     known_buildings_line,
+    record_llm_turn,
 )
 
 from tests.factories import make_entity as _ent
@@ -285,12 +285,12 @@ def test_fallback_actions_not_housed_queues_villager():
 
 
 # ---------------------------------------------------------------------------
-# _process_response — executor-outage accounting (T-533)
+# record_llm_turn — executor-outage accounting (T-533)
 # ---------------------------------------------------------------------------
 
 
 class _StubGoalManager:
-    """The slice of GoalManager that _process_response touches."""
+    """The slice of GoalManager that record_llm_turn touches."""
 
     active_goals: ClassVar[list] = []
     completed_goals: ClassVar[list] = []
@@ -316,23 +316,23 @@ def _err_response() -> dict:
     }
 
 
-def test_process_response_counts_executor_errors_into_metrics():
+def test_record_llm_turn_counts_executor_errors_into_metrics():
     """An error response bumps llm_errors so llm_error_rate reflects the outage —
     the signal missing from run 12's accepted=true, 90-error ledger row."""
     memory = AgentMemory()
     gm, gl = _StubGoalManager(), _StubGoalLogger()
     for _ in range(_EXECUTOR_OUTAGE_STREAK):
-        _process_response(_err_response(), memory, gm, 1, gl, None)
+        record_llm_turn(_err_response(), memory, gm, 1, gl)
     assert memory.llm_errors == _EXECUTOR_OUTAGE_STREAK
     assert memory.get_metrics_snapshot()["llm_error_rate"] == 1.0
 
 
-def test_process_response_success_response_is_not_an_error():
+def test_record_llm_turn_success_response_is_not_an_error():
     """A normal (error-absent) response counts as a healthy executor turn."""
     memory = AgentMemory()
     gm, gl = _StubGoalManager(), _StubGoalLogger()
     ok = {"reasoning": "queue a villager", "actions": [{"type": "queue_villager"}]}
-    _process_response(ok, memory, gm, 1, gl, None)
+    record_llm_turn(ok, memory, gm, 1, gl)
     snap = memory.get_metrics_snapshot()
     assert snap["llm_calls"] == 1
     assert snap["llm_errors"] == 0

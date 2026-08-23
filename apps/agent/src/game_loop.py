@@ -38,11 +38,12 @@ from .goal_logger import GoalLogger
 from .goals import GoalManager
 from .loops.act import act_loop
 from .loops.context import LoopContext
+from .loops.deliberate import deliberate_loop
 from .loops.perceive import perceive_loop
 from .loops.source import GameActuator, GameSource, frame_refresh
 from .memory import AgentMemory
 from .models import validate_actions
-from .providers.strategist import get_default_goals
+from .providers.strategist import StrategistProvider, get_default_goals
 from .resource_ocr import warm_up_ocr
 from .screen import capture_screenshot, save_screenshot
 from .turn_phases import _get_ground_commands
@@ -133,15 +134,25 @@ async def _stop_on_budget(ctx: LoopContext) -> None:
         ctx.request_stop("timeout")
 
 
-async def _run_clocks(ctx: LoopContext) -> None:
+async def _run_clocks(
+    ctx: LoopContext,
+    strategist: StrategistProvider,
+    provider: ExecutorProvider,
+) -> None:
     """Run the clocks until one of them ends the game, then stop the rest."""
     tasks = [
         asyncio.create_task(perceive_loop(ctx), name="perceive"),
         asyncio.create_task(act_loop(ctx), name="act"),
+        asyncio.create_task(deliberate_loop(ctx, strategist, provider), name="deliberate"),
         asyncio.create_task(_stop_on_budget(ctx), name="budget"),
     ]
     try:
-        await asyncio.gather(*tasks)
+        # FIRST_COMPLETED, not gather: a clock only returns when the game is
+        # over, and waiting for the rest would hold shutdown for the length of
+        # an in-flight LLM call.
+        done, _pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for task in done:
+            await task  # re-raise whatever ended it
     finally:
         for task in tasks:
             task.cancel()
@@ -156,7 +167,7 @@ async def game_loop(
     time_budget: float | None = None,
     use_overlay: bool = False,
 ) -> AgentMemory:
-    """Play one game with the perceive and act clocks. No LLM runs yet.
+    """Play one game on the perceive, act and deliberate clocks.
 
     `max_iterations` bounds PERCEIVE FRAMES, about 0.5 s each, where a turn used
     to be 10. Use `time_budget` to bound a real game."""
@@ -196,7 +207,7 @@ async def game_loop(
         # Before the first frame on purpose: the scout explores during the
         # slowest perception pass of the game (engine warm-up).
         await ctx.actuator.execute(validate_actions(_get_ground_commands(1)))
-        await _run_clocks(ctx)
+        await _run_clocks(ctx, StrategistProvider(), provider)
     except KeyboardInterrupt:
         log.info("game_loop_interrupted")
         ctx.request_stop("interrupted")

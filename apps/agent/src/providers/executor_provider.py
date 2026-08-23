@@ -7,7 +7,7 @@ single-shot/tool-loop routing — and delegates every vendor detail to a
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, cast
+from typing import TYPE_CHECKING, ClassVar, Protocol, cast
 
 import structlog
 from pydantic import BaseModel
@@ -104,6 +104,12 @@ try:
 except ImportError:
     GAME_KNOWLEDGE_AVAILABLE = False
     log.debug("game_knowledge_not_available", message="Running without dynamic context injection")
+
+
+class _CallPath(Protocol):
+    """One way of asking the model for a turn: single-shot, or the tool loop."""
+
+    async def __call__(self, content: list[dict], *, age: str) -> LLMResult: ...
 
 
 class ExecutorProvider:
@@ -718,7 +724,7 @@ class ExecutorProvider:
         self._record_usage(usage)
         return parsed
 
-    async def _call_single_shot(self, content: list[dict], age: str = "Dark Age") -> LLMResult:
+    async def _call_single_shot(self, content: list[dict], *, age: str = "Dark Age") -> LLMResult:
         """Fast path for routine turns: one structured-output call, no tool loop.
 
         Returns actions for the game loop to execute (actions_already_executed is
@@ -777,39 +783,43 @@ class ExecutorProvider:
         lowered = context.lower()
         return not any(signal in lowered for signal in self._INTERACTIVE_SIGNALS)
 
+    async def plan(self, context: str, width: int = 1920, height: int = 1080) -> LLMResult:
+        """One structured call that NEVER executes anything.
+
+        No tool-loop fallback: the caller discards the actions anyway, so a
+        grammar 400 costs nothing and must not reach a path that presses keys.
+        """
+        return await self._respond(context, width, height, self._call_single_shot)
+
+    async def act(self, context: str, width: int = 1920, height: int = 1080) -> LLMResult:
+        """The agentic tool loop, which presses keys during the call.
+
+        The caller must hold the input lock: the result carries
+        `actions_already_executed`.
+        """
+        return await self._respond(context, width, height, self._call_tool_loop)
+
     async def get_actions(
         self,
         context: str,
         width: int = 1920,
         height: int = 1080,
     ) -> LLMResult:
-        """
-        Send text context to Claude and get actions back.
+        """Plan or act, chosen by sniffing the context. The scenario runner and
+        its fixtures depend on this shape; the clocks call `plan` / `act`."""
+        if not self._use_single_shot(context):
+            return await self.act(context, width, height)
+        return await self._respond(context, width, height, self._single_shot_or_tool_loop)
 
-        The executor is 100% text-based. All visual information comes from
-        YOLO entity detection (text list) and strategist resource readings.
-
-        Args:
-            context: Context string with entities, goals, resources, memory
-            width: Game window width in pixels
-            height: Game window height in pixels
-
-        Returns:
-            Dictionary with reasoning, observations, and actions
-        """
+    async def _respond(self, context: str, width: int, height: int, call: _CallPath) -> LLMResult:
+        """Build the content, run one call path, and turn any failure into a
+        no-op `error=True` turn — which is what `llm_error_rate` counts."""
         content = self._build_content(context, width, height)
         age = self._extract_age(context)
-
         try:
-            if self._use_single_shot(context):
-                payload = await self._single_shot_or_tool_loop(content, age)
-            else:
-                result = await self._call_api(content, age=age)
-                log.debug("claude_response", age=age, reasoning=result.reasoning[:200])
-                payload = self._serialize_response(result)
+            payload = await call(content, age=age)
             self._log_api_cost()
             return payload
-
         except Exception as e:
             if self.wire.is_api_error(e):
                 log.error("llm_api_error", error=str(e))
@@ -817,7 +827,13 @@ class ExecutorProvider:
             log.error("llm_error", error=str(e))
             return self._error_response(f"Error: {e}")
 
-    async def _single_shot_or_tool_loop(self, content: list[dict], age: str) -> LLMResult:
+    async def _call_tool_loop(self, content: list[dict], *, age: str) -> LLMResult:
+        """The agentic path, as one named call beside `_call_single_shot`."""
+        result = await self._call_api(content, age=age)
+        log.debug("claude_response", age=age, reasoning=result.reasoning[:200])
+        return self._serialize_response(result)
+
+    async def _single_shot_or_tool_loop(self, content: list[dict], *, age: str) -> LLMResult:
         """Single-shot fast path, falling back to the tool loop on a 400.
 
         The single-shot path sends LLMResponse's schema to Anthropic structured
@@ -835,8 +851,7 @@ class ExecutorProvider:
             if not self.wire.is_schema_too_large(e):
                 raise
             log.warning("single_shot_bad_request_fallback_tool_loop", error=str(e))
-            result = await self._call_api(content, age=age)
-            return self._serialize_response(result)
+            return await self._call_tool_loop(content, age=age)
 
     def _error_response(self, message: str) -> LLMResult:
         """Return a safe error response with a wait action.

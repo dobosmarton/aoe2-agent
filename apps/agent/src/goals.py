@@ -79,12 +79,15 @@ class GoalManager:
         # Latest strategist allocation; None until it answers, and for the
         # whole game when the LLM is down — the seeded per-age mix covers that.
         self.allocation: Allocation | None = None
+        # Set when the last `set_goals` moved the goal names; read once through
+        # `take_goals_changed`.
+        self._goals_changed: bool = False
 
     def set_goals(self, goals: list[Goal]) -> None:
-        """Replace active goals with new ones from strategist.
+        """Replace active goals with new ones from the strategist.
 
-        Preserves completed goals and merges progress for goals
-        that exist in both old and new lists (matched by name).
+        Merges progress for goals in both lists, matched by name, and flags a
+        moved name set — which the deliberate loop triggers on.
         """
         old_by_name = {g.name: g for g in self.active_goals}
         for goal in goals:
@@ -93,6 +96,12 @@ class GoalManager:
                 goal.progress = old.progress
                 goal.completed = old.completed
         self.active_goals = [g for g in goals if not g.completed]
+        self._goals_changed = {g.name for g in self.active_goals} != set(old_by_name)
+
+    def take_goals_changed(self) -> bool:
+        """Whether the goals moved since the last ask. Consumes the flag."""
+        changed, self._goals_changed = self._goals_changed, False
+        return changed
 
     def evaluate_progress(self, game_state: GameState, turn: int) -> None:
         """Update progress for all active goals based on current game state."""

@@ -665,6 +665,11 @@ def _is_pop_capped() -> bool:
     return cap > 0 and population >= cap
 
 
+def is_pop_capped() -> bool:
+    """Whether the HUD says no villager can be queued. False when unread."""
+    return _is_pop_capped()
+
+
 def _clear_missing_streak(building_class: str) -> None:
     """A real purchase proves the build path works — lift any suppression."""
     _build_gates.missing_streaks.pop(building_class, None)

@@ -181,7 +181,9 @@ def test_single_shot_falls_back_to_tool_loop_on_400(provider: ExecutorProvider) 
     create = AsyncMock(side_effect=[_end_turn_response()])
     provider.wire.client = SimpleNamespace(messages=SimpleNamespace(parse=parse, create=create))
 
-    out = _run(provider._single_shot_or_tool_loop([{"type": "text", "text": "ctx"}], "Dark Age"))
+    out = _run(
+        provider._single_shot_or_tool_loop([{"type": "text", "text": "ctx"}], age="Dark Age")
+    )
 
     assert parse.await_count == 1  # single-shot attempted
     assert create.await_count == 1  # then fell through to the tool loop
@@ -210,8 +212,36 @@ def test_single_shot_non_400_error_propagates(provider: ExecutorProvider) -> Non
     provider.wire.client = SimpleNamespace(messages=SimpleNamespace(parse=parse, create=create))
 
     with pytest.raises(anthropic.APIError):
-        _run(provider._single_shot_or_tool_loop([{"type": "text", "text": "ctx"}], "Dark Age"))
+        _run(provider._single_shot_or_tool_loop([{"type": "text", "text": "ctx"}], age="Dark Age"))
     assert create.await_count == 0  # no tool-loop fallback for non-400s
+
+
+# ---------------------------------------------------------------------------
+# plan vs act — the routine path must never be able to press a key
+# ---------------------------------------------------------------------------
+
+
+def test_plan_never_falls_back_to_the_tool_loop(provider: ExecutorProvider) -> None:
+    """`get_actions` retries a grammar 400 on the ACTING tool loop. `plan` must
+    not: its caller discards the actions, so the retry buys nothing and could
+    press keys without the input lock."""
+    import anthropic
+
+    parse = AsyncMock(side_effect=anthropic.BadRequestError)
+    create = AsyncMock(side_effect=[_end_turn_response()])
+    provider.wire.client = SimpleNamespace(messages=SimpleNamespace(parse=parse, create=create))
+
+    _run(provider.plan("ctx"))
+    assert create.await_count == 0  # the tool loop never ran
+
+
+def test_plan_reports_a_failed_turn_as_an_error(provider: ExecutorProvider) -> None:
+    """A dead executor must be loud in llm_error_rate, not silently absent."""
+    import anthropic
+
+    parse = AsyncMock(side_effect=anthropic.BadRequestError)
+    provider.wire.client = SimpleNamespace(messages=SimpleNamespace(parse=parse))
+    assert _run(provider.plan("ctx"))["error"] is True
 
 
 # ---------------------------------------------------------------------------
