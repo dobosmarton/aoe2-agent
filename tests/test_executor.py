@@ -1209,3 +1209,38 @@ def test_every_tech_names_the_building_it_needs(name: str) -> None:
     selected before — the silent failure this table exists to prevent."""
     tech = ex._TECHS[name]
     assert tech.requires == "" or tech.requires in ex.GATE_BUILDING_CLASSES
+
+
+# ---------------------------------------------------------------------------
+# Wood already committed to a pending placement
+# ---------------------------------------------------------------------------
+# The HUD reading refreshes once per turn. Run 2026_08_22_2 had 125 wood, placed
+# a lumber camp and then a mill against the same reading, and could pay for one.
+
+
+def test_a_pending_placement_reserves_its_wood(fake_pyautogui: _FakePyautogui) -> None:
+    """The exact sequence from 23:43:55 to 23:44:26: camp pending, mill asked."""
+    ex.observe_hud(10, 20, {"wood": 125})
+    ex._note_pending_placement("r")  # lumber camp, 100 wood
+    reason = ex.build_rejection("w")  # mill, 100 wood
+    assert reason is not None and "only 25 is uncommitted" in reason
+
+
+def test_wood_is_free_again_once_the_placement_settles(
+    fake_pyautogui: _FakePyautogui,
+) -> None:
+    """The reservation cannot outlive the placement that made it."""
+    ex.observe_hud(10, 20, {"wood": 125})
+    ex._note_pending_placement("r")
+    for _ in range(ex._PLACEMENT_SETTLE_ATTEMPTS + 1):
+        ex.observe_hud(10, 20, {"wood": 25})  # the camp was bought
+    assert not ex._build_gates.pending_placements  # precondition: it settled
+    ex.observe_hud(10, 20, {"wood": 125})
+    assert ex.build_rejection("w") is None
+
+
+def test_nothing_pending_leaves_the_old_message(fake_pyautogui: _FakePyautogui) -> None:
+    """With no commitments the reason must not mention them."""
+    ex.observe_hud(10, 20, {"wood": 30})
+    reason = ex.build_rejection("w")
+    assert reason == "mill unavailable: costs 100 wood, you have 30"

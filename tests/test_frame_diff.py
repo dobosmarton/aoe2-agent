@@ -12,8 +12,12 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from detection.inference.frame_diff import FrameDiffer
-from gameplay_agent.detection_phase import STATIC_CLASSES, _translated_static
+from detection.inference.frame_diff import FrameChange, FrameDiffer
+from gameplay_agent.detection_phase import (
+    STATIC_CLASSES,
+    _pan_translation,
+    _translated_static,
+)
 from PIL import Image
 
 _SIZE = (640, 360)
@@ -136,3 +140,92 @@ def test_a_missing_opencv_is_announced_not_silent(
 
     assert change.response == 0.0  # so the caller falls back to detecting
     assert "opencv missing" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# Why a pan was refused
+# ---------------------------------------------------------------------------
+# Run 2026_08_22_2 translated 0 of 195 rescans and the log could not say which
+# clause declined, because only the success path logged.
+
+
+@pytest.mark.parametrize(
+    ("change", "cached", "reason"),
+    [
+        (
+            FrameChange(True, (5.0, 5.0), 0.2),
+            [{"class": "tree", "center": (10, 10)}],
+            "low_confidence",
+        ),
+        (FrameChange(True, (5.0, 5.0), 0.9), [], "empty_cache"),
+        (
+            FrameChange(True, (5.0, 5.0), 0.9),
+            [{"class": "villager", "center": (1, 1)}],
+            "nothing_static_cached",
+        ),
+    ],
+    ids=["low-confidence", "empty-cache", "no-static-entities"],
+)
+def test_every_refusal_names_itself(change: FrameChange, cached: list[dict], reason: str) -> None:
+    translated, declined = _pan_translation(change, cached)
+    assert translated == []
+    assert declined == reason
+
+
+def test_a_confident_pan_is_served_with_no_reason() -> None:
+    translated, declined = _pan_translation(
+        FrameChange(True, (5.0, 5.0), 0.9), [{"class": "tree", "center": (10, 10)}]
+    )
+    assert translated == [{"class": "tree", "center": (15, 15)}]
+    assert declined == ""
+
+
+# ---------------------------------------------------------------------------
+# A disabled cache stays silent
+# ---------------------------------------------------------------------------
+# AOE2_RESCAN_CACHE=false is the A/B condition. A refusal logged on every rescan
+# would bury the signal the comparison exists to collect.
+
+
+def _drive_one_rescan(monkeypatch: pytest.MonkeyPatch, *, cache_on: bool) -> None:
+    """Register the rescan callbacks against stubs, then run one rescan."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from detection.inference.frame_diff import FrameDiffer
+    from gameplay_agent import detection_phase as dp
+    from gameplay_agent import executor as ex
+
+    monkeypatch.setattr(dp.config, "rescan_cache", cache_on, raising=False)
+    monkeypatch.setattr(dp, "capture_screenshot", lambda quality=0: (_jpg(_noise_frame(2)), 0, 0))
+    monkeypatch.setattr(dp, "get_game_window_rect", lambda: None)
+    ex.set_detected_entities([{"class": "tree", "center": (10, 10)}])
+
+    differ = FrameDiffer(threshold=0.03)
+    differ.compare(_jpg(_noise_frame(1)))  # a previous frame, so a pan is measurable
+    detector = SimpleNamespace(
+        tracker=None,
+        _previous_entities=[],
+        detect_fast_multi=lambda _s: [],
+    )
+    dp._register_rescan_callbacks(detector, None, differ)  # pyright: ignore[reportArgumentType]
+    rescan = ex.get_rescan_fn()
+    assert rescan is not None
+    asyncio.run(rescan())
+
+
+def test_a_disabled_cache_logs_no_refusal(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    capsys.readouterr()
+    _drive_one_rescan(monkeypatch, cache_on=False)
+    assert "rescan_pan_declined" not in capsys.readouterr().out
+
+
+def test_an_enabled_cache_reports_why_it_declined(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Two unrelated frames cannot correlate, so the refusal must say so."""
+    capsys.readouterr()
+    _drive_one_rescan(monkeypatch, cache_on=True)
+    assert "low_confidence" in capsys.readouterr().out

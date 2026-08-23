@@ -805,6 +805,16 @@ def build_rejection(building_key: str, intent: str = "", *, menu: str = ECON_MEN
     return reason
 
 
+def _committed_wood() -> int:
+    """Wood owed by placements the HUD has not settled yet.
+
+    The reading refreshes once per turn, so without this a second build sees
+    money the first already spent — run 2026_08_22_2 had 125 wood and committed
+    200. Self-limiting: a pending placement is judged within `settles_left`.
+    """
+    return sum(p.wood_cost for p in _build_gates.pending_placements)
+
+
 def _rejection_reason(building_key: str, menu: str) -> str | None:
     """Five gates: suppressed after a missing-settlement streak, unique
     building already standing, house with ample pop-cap headroom (wasted
@@ -851,7 +861,14 @@ def _rejection_reason(building_key: str, menu: str) -> str | None:
     cost = _WOOD_COST_BY_CLASS.get(cls)
     if cost is not None and _build_gates.resources is not None:
         wood = _build_gates.resources.get("wood")
-        if wood is not None and wood < cost:
+        committed = _committed_wood()
+        if wood is not None and wood - committed < cost:
+            spare = wood - committed
+            if committed:
+                return (
+                    f"{cls} unavailable: costs {cost} wood and only {spare} is uncommitted "
+                    f"({wood} on the HUD, {committed} owed by placements not yet settled)"
+                )
             return f"{cls} unavailable: costs {cost} wood, you have {wood}"
     if building_key in _RESOURCE_REQUIRED_KEYS and _resource_anchor(building_key) is None:
         classes = ", ".join(sorted(_BUILD_ANCHOR_CLASSES[building_key]))

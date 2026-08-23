@@ -65,6 +65,15 @@ def _install_create(provider: ExecutorProvider, *responses: object) -> AsyncMock
     return create
 
 
+@pytest.fixture(autouse=True)
+def _fresh_build_gates() -> None:
+    """The gates are per-game module state; a leaked pending placement from an
+    earlier test now reserves wood and refuses a build these tests expect."""
+    from gameplay_agent import executor as ex
+
+    ex.reset_build_gates()
+
+
 @pytest.fixture
 def provider() -> ExecutorProvider:
     """A ExecutorProvider with stubbed prompts and no game-knowledge DB."""

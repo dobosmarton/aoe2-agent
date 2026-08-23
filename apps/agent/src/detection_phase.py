@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 import structlog
 
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from detection.inference.detector import DetectedEntity, EntityDetector
-    from detection.inference.frame_diff import FrameDiffer
+    from detection.inference.frame_diff import FrameChange, FrameDiffer
     from detection.inference.remote_detector import RemoteDetector
 
     from .overlay import DetectionOverlay
@@ -148,6 +148,26 @@ def _translated_static(entities: list[dict], shift: tuple[float, float]) -> list
     return moved
 
 
+# Why a pan could not serve a rescan. "" means it did.
+PanRefusal = Literal["", "low_confidence", "empty_cache", "nothing_static_cached"]
+
+
+def _pan_translation(change: FrameChange, cached: list[dict]) -> tuple[list[dict], PanRefusal]:
+    """The cached static map moved to the new view, or why it cannot be.
+
+    One function so the caller can log WHY a pan was refused: run 2026_08_22_2
+    translated 0 of 195 rescans and the log never said which clause declined.
+    """
+    if change.response < PAN_CONFIDENCE_MIN:
+        return [], "low_confidence"
+    if not cached:
+        return [], "empty_cache"
+    translated = _translated_static(cached, change.shift)
+    if not translated:
+        return [], "nothing_static_cached"
+    return translated, ""
+
+
 def _init_frame_differ() -> FrameDiffer | None:
     """Initialize frame differ for skipping redundant rescans."""
     try:
@@ -189,13 +209,9 @@ def _register_rescan_callbacks(
 
         # The view only panned, so the static map is still known — translate it
         # rather than pay for a detection (run 2026_08_22_1: 112 of 212).
-        if (
-            config.rescan_cache
-            and change
-            and change.response >= PAN_CONFIDENCE_MIN
-            and (cached := get_detected_entities())
-        ):
-            translated = _translated_static(cached, change.shift)
+        # A disabled cache stays silent so an A/B run's log carries only signal.
+        if config.rescan_cache and change:
+            translated, declined = _pan_translation(change, get_detected_entities())
             if translated:
                 set_detected_entities(translated)
                 log.debug(
@@ -207,6 +223,7 @@ def _register_rescan_callbacks(
                 if overlay:
                     overlay.show(translated, get_game_window_rect())
                 return
+            log.debug("rescan_pan_declined", reason=declined, response=round(change.response, 3))
 
         entities = await _invoke_detector(detector, "detect_fast_multi", screenshot)
         if (
