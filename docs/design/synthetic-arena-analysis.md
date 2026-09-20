@@ -259,11 +259,11 @@ The existing project deliberately runs with minimal infrastructure (pip + justfi
 
 | Service | Image | Purpose | Volume |
 |---|---|---|---|
-| `langfuse-web` + `langfuse-worker` | `langfuse/langfuse:3@sha256:…` | LLM trace UI + OTel ingestion | (uses langfuse-db) |
-| `langfuse-db` | `postgres:17@sha256:…` | Langfuse backing store | `langfuse-pg-data` |
-| `clickhouse` | `clickhouse/clickhouse-server:24@sha256:…` | Langfuse analytics (required by v3+) | `clickhouse-data` |
-| `minio` | `minio/minio:RELEASE.YYYY-MM-DD@sha256:…` | S3-compatible store for replays, screenshots, event-log snapshots | `minio-data` |
-| `otel-collector` | `otel/opentelemetry-collector-contrib:0.112@sha256:…` | OpenTelemetry ingestion → Langfuse | (stateless) |
+| `langfuse-web` + `langfuse-worker` | `langfuse/langfuse:4.38.0@sha256:…` | LLM trace UI + OTel ingestion | (uses langfuse-db) |
+| `langfuse-db` | `postgres:17.11@sha256:…` | Langfuse backing store | `langfuse-pg-data` |
+| `clickhouse` | `clickhouse/clickhouse-server:25.12@sha256:…` | Langfuse v4 analytics store | `clickhouse-data` |
+| `minio` | `cgr.dev/chainguard/minio:latest@sha256:…` | S3-compatible store for replays, screenshots, event-log snapshots | `minio-data` |
+| `otel-collector` | `otel/opentelemetry-collector-contrib:0.161@sha256:…` | OpenTelemetry ingestion → Langfuse | (stateless) |
 
 Single bridge network `arena-net`; only Langfuse UI exposed to host by default. Postgres, ClickHouse, MinIO unreachable from host except via the service network.
 

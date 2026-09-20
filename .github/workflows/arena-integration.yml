@@ -40,9 +40,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Write throwaway secrets for compose
-        # Healthchecks need non-empty env vars but no actual auth is exercised
-        # here — Phase 0 only asserts "containers go Healthy". Real secret
-        # rotation happens out-of-band in production.
+        # CI volumes are disposable, so Langfuse v4 starts directly in its
+        # default events-only mode. Healthchecks need non-empty env vars but no
+        # actual auth is exercised here. Real secret rotation happens out-of-band.
         run: |
           {
             echo "ANTHROPIC_API_KEY=ci-not-used"
@@ -55,6 +55,15 @@ jobs:
             echo "MINIO_ROOT_USER=arena"
             echo "MINIO_ROOT_PASSWORD=$(openssl rand -base64 24 | tr -d '=+/' )"
             echo "OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318"
+            echo "LANGFUSE_INIT_ORG_ID=ci-org"
+            echo "LANGFUSE_INIT_ORG_NAME=Arena-CI"
+            echo "LANGFUSE_INIT_PROJECT_ID=ci-project"
+            echo "LANGFUSE_INIT_PROJECT_NAME=aoe2-arena-ci"
+            echo "LANGFUSE_INIT_PROJECT_PUBLIC_KEY=pk-lf-ci"
+            echo "LANGFUSE_INIT_PROJECT_SECRET_KEY=sk-lf-ci"
+            echo "LANGFUSE_INIT_USER_EMAIL=ci@local.invalid"
+            echo "LANGFUSE_INIT_USER_NAME=Arena-CI"
+            echo "LANGFUSE_INIT_USER_PASSWORD=ci-password-not-used"
           } > .env
 
       - name: Bring up arena stack on tmpfs (CI override)

@@ -6,7 +6,8 @@
 # Differences vs. the production-ish compose file:
 #   * Every named volume becomes tmpfs-backed — no state leaks between runs,
 #     no host disk used, faster bring-up.
-#   * Host port bindings dropped — CI doesn't need host access.
+#   * UI/object-storage host ports dropped. Redis stays published because the
+#     cross-process broker test runs on the GitHub Actions host.
 #   * Healthcheck retries/intervals tightened — fail-fast on broken images.
 #
 # Compose merges lists by appending; we override named-volume DEFINITIONS
@@ -56,3 +57,7 @@ services:
 
   minio:
     ports: !reset []
+
+  redis:
+    ports:
+      - "127.0.0.1:6379:6379"

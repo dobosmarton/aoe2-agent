@@ -192,8 +192,8 @@ Three knobs to make runs as reproducible as the model vendor and the Python stac
 
 ### Synthetic Arena infrastructure (optional)
 
-Required only when bringing up the Docker stack (`just arena-infra-up`). All seven
-variables below must be set to non-empty values — Langfuse refuses to boot with empty
+Required only when bringing up the Docker stack (`just arena-infra-up`). The
+credentials below must be set to non-empty values — Langfuse refuses to boot with empty
 secrets. **Never commit the populated `.env`** (it's gitignored).
 
 **Prerequisites:**
@@ -236,9 +236,16 @@ just arena-infra-status    # every service should be "healthy"
 
 Langfuse UI lands at <http://localhost:3000>; MinIO console at <http://localhost:9001>.
 
+> **Langfuse v4 reset boundary:** this Compose stack is configured as a fresh v4
+> deployment. If you previously started the repository's v3 stack, run
+> `just arena-infra-nuke` once before starting v4. This permanently removes the
+> local Langfuse, ClickHouse, Redis, and MinIO volumes. Preserve existing traces
+> only by following the staged [Langfuse v3-to-v4 migration guide](https://langfuse.com/self-hosting/upgrade/upgrade-guides/upgrade-v3-to-v4)
+> instead of resetting the volumes.
+
 #### Notes on the compose file
 
-- `langfuse-web` and `langfuse-worker` healthchecks target `http://$(hostname):PORT/...` rather than `http://localhost:...`. The Langfuse v3 image starts Next.js with `-H $(hostname)`, which binds Next.js to the container's external interface only — `localhost` returns `Connection refused`. Use the `CMD-SHELL` form (with `$$(hostname)` to escape compose interpolation) if you adjust these.
+- `langfuse-web` and `langfuse-worker` healthchecks target `http://$(hostname):PORT/...` rather than `http://localhost:...`. Keep the `CMD-SHELL` form (with `$$(hostname)` to escape Compose interpolation) if you adjust these. The worker probe also checks that v4 event propagation is not stuck.
 - `otel-collector` runs `healthcheck: disable: true` because the upstream image (`otel/opentelemetry-collector-contrib`) is distroless: no shell, no `wget`, no `busybox` — any in-container probe fails with `OCI runtime exec failed: ... no such file or directory`. The collector logs `"Everything is ready"` itself once started, and nothing in the stack `depends_on` its health.
 
 #### Troubleshooting

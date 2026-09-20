@@ -22,7 +22,7 @@ Run the detection server on macOS (Apple Silicon) and the gameplay agent on a Wi
 | **Mac** | Python 3.11+, Apple Silicon recommended |
 | **Windows VM** | Python 3.11+ (x64 installer, NOT ARM64), AoE2:DE installed, VMware Fusion or similar |
 | **Both** | Network connectivity between host and VM |
-| **API Key** | Model API key for the selected adapter (`AOE2_LLM_API_KEY`) |
+| **API Keys** | Model adapter key (`AOE2_LLM_API_KEY`) and TypeSafe policy key (`TYPESAFE_API_KEY`) |
 
 ---
 
@@ -165,12 +165,14 @@ pip install -r requirements.txt
 **Command Prompt:**
 ```cmd
 set AOE2_LLM_API_KEY=your-key-here
+set TYPESAFE_API_KEY=your-typesafe-key
 set AOE2_DETECTION_HOST=http://192.168.64.1:8420
 ```
 
 **PowerShell:**
 ```powershell
 $env:AOE2_LLM_API_KEY = "your-key-here"
+$env:TYPESAFE_API_KEY = "your-typesafe-key"
 $env:AOE2_DETECTION_HOST = "http://192.168.64.1:8420"
 ```
 
@@ -285,6 +287,7 @@ The remote detector logs `remote_detector_unavailable` and falls back to local O
 | Variable | Default | Where | Purpose |
 |----------|---------|-------|---------|
 | `AOE2_LLM_API_KEY` | — | VM | Model API key for the selected adapter (required) |
+| `TYPESAFE_API_KEY` | — | VM | TypeSafe System One policy key (required) |
 | `AOE2_LLM_WIRE` | `openai` | VM | Adapter: `openai`, `zen` (OpenCode Zen) or `anthropic`. An unknown name raises at startup |
 | `AOE2_LLM_BASE_URL` | `""` | VM | Endpoint override; empty uses the adapter's own |
 | `AOE2_DETECTION_HOST` | `""` | VM | Detection server URL, e.g. `http://192.168.64.1:8420` |
