@@ -1,4 +1,4 @@
-"""What the three clocks hand each other: one frame, and the pipe it travels.
+"""What the four clocks hand each other: one frame, and the pipe it travels.
 
 One thread, so no lock. The discipline that replaces one: the writer swaps a
 whole new frame in, so a reader never sees a half-built one.

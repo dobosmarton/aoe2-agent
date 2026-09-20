@@ -20,6 +20,7 @@ dependencies = [
     # Resource-bar OCR (pip-only, runs on the onnxruntime detection already ships):
     "rapidocr-onnxruntime>=1.4.0",
     "structlog>=24.1.0",
+    "typesafe-sdk>=0.7.0",
 ]
 
 [project.scripts]
@@ -33,6 +34,8 @@ build-backend = "setuptools.build_meta"
 package-dir = { "gameplay_agent" = "src" }
 packages = [
     "gameplay_agent",
+    "gameplay_agent.loops",
+    "gameplay_agent.policy",
     "gameplay_agent.providers",
 ]
 

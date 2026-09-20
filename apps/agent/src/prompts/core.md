@@ -29,7 +29,7 @@ Your strategic goals are provided in the context below (under "Active Goals"). F
 
 Read the **strategist's Resource Status** block in context — that is the authoritative reading. Do NOT use your own age estimate.
 
-**The reactive tier presses `h` then `z` automatically** once you are in Dark Age with food ≥ 500 and both a Mill and a Lumber Camp built — you normally do not age up by hand. As a backstop, if that state holds and the research still hasn't started, your first two actions this turn MUST be `press key=h` then `press key=z` — nothing else before them:
+**The routine TypeSafe policy can select `h` then `z` automatically** once you are in Dark Age with food ≥ 500 and both a Mill and a Lumber Camp built — you normally do not age up by hand. As a backstop, if that state holds and the research still hasn't started, your first two actions this turn MUST be `press key=h` then `press key=z` — nothing else before them:
 - Strategist's Age reads `Dark Age`
 - Food ≥ 500
 - Both **Lumber Camp** AND **Mill** appear in the Detected Entities list (Feudal Age prereq: 2 Dark Age buildings)
@@ -44,10 +44,10 @@ Missing Feudal Age is the #1 ranking killer against real opponents. If this gate
 
 Before choosing actions, check these in order:
 1. **Idle villagers are AUTO-DISTRIBUTED for you.** A background system reads the idle-villager badge each turn and spreads idle villagers across resources (food/wood/gold) by the age's ratio — you do NOT need to sweep them, and you should NOT use `send_all_idle` (it dumps everyone onto one tile, unbalancing the economy). Only send villagers yourself for a *deliberate* move: `send_villager` to put one on a specific resource, or `reassign_villager` to pull a worker off one job and build/gather something else (see the food-emergency rule).
-2. **Should I queue a villager?** → The reactive tier queues villagers up to the age's **order target** (30 in Dark Age, 35 in Feudal) automatically, then banks food for the next age. TC should never be idle unless you are saving for the age-up — but you rarely need to queue by hand.
+2. **Should I queue a villager?** → The routine policy normally chooses between queuing and banking for a higher-value purchase. Queue by hand only when the TC is idle and doing so does not delay an age-up.
 3. **Am I housed (pop = pop cap)?** → **BUILD A HOUSE IMMEDIATELY** using `build` with `building_key="q"` (omit x,y — the executor auto-places on open ground).
    You CANNOT queue villagers while housed. This is the #1 game-losing mistake.
-4. **Do I need houses soon?** → The reactive tier auto-builds a house when headroom runs low; as a backstop, build ONE house when **population ≥ pop_cap − 3** (any age). Do NOT wait until pop_cap — house construction takes ~25 s, and once housed the TC stops producing villagers entirely. (The executor rejects a house built with more than 4 headroom, so don't build them earlier than this.) Do NOT build multiple houses per turn — one house adds 5 pop slots, that's enough.
+4. **Do I need houses soon?** → The routine policy can build a house when headroom runs low; as a backstop, build ONE house when **population ≥ pop_cap − 3** (any age). Do NOT wait until pop_cap — house construction takes ~25 s, and once housed the TC stops producing villagers entirely. (The executor rejects a house built with more than 4 headroom, so don't build them earlier than this.) Do NOT build multiple houses per turn — one house adds 5 pop slots, that's enough.
 5. **FOOD EMERGENCY: Is food < 50?** →
    **Dedicate the ENTIRE turn to farms.** Do nothing else — no houses, no queuing, just farms.
    Each farm costs 60 wood. If you have 300+ wood, build several this turn.

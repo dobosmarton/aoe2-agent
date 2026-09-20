@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from ..entity_utils import RESOURCE_KINDS, ResourceKind
 
@@ -28,6 +28,9 @@ _FOOD_CRISIS_THRESHOLD = 60
 _FARM_AFFORDABLE_WOOD = 80
 _CASTLE_GOLD_COST = 200
 
+AllocationFocus = Literal["balanced", "food", "wood", "gold", "stone"]
+ALLOCATION_FOCI: tuple[AllocationFocus, ...] = ("balanced", "food", "wood", "gold", "stone")
+
 
 @dataclass(frozen=True, slots=True)
 class Allocation:
@@ -44,6 +47,12 @@ class Allocation:
 def seeded(age: str) -> Allocation:
     """The default target for `age`, before the strategist has said anything."""
     return Allocation(targets=_SEED_BY_AGE.get(age, _SEED_BY_AGE["Dark Age"]))
+
+
+def focused(age: str, focus: AllocationFocus) -> Allocation:
+    """The stable age mix with one extra share on the selected resource."""
+    base = seeded(age)
+    return base if focus == "balanced" else _with_extra(base, focus)
 
 
 def is_famine(state: PolicyState) -> bool:

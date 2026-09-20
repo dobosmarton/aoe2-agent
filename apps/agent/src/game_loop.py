@@ -9,21 +9,24 @@ import asyncio
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import structlog
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from .overlay import DetectionOverlay
     from .providers.base import ChatWire
     from .providers.executor_provider import ExecutorProvider
+    from .providers.policy import PolicyAdvisor
 
 from .config import config
 from .detection_phase import (
     DETECTION_AVAILABLE,
     ENTITY_DISPLAY_LIMIT,
-    _init_detector,
-    _init_frame_differ,
+    init_detector,
+    init_frame_differ,
 )
 from .entity_utils import build_entity_summary
 from .executor import (
@@ -40,15 +43,26 @@ from .loops.act import act_loop
 from .loops.context import LoopContext
 from .loops.deliberate import deliberate_loop
 from .loops.perceive import perceive_loop
+from .loops.policy import policy_loop
 from .loops.source import GameActuator, GameSource, frame_refresh
 from .memory import AgentMemory
 from .models import validate_actions
 from .providers.strategist import StrategistProvider, get_default_goals
 from .resource_ocr import warm_up_ocr
 from .screen import capture_screenshot, save_screenshot
-from .turn_phases import _get_ground_commands
+from .turn_phases import get_ground_commands
 
 log = structlog.stdlib.get_logger()
+
+
+@runtime_checkable
+class _SerializableEntity(Protocol):
+    def to_dict(self) -> object: ...
+
+
+def _serialize_entity(entity: object) -> object:
+    """Cross the optional detector serialization boundary without using Any."""
+    return entity.to_dict() if isinstance(entity, _SerializableEntity) else entity
 
 
 def _warm_up_wire(wire: ChatWire) -> None:
@@ -110,9 +124,9 @@ def _build_context(
         goal_manager=goal_manager,
         goal_logger=GoalLogger(log_dir),
         source=GameSource(
-            detector=_init_detector() if use_detection else None,
+            detector=init_detector() if use_detection else None,
             overlay=overlay,
-            frame_differ=_init_frame_differ(),
+            frame_differ=init_frame_differ(),
             screenshots_dir=screenshots_dir,
         ),
         actuator=GameActuator(),
@@ -138,11 +152,20 @@ async def _run_clocks(
     ctx: LoopContext,
     strategist: StrategistProvider,
     provider: ExecutorProvider,
+    policy_advisor: PolicyAdvisor,
 ) -> None:
     """Run the clocks until one of them ends the game, then stop the rest."""
     tasks = [
         asyncio.create_task(perceive_loop(ctx), name="perceive"),
         asyncio.create_task(act_loop(ctx), name="act"),
+        asyncio.create_task(
+            policy_loop(
+                ctx,
+                policy_advisor,
+                interval_seconds=config.policy_interval,
+            ),
+            name="policy",
+        ),
         asyncio.create_task(deliberate_loop(ctx, strategist, provider), name="deliberate"),
         asyncio.create_task(_stop_on_budget(ctx), name="budget"),
     ]
@@ -161,13 +184,14 @@ async def _run_clocks(
 
 async def game_loop(
     provider: ExecutorProvider,
+    policy_advisor: PolicyAdvisor,
     max_iterations: int | None = None,
     memory: AgentMemory | None = None,
     use_detection: bool = True,
     time_budget: float | None = None,
     use_overlay: bool = False,
 ) -> AgentMemory:
-    """Play one game on the perceive, act and deliberate clocks.
+    """Play one game on the perceive, policy, act and deliberate clocks.
 
     `max_iterations` bounds PERCEIVE FRAMES, about 0.5 s each, where a turn used
     to be 10. Use `time_budget` to bound a real game."""
@@ -206,8 +230,8 @@ async def game_loop(
     try:
         # Before the first frame on purpose: the scout explores during the
         # slowest perception pass of the game (engine warm-up).
-        await ctx.actuator.execute(validate_actions(_get_ground_commands(1)))
-        await _run_clocks(ctx, StrategistProvider(), provider)
+        await ctx.actuator.execute(validate_actions(get_ground_commands(1)))
+        await _run_clocks(ctx, StrategistProvider(), provider, policy_advisor)
     except KeyboardInterrupt:
         log.info("game_loop_interrupted")
         ctx.request_stop("interrupted")
@@ -216,24 +240,32 @@ async def game_loop(
         ctx.request_stop("error")
         raise
     finally:
-        for warm_up in warm_ups:
-            warm_up.cancel()
-        await asyncio.gather(*warm_ups, return_exceptions=True)
-        ctx.source.close()
-        # Exits that bypass both except clauses (CancelledError is a
-        # BaseException) reach here unlabelled — run 13 logged an empty
-        # game_end_reason on a manual stop (T-543). This is the one choke point.
-        if not memory.game_end_reason:
-            memory.game_end_reason = "interrupted"
-        metrics = memory.get_metrics_snapshot()
-        log.info("game_metrics_final", **metrics)
-        ctx.goal_logger.log_game_end(
-            memory.turn_count,
-            memory.game_end_reason,
-            len(ctx.goal_manager.completed_goals),
-        )
+        await _close_out(ctx, memory, warm_ups)
 
     return memory
+
+
+async def _close_out(
+    ctx: LoopContext,
+    memory: AgentMemory,
+    warm_ups: list[asyncio.Task[None]],
+) -> None:
+    """Stop the warm-ups, release the source, and label the end."""
+    for warm_up in warm_ups:
+        warm_up.cancel()
+    await asyncio.gather(*warm_ups, return_exceptions=True)
+    ctx.source.close()
+    # Exits that bypass both except clauses (CancelledError is a BaseException)
+    # reach here unlabelled — run 13 logged an empty game_end_reason on a manual
+    # stop (T-543). This is the one choke point.
+    if not memory.game_end_reason:
+        memory.game_end_reason = "interrupted"
+    log.info("game_metrics_final", **memory.get_metrics_snapshot())
+    ctx.goal_logger.log_game_end(
+        memory.turn_count,
+        memory.game_end_reason,
+        len(ctx.goal_manager.completed_goals),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -259,7 +291,7 @@ async def run_single_iteration(
     screenshot_path = log_dir / f"test_{timestamp}.jpg"
     save_screenshot(screenshot, str(screenshot_path))
 
-    detected_entities: list = []
+    detected_entities: Sequence[object] = []
     if use_detection and DETECTION_AVAILABLE:
         try:
             from detection.inference.detector import get_detector
@@ -272,7 +304,7 @@ async def run_single_iteration(
 
     context = memory.get_context_for_llm()
     if detected_entities:
-        summary = build_entity_summary(detected_entities, max_count=ENTITY_DISPLAY_LIMIT)
+        summary = build_entity_summary(list(detected_entities), max_count=ENTITY_DISPLAY_LIMIT)
         entity_context = (
             "\n## Detected Entities (from YOLO)\n"
             "Use target_class or target_id to interact with these:\n" + summary + "\n"
@@ -299,7 +331,5 @@ async def run_single_iteration(
         "observations": response.get("observations", {}),
         "actions": response.get("actions", []),
         "memory_context": context,
-        "detected_entities": [
-            e.to_dict() if hasattr(e, "to_dict") else e for e in detected_entities
-        ],
+        "detected_entities": [_serialize_entity(entity) for entity in detected_entities],
     }

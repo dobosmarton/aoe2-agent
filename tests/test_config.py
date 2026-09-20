@@ -8,6 +8,24 @@ from __future__ import annotations
 
 import pytest
 
+
+def test_from_env_reads_typesafe_policy_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    from gameplay_agent.config import Config
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "ts-test")
+    monkeypatch.setenv("AOE2_TYPESAFE_MODEL", "jev-1.13.0")
+    monkeypatch.setenv("AOE2_POLICY_INTERVAL", "0.75")
+    monkeypatch.setenv("AOE2_POLICY_ADVICE_TTL", "3.5")
+    monkeypatch.setenv("AOE2_POLICY_MIN_CONFIDENCE", "0.8")
+
+    resolved = Config.from_env()
+    assert resolved.typesafe_api_key == "ts-test"
+    assert resolved.typesafe_model == "jev-1.13.0"
+    assert resolved.policy_interval == 0.75
+    assert resolved.policy_advice_ttl == 3.5
+    assert resolved.policy_min_confidence == 0.8
+
+
 # ---------------------------------------------------------------------------
 # AOE2_TEMPERATURE
 # ---------------------------------------------------------------------------

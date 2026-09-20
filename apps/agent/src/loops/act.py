@@ -7,18 +7,23 @@ one frame would spend the same state twice. Budget: 100 ms p95 on `decide`.
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import TYPE_CHECKING
 
 import structlog
 
+from ..config import config
 from ..models import validate_actions
-from ..policy.engine import decide as policy_decide
-from ..policy.state import from_game_state
+from ..policy.allocation import focused
+from ..policy.candidates import feasible_candidates
+from ..policy.engine import decide as fallback_decide
+from ..policy.idle import distribute_idle
 from ..turn_timing import ACT_LOOP
-from ..villager_roles import gather_counts, infer_jobs, job_counts
+from .policy import state_for_frame
 
 if TYPE_CHECKING:
     from ..models import Action
+    from ..policy.state import PolicyState
     from .context import LoopContext
     from .snapshot import Perception
 
@@ -61,27 +66,59 @@ async def act_once(ctx: LoopContext, frame: Perception, tick: int) -> None:
             actions=len(actions),
         )
         with timings.phase("execute"):
+            # Safe despite the check above: nothing awaits in between, so the lock
+            # cannot change hands. Keep `_decide` synchronous or this breaks.
             async with ctx.input_lock:
                 results = await ctx.actuator.execute(actions)
         ctx.memory.record_action_results(sum(1 for r in results if r.success), len(results))
 
 
 def _decide(ctx: LoopContext, frame: Perception) -> list[Action]:
-    """The rule engine's answer for this frame. Pure, and microseconds long."""
+    """Choose from cached advice synchronously, or use the rule fallback."""
     entities = list(frame.entities)
-    jobs: dict[str, int] = gather_counts(job_counts(infer_jobs(entities))) if entities else {}
-    state = from_game_state(
-        ctx.memory.game_state,
-        captured_at=frame.captured_at,
-        villager_jobs=jobs,
+    state = state_for_frame(ctx, frame)
+    if frame.alarm:
+        return validate_actions(_fallback_commands(ctx, entities, state, frame.alarm))
+
+    candidates = feasible_candidates(state)
+    resolution = ctx.policy_advice.consume(
+        candidates,
+        now=time.monotonic(),
+        ttl_seconds=config.policy_advice_ttl,
+        minimum_confidence=config.policy_min_confidence,
     )
-    commands = policy_decide(
-        entities,
-        state,
-        frame.alarm,
-        strategist_allocation=ctx.goal_manager.allocation,
+    if resolution.should_fallback:
+        log.debug("policy_advice_rejected", reason=resolution.status)
+        return validate_actions(_fallback_commands(ctx, entities, state, frame.alarm))
+
+    allocation = (
+        focused(state.age, resolution.allocation_focus)
+        if resolution.allocation_focus is not None
+        else ctx.goal_manager.allocation
+    )
+    commands = resolution.action.render() if resolution.action is not None else []
+    commands.extend(distribute_idle(entities, state, None, allocation))
+    log.info(
+        "policy_advice_applied",
+        status=resolution.status,
+        action=resolution.advice.action_choice if resolution.advice else None,
+        allocation=resolution.allocation_focus,
     )
     return validate_actions(commands)
+
+
+def _fallback_commands(
+    ctx: LoopContext,
+    entities: list[object],
+    state: PolicyState,
+    alarm: bool,
+) -> list[dict[str, object]]:
+    return fallback_decide(
+        entities,
+        state,
+        alarm,
+        strategist_allocation=ctx.goal_manager.allocation,
+    )
 
 
 __all__ = ["act_loop", "act_once"]

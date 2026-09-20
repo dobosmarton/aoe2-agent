@@ -14,8 +14,8 @@ By turn 5–8, NOT turn 15+. Sheep deplete around turn 10–12; the farm pipelin
 
 ## Dark Age Checklist (in addition to universal checklist)
 
-**Villager queuing:** the reactive tier queues villagers up to the Dark Age **order target of 30** automatically, then banks food — you rarely need to queue by hand.
-- **Fewer than 30 villagers ordered**: queuing is fine (the reactive tier is already doing it; call `queue_villager` yourself only if the TC is sitting idle). If 150+ food, 2–3 is fine.
+**Villager queuing:** the routine TypeSafe policy chooses between another villager and banking toward the current goals — you rarely need to queue by hand.
+- **Fewer than 30 villagers ordered**: queuing is fine when it does not delay Feudal; call `queue_villager` yourself only if the TC is sitting idle. If 150+ food, 2–3 is fine.
 - **30 ordered**: STOP queuing — save food for Feudal (500). Each extra villager delays Feudal research by 25 s.
 
 **Villager allocation:** 6–8 on food, 3–4 on wood initially. Never have 0 food gatherers.
@@ -26,7 +26,7 @@ By turn 5–8, NOT turn 15+. Sheep deplete around turn 10–12; the farm pipelin
 
 **Berries:** `berry_bush` detected but no Mill nearby? → Build a Mill (`build` with `building_key="w"`) and send 3–4 villagers via `send_villager target_class=berry_bush`.
 
-**Feudal Age transition:** see the **Age-up Gate** in core.md. Two notes specific to Dark Age: (a) the qualifying prereq pair is **Mill AND Lumber Camp** — build exactly those two (the reactive auto age-up only fires on that pair, so don't substitute another building); (b) wait for the TC queue to drain before pressing Z (each queued villager delays the research by 25 s).
+**Feudal Age transition:** see the **Age-up Gate** in core.md. Two notes specific to Dark Age: (a) the qualifying prereq pair is **Mill AND Lumber Camp** — build exactly those two; (b) wait for the TC queue to drain before pressing Z (each queued villager delays the research by 25 s).
 
 **Mill + Farms emergency:** NO sheep AND no berry_bush in entity list AND food < 100? → P10 EMERGENCY. Drop everything else and get farms running this turn (template below). Do NOT keep sending villagers to wood when food is the bottleneck.
 

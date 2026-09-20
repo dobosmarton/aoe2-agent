@@ -16,6 +16,7 @@ from gameplay_agent.game_loop import game_loop
 from gameplay_agent.memory import AgentMemory
 from gameplay_agent.memory_chain import MemoryChain
 from gameplay_agent.providers.executor_provider import ExecutorProvider
+from gameplay_agent.providers.typesafe_policy import TypeSafePolicyAdvisor
 
 log = structlog.stdlib.get_logger()
 
@@ -41,6 +42,10 @@ async def run_game(
         Dict with metrics snapshot and computed score
     """
     provider = ExecutorProvider()
+    policy_advisor = TypeSafePolicyAdvisor(
+        api_key=config.typesafe_api_key,
+        model=config.typesafe_model,
+    )
     memory = AgentMemory()
 
     log.info(
@@ -52,6 +57,7 @@ async def run_game(
 
     memory = await game_loop(
         provider=provider,
+        policy_advisor=policy_advisor,
         max_iterations=max_iterations,
         memory=memory,
         use_detection=use_detection,

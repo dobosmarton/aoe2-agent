@@ -5,16 +5,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Literal, get_args
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .env_file import load_env_file
 
 EffortLevel = Literal["low", "medium", "high"]  # Sonnet 4.6 rejects xhigh/max
 WireName = Literal["anthropic", "openai", "zen"]
 
-# The one credential, whichever vendor is serving.
+# The generative-model credential, whichever vendor is serving.
 KEY_ENV = "AOE2_LLM_API_KEY"
 WIRE_ENV = "AOE2_LLM_WIRE"
+TYPESAFE_KEY_ENV = "TYPESAFE_API_KEY"
 # Derived from the Literal so the valid set is written once.
 _WIRES: Final[tuple[WireName, ...]] = get_args(WireName)
 
@@ -104,6 +105,12 @@ class Config(BaseModel):
     strategist_model: str = _GPT_MODELS.strategist  # AOE2_STRATEGIST_MODEL
     strategist_interval: int = 10  # Run strategist every N turns
     memory_model: str = _GPT_MODELS.memory  # AOE2_MEMORY_MODEL
+    # TypeSafe drives routine policy; exact game mechanics remain code-owned.
+    typesafe_api_key: str = ""
+    typesafe_model: str = "jev-1.13.0"
+    policy_interval: float = Field(default=0.5, gt=0)
+    policy_advice_ttl: float = Field(default=2.0, gt=0)
+    policy_min_confidence: float = Field(default=0.65, ge=0.0, le=1.0)
     # Resource bar is read locally (Claude vision dropped). Backend: rapidocr
     # (pip-only, runs on onnxruntime) | tesseract (needs binary) | template.
     ocr_backend: str = "rapidocr"  # AOE2_OCR_BACKEND
@@ -134,8 +141,6 @@ class Config(BaseModel):
     # launch; keep the two in sync. detection_imgsz above must match this
     # model's training resolution (v9 trained @1280).
     detection_model: str = "aoe2_yolo_v9"  # AOE2_DETECTION_MODEL
-    adaptive_sahi: bool = False  # SAHI hurts v6 at retina res (scale mismatch); single-pass wins
-    full_sahi_interval: int = 5  # Force full SAHI scan every N turns (only if adaptive_sahi=True)
     detection_host: str = ""  # Remote CoreML server URL (e.g., "http://192.168.64.1:8420")
     # Serve a mid-turn rescan from the cached static map when the camera only
     # panned, instead of re-detecting. AOE2_RESCAN_CACHE=false to A/B it.
@@ -144,9 +149,9 @@ class Config(BaseModel):
     # Timing settings
     action_delay: float = 0.05  # Seconds between actions
 
-    # The three clocks (ADAPTIVE-AGENT-PLAN.md 3). Pacing is a raceable variant
-    # dimension (docs/design/synthetic-arena-analysis.md), so all three take an
-    # env override.
+    # The four clocks (ADAPTIVE-AGENT-PLAN.md 3). Pacing is a raceable variant
+    # dimension (docs/design/synthetic-arena-analysis.md), so every clock has
+    # an environment override. The policy interval lives with its settings above.
     act_interval: float = 0.1  # AOE2_ACT_INTERVAL — seconds between act ticks
     perceive_interval: float = 0.5  # AOE2_PERCEIVE_INTERVAL — seconds between frames
     # AOE2_DELIBERATE_INTERVAL — perceive ticks between executor sanity checks.
@@ -172,6 +177,11 @@ class Config(BaseModel):
             strategist_model=os.environ.get("AOE2_STRATEGIST_MODEL") or models.strategist,
             strategist_interval=int(os.environ.get("AOE2_STRATEGIST_INTERVAL", "10")),
             memory_model=os.environ.get("AOE2_MEMORY_MODEL") or models.memory,
+            typesafe_api_key=os.environ.get(TYPESAFE_KEY_ENV, ""),
+            typesafe_model=os.environ.get("AOE2_TYPESAFE_MODEL") or "jev-1.13.0",
+            policy_interval=float(os.environ.get("AOE2_POLICY_INTERVAL", "0.5")),
+            policy_advice_ttl=float(os.environ.get("AOE2_POLICY_ADVICE_TTL", "2.0")),
+            policy_min_confidence=float(os.environ.get("AOE2_POLICY_MIN_CONFIDENCE", "0.65")),
             ocr_backend=os.environ.get("AOE2_OCR_BACKEND", "rapidocr"),
             act_interval=float(os.environ.get("AOE2_ACT_INTERVAL", "0.1")),
             perceive_interval=float(os.environ.get("AOE2_PERCEIVE_INTERVAL", "0.5")),

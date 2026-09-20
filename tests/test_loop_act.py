@@ -14,6 +14,8 @@ from gameplay_agent.loops.context import LoopContext
 from gameplay_agent.loops.snapshot import Perception
 from gameplay_agent.loops.source import frame_refresh
 from gameplay_agent.memory import AgentMemory
+from gameplay_agent.policy.advice import PolicyAdvice, readonly_probabilities
+from gameplay_agent.policy.candidates import feasible_candidates
 from gameplay_agent.turn_timing import ACT_LOOP
 
 from tests.factories import make_entity as _ent
@@ -66,6 +68,26 @@ def _only_idle_fires(ctx: LoopContext) -> None:
     state.buildings_seen = frozenset({"mill", "lumber_camp"})
     state.resources = {"food": 100, "wood": 100, "gold": 0, "stone": 0}
     state.idle_present = True
+
+
+def _publish_house_advice(ctx: LoopContext, frame: Perception) -> None:
+    state = act.state_for_frame(ctx, frame)
+    candidates = feasible_candidates(state)
+    ctx.policy_advice.publish(
+        PolicyAdvice(
+            source_tick=frame.tick,
+            source_captured_at=frame.captured_at,
+            created_at=frame.captured_at,
+            model="jev-1.13.0",
+            candidate_ids=frozenset(candidate.id for candidate in candidates),
+            action_choice="build_house",
+            action_confidence=0.9,
+            action_probabilities=readonly_probabilities({"build_house": 0.9}),
+            allocation_focus="wood",
+            allocation_confidence=0.9,
+            allocation_probabilities=readonly_probabilities({"wood": 0.9}),
+        )
+    )
 
 
 def test_a_decision_reaches_the_actuator(tmp_path, gates) -> None:
@@ -192,6 +214,17 @@ def test_the_loop_leaves_when_the_game_ends(tmp_path, gates) -> None:
         await asyncio.wait_for(act.act_loop(ctx), timeout=2.0)
 
     _run(drive())  # must not hang
+
+
+def test_actor_executes_fresh_reviewed_advice_once(tmp_path, gates) -> None:
+    actuator = FakeActuator()
+    ctx = _context(tmp_path, actuator)
+    frame = Perception(tick=1)
+    _publish_house_advice(ctx, frame)
+    _run(act.act_once(ctx, frame, tick=1))
+    _run(act.act_once(ctx, frame, tick=2))
+
+    assert [action["type"] for action in actuator.actions] == ["build"]
 
 
 # ---------------------------------------------------------------------------

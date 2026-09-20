@@ -1,4 +1,4 @@
-"""What the three clocks share, and only that.
+"""What the four clocks share, and only that.
 
 Passed in, not reached for: a loop that reads a module global cannot be tested
 without the game. What one loop alone owns stays out.
@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 
+from ..policy.advice import PolicyAdviceStore
 from ..turn_timing import LatencyRecorder
 from .snapshot import FramePipe
 
@@ -26,7 +27,7 @@ log = structlog.stdlib.get_logger()
 
 @dataclass(frozen=True, slots=True)
 class LoopContext:
-    """The act, perceive and deliberate loops, and what sits between them."""
+    """The act, perceive, policy and deliberate loops, and their handoffs."""
 
     memory: AgentMemory
     goal_manager: GoalManager
@@ -34,9 +35,11 @@ class LoopContext:
     source: FrameSource
     actuator: Actuator
 
-    # Perceive publishes; act and deliberate read. See `FramePipe`.
+    # Perceive publishes; act, policy and deliberate read. See `FramePipe`.
     frames: FramePipe = field(default_factory=FramePipe)
     latency: LatencyRecorder = field(default_factory=LatencyRecorder)
+    # The policy task swaps whole immutable judgments; the actor only reads.
+    policy_advice: PolicyAdviceStore = field(default_factory=PolicyAdviceStore)
     # Held by act around one batch, and by deliberate around the combat tool
     # loop, which presses its own keys. Two loops must never type at once.
     input_lock: asyncio.Lock = field(default_factory=asyncio.Lock)

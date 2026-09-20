@@ -7,9 +7,10 @@ from typing import get_args
 
 import structlog
 
-from .config import KEY_ENV, WireName, config
+from .config import KEY_ENV, TYPESAFE_KEY_ENV, WireName, config
 from .game_loop import game_loop, run_single_iteration
 from .providers import ExecutorProvider
+from .providers.policy import PolicyAdvisor
 from .providers.wire_factory import make_wire
 
 # Configure structured logging
@@ -37,10 +38,23 @@ class _AgentArgs(argparse.Namespace):
     overlay: bool
 
 
+def _make_policy_advisor() -> PolicyAdvisor:
+    """Build the required dynamic policy at the process boundary."""
+    from .providers.typesafe_policy import TypeSafePolicyAdvisor
+
+    return TypeSafePolicyAdvisor(
+        api_key=config.typesafe_api_key,
+        model=config.typesafe_model,
+    )
+
+
 async def main_async(args: _AgentArgs) -> None:
     """Async main function."""
     if not config.llm_api_key:
         log.error("missing_api_key", message=f"Set {KEY_ENV}")
+        sys.exit(1)
+    if not config.typesafe_api_key.strip():
+        log.error("missing_api_key", message=f"Set {TYPESAFE_KEY_ENV}")
         sys.exit(1)
 
     wire_name: WireName = args.wire or config.llm_wire
@@ -67,7 +81,12 @@ async def main_async(args: _AgentArgs) -> None:
     else:
         # Run main game loop
         log.info("starting_game_loop", act_interval=config.act_interval)
-        await game_loop(provider, max_iterations=args.iterations, use_overlay=args.overlay)
+        await game_loop(
+            provider,
+            max_iterations=args.iterations,
+            use_overlay=args.overlay,
+            policy_advisor=_make_policy_advisor(),
+        )
 
 
 def main() -> None:

@@ -1,7 +1,7 @@
-"""The supervisor: it starts the clocks, and it labels the end.
+"""The supervisor: it starts the four clocks, and it labels the end.
 
-Everything here runs on `FakeSource` / `FakeActuator`, so there is no game, no
-detector and no LLM. That is the point of the environment seam.
+Everything here runs on fake source, actuator and policy providers, so there is
+no game, detector or LLM. That is the point of the environment seam.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from gameplay_agent.providers.executor_provider import ExecutorProvider
 from gameplay_agent.providers.strategist import StrategistProvider
 
 from tests.factories import make_entity as _ent
-from tests.loop_fakes import FakeActuator, FakeSource
+from tests.loop_fakes import FakeActuator, FakePolicyAdvisor, FakeSource
 
 
 class _FakeProvider(ExecutorProvider):
@@ -34,8 +34,8 @@ def loop_seams(monkeypatch, tmp_path):
     actuator = FakeActuator()
     monkeypatch.setattr(gl, "GameSource", lambda **_kwargs: source)
     monkeypatch.setattr(gl, "GameActuator", lambda: actuator)
-    monkeypatch.setattr(gl, "_init_detector", lambda: None)
-    monkeypatch.setattr(gl, "_init_frame_differ", lambda: None)
+    monkeypatch.setattr(gl, "init_detector", lambda: None)
+    monkeypatch.setattr(gl, "init_frame_differ", lambda: None)
     monkeypatch.setattr(gl, "warm_up_ocr", lambda: None)
     monkeypatch.setattr(perceive, "is_game_running", lambda: True)
     monkeypatch.setattr(perceive, "ensure_game_focused", lambda: True)
@@ -51,7 +51,7 @@ def loop_seams(monkeypatch, tmp_path):
 
 def _play(frames: int = 2) -> AgentMemory:
     """Run one game bounded by a frame budget."""
-    return asyncio.run(gl.game_loop(_FakeProvider(), max_iterations=frames))
+    return asyncio.run(gl.game_loop(_FakeProvider(), FakePolicyAdvisor(), max_iterations=frames))
 
 
 # ---------------------------------------------------------------------------
@@ -103,7 +103,7 @@ def test_the_frame_budget_is_counted_in_frames(loop_seams) -> None:
 
 
 def test_the_time_budget_ends_the_run(loop_seams) -> None:
-    memory = asyncio.run(gl.game_loop(_FakeProvider(), time_budget=0.01))
+    memory = asyncio.run(gl.game_loop(_FakeProvider(), FakePolicyAdvisor(), time_budget=0.01))
     assert memory.game_end_reason == "timeout"
 
 
@@ -123,7 +123,14 @@ def test_a_source_failure_still_labels_the_run(loop_seams, monkeypatch) -> None:
     monkeypatch.setattr(source, "capture", _cancelled)
     memory = AgentMemory()
     with pytest.raises(asyncio.CancelledError):
-        asyncio.run(gl.game_loop(_FakeProvider(), max_iterations=1, memory=memory))
+        asyncio.run(
+            gl.game_loop(
+                _FakeProvider(),
+                FakePolicyAdvisor(),
+                max_iterations=1,
+                memory=memory,
+            )
+        )
     assert memory.game_end_reason == "interrupted"
 
 
@@ -185,7 +192,7 @@ def test_the_wire_is_warmed_once(loop_seams, monkeypatch) -> None:
     provider = _FakeProvider()
     warmed: list[bool] = []
     monkeypatch.setattr(provider.wire, "warm_up", lambda: warmed.append(True))
-    asyncio.run(gl.game_loop(provider, max_iterations=1))
+    asyncio.run(gl.game_loop(provider, FakePolicyAdvisor(), max_iterations=1))
     assert warmed == [True]
 
 
@@ -197,7 +204,7 @@ def test_a_failing_wire_warm_up_does_not_stop_the_game(loop_seams, monkeypatch) 
         raise RuntimeError("no SDK on this host")
 
     monkeypatch.setattr(provider.wire, "warm_up", _boom)
-    memory = asyncio.run(gl.game_loop(provider, max_iterations=1))
+    memory = asyncio.run(gl.game_loop(provider, FakePolicyAdvisor(), max_iterations=1))
     assert memory.game_end_reason != "error"
 
 
