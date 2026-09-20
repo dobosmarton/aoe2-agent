@@ -1,6 +1,6 @@
 # Chapter 1: System Overview
 
-The AoE2 LLM Arena agent plays Age of Empires II autonomously using a two-tier LLM architecture. A Sonnet strategist reads the resource bar via local OCR and sets goals; a Sonnet executor reads YOLO-detected entities as text and executes mouse/keyboard actions. No game API, no memory-mapped data — the agent perceives only pixels (YOLO entity detection + local OCR of the HUD), and both LLM tiers are text-only.
+The AoE2 LLM Arena agent plays Age of Empires II autonomously using three AI roles. A strategist reads the resource bar via local OCR and sets goals; TypeSafe System One selects bounded routine economic actions; an executor handles tactical and exceptional situations from YOLO-detected entities. No game API, no memory-mapped data — the agent perceives only pixels, and every AI input is text or typed state.
 
 <aside class="prereqs">
 
@@ -102,6 +102,8 @@ Configuration uses a Pydantic `BaseModel` with environment variable overrides (`
 | Setting | Env Var | Default | Purpose |
 |---------|---------|---------|---------|
 | `llm_api_key` | `AOE2_LLM_API_KEY` | `""` | Model API authentication |
+| `typesafe_api_key` | `TYPESAFE_API_KEY` | `""` | Required routine policy authentication |
+| `typesafe_model` | `AOE2_TYPESAFE_MODEL` | `jev-1.13.0` | System One policy model |
 | `llm_wire` | `AOE2_LLM_WIRE` | `openai` | Adapter: `openai`, `zen` or `anthropic` |
 | `llm_base_url` | `AOE2_LLM_BASE_URL` | `""` | Endpoint override; empty uses the adapter's own |
 | `model` | `AOE2_MODEL` | `gpt-5.6-luna` | Executor model (fast; runs every turn) |
@@ -111,7 +113,6 @@ Configuration uses a Pydantic `BaseModel` with environment variable overrides (`
 | `max_tokens` | — | `1536` | Max response tokens per executor call |
 | `max_tool_iterations` | — | `7` | Max tool roundtrips per turn (tool-loop path) |
 | `detection_imgsz` | — | `1280` | YOLO inference resolution (matches v9's training resolution) |
-| `adaptive_sahi` | — | `False` | SAHI tiling lowers real F1 at retina resolution; agent runs single-pass @1280 |
 | `screenshot_quality` | — | `85` | JPEG quality (1-100) |
 | `ocr_backend` | `AOE2_OCR_BACKEND` | `rapidocr` | Resource-bar OCR backend (`rapidocr`/`template`/`tesseract`) |
 | `loop_delay` | `AOE2_LOOP_DELAY` | `0.3` | Seconds between iterations |
@@ -168,7 +169,7 @@ Key log events: `iteration_start`, `screenshot_captured`, `detection_complete`, 
 ## Summary
 
 - Two-tier architecture: Sonnet strategist (local OCR, goals) + Sonnet executor (text-only, actions; single-shot routine turns + tool loop for combat)
-- A deterministic reactive tier handles routine villager upkeep every turn with no LLM call; routine turns pipeline (RTC) and entity-affecting actions are verified by re-detection
+- TypeSafe selects routine actions from code-reviewed feasible candidates; deterministic rules are the degraded-service fallback, and entity-affecting actions are verified by re-detection
 - Detection is practically required for useful gameplay; game knowledge and window management are truly optional
 - Pydantic for config and validation, structlog for observability, asyncio for concurrency
 - Goal-driven gameplay with alarm system for emergency defense

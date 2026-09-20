@@ -74,19 +74,20 @@ Entries are organized alphabetically. Most are followed by a short link of the f
 
 ## R
 
-- **Reactive tier** — A deterministic, no-LLM layer that runs routine economy upkeep every turn (queue villagers below the age cap, reassign idle villagers to the nearest resource); it cedes combat to the LLM by returning nothing on alarm. → [Chapter 2 §2.1 Step 9](./part1-architecture/02-game-loop-pipeline.md).
+- **Rule fallback** — The deterministic degraded-service path used when TypeSafe policy advice is missing, stale, uncertain, or unavailable. It is not the primary routine actor. → [Chapter 2 §2.1 Step 9](./part1-architecture/02-game-loop-pipeline.md).
 - **Redis Streams** — A Redis data structure (`XADD` / `XREAD`) that behaves like a durable, replayable, consumer-group-aware log. Our cross-process broker backend. → [Appendix B](./appendix/02-event-brokers-and-redis-streams.md).
 - **Reflective prompt mutation** — Proposing prompt edits by reasoning over full game *traces* (turn-by-turn reasoning, actions, verification) plus the per-component score breakdown, rather than over summary metrics alone. → [Chapter 23 — The mutator](./part8-autoresearch/23-prompt-mutation-and-memory.md).
 - **RTC (turn pipelining)** — Request-to-completion overlap: a routine turn launches the *next* executor plan as a background task and executes the previous turn's committed head while it computes, hiding the LLM roundtrip. → [Chapter 2 §2.1 Step 9](./part1-architecture/02-game-loop-pipeline.md).
 
 ## S
 
-- **SAHI (Slicing Aided Hyper Inference)** — A technique for detecting small objects in large images by tiling the input, running the detector on each tile, and stitching results. Implemented (including an *adaptive* variant that only tiles likely regions) but **disabled** (`adaptive_sahi=False`): tiling a retina screenshot into 640 crops shows the model objects ~2.4× larger than its training scale, which *lowers* real F1, so the agent runs a single pass at `imgsz=1280` (v9's training resolution) instead. → [Chapter 7 §7.4](./part3-entity-detection/07-detector-architecture.md).
+- **SAHI (Slicing Aided Hyper Inference)** — A technique for detecting small objects in large images by tiling the input, running the detector on each tile, and stitching results. Implemented (including an *adaptive* variant that only tiles likely regions) but **disabled** (the agent hard-codes `use_sahi=False`): tiling a retina screenshot into 640 crops shows the model objects ~2.4× larger than its training scale, which *lowers* real F1, so the agent runs a single pass at `imgsz=1280` (v9's training resolution) instead. → [Chapter 7 §7.4](./part3-entity-detection/07-detector-architecture.md).
 - **SSE (Server-Sent Events)** — A one-way HTTP streaming protocol where the server pushes `text/event-stream` chunks to the client. Simpler than WebSocket for fan-out telemetry. → [Chapter 19 — SSE callout](./part7-arena-web/19-web-architecture.md).
 - **Structured output** — Constraining an LLM to emit a parseable, schema-validated response (typically JSON). → [Chapter 5 — Structured output callout](./part2-llm-integration/05-prompt-engineering.md).
 
 ## T
 
+- **TypeSafe policy** — The System One `Choice` provider that selects one feasible routine economy action and an allocation focus from current goals and observed game state. → [Chapter 2 §2.1 Step 9](./part1-architecture/02-game-loop-pipeline.md).
 - **Tool use / function calling** — An API pattern where the LLM is given a set of "tools" with JSON-schema arguments; the model emits a tool call and the host runs it and feeds back the result. → [Chapter 4 — Agentic tool loops deep dive](./part2-llm-integration/04-provider-pattern.md).
 
 ## V

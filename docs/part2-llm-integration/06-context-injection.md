@@ -25,7 +25,7 @@ flowchart TD
     MSG --> API
 ```
 
-The context string is built in two stages: `_build_llm_context()` in the game loop builds the base context, then the Claude provider optionally enhances it with game knowledge.
+The context string is built in two stages: `build_llm_context()` in the game loop builds the base context, then the Claude provider optionally enhances it with game knowledge.
 
 ## 6.2 Memory System
 
@@ -112,7 +112,7 @@ Stuck-loop detection counts consecutive turns with no visible change. After `STU
 
 ## 6.3 Entity Context
 
-Built by `_build_llm_context()` in the game loop, using `build_entity_summary()` from `entity_utils.py`:
+Built by `build_llm_context()` in the game loop, using `build_entity_summary()` from `entity_utils.py`:
 
 ```python
 def build_entity_summary(

@@ -1,6 +1,6 @@
 # AoE2 LLM Agent
 
-An AI agent that plays Age of Empires 2: Definitive Edition using a two-tier LLM architecture: a strategist reads the resource bar via local OCR and sets goals, an executor reads YOLO entity detections and executes actions. Both LLM tiers are text-only, so no image is ever sent to the model. The vendor is a config value — `gpt-5.6-luna` by default, with Claude one env var away.
+An AI agent that plays Age of Empires 2: Definitive Edition using three AI roles: a strategist sets goals, TypeSafe System One chooses routine economic actions, and an executor handles exceptional or tactical situations. Every role receives text derived from local OCR and YOLO; no screenshot is sent to a model.
 
 ## Architecture
 
@@ -10,17 +10,20 @@ Screenshot → Local OCR (RapidOCR) → Resource Readings (text)
                                     ↓
 Resource Readings → Strategist (LLM, text) → Goals
                                     ↓
-Entity List + Goals + Resources → Executor (LLM, text) → Actions
+Entity List + Goals + Resources → TypeSafe policy → Routine action
+                                    ↓
+Entity List + Goals + Resources → Executor (LLM, text) → Tactical actions
                                                              ↓
                                                        Mouse/Keyboard
 ```
 
-**Two-model design:**
+**Three-role design:**
 
 | Role | Model | Input | Output | Frequency |
 |------|-------|-------|--------|-----------|
 | Strategist | `gpt-5.6-luna` | Text (resources via local OCR) + game state | Goals + resource readings | Every 10 turns, or on alarm |
-| Executor | `gpt-5.6-luna` | Text only (entities, goals, resources) | Mouse/keyboard actions | Every turn |
+| Policy | `jev-1.13.0` | Goals, game state, feasible actions | Typed action and allocation choices | Every new routine frame |
+| Executor | `gpt-5.6-luna` | Text only (entities, goals, resources) | Mouse/keyboard actions | On interval or exception |
 
 The executor runs the model named above with a per-call `effort` knob (default `low`) for speed. Routine turns take a single-shot structured call; combat/housing turns take an agentic tool loop.
 
@@ -35,7 +38,7 @@ Each iteration (~3-5 seconds):
 3. **Classify ownership** — Color-based blue-dominance check on military units (own vs enemy)
 4. **Alarm check** — Scan for enemy military → inject emergency defense goals if found
 5. **Strategist** (periodic) — reads resources from the bar via local OCR (RapidOCR), then the strategist creates/updates goals from that text
-6. **Reactive tier** — a deterministic, no-LLM rule layer handles routine upkeep first: villager queuing to the age's order target (30 Dark / 35 Feudal), Feudal prep (mill + lumber camp), the mining camp in Feudal, house building at low headroom, and the age-up press. Many turns need no LLM call at all.
+6. **Policy** — TypeSafe chooses one currently feasible economic action and a resource-allocation focus. Code owns costs, prerequisites, freshness and execution; uncertain or unavailable advice uses the deterministic safety fallback.
 7. **Build context** — Assemble text: entities + goals + resources + memory + game knowledge
 8. **Execute** — the executor reads text context, returns structured actions (Pydantic-validated)
 9. **Act** — Execute mouse clicks / keyboard presses via pyautogui
@@ -46,6 +49,7 @@ Each iteration (~3-5 seconds):
 - Windows 10/11 with AoE2:DE installed
 - Python 3.11+ (x64, not ARM64)
 - An API key for whichever adapter you use (`AOE2_LLM_API_KEY`)
+- A TypeSafe API key for routine policy (`TYPESAFE_API_KEY`)
 
 ## Installation
 
@@ -86,8 +90,8 @@ agent when launched via `just agent`). A documented template lives at `.env.exam
 cp .env.example .env        # then edit .env and fill in the values below
 ```
 
-At minimum, set `AOE2_LLM_API_KEY` — that's all the **gameplay agent** needs. Every other
-variable in `.env.example` is for the **Synthetic Arena infrastructure** (Langfuse + MinIO +
+Set `AOE2_LLM_API_KEY` and `TYPESAFE_API_KEY` for the **gameplay agent**. Every other
+credential in `.env.example` is for the **Synthetic Arena infrastructure** (Langfuse + MinIO +
 ClickHouse + Redis + Postgres) and is only consumed by `just arena-infra-up`. If you're
 not running the arena stack yet, leaving those blank is fine.
 
@@ -96,9 +100,11 @@ not running the arena stack yet, leaving those blank is fine.
 ```bash
 # Windows VM
 set AOE2_LLM_API_KEY=your-key-here
+set TYPESAFE_API_KEY=your-typesafe-key
 
 # macOS / Linux
 export AOE2_LLM_API_KEY=your-key-here
+export TYPESAFE_API_KEY=your-typesafe-key
 ```
 
 The agent defaults to GPT-5.6 Luna on the OpenAI API. Each adapter supplies its own
@@ -123,6 +129,11 @@ ValueError: unknown AOE2_LLM_WIRE='zzz'; expected one of 'anthropic', 'openai', 
 | `AOE2_EXECUTOR_EFFORT` | `low` | Executor effort (`low`/`medium`/`high`) |
 | `AOE2_STRATEGIST_MODEL` | `gpt-5.6-terra` | Strategist model (strong; runs every 3-10 turns) |
 | `AOE2_STRATEGIST_INTERVAL` | `10` | Run strategist every N turns |
+| `TYPESAFE_API_KEY` | — | TypeSafe credential for the required routine policy |
+| `AOE2_TYPESAFE_MODEL` | `jev-1.13.0` | TypeSafe System One model |
+| `AOE2_POLICY_INTERVAL` | `0.5` | Seconds between evaluations of new perception frames |
+| `AOE2_POLICY_ADVICE_TTL` | `2.0` | Maximum age in seconds for cached advice |
+| `AOE2_POLICY_MIN_CONFIDENCE` | `0.65` | Minimum confidence for applying advice |
 | `AOE2_LOOP_DELAY` | `0.3` | Seconds between iterations |
 | `AOE2_SAVE_SCREENSHOTS` | `true` | Save screenshots to logs/ |
 | `AOE2_OCR_BACKEND` | `rapidocr` | Resource-bar OCR backend (`rapidocr`/`template`/`tesseract`) |

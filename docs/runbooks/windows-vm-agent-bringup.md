@@ -56,11 +56,12 @@ copy .env.example .env
 notepad .env
 ```
 
-Fill in two values and save:
+Fill in three values and save:
 
 ```
 # The key must match AOE2_LLM_WIRE (default: openai).
 AOE2_LLM_API_KEY=your-key-here
+TYPESAFE_API_KEY=your-typesafe-key
 AOE2_DETECTION_HOST=http://192.168.64.1:8420
 ```
 

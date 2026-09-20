@@ -11,6 +11,7 @@ instead of vibes.
 - Detection server running on the Mac host (`just server --model <path-to-aoe2_yolo_v9.onnx>`)
   and `AOE2_DETECTION_HOST` pointing at it.
 - `AOE2_LLM_API_KEY` set.
+- `TYPESAFE_API_KEY` set.
 - `AOE2_OCR_BACKEND=template` set (T-202): millisecond digit reads via the
   harvested `templates/3024x1672/` glyphs instead of ~2-4 s of RapidOCR per
   field; age text stays on RapidOCR, sampled every 5 ticks. Only set this where

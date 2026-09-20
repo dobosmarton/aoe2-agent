@@ -41,7 +41,7 @@ sequenceDiagram
             GL->>GM: set_goals(goals)
         end
         GL->>M: get_context_for_llm()
-        GL->>E: reactive upkeep (queue / reassign villagers)
+        GL->>E: apply cached TypeSafe policy advice
         GL->>C: get_actions(context, w, h)
         Note over GL,C: routine turns pipeline — this turn's plan<br/>computes while last turn's committed head executes
         C-->>GL: {reasoning, observations, actions}
@@ -67,13 +67,13 @@ Uses the `mss` library to grab the game window region, convert from BGRA to RGB 
 
 ### Step 4: Run entity detection — `_run_detection()`
 
-Entity detection runs a **single forward pass at `imgsz=1280`** — the resolution the v9 model was trained at (`config.detection_imgsz = 1280`, `config.adaptive_sahi = False`). On real screenshots, matching inference resolution to training resolution beats SAHI-tiled inference: tiling a 3024px frame into 640 crops makes objects ~2.4× larger than v9's training scale and *lowers* real F1. SAHI is implemented but off; see [Chapter 7 §7.4](../part3-entity-detection/07-detector-architecture.md) for the measurement and the v6/v7-era mode comparison.
+Entity detection runs a **single forward pass at `imgsz=1280`** — the resolution the v9 model was trained at (`config.detection_imgsz = 1280`, and `use_sahi=False` pinned in `init_detector`). On real screenshots, matching inference resolution to training resolution beats SAHI-tiled inference: tiling a 3024px frame into 640 crops makes objects ~2.4× larger than v9's training scale and *lowers* real F1. SAHI is implemented but off; see [Chapter 7 §7.4](../part3-entity-detection/07-detector-architecture.md) for the measurement and the v6/v7-era mode comparison.
 
-> When `config.adaptive_sahi` is `True` (it isn't, by default), the loop instead runs adaptive SAHI and forces full SAHI on the first iteration, every `full_sahi_interval` turns, and after an alarm — the parked path for a future SAHI-native model.
+> There is no config flag that switches SAHI back on. A flag cannot fix a scale mismatch, so a SAHI-native model would need a code change here as well as a retrain.
 
 Results are cached in the executor module via `set_detected_entities()` for later target_id/target_class resolution. Entity IDs persist across frames via the Kalman filter tracker. Detection failures are caught and logged without breaking the loop.
 
-### Step 5: Classify ownership — `_classify_entities()`
+### Step 5: Classify ownership — `summarize_frame()`
 
 For military entities, a color-based classifier checks blue pixel dominance in the health bar and unit body regions. In AoE2:DE, Player 1 is always blue. Entities are tagged `[own]` or `[enemy]` in the text context sent to the executor.
 
@@ -83,7 +83,7 @@ Entity formatting uses `build_entity_summary()` from `entity_utils.py`, which no
 
 Scans detected entities for 21 enemy military classes (militia_line, archer_line, knight_line, etc.). Uses ownership classification to filter out own units. If enemy threats are found, injects a priority-10 "Defend base" goal and triggers an early strategist run.
 
-### Step 7: Launch strategist — `_maybe_launch_strategist()`
+### Step 7: Launch strategist — `maybe_launch_strategist()`
 
 The strategist (Sonnet) runs every N turns (default 10), on the first successful iteration, or when an alarm is triggered. It is launched **asynchronously** via `asyncio.create_task()` so it runs in the background while the executor continues. If a previous strategist task is still pending, it is reused rather than launching a new one.
 
@@ -95,7 +95,7 @@ The strategist:
 
 The strategist uses `messages.parse()` with a `StrategistResponse` Pydantic model for structured output. In the cleanup phase, any pending strategist task is awaited to ensure goals are finalized.
 
-### Step 8: Build context — `_build_llm_context()`
+### Step 8: Build context — `build_llm_context()`
 
 Assembles text context from multiple sources, layered in this order:
 1. **Detected entities** — YOLO results formatted as text: `sheep_0: sheep at (456,789) [95%]`
@@ -110,7 +110,7 @@ Assembles text context from multiple sources, layered in this order:
 Routine turns are **pipelined** RTC-style (request-to-completion overlap): the executor call for *this* turn is launched as a background task via `asyncio.create_task(provider.get_actions(...))`, and while it computes the agent does useful work in that window:
 
 1. **Ground commands** (turn 1 only) — zoom in, select scout, enable auto-scout
-2. **Reactive tier** (`reactive.decide`) — deterministic, no-LLM upkeep run every turn: queue a villager while orders are below the age **order target** (30 Dark / 35 Feudal — keyed on villagers *ordered*, not live population, since the TC queue lags), build the Feudal prerequisites (mill then lumber camp) and the Feudal mining camp, build a house when headroom runs low, press the age-up when the food + prerequisites are ready, and dispatch idle villagers across resources by the age's gather ratio. It returns nothing on alarm, ceding combat to the LLM.
+2. **Routine TypeSafe policy** — a separate async clock asks System One to choose one currently feasible economy action and one resource-allocation focus from observed state and active goals. The synchronous actor consumes only fresh, confident cached advice. Code still owns costs, prerequisites, action schemas, one-shot consumption and execution; missing or uncertain advice invokes the deterministic rule fallback. Alarm frames cede control to the tactical executor.
 3. **Previous turn's committed head** — the plan launched last turn is drained and executed now (Step 11), against freshly re-detected entities.
 
 The freshly-launched plan is held as a `_PendingPlan` and executed on the *next* iteration. Whether a turn pipelines is decided by `_should_pipeline` (= `provider._use_single_shot(context)`): combat/housing turns can't pipeline because the tool loop executes its own actions mid-call, so they run **synchronously** — any pending routine plan is discarded (its frame is stale) and the turn's actions execute the same turn.
@@ -121,7 +121,7 @@ The executor is 100% text-based — no screenshot. `get_actions()` picks one of 
 
 Creates a `Turn` record, updates `GameState` from the executor's observations. Evaluates goal progress against the updated state. Computes a turn reward based on resource deltas, population changes, and age progression. Checks for game-over conditions (victory, defeat, timeout).
 
-### Step 11: Execute actions — `_execute_turn_actions()`
+### Step 11: Execute actions — `execute_turn_actions()`
 
 If the agentic tool loop already executed actions (indicated by `actions_already_executed` flag), this step just records the results. Otherwise, it executes LLM actions:
 - For a **pipelined** turn, only the **committed head** runs — the first `pipeline_commit_max` (2) actions, after `_revalidate_against_fresh` drops any whose `target_id`/`target_class` no longer resolves against the current frame. The tail is discarded: next turn's plan supersedes it from fresher perception.
@@ -172,7 +172,7 @@ MAD is the cheapest possible change-detection metric — one subtraction and one
 
 **Why Union-Find for clustering?** We need: *given N boxes, group any pair that overlap into the same cluster*. The naive O(N²) pairwise intersection works at N ≤ 50 but degrades. K-means doesn't fit — clusters aren't centroidal, they're connectivity components. DBSCAN works but is more code. **Union-Find runs in O(N · α(N))** — practically O(N) — and the implementation is ~30 lines: each box starts in its own set, and any time two boxes overlap you `union()` their sets. The chapter's full SAHI fallback is what you'd use if you wanted exhaustive coverage of every tile regardless of content.
 
-**When adaptive SAHI is wrong to use.** First frame (no prior boxes → no ROIs → only the fast scan runs → you miss things). Solution: force full SAHI on the first frame, and on every Nth frame (`full_sahi_interval=5`), and after an alarm. These are the three branches you see in Step 4.
+**When adaptive SAHI is wrong to use.** First frame (no prior boxes → no ROIs → only the fast scan runs → you miss things). Solution: force full SAHI on the first frame, and on every Nth frame, and after an alarm. The agent used those three branches before it dropped SAHI.
 
 **Further reading.** Akyon et al., *Slicing Aided Hyper Inference and Fine-tuning for Small Object Detection* (2022). Sedgewick & Wayne, *Algorithms* (4th ed.), §1.5 for the Union-Find treatment.
 
@@ -214,7 +214,7 @@ Captures a screenshot, runs detection, builds context, gets actions from Claude 
 |-------|----------|--------|
 | Window check + focus | ~200ms worst case | `window.py` (3 retries, 200ms each) |
 | Screenshot capture | ~10-30ms | mss grab + PIL convert + JPEG encode |
-| YOLO detection (single-pass @1280) | one forward pass | The deployed path (`adaptive_sahi=False`); cost is backend/hardware-dependent |
+| YOLO detection (single-pass @1280) | one forward pass | The deployed path; cost is backend/hardware-dependent |
 | Ownership classification | ~5ms | NumPy pixel analysis |
 | Strategist call (periodic) | 3-8s | Sonnet text call (resources via local OCR) |
 | Executor single-shot (routine turns) | ~2-4s | One `messages.parse` call, no tool loop |
@@ -224,7 +224,7 @@ Captures a screenshot, runs detection, builds context, gets actions from Claude 
 | Rescan: fast detection | one forward pass | Single-pass YOLO at imgsz=1280 |
 | Loop delay | 0.3s | `config.loop_delay` |
 
-Cycle time depends on the path: **routine turns single-shot in ~one roundtrip** (~2-4s of API + 0.3s loop delay), and because routine turns pipeline, the previous turn's committed head plus the reactive tier execute *during* that roundtrip rather than adding to it. Combat/housing turns run the agentic tool loop synchronously and can reach ~20-30s when they use all 7 iterations. Composite tools cut the loop path further (~9s saved per building placement). The strategist runs in the background and does not add to cycle time.
+Routine TypeSafe evaluation runs on its own clock and never joins the synchronous actor's latency path. Tactical executor calls may still reach ~20-30s when they use all 7 tool iterations. Composite tools cut that path further, while the strategist also runs independently.
 
 ## 2.4 Error Handling
 
@@ -249,7 +249,7 @@ The game loop supports a `time_budget` parameter (seconds). When elapsed time ex
 
 - 12-step iteration cycle: check → focus → capture → detect → classify → alarm → strategist → context → executor → memory → execute+verify → wait
 - Cycle time depends on the path: routine turns single-shot in ~2-4s; combat/housing turns run the agentic tool loop and can reach ~30s
-- Routine turns are pipelined (RTC): the executor call overlaps the previous turn's committed head plus the deterministic reactive tier (villager queue/reassign) via `asyncio.create_task()`; combat turns run synchronously
+- Routine decisions come from cached TypeSafe judgments on a separate clock; the actor remains synchronous and combat stays with the executor
 - Action-effect verification (R1): entity-affecting actions are confirmed by re-detection, and misses emit `no visible change` into the stuck-loop detector
 - Strategist runs asynchronously in the background; executor runs every turn
 - Composite tools (build, send_villager, queue_villager) eliminate multiple API roundtrips per sequence

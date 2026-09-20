@@ -1,6 +1,6 @@
 # AoE2 LLM Arena — Technical Documentation
 
-A two-tier AI agent that plays Age of Empires II: Definitive Edition, plus a synthetic evaluation tier (Arena) that races prompt/model variants against an in-memory AoE2-lite world and a web UI for replaying and forking past runs.
+A three-role AI agent that plays Age of Empires II: Definitive Edition: a goal strategist, a TypeSafe routine policy, and a tactical executor. It also includes a synthetic evaluation tier (Arena) that races prompt/model variants against an in-memory AoE2-lite world and a web UI for replaying and forking past runs.
 
 ---
 
@@ -14,6 +14,7 @@ graph TD
         LOOP --> EXEC[executor.py]
         LOOP --> GOALS[goals.py]
         LOOP --> PROV[providers/executor_provider.py]
+        LOOP --> POLICY[providers/typesafe_policy.py]
         LOOP --> STRAT[providers/strategist.py]
         LOOP -.->|optional| DET[detector.py]
         DET --> YOLO[YOLO26n]
@@ -88,8 +89,8 @@ See also the [Glossary](./glossary.md) for one-line definitions of terms used th
 
 | # | Chapter | Description | Key files |
 |---|---|---|---|
-| 01 | [System Overview](./part1-architecture/01-system-overview.md) | Two-tier design, graceful degradation, async architecture | `config.py`, `main.py` |
-| 02 | [Game Loop Pipeline](./part1-architecture/02-game-loop-pipeline.md) | Capture-detect-alarm-strategist-execute-verify cycle (RTC pipelining, reactive tier) | `game_loop.py`, `reactive.py`, `turn_phases.py`, `goals.py`, `screen.py` |
+| 01 | [System Overview](./part1-architecture/01-system-overview.md) | Three-role design, graceful degradation, async architecture | `config.py`, `main.py` |
+| 02 | [Game Loop Pipeline](./part1-architecture/02-game-loop-pipeline.md) | Independent perceive, policy, act and deliberate clocks | `game_loop.py`, `loops/`, `policy/`, `goals.py`, `screen.py` |
 | 03 | [Action Model & Execution](./part1-architecture/03-action-model-and-execution.md) | Pydantic action types, target_id/target_class resolution | `models.py`, `executor.py` |
 | — | [Seven-Round Run Map](./part1-architecture/14-seven-round-run-map.md) | Per-step timing table for the first 7 rounds; async-strategist and loop-delay analysis. Deep dive behind chapter 02. | `game_loop.py` |
 
