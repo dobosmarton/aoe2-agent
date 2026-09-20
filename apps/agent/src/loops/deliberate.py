@@ -16,11 +16,11 @@ from ..executor import is_pop_capped
 from ..memory import STUCK_LOOP_THRESHOLD
 from ..policy.allocation import is_famine
 from ..policy.state import from_game_state
-from ..strategist_phase import _maybe_launch_strategist
+from ..strategist_phase import maybe_launch_strategist
 from ..turn_phases import (
-    _build_llm_context,
-    _execute_turn_actions,
+    build_llm_context,
     check_game_over,
+    execute_turn_actions,
     known_buildings_line,
     record_llm_turn,
 )
@@ -60,7 +60,7 @@ async def deliberate_loop(
             continue
         seen = frame.captured_at
         tick += 1
-        strategist_task = _maybe_launch_strategist(
+        strategist_task = maybe_launch_strategist(
             strategist,
             tick,
             frame.alarm,
@@ -107,7 +107,7 @@ async def deliberate_once(
     """One LLM turn: act on an exception, else plan and discard."""
     with ctx.latency.tick(DELIBERATE_LOOP, tick) as timings:
         with timings.phase("context"):
-            context = _build_llm_context(
+            context = build_llm_context(
                 ctx.memory,
                 ctx.goal_manager,
                 frame.entity_summary,
@@ -165,7 +165,7 @@ async def _execute_or_record(
         memory.record_action_results(success, len(actions))
         log.info("actions_executed", iteration=tick, total=len(actions), successful=success)
         return
-    await _execute_turn_actions(actions, tick, memory, response.get("reasoning", ""))
+    await execute_turn_actions(actions, tick, memory, response.get("reasoning", ""))
 
 
 __all__ = ["deliberate_loop", "deliberate_once"]

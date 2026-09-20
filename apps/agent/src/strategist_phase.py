@@ -6,7 +6,7 @@ executor so the executor never waits on it. Two responsibilities:
 
   - `_run_strategist_async`: the actual call body — generate goals, push them
     into `goal_manager`, log progress.
-  - `_maybe_launch_strategist`: gating logic — runs only when the strategist
+  - `maybe_launch_strategist`: gating logic — runs only when the strategist
     cadence/alarm logic says it should and never doubles up an in-flight call.
 """
 
@@ -63,7 +63,7 @@ async def _run_strategist_async(
         log.warning("strategist_failed", error=str(e))
 
 
-def _maybe_launch_strategist(
+def maybe_launch_strategist(
     strategist: StrategistProvider,
     iteration: int,
     alarm: bool,
@@ -102,3 +102,6 @@ def _maybe_launch_strategist(
     )
     log.info("strategist_launched_async", turn=iteration, alarm=alarm)
     return task
+
+
+__all__ = ["maybe_launch_strategist"]

@@ -1,13 +1,12 @@
 """Vision-pipeline glue between the game loop and the YOLO detector.
 
 Owns:
-  - `_init_detector` / `_init_frame_differ`: optional-resource initialization
+  - `init_detector` / `init_frame_differ`: optional-resource initialization
     (the agent can run without a detector).
-  - `_register_rescan_callbacks`: hooks the executor's rescan-on-keypress paths
-    into the detector + overlay. Lives here because the closures `_rescan` and
-    `_rescan_full` capture `detector`/`overlay`/`frame_differ` together.
-  - `_capture_screenshot` / `_run_detection` / `_classify_entities`: the per-turn
-    screenshot → detection → ownership-tagging chain.
+  - `detect_frame`: one ladder from cheapest to costliest — tracker prediction,
+    pan translation, then a real detection.
+  - `_capture_screenshot` / `summarize_frame`: the screenshot and the
+    ownership tagging either side of it.
 
 The `Detector` alias unifies `EntityDetector` (local YOLO) and `RemoteDetector`
 (HTTP server). They share a duck-typed surface — `.tracker`, `.use_mock`,
@@ -24,11 +23,12 @@ from typing import TYPE_CHECKING, Literal, cast
 import structlog
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
     from pathlib import Path
 
     from detection.inference.detector import DetectedEntity, EntityDetector
     from detection.inference.frame_diff import FrameChange, FrameDiffer
+    from detection.inference.ownership import Owner
     from detection.inference.remote_detector import RemoteDetector
 
     from .overlay import DetectionOverlay
@@ -42,11 +42,8 @@ from .executor import (
     clear_detected_entities,
     get_detected_entities,
     set_detected_entities,
-    set_rescan_fn,
-    set_rescan_full_fn,
 )
 from .screen import capture_screenshot, save_screenshot
-from .window import get_game_window_rect
 
 log = structlog.stdlib.get_logger()
 
@@ -82,7 +79,7 @@ async def _invoke_detector(
     return cast("list[DetectedEntity]", await asyncio.to_thread(fn, *args, **kwargs))
 
 
-def _init_detector() -> Detector | None:
+def init_detector() -> Detector | None:
     """Initialize YOLO detector (remote or local)."""
     if not DETECTION_AVAILABLE:
         return None
@@ -97,12 +94,13 @@ def _init_detector() -> Detector | None:
             )
             log.info("detector_initialized", mode="remote", server=config.detection_host)
             return detector
-        # adaptive_sahi gates SAHI everywhere: it picks detect_adaptive vs the
-        # single-pass detect() below, and use_sahi keeps detect() from tiling.
+        # Explicit: get_detector defaults to use_sahi=True, and SAHI tiles the
+        # 3024 px frame into crops the model never trained on. Real F1 0.04 vs
+        # 0.42 single-pass. v9 gets its pixels from imgsz=1280 instead.
         detector = get_detector(
             use_mock=False,
             imgsz=config.detection_imgsz,
-            use_sahi=config.adaptive_sahi,
+            use_sahi=False,
             model_name=config.detection_model,
         )
         backend = "mock" if detector.use_mock else detector.backend or "yolo"
@@ -168,7 +166,7 @@ def _pan_translation(change: FrameChange, cached: list[dict]) -> tuple[list[dict
     return translated, ""
 
 
-def _init_frame_differ() -> FrameDiffer | None:
+def init_frame_differ() -> FrameDiffer | None:
     """Initialize frame differ for skipping redundant rescans."""
     try:
         from detection.inference.frame_diff import FrameDiffer
@@ -176,85 +174,6 @@ def _init_frame_differ() -> FrameDiffer | None:
         return FrameDiffer(threshold=FRAME_DIFFER_THRESHOLD)
     except ImportError:
         return None
-
-
-def _register_rescan_callbacks(
-    detector: Detector,
-    overlay: DetectionOverlay | None,
-    frame_differ: FrameDiffer | None,
-) -> None:
-    """Register rescan + full detection callbacks on the executor module."""
-
-    async def _rescan() -> None:
-        if overlay:
-            overlay.hide()
-        screenshot, _, _ = capture_screenshot(quality=RESCAN_SCREENSHOT_QUALITY)
-
-        change = frame_differ.compare(screenshot) if frame_differ else None
-        if change and not change.changed:
-            if (
-                detector.tracker
-                and detector.tracker.get_confidence() > TRACKER_CONFIDENCE_THRESHOLD
-            ):
-                predicted = detector.tracker.predict()
-                set_detected_entities(predicted)
-                if overlay:
-                    overlay.show(predicted, get_game_window_rect())
-                    log.debug("rescan_predicted", entity_count=len(predicted))
-                return
-            log.debug("rescan_skipped", reason="no_change")
-            if overlay:
-                overlay.show(detector._previous_entities, get_game_window_rect())
-                return
-
-        # The view only panned, so the static map is still known — translate it
-        # rather than pay for a detection (run 2026_08_22_1: 112 of 212).
-        # A disabled cache stays silent so an A/B run's log carries only signal.
-        if config.rescan_cache and change:
-            translated, declined = _pan_translation(change, get_detected_entities())
-            if translated:
-                set_detected_entities(translated)
-                log.debug(
-                    "rescan_translated",
-                    entity_count=len(translated),
-                    shift=[round(v) for v in change.shift],
-                    response=round(change.response, 3),
-                )
-                if overlay:
-                    overlay.show(translated, get_game_window_rect())
-                return
-            log.debug("rescan_pan_declined", reason=declined, response=round(change.response, 3))
-
-        entities = await _invoke_detector(detector, "detect_fast_multi", screenshot)
-        if (
-            detector.tracker
-            and detector._previous_entities
-            and len(entities) < len(detector._previous_entities) * ENTITY_DROP_RATIO
-        ):
-            detector.tracker.reset()
-            log.debug("tracker_reset", reason="camera_moved")
-        set_detected_entities(entities)
-        if overlay:
-            overlay.show(entities, get_game_window_rect())
-            log.debug("rescan_complete", entity_count=len(entities), mode="fast")
-
-    async def _rescan_full() -> None:
-        if overlay:
-            overlay.hide()
-        screenshot_full, _, _ = capture_screenshot(quality=85)
-        if frame_differ:
-            frame_differ.reset()
-        full_method = "detect" if config.adaptive_sahi else "detect_fast"
-        entities = await _invoke_detector(detector, full_method, screenshot_full)
-        if detector.tracker:
-            detector.tracker.reset()
-        set_detected_entities(entities)
-        if overlay:
-            overlay.show(entities, get_game_window_rect())
-        log.info("rescan_full_complete", entity_count=len(entities))
-
-    set_rescan_fn(_rescan)
-    set_rescan_full_fn(_rescan_full)
 
 
 async def _capture_screenshot(
@@ -276,47 +195,89 @@ async def _capture_screenshot(
     return screenshot, width, height
 
 
-async def _run_detection(
+async def detect_frame(
     detector: Detector,
+    differ: FrameDiffer | None,
     screenshot: bytes,
-    iteration: int,
-    alarm: bool,
-) -> list[DetectedEntity]:
-    """Run entity detection, choosing adaptive SAHI or standard mode."""
+) -> Sequence[object]:
+    """The cheapest view of this frame that is still true.
+
+    Run 2026_08_22_1 served 112 of 212 frames from the 2 rungs above the
+    detector. Every rung publishes to the entity cache `target_class` reads.
+    """
+    change = differ.compare(screenshot) if differ else None
+    if change is None:
+        return await _detected_frame(detector, screenshot)
+    if not change.changed:
+        return _unchanged_frame(detector)
+    if config.rescan_cache:
+        translated = _panned_frame(change)
+        if translated is not None:
+            return translated
+    return await _detected_frame(detector, screenshot)
+
+
+def _unchanged_frame(detector: Detector) -> Sequence[object]:
+    """Nothing moved on screen. Extrapolate, or keep what we had."""
+    tracker = detector.tracker
+    if tracker and tracker.get_confidence() > TRACKER_CONFIDENCE_THRESHOLD:
+        predicted = tracker.predict()
+        set_detected_entities(predicted)
+        log.debug("frame_predicted", entity_count=len(predicted))
+        return predicted
+    held = get_detected_entities()
+    log.debug("frame_unchanged", entity_count=len(held))
+    return held
+
+
+def _panned_frame(change: FrameChange) -> Sequence[object] | None:
+    """The view only panned, so shift the static map instead of re-detecting."""
+    translated, declined = _pan_translation(change, get_detected_entities())
+    if not translated:
+        log.debug("frame_pan_declined", reason=declined, response=round(change.response, 3))
+        return None
+    set_detected_entities(translated)
+    log.debug(
+        "frame_translated",
+        entity_count=len(translated),
+        shift=[round(v) for v in change.shift],
+    )
+    return translated
+
+
+async def _detected_frame(detector: Detector, screenshot: bytes) -> Sequence[object]:
+    """Pay for a detection, and own the catch: this is the only rung that fails
+    for a reason outside the process — no model, or a server that is down.
+
+    `detect_fast` is single-pass on both detectors. The remote's `detect()`
+    maps to /detect/sahi, which is bad for v6."""
+    # The cache, not `detector._previous_entities`: after a cheap rung the cache
+    # holds the current view, and it is public.
+    previous = get_detected_entities()
     try:
-        if config.adaptive_sahi:
-            force_full = iteration == 1 or iteration % config.full_sahi_interval == 0 or alarm
-            entities = await _invoke_detector(
-                detector,
-                "detect_adaptive",
-                screenshot,
-                force_full=force_full,
-            )
-        else:
-            # Single-pass. Use detect_fast: it is single-pass on BOTH the local and
-            # remote detectors. (The remote detector's detect() maps to /detect/sahi,
-            # which is bad for v6 — see Chapter 7 §7.4 — whereas detect_fast hits the
-            # single-pass /detect endpoint at imgsz.)
-            entities = await _invoke_detector(detector, "detect_fast", screenshot)
-        set_detected_entities(entities)
-        log.debug("detection_complete", entity_count=len(entities))
-        return entities
+        entities = await _invoke_detector(detector, "detect_fast", screenshot)
     except Exception as e:
         log.warning("detection_failed", error=str(e))
         clear_detected_entities()
         return []
+    if detector.tracker and previous and len(entities) < len(previous) * ENTITY_DROP_RATIO:
+        detector.tracker.reset()
+        log.debug("tracker_reset", reason="camera_moved")
+    set_detected_entities(entities)
+    log.debug("frame_detected", entity_count=len(entities))
+    return entities
 
 
-async def _classify_entities(
-    detected_entities: list,
+async def summarize_frame(
+    detected_entities: Sequence[object],
     screenshot: bytes,
-) -> tuple[str, dict]:
-    """Build entity summary and classify ownership of military units.
+) -> tuple[str, dict[str, tuple[Owner, float]]]:
+    """The frame as the LLM reads it: a summary line, plus who owns each unit.
 
-    The classifier is CPU-bound, so it runs in a thread: it was the last such
-    step left on the event loop.
+    The ownership classifier is CPU-bound, so it runs in a thread. It was the
+    last such step left on the event loop.
     """
-    ownership_results: dict = {}
+    ownership_results: dict[str, tuple[Owner, float]] = {}
     if not detected_entities:
         return "", ownership_results
 
@@ -326,10 +287,11 @@ async def _classify_entities(
         from .goals import THREAT_CLASSES
 
         ownership_results = await asyncio.to_thread(
-            classify_ownership, screenshot, detected_entities, THREAT_CLASSES
+            classify_ownership, screenshot, list(detected_entities), THREAT_CLASSES
         )
-    except Exception:
-        pass
+    except Exception as e:
+        # Ownership is an enrichment: the summary is still worth returning.
+        log.debug("ownership_classification_failed", error=str(e))
 
     entity_summary = build_entity_summary(
         detected_entities,
@@ -337,3 +299,14 @@ async def _classify_entities(
         ownership_results=ownership_results,
     )
     return entity_summary, ownership_results
+
+
+__all__ = [
+    "DETECTION_AVAILABLE",
+    "ENTITY_DISPLAY_LIMIT",
+    "STATIC_CLASSES",
+    "detect_frame",
+    "init_detector",
+    "init_frame_differ",
+    "summarize_frame",
+]

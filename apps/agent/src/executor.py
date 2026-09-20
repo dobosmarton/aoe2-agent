@@ -1776,7 +1776,7 @@ async def execute_action(action: dict[str, object] | Action) -> ActionResult:
         return ActionResult(False, f"execution error: {e}")
 
 
-def _as_dict(action: dict[str, object] | Action) -> dict[str, object]:
+def as_dict(action: dict[str, object] | Action) -> dict[str, object]:
     """Plain-dict view of an action for inspection (models are dumped)."""
     if isinstance(action, BaseModel):
         return cast("dict[str, object]", action.model_dump())
@@ -1816,7 +1816,7 @@ async def execute_actions(actions: Sequence[dict[str, object] | Action]) -> list
     results: list[ActionResult] = []
     camera_moved = False
     for action in actions:
-        preview = _as_dict(action)
+        preview = as_dict(action)
         if camera_moved and _uses_raw_coords_only(preview):
             log.warning("stale_coords_rejected", intent=preview.get("intent", ""))
             results.append(ActionResult(False, STALE_COORDS_DETAIL))

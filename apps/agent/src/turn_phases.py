@@ -2,14 +2,14 @@
 
 Owns the four pieces the game loop runs once per iteration:
 
-  - `_get_ground_commands`: hardcoded actions that run alongside the LLM call
+  - `get_ground_commands`: hardcoded actions that run alongside the LLM call
     (zoom on turn 1). Pure function of the iteration number.
-  - `_build_llm_context`: stitches memory + goals + entities into the prompt
+  - `build_llm_context`: stitches memory + goals + entities into the prompt
     string the executor sees. Mirrors `evaluation.context_builder._build_context`.
   - `record_llm_turn`: parses the LLM's response, strips the
     `[applied: ...]` memory-attribution prefix, snapshots state for reward
     computation, and returns `(actions, game_end_reason | None)`.
-  - `_execute_turn_actions`: runs the validated actions through the executor
+  - `execute_turn_actions`: runs the validated actions through the executor
     and records success/failure feedback into memory, with a hardcoded
     fallback when the LLM returns no actions.
 """
@@ -89,7 +89,7 @@ def _extract_applied_memories(
 INITIAL_ZOOM_CLICKS = 5
 
 
-def _get_ground_commands(iteration: int) -> list[dict]:
+def get_ground_commands(iteration: int) -> list[dict]:
     """Return hardcoded actions injected BEFORE LLM actions each turn."""
     if iteration != 1:
         return []
@@ -106,7 +106,7 @@ def _get_ground_commands(iteration: int) -> list[dict]:
 
 # Age-dependent population thresholds for maintenance villager queuing.
 # Beyond these caps, stop queuing to save food for age-up research.
-def _build_llm_context(
+def build_llm_context(
     memory: AgentMemory,
     goal_manager: GoalManager,
     entity_summary: str,
@@ -242,7 +242,7 @@ def record_llm_turn(
             iteration=iteration,
             consecutive_failures=streak,
             detail=reasoning[:200],
-            hint="every LLM path is failing; the reactive tier alone cannot build a mill",
+            hint="the tactical LLM is failing; routine TypeSafe policy remains active",
         )
 
     loaded = set(memory.memories_loaded)
@@ -431,7 +431,7 @@ def _fallback_actions(memory: AgentMemory) -> list[dict[str, object]]:
     ]
 
 
-async def _execute_turn_actions(
+async def execute_turn_actions(
     actions: list,
     iteration: int,
     memory: AgentMemory,
@@ -473,3 +473,16 @@ async def _execute_turn_actions(
             fb_results = await execute_actions(fallback_actions)
             fb_success = sum(1 for r in fb_results if r.success)
             memory.record_action_results(fb_success, len(fallback_actions))
+
+
+__all__ = [
+    "INITIAL_ZOOM_CLICKS",
+    "blocked_actions_line",
+    "build_llm_context",
+    "castle_gate_line",
+    "check_game_over",
+    "execute_turn_actions",
+    "get_ground_commands",
+    "known_buildings_line",
+    "record_llm_turn",
+]

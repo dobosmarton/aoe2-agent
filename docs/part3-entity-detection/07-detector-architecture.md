@@ -2,7 +2,7 @@
 
 The entity detection system runs YOLO inference on game screenshots, producing labeled bounding boxes with semantic IDs like `sheep_0` or `town_center_0`. It supports three backends (PyTorch, ONNX, Mock), a 60-class taxonomy, Kalman filter-based object tracking, and (optional, currently disabled) SAHI tiling.
 
-> **What the agent actually runs (v9).** A **single forward pass at `imgsz=1280`** — the model's training resolution. `config.detection_imgsz=1280` and `config.adaptive_sahi=False`; the per-turn detection in `apps/agent/src/detection_phase.py` builds the detector with `use_sahi=config.adaptive_sahi` and calls `detect_fast` (mid-turn rescans use it too, since `detect_fast_multi` measured worse at native resolution — see §7.3). SAHI tiling (§7.4, §7.11) is still implemented but **off by default**, because on real screenshots it *lowers* accuracy (§7.4 — Why single-pass at training res). The SAHI sections below document a path the agent keeps for a future model retrained at SAHI-native scale, not the deployed one.
+> **What the agent actually runs (v9).** A **single forward pass at `imgsz=1280`** — the model's training resolution. `config.detection_imgsz=1280`, and `init_detector` in `apps/agent/src/detection_phase.py` pins `use_sahi=False`. Every frame calls `detect_fast` through the one ladder in `detect_frame` (`detect_fast_multi` measured worse at native resolution — see §7.3). There is no `adaptive_sahi` config flag: a flag cannot fix a scale mismatch, so re-enabling SAHI means a code change plus a SAHI-aware retrain. SAHI tiling (§7.4, §7.11) is still implemented in the detection package, but the agent never calls it, because on real screenshots it *lowers* accuracy (§7.4 — Why single-pass at training res). The SAHI sections below document a path the agent keeps for a future model retrained at SAHI-native scale, not the deployed one.
 
 <aside class="prereqs">
 
@@ -62,7 +62,7 @@ Defined at `packages/detection/src/inference/detector.py`. Key initialization pa
 | `class_names` | loaded from `classes.yaml` | 60-class name list (PyTorch overrides with `model.names`) |
 | `use_mock` | `False` | Use mock detections for testing |
 | `imgsz` | `1280` | Constructor default. The agent runs at **`1280`** via `config.detection_imgsz` — matches v9's training resolution |
-| `use_sahi` | `True` | Constructor default. The agent passes `use_sahi=config.adaptive_sahi`, i.e. **`False`** — single-pass, no tiling |
+| `use_sahi` | `True` | Constructor default. The agent pins **`False`** — single-pass, no tiling |
 | `tracker` | auto-init | Kalman filter tracker for persistent IDs (see §7.9) |
 
 ### Model Loading
@@ -84,10 +84,10 @@ The detector provides four detection methods:
 
 | Method | Tiles | Relative cost | When Used |
 |--------|-------|---------------|-----------|
-| `detect_fast()` | 1 (no SAHI) | cheapest — one forward pass | **The deployed path**, per-turn and mid-turn rescan (`adaptive_sahi=False`) |
+| `detect_fast()` | 1 (no SAHI) | cheapest — one forward pass | **The deployed path**, every frame |
 | `detect_fast_multi()` | 2 (full + centre crop) | ~2x `detect_fast` | Unused — loses to single-pass at native resolution |
-| `detect_adaptive()` | ~3-8 (ROI only) | moderate | Only when `config.adaptive_sahi=True` (off by default) |
-| `detect()` | ~18 (full SAHI) | most expensive (an order of magnitude slower) | Only when `adaptive_sahi=True`, on forced full scans |
+| `detect_adaptive()` | ~3-8 (ROI only) | moderate | Not called by the agent — library capability only |
+| `detect()` | ~18 (full SAHI) | most expensive (an order of magnitude slower) | Not called by the agent — library capability only |
 
 All four methods apply NMS and persistent ID assignment (Kalman tracker or greedy IoU fallback) before returning results. Exact latency is hardware- and backend-dependent (ONNX on the deploy VM vs. PyTorch on a dev Mac differ by an order of magnitude), so the table ranks the modes rather than pinning millisecond figures. `detect_fast_multi()` adds a center-crop second pass to recover small objects without paying for full tiling, but it is **no longer used by any deployed path**. Scored on 32 real screenshots at the native 3024x1964 the agent actually captures (rebuild the split with `testing/build_native_val.py`), it loses to single-pass: F1 0.622 (P 0.583 / R 0.666) against 0.693 (P 0.735 / R 0.655). Halving the frame through the same network input shows objects at 2x the training scale, so the crop pass trades 13 extra true positives for 291 extra false ones — the SAHI scale mismatch (§7.4) in miniature.
 
@@ -107,7 +107,7 @@ The matching rule matters more than any single figure, and the earlier v6/v7 mod
 
 Push that model *above* its 640 training scale and accuracy falls; tile it with SAHI and it collapses. The lesson transfers directly: v9 is trained at 1280, so **1280 — not 640 — is *its* native scale**, and that is exactly what the agent runs.
 
-SAHI is still off, for the same scale reason. Tiling a 3024px screenshot into 640 crops shows the model objects at roughly **2.4× the size** they had at v9's 1280 training (a sheep that trains as ~21px appears ~50px in a native 640 tile). The model never saw entities that large, so it misses or hallucinates them and real F1 collapses. This is why the agent pins `config.detection_imgsz=1280` and `config.adaptive_sahi=False`.
+SAHI is still off, for the same scale reason. Tiling a 3024px screenshot into 640 crops shows the model objects at roughly **2.4× the size** they had at v9's 1280 training (a sheep that trains as ~21px appears ~50px in a native 640 tile). The model never saw entities that large, so it misses or hallucinates them and real F1 collapses. This is why the agent pins `config.detection_imgsz=1280` and `use_sahi=False`.
 
 > **The SAHI code stays — disabled.** The tiling machinery below (§7.4.1, §7.11) is fully implemented and tested. It is the right tool only once the model is retrained at a resolution whose SAHI tiles match the training scale; until then it is off. Treat the SAHI sections as "built, measured, parked," not as the current path.
 
@@ -300,11 +300,11 @@ def get_detector(model_path=None, use_mock=False, imgsz=1280) -> EntityDetector:
     return _instance
 ```
 
-The per-turn detection phase (`apps/agent/src/detection_phase.py`) calls `get_detector(use_mock=False, imgsz=config.detection_imgsz, use_sahi=config.adaptive_sahi)` once — i.e. `imgsz=1280`, `use_sahi=False`. The same instance is reused for all subsequent detection calls, preserving the Kalman tracker state across frames.
+The per-turn detection phase (`apps/agent/src/detection_phase.py`) calls `get_detector(use_mock=False, imgsz=config.detection_imgsz, use_sahi=False)` once — i.e. `imgsz=1280`, no tiling. The same instance is reused for all subsequent detection calls, preserving the Kalman tracker state across frames.
 
 ## 7.11 Adaptive SAHI (Smart Tiling) — disabled by default
 
-> **Off in v9.** Everything in this section is gated behind `config.adaptive_sahi`, which defaults to `False` (see §7.4 for why). The agent does **not** run adaptive SAHI; this documents the parked path for a future model retrained at SAHI-native scale.
+> **Off in v9.** The agent never calls `detect_adaptive` (see §7.4 for why); nothing in this section runs; this documents the parked path for a future model retrained at SAHI-native scale.
 
 Full SAHI tiles the entire screenshot (~18 tiles for 3024×1672). Most tiles cover static terrain with no entities. Adaptive SAHI reduces this to ~3-8 tiles by running SAHI only on regions of interest around detected entities.
 
@@ -347,16 +347,13 @@ Phase 1: Fast Scan        Phase 2: Targeted SAHI
 Adaptive SAHI reverts to full SAHI via `detect()` when:
 
 - **First iteration**: No previous entities to guide ROI placement
-- **Periodic interval**: Every `full_sahi_interval` turns (default 5) to catch entities the fast scan may consistently miss
+- **Periodic interval**: Every Nth turn, to catch entities the fast scan may consistently miss
 - **Alarm**: When enemy threats were detected on the previous turn (need maximum detection coverage)
 
 ```python
-# In detection_phase.py:
-force_full = (
-    iteration == 1
-    or iteration % config.full_sahi_interval == 0
-    or alarm
-)
+# The shape the agent used before it dropped SAHI. `full_sahi_interval` was an
+# agent config field; a SAHI-native model would reintroduce both.
+force_full = iteration == 1 or iteration % full_sahi_interval == 0 or alarm
 detected_entities = detector.detect_adaptive(screenshot, force_full=force_full)
 ```
 
@@ -364,9 +361,7 @@ detected_entities = detector.detect_adaptive(screenshot, force_full=force_full)
 
 | Parameter | Default | Purpose |
 |-----------|---------|---------|
-| `config.adaptive_sahi` | **`False`** | Master switch for all SAHI. `False` ⇒ single-pass @1280 (the deployed path); `True` ⇒ adaptive SAHI with full-SAHI fallback |
 | `config.detection_imgsz` | `1280` | Inference resolution — pinned to v9's training resolution |
-| `config.full_sahi_interval` | `5` | Force full SAHI scan every N turns (only consulted when `adaptive_sahi=True`) |
 
 ### Relative cost (when SAHI is enabled)
 
@@ -423,7 +418,7 @@ See [Chapter 8 — Training Pipeline](./08-training-pipeline.md) for the sim-to-
 - 60-class taxonomy organized by category (resources, buildings, units, siege, naval, animals)
 - Three backends: PyTorch (ultralytics), ONNX Runtime, Mock
 - Resolves the model as `aoe2_yolo_v9.onnx` (preferred, the deployed artifact), else `aoe2_yolo_v9.pt`, else mock — YOLO26n, NMS-free, no legacy version fallback
-- **Deployed path: single forward pass at `imgsz=1280`** (`detect_fast`, `adaptive_sahi=False`) — matches v9's training resolution; beats off-scale inference and SAHI on real F1
+- **Deployed path: single forward pass at `imgsz=1280`** (`detect_fast`, no tiling) — matches v9's training resolution; beats off-scale inference and SAHI on real F1
 - **SAHI (full + adaptive)**: implemented and tested but **disabled** — scale mismatch lowers real accuracy; parked for a future SAHI-native retrain
 - **ONNX batched SAHI**: all tiles in one inference call (~3-5x faster than sequential) — only relevant when SAHI is re-enabled
 - **Kalman filter tracking**: 6D state with Hungarian algorithm matching for stable entity IDs

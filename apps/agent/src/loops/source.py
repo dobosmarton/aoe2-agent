@@ -15,11 +15,7 @@ from typing import TYPE_CHECKING, Protocol
 import structlog
 
 from ..config import config
-from ..detection_phase import (
-    _classify_entities,
-    _register_rescan_callbacks,
-    _run_detection,
-)
+from ..detection_phase import detect_frame, summarize_frame
 from ..executor import execute_actions
 from ..providers.strategist import read_hud_readings
 from ..screen import capture_screenshot, save_screenshot
@@ -38,6 +34,7 @@ if TYPE_CHECKING:
     from ..executor import ActionResult
     from ..models import Action
     from ..overlay import DetectionOverlay
+    from ..resource_ocr import ResourceReadings
     from ..turn_timing import TickTimings
 
     # Mirrors `detection_phase.Detector` — local weights or the remote server.
@@ -119,32 +116,13 @@ class GameSource:
     ) -> None:
         self._detector = detector
         self._overlay = overlay
+        self._differ = frame_differ
         self._screenshots_dir = screenshots_dir
-        if detector is not None:
-            # For the combat tool loop's mid-turn rescan. The act loop never
-            # asks for one (plan 3.5).
-            _register_rescan_callbacks(detector, overlay, frame_differ)
 
     async def capture(self, tick: int, timings: TickTimings) -> Sighting:
-        with timings.phase("capture"):
-            if self._overlay:
-                self._overlay.hide()
-            screenshot, width, height, captured_at = await asyncio.to_thread(_grab)
-            self._save_sample(screenshot, tick)
-
-        with timings.phase("ocr"):
-            hud_readings, calib = await read_hud_readings(screenshot, turn=tick)
-        if self._overlay is not None and calib is not None:
-            self._overlay.set_ocr_fields(calib.field_rects())
-
-        with timings.phase("detect"):
-            entities: list[object] = []
-            if self._detector:
-                entities = await _run_detection(self._detector, screenshot, tick, alarm=False)
-            if self._overlay is not None:
-                self._overlay.show(entities, get_game_window_rect())
-            entity_summary, ownership = await _classify_entities(entities, screenshot)
-
+        screenshot, width, height, captured_at = await self._screen(tick, timings)
+        hud_readings = await self._hud(screenshot, tick, timings)
+        entities, entity_summary, ownership = await self._entities(screenshot, timings)
         return Sighting(
             frame=Perception(
                 screenshot=screenshot,
@@ -158,6 +136,36 @@ class GameSource:
             ),
             ownership=ownership,
         )
+
+    async def _screen(self, tick: int, timings: TickTimings) -> tuple[bytes, int, int, float]:
+        """Grab the frame. The overlay hides first, so it stays out of the shot."""
+        with timings.phase("capture"):
+            if self._overlay:
+                self._overlay.hide()
+            screenshot, width, height, captured_at = await asyncio.to_thread(_grab)
+            self._save_sample(screenshot, tick)
+        return screenshot, width, height, captured_at
+
+    async def _hud(self, screenshot: bytes, tick: int, timings: TickTimings) -> ResourceReadings:
+        """Read the resource bar, and show the OCR boxes it calibrated."""
+        with timings.phase("ocr"):
+            hud_readings, calib = await read_hud_readings(screenshot, turn=tick)
+        if self._overlay is not None and calib is not None:
+            self._overlay.set_ocr_fields(calib.field_rects())
+        return hud_readings
+
+    async def _entities(
+        self, screenshot: bytes, timings: TickTimings
+    ) -> tuple[list[object], str, Mapping[str, tuple[Owner, float]]]:
+        """Detect, then tag ownership. Empty without a detector."""
+        with timings.phase("detect"):
+            entities: list[object] = []
+            if self._detector:
+                entities = list(await detect_frame(self._detector, self._differ, screenshot))
+            if self._overlay is not None:
+                self._overlay.show(entities, get_game_window_rect())
+            entity_summary, ownership = await summarize_frame(entities, screenshot)
+        return entities, entity_summary, ownership
 
     def _save_sample(self, screenshot: bytes, tick: int) -> None:
         """Keep one frame in `_SCREENSHOT_SAMPLE`, for the run's image trail."""

@@ -1,6 +1,6 @@
 """Build the LLM context string from a scenario fixture.
 
-Mirrors `gameplay_agent.game_loop._build_llm_context` so a fixture's `inputs:`
+Mirrors `gameplay_agent.game_loop.build_llm_context` so a fixture's `inputs:`
 block produces the same shape of prompt the agent sees in production. Each
 helper renders one section (entities → goals → resources → state → recent
 turns) and `_build_context` stitches them together in the production order.
@@ -158,7 +158,7 @@ def _apply_strategist_overrides(inputs: dict) -> dict:
 
 
 def _build_context(fixture: dict) -> str:
-    """Assemble the context string the same way game_loop._build_llm_context does.
+    """Assemble the context string the same way game_loop.build_llm_context does.
 
     Order matches the production assembly: entities → goals → resources → state → recent.
     """

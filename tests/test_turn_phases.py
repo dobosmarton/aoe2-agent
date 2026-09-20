@@ -3,7 +3,7 @@
 These cover the pure (or near-pure) helpers that drive a single iteration:
 applied-memory parsing, hardcoded ground/maintenance commands, LLM context
 assembly. The async/state-mutating pieces (`record_llm_turn`,
-`_execute_turn_actions`) are exercised indirectly via the evaluation runner;
+`execute_turn_actions`) are exercised indirectly via the evaluation runner;
 direct tests for them would need extensive AgentMemory + GoalManager mocking
 without much marginal coverage gain.
 """
@@ -18,12 +18,12 @@ from gameplay_agent.memory import AgentMemory
 from gameplay_agent.turn_phases import (
     _EXECUTOR_OUTAGE_STREAK,
     INITIAL_ZOOM_CLICKS,
-    _build_llm_context,
     _extract_applied_memories,
     _fallback_actions,
-    _get_ground_commands,
     blocked_actions_line,
+    build_llm_context,
     castle_gate_line,
+    get_ground_commands,
     known_buildings_line,
     record_llm_turn,
 )
@@ -109,48 +109,48 @@ def test_extract_applied_memories_drops_empty_tokens():
 
 
 # ---------------------------------------------------------------------------
-# _get_ground_commands
+# get_ground_commands
 # ---------------------------------------------------------------------------
 
 
 def test_ground_commands_only_run_on_first_iteration():
     """The zoom-in + auto-scout sequence belongs at game start, not every turn."""
-    cmds = _get_ground_commands(iteration=1)
+    cmds = get_ground_commands(iteration=1)
     assert len(cmds) > 0
 
 
 @pytest.mark.parametrize("iteration", [2, 5, 100])
 def test_ground_commands_empty_after_first_iteration(iteration: int):
-    assert _get_ground_commands(iteration) == []
+    assert get_ground_commands(iteration) == []
 
 
 def test_ground_commands_first_iter_zooms_in():
-    cmds = _get_ground_commands(iteration=1)
+    cmds = get_ground_commands(iteration=1)
     types = [c["type"] for c in cmds]
     assert "scroll" in types
 
 
 def test_ground_commands_first_iter_uses_initial_zoom_constant():
     """Constant change should propagate into the emitted scroll action."""
-    cmds = _get_ground_commands(iteration=1)
+    cmds = get_ground_commands(iteration=1)
     scroll = next(c for c in cmds if c["type"] == "scroll")
     assert scroll["clicks"] == INITIAL_ZOOM_CLICKS
 
 
 def test_ground_commands_first_iter_includes_auto_scout():
     """Auto-scout (g hotkey) is the second purpose of the ground sequence."""
-    cmds = _get_ground_commands(iteration=1)
+    cmds = get_ground_commands(iteration=1)
     keys = [c.get("key") for c in cmds if c["type"] == "press"]
     assert "g" in keys
 
 
 # ---------------------------------------------------------------------------
-# _build_llm_context
+# build_llm_context
 # ---------------------------------------------------------------------------
 
 
 class _FakeGoalManager:
-    """Minimal stub matching the slice of GoalManager that _build_llm_context uses."""
+    """Minimal stub matching the slice of GoalManager that build_llm_context uses."""
 
     def __init__(self, goal_text: str = "", resource_text: str = "") -> None:
         self._goal_text = goal_text
@@ -166,14 +166,14 @@ class _FakeGoalManager:
 def test_build_llm_context_includes_memory_context_alone():
     memory = AgentMemory()
     gm = _FakeGoalManager()
-    context = _build_llm_context(memory, gm, entity_summary="")
+    context = build_llm_context(memory, gm, entity_summary="")
     assert isinstance(context, str)
 
 
 def test_build_llm_context_prepends_resource_block():
     memory = AgentMemory()
     gm = _FakeGoalManager(resource_text="## Resource Status\n- Food: 200")
-    context = _build_llm_context(memory, gm, entity_summary="")
+    context = build_llm_context(memory, gm, entity_summary="")
     assert context.startswith("## Resource Status")
 
 
@@ -181,7 +181,7 @@ def test_build_llm_context_prepends_goals_above_resources():
     """Goals come before resources so the LLM reads its objectives first."""
     memory = AgentMemory()
     gm = _FakeGoalManager(goal_text="## Goals\n- gather food", resource_text="## Res\n- 200 food")
-    context = _build_llm_context(memory, gm, entity_summary="")
+    context = build_llm_context(memory, gm, entity_summary="")
     goal_pos = context.find("## Goals")
     res_pos = context.find("## Res")
     assert 0 <= goal_pos < res_pos
@@ -192,7 +192,7 @@ def test_build_llm_context_includes_entity_summary_block():
     memory = AgentMemory()
     gm = _FakeGoalManager()
     summary = "  sheep_0: sheep at (100,100) [90%]"
-    context = _build_llm_context(memory, gm, entity_summary=summary)
+    context = build_llm_context(memory, gm, entity_summary=summary)
     assert "Detected Entities (from YOLO)" in context
     assert "sheep_0: sheep" in context
 
@@ -200,14 +200,14 @@ def test_build_llm_context_includes_entity_summary_block():
 def test_build_llm_context_omits_entity_block_when_empty():
     memory = AgentMemory()
     gm = _FakeGoalManager()
-    context = _build_llm_context(memory, gm, entity_summary="")
+    context = build_llm_context(memory, gm, entity_summary="")
     assert "Detected Entities" not in context
 
 
 def test_build_llm_context_omits_goal_block_when_empty():
     memory = AgentMemory()
     gm = _FakeGoalManager(goal_text="", resource_text="## Res\n- food")
-    context = _build_llm_context(memory, gm, entity_summary="")
+    context = build_llm_context(memory, gm, entity_summary="")
     # Goal text is empty so it shouldn't be glued in (which would add a stray separator)
     # The resource section is still present.
     assert "## Res" in context
@@ -259,7 +259,7 @@ def test_build_llm_context_includes_known_buildings(build_gates) -> None:
     ex.record_confirmed_buildings(["mill"])
     memory = AgentMemory()
     gm = _FakeGoalManager()
-    context = _build_llm_context(memory, gm, entity_summary="mill_0: mill at (100,100)")
+    context = build_llm_context(memory, gm, entity_summary="mill_0: mill at (100,100)")
     assert "Known buildings: mill=1" in context
 
 
