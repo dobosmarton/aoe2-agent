@@ -90,7 +90,7 @@ See also the [Glossary](./glossary.md) for one-line definitions of terms used th
 | # | Chapter | Description | Key files |
 |---|---|---|---|
 | 01 | [System Overview](./part1-architecture/01-system-overview.md) | Three-role design, graceful degradation, async architecture | `config.py`, `main.py` |
-| 02 | [Game Loop Pipeline](./part1-architecture/02-game-loop-pipeline.md) | Independent perceive, policy, act and deliberate clocks | `game_loop.py`, `loops/`, `policy/`, `goals.py`, `screen.py` |
+| 02 | [Game Loop Pipeline](./part1-architecture/02-game-loop-pipeline.md) | Perceive, act-with-policy, and deliberate clocks | `game_loop.py`, `loops/`, `policy/`, `goals.py`, `screen.py` |
 | 03 | [Action Model & Execution](./part1-architecture/03-action-model-and-execution.md) | Pydantic action types, target_id/target_class resolution | `models.py`, `executor.py` |
 | — | [Seven-Round Run Map](./part1-architecture/14-seven-round-run-map.md) | Per-step timing table for the first 7 rounds; async-strategist and loop-delay analysis. Deep dive behind chapter 02. | `game_loop.py` |
 

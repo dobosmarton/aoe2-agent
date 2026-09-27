@@ -74,7 +74,7 @@ Entries are organized alphabetically. Most are followed by a short link of the f
 
 ## R
 
-- **Rule fallback** — The deterministic degraded-service path used when TypeSafe policy advice is missing, stale, uncertain, or unavailable. It is not the primary routine actor. → [Chapter 2 §2.1 Step 9](./part1-architecture/02-game-loop-pipeline.md).
+- **Rule fallback** — The deterministic degraded-service path used when same-frame TypeSafe policy advice times out, is uncertain, or is unavailable. It is not the primary routine actor. → [Chapter 2 §2.1 Step 9](./part1-architecture/02-game-loop-pipeline.md).
 - **Redis Streams** — A Redis data structure (`XADD` / `XREAD`) that behaves like a durable, replayable, consumer-group-aware log. Our cross-process broker backend. → [Appendix B](./appendix/02-event-brokers-and-redis-streams.md).
 - **Reflective prompt mutation** — Proposing prompt edits by reasoning over full game *traces* (turn-by-turn reasoning, actions, verification) plus the per-component score breakdown, rather than over summary metrics alone. → [Chapter 23 — The mutator](./part8-autoresearch/23-prompt-mutation-and-memory.md).
 - **RTC (turn pipelining)** — Request-to-completion overlap: a routine turn launches the *next* executor plan as a background task and executes the previous turn's committed head while it computes, hiding the LLM roundtrip. → [Chapter 2 §2.1 Step 9](./part1-architecture/02-game-loop-pipeline.md).

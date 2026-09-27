@@ -1,6 +1,6 @@
 # Chapter 1: System Overview
 
-The AoE2 LLM Arena agent plays Age of Empires II autonomously using three AI roles. A strategist reads the resource bar via local OCR and sets goals; TypeSafe System One selects bounded routine economic actions; an executor handles tactical and exceptional situations from YOLO-detected entities. No game API, no memory-mapped data — the agent perceives only pixels, and every AI input is text or typed state.
+The AoE2 LLM Arena agent plays Age of Empires II autonomously using three AI roles. Local OCR and detection publish immutable observations. A strategist sets goals and allocation; TypeSafe System One selects bounded routine economy, age-up, and basic military actions; an executor handles combat and bounded recovery. No game API or memory-mapped data is used, and no screenshot is sent to a model.
 
 <aside class="prereqs">
 
@@ -8,15 +8,15 @@ Python 3 and the `async`/`await` mental model. If `asyncio` is new, see [Glossar
 
 </aside>
 
-## 1.1 Two-Tier Architecture
+## 1.1 Decision Architecture
 
-The agent splits decision-making into two models:
+The agent runs three concurrent loops—perception, actor-with-policy, and deliberate work—over one action catalog and per-game purchase ledger:
 
-**Strategist (Sonnet)** — Runs every 10 turns (or on alarm). Reads resource values, population, and age from the resource bar **locally via OCR** (`resource_ocr.py`, RapidOCR) — no screenshot is sent to the model; its prompt is text-only. Creates 3-5 prioritized goals and caches resource readings for the executor.
+**Strategist** — Periodically proposes goals and resource allocation from locally observed state. It cannot modify observed resources, population, age, or idle status.
 
-**Executor (Sonnet)** — Runs every turn. Receives only text: YOLO entity list, cached resource readings, active goals, memory context, and game knowledge. Returns structured actions (clicks, key presses) validated as Pydantic models. `build` is a **coordinate-free** action — the model picks the building, the executor auto-places it near the Town Center — and a no-actions turn falls back to building a house when housed, so the economy never freezes at the population cap. Routine turns take a fast single-shot call; combat/housing turns take an agentic tool loop (see [Chapter 4 §4.3](../part2-llm-integration/04-provider-pattern.md)).
+**TypeSafe policy** — Once per ordinary frame, chooses a named action and allocation focus from a feasible catalog. The actor awaits advice for up to two seconds, then revalidates it against the latest observation under the input lock. A newer frame alone does not invalidate a useful choice. Invalid, low-confidence, timed-out, or failed advice uses a deterministic catalog fallback.
 
-The split separates concerns: the strategist owns slow, periodic goal-setting; the executor owns rapid, per-turn tactics. Both tiers are text-only — the strategist reads the HUD via local OCR, the executor reads the YOLO entity list. Both run over an OpenAI-compatible wire by default (Claude remains one env var away), on separate models: the executor takes the fast `gpt-5.6-luna`, the strategist the stronger `gpt-5.6-terra`, and a per-call `effort` knob (default `low`) keeps the executor fast.
+**Deliberate executor** — Runs only for combat alarms, tactical handoffs, or recovery after three failed actions/settlements or a 30-second food stall. Recovery has a three-tool limit and only catalog-guarded economic tools. Each purchase reserves resources before the spending input; later observations settle it. Camera-moving input requires a fresh frame before any dependent click.
 
 ## 1.2 Component Map
 
@@ -104,6 +104,7 @@ Configuration uses a Pydantic `BaseModel` with environment variable overrides (`
 | `llm_api_key` | `AOE2_LLM_API_KEY` | `""` | Model API authentication |
 | `typesafe_api_key` | `TYPESAFE_API_KEY` | `""` | Required routine policy authentication |
 | `typesafe_model` | `AOE2_TYPESAFE_MODEL` | `jev-1.13.0` | System One policy model |
+| `policy_timeout` | `AOE2_POLICY_TIMEOUT` | `2.0` | Bounded policy wait before latest-frame revalidation |
 | `llm_wire` | `AOE2_LLM_WIRE` | `openai` | Adapter: `openai`, `zen` or `anthropic` |
 | `llm_base_url` | `AOE2_LLM_BASE_URL` | `""` | Endpoint override; empty uses the adapter's own |
 | `model` | `AOE2_MODEL` | `gpt-5.6-luna` | Executor model (fast; runs every turn) |
@@ -115,10 +116,10 @@ Configuration uses a Pydantic `BaseModel` with environment variable overrides (`
 | `detection_imgsz` | — | `1280` | YOLO inference resolution (matches v9's training resolution) |
 | `screenshot_quality` | — | `85` | JPEG quality (1-100) |
 | `ocr_backend` | `AOE2_OCR_BACKEND` | `rapidocr` | Resource-bar OCR backend (`rapidocr`/`template`/`tesseract`) |
-| `loop_delay` | `AOE2_LOOP_DELAY` | `0.3` | Seconds between iterations |
+| `perceive_interval` | `AOE2_PERCEIVE_INTERVAL` | `0.5` | Seconds between perception frames |
 | `action_delay` | — | `0.05` | Seconds between individual actions |
-| `pipeline_commit_max` | `AOE2_PIPELINE_COMMIT_MAX` | `2` | Actions committed per pipelined (routine) turn; the tail is discarded |
 | `save_screenshots` | `AOE2_SAVE_SCREENSHOTS` | `true` | Log screenshots to disk |
+| `log_dir` | — | `logs` | Screenshot and log output directory |
 
 The 3 model defaults follow `AOE2_LLM_WIRE`, because a model name belongs to its vendor: the `anthropic` wire serves `claude-haiku-4-5` to the executor and `claude-sonnet-5` to the strategist. `config._MODELS_BY_WIRE` holds the table. An env override still wins per role.
 
@@ -129,7 +130,6 @@ ValueError: unknown AOE2_LLM_WIRE='zzz'; expected one of 'anthropic', 'openai', 
 ```
 
 The valid set is the `WireName` Literal in `config.py`, and the `--wire` CLI choices derive from it. See [Provider Pattern §4.2](../part2-llm-integration/04-provider-pattern.md) for how the factories turn a name into a client.
-| `log_dir` | — | `logs` | Screenshot and log output directory |
 
 A global singleton `config = Config.from_env()` is created at module load time and imported throughout the codebase.
 
@@ -147,12 +147,12 @@ pyautogui calls are synchronous but fast (sub-millisecond per click), so they do
 
 <aside class="concept" data-title="Async-first architecture (why one event loop, not threads)">
 
-The agent is built on a single asyncio event loop, not threads or processes. The reason is **structural concurrency without locks**: every coroutine runs to the next `await` before yielding, so two coroutines reading and writing the same in-memory data (the entity cache, the goal manager, the memory deque) can never interleave mid-statement. No `threading.Lock`, no race conditions on shared state, no `asyncio.to_thread` for the hot path.
+The agent runs three tasks on one asyncio event loop: perception publishes immutable frames; the actor awaits one bounded TypeSafe choice and revalidates it against the latest frame; deliberate work handles combat, tactical handoff, and recovery. The actor and deliberate task share an `asyncio.Lock` around game input. Perception can still run while input is in progress, so purchase records retain both observation and input revisions. Screen capture is dispatched with `asyncio.to_thread`.
 
 Two patterns recur:
 
 - **`await foo()` for sequential work** — the most common shape. You're waiting on the result before continuing.
-- **`asyncio.create_task(foo())` for fire-and-forget parallelism** — you want the work to run *while* something else proceeds, and you'll await the result later (or never). The strategist call in §2.1 Step 7 is the canonical example: the loop dispatches the strategist into the background and continues with the reactive tier + executor on the main path, then awaits the strategist result at cleanup. Routine turns lean on the same pattern for RTC pipelining — the next turn's executor plan computes in the background while the current committed head executes.
+- **`asyncio.create_task(foo())` for owned background work** — the strategist updates goals while perception and routine choices continue. Shutdown cancels and awaits this task and closes the policy and executor providers.
 
 The single-loop invariant breaks the moment you call into blocking code (the synchronous `pyautogui.click()` is fast enough that we accept the block; a sync database driver wouldn't be). For genuine background CPU work you'd use `loop.run_in_executor` to dispatch to a thread pool; the broker uses `loop.call_soon_threadsafe` to marshal CLI cross-thread publishes back onto the main loop — see [Appendix B §B.6](../appendix/02-event-brokers-and-redis-streams.md).
 
@@ -162,14 +162,14 @@ The single-loop invariant breaks the moment you call into blocking code (the syn
 
 Structured logging via structlog with colored console output, configured in `apps/agent/src/main.py`.
 
-Key log events: `iteration_start`, `screenshot_captured`, `detection_complete`, `strategist_response`, `strategist_goals_updated`, `llm_response`, `actions_executed`, `routine_decided`, `policy_rule_stale`, `pipeline_head_committed`, `action_verification`, `alarm_triggered`, `turn_reward`.
+Key log events: `strategist_goals_updated`, `policy_advice_outcome`, `act_decided`, `act_execution_outcome`, `action_outcome`, `frame_refresh_timed_out`, and `alarm_triggered`. Actor logs include source and execution ticks, revalidation reason, input revision, action ID, reservations, and final outcome.
 
 ---
 
 ## Summary
 
-- Two-tier architecture: Sonnet strategist (local OCR, goals) + Sonnet executor (text-only, actions; single-shot routine turns + tool loop for combat)
-- TypeSafe selects routine actions from code-reviewed feasible candidates; deterministic rules are the degraded-service fallback, and entity-affecting actions are verified by re-detection
+- Three-loop architecture: perception owns observed facts, TypeSafe selects routine actions, and deliberate work handles tactics and bounded recovery while the strategist updates goals.
+- TypeSafe selects routine actions from one catalog; deterministic fallback and deliberate economic tools share its feasibility rules. The ledger records pending purchases and observed outcomes, while re-detection and HUD changes provide confirmation.
 - Detection is practically required for useful gameplay; game knowledge and window management are truly optional
 - Pydantic for config and validation, structlog for observability, asyncio for concurrency
 - Goal-driven gameplay with alarm system for emergency defense

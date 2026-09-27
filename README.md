@@ -1,6 +1,6 @@
 # AoE2 LLM Agent
 
-An AI agent that plays Age of Empires 2: Definitive Edition using three AI roles: a strategist sets goals, TypeSafe System One chooses routine economic actions, and an executor handles exceptional or tactical situations. Every role receives text derived from local OCR and YOLO; no screenshot is sent to a model.
+An AI agent that plays Age of Empires 2: Definitive Edition using three AI roles: a strategist sets goals, TypeSafe System One chooses routine economy, age-up, and basic military actions, and an executor handles combat and bounded recovery. Every role receives text derived from local OCR and YOLO; no screenshot is sent to a model.
 
 ## Architecture
 
@@ -10,9 +10,9 @@ Screenshot → Local OCR (RapidOCR) → Resource Readings (text)
                                     ↓
 Resource Readings → Strategist (LLM, text) → Goals
                                     ↓
-Entity List + Goals + Resources → TypeSafe policy → Routine action
+Immutable observed snapshot + goals + action ledger → TypeSafe policy → Named action
                                     ↓
-Entity List + Goals + Resources → Executor (LLM, text) → Tactical actions
+Alarm / tactical handoff / repeated failure → Executor (LLM, text) → Tactical or recovery tools
                                                              ↓
                                                        Mouse/Keyboard
 ```
@@ -21,28 +21,27 @@ Entity List + Goals + Resources → Executor (LLM, text) → Tactical actions
 
 | Role | Model | Input | Output | Frequency |
 |------|-------|-------|--------|-----------|
-| Strategist | `gpt-5.6-luna` | Text (resources via local OCR) + game state | Goals + resource readings | Every 10 turns, or on alarm |
-| Policy | `jev-1.13.0` | Goals, game state, feasible actions | Typed action and allocation choices | Every new routine frame |
-| Executor | `gpt-5.6-luna` | Text only (entities, goals, resources) | Mouse/keyboard actions | On interval or exception |
+| Strategist | `gpt-5.6-luna` | Observed state and goals | Goals + allocation | Periodically, or on alarm |
+| Policy | `jev-1.13.0` | Immutable snapshot, goals, feasible catalog | Typed action and allocation choices | Every new routine frame |
+| Executor | `gpt-5.6-luna` | Observed text and action outcomes | Guarded tactical or recovery tools | Alarm, handoff, or recovery only |
 
-The executor runs the model named above with a per-call `effort` knob (default `low`) for speed. Routine turns take a single-shot structured call; combat/housing turns take an agentic tool loop.
+The actor waits up to two seconds for one TypeSafe answer. A newer frame can revalidate that choice; changed input, age, goals, alarms, or eligibility reject it. Failed or timed-out advice falls back to the same action catalog. The executor uses a tool loop only for combat, handoff, or recovery; recovery is limited to three guarded tools.
 
 The executor never sees screenshots. All visual information comes from YOLO entity detection (text list of class/position/confidence) and the strategist's cached resource readings.
 
 ## The Game Loop
 
-Each iteration (~3-5 seconds):
+Three concurrent loops share immutable observations:
 
 1. **Capture** — Screenshot the game window via `mss`
 2. **Detect** — Run YOLO v9 (single-pass @1280) on screenshot → list of entities with IDs, classes, positions
 3. **Classify ownership** — Color-based blue-dominance check on military units (own vs enemy)
 4. **Alarm check** — Scan for enemy military → inject emergency defense goals if found
-5. **Strategist** (periodic) — reads resources from the bar via local OCR (RapidOCR), then the strategist creates/updates goals from that text
-6. **Policy** — TypeSafe chooses one currently feasible economic action and a resource-allocation focus. Code owns costs, prerequisites, freshness and execution; uncertain or unavailable advice uses the deterministic safety fallback.
-7. **Build context** — Assemble text: entities + goals + resources + memory + game knowledge
-8. **Execute** — the executor reads text context, returns structured actions (Pydantic-validated)
-9. **Act** — Execute mouse clicks / keyboard presses via pyautogui
-10. **Remember** — Update memory, evaluate goal progress, compute rewards
+5. **Publish** — Perception is the only writer of observed resources, population, age, idle workers, entities, and ownership; missing readings stay unknown
+6. **Strategist** (periodic) — sets goals and allocation from observed state
+7. **Actor** — TypeSafe chooses one feasible named action; the actor revalidates it against the latest observation under the input lock or chooses a deterministic fallback
+8. **Execute** — shared preflight checks costs, prerequisites, reservations, and spatial validity before pyautogui input
+9. **Reconcile** — a per-game ledger settles purchases from later observations, keeps paid age advances and buildings distinct from completed ones, and feeds actual failures to bounded recovery
 
 ## Requirements
 
@@ -73,6 +72,8 @@ uv run --package gameplay-agent aoe2-agent
 uv run --package arena aoe2-arena race
 uv run --package detection-server aoe2-server --model <path>
 ```
+
+For an offline production-path replay, run `uv run --no-sync python -m gameplay_agent.scenario_runner --all`. Its fixtures under `apps/agent/src/scenarios/production/` drive the real perception, candidate, actor, and executor paths with scripted low-level input; an `after` observation advances only after the expected spending input. The older model-only fixtures remain available through `gameplay_agent.provider_scenario_runner` and do not establish action feasibility. These replays do not verify the shipped hotkeys in the Windows game; new bindings still need a controlled in-game smoke test.
 
 Per-package optional extras (e.g. `.mlpackage` CoreML builds need CoreML,
 detection training needs ultralytics) are declared on each package's own
@@ -131,8 +132,7 @@ ValueError: unknown AOE2_LLM_WIRE='zzz'; expected one of 'anthropic', 'openai', 
 | `AOE2_STRATEGIST_INTERVAL` | `10` | Run strategist every N turns |
 | `TYPESAFE_API_KEY` | — | TypeSafe credential for the required routine policy |
 | `AOE2_TYPESAFE_MODEL` | `jev-1.13.0` | TypeSafe System One model |
-| `AOE2_POLICY_INTERVAL` | `0.5` | Seconds between evaluations of new perception frames |
-| `AOE2_POLICY_ADVICE_TTL` | `2.0` | Maximum age in seconds for cached advice |
+| `AOE2_POLICY_TIMEOUT` | `2.0` | Maximum seconds the actor waits before revalidating advice on the latest frame |
 | `AOE2_POLICY_MIN_CONFIDENCE` | `0.65` | Minimum confidence for applying advice |
 | `AOE2_LOOP_DELAY` | `0.3` | Seconds between iterations |
 | `AOE2_SAVE_SCREENSHOTS` | `true` | Save screenshots to logs/ |
