@@ -404,6 +404,15 @@ def test_serialize_response_is_pre_executed() -> None:
     assert out["actions_already_executed"] is True
 
 
+def test_serialize_response_preserves_zero_successes() -> None:
+    from gameplay_agent.models import LLMResponse
+
+    response = LLMResponse(actions=[{"type": "press", "key": "h"}])
+    response._success_count = 0
+
+    assert ExecutorProvider._serialize_response(response)["success_count"] == 0
+
+
 # ---------------------------------------------------------------------------
 # reassign_villager composite: jump-to-camp → pick worker → build → place
 # ---------------------------------------------------------------------------

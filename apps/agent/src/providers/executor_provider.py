@@ -388,7 +388,7 @@ class ExecutorProvider:
             observations=ExecutorProvider._observations_dict(result),
             actions=actions,
             actions_already_executed=True,
-            success_count=result._success_count if result._success_count else len(actions),
+            success_count=result._success_count,
         )
 
     @staticmethod
