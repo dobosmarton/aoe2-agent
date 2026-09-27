@@ -25,10 +25,6 @@ def _no_jobs() -> Mapping[str, int]:
     return _NO_JOBS
 
 
-# Villagers the game starts with (mirrors memory.INITIAL_POPULATION).
-_STARTING_VILLAGERS = 4
-
-
 @dataclass(frozen=True, slots=True)
 class PolicyState:
     """Everything a rule may read, from either the real game or the simulator.
@@ -46,7 +42,8 @@ class PolicyState:
     population: int = 0
     population_cap: int = 0
     population_known: bool = True
-    villagers_ordered: int = _STARTING_VILLAGERS
+    villagers: int | None = None
+    villagers_ordered: int = 0
     buildings_seen: frozenset[str] = frozenset()
     pending_buildings: frozenset[str] = frozenset()
     building_purchases: frozenset[str] = frozenset()
@@ -58,6 +55,10 @@ class PolicyState:
     suppressed_actions: frozenset[str] = frozenset()
     reserved_resources: Mapping[str, int] = field(default_factory=_no_jobs)
     pending_population: int = 0
+    pending_villagers: int = 0
+    assignment_pending: bool = False
+    food_stalled: bool = False
+    tc_stalled: bool = False
     visible_classes: frozenset[str] = frozenset()
     own_army_present: bool = False
     spatial_valid: bool = True
@@ -114,6 +115,7 @@ def from_game_state(
         stone=_as_int(resources.get("stone", 0)),
         population=state.population,
         population_cap=state.population_cap,
+        villagers=state.villagers,
         villagers_ordered=state.villagers_ordered,
         buildings_seen=state.buildings_seen,
         pending_buildings=pending_buildings,
@@ -125,7 +127,7 @@ def from_game_state(
         idle_present=state.idle_present,
         idle_count=state.idle_count,
         idle_streak=state.idle_streak,
-        villager_jobs=jobs,
+        villager_jobs=jobs if villager_jobs is not None else state.worker_counts,
         captured_at=captured_at,
     )
 

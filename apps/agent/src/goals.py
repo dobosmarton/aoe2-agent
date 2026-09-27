@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, cast
 
@@ -57,7 +56,7 @@ class Goal:
 
     name: str
     type: Literal["local", "global"]
-    metric: str  # "population", "food", "wood", "gold", "stone", "age", "building"
+    metric: str  # observed villagers/workers, population, resources, or age
     target: int | float | str  # Numeric for resource/pop goals, string for "Feudal Age"
     priority: int  # 1-10 (10 = most urgent)
     created_turn: int
@@ -106,14 +105,20 @@ class GoalManager:
             self.allocation = allocation
             self.revision += 1
 
-    def evaluate_progress(self, game_state: GameState, turn: int) -> None:
+    def evaluate_progress(
+        self,
+        game_state: GameState,
+        turn: int,
+        observed_keys: frozenset[str] | None = None,
+    ) -> None:
         """Update progress for all active goals based on current game state."""
         for goal in self.active_goals:
             if goal.completed or goal.failed:
                 continue
 
-            progress = self._compute_goal_progress(goal, game_state)
-            goal.progress = min(1.0, max(0.0, progress))
+            progress = self._compute_goal_progress(goal, game_state, observed_keys)
+            if progress is not None:
+                goal.progress = min(1.0, max(0.0, progress))
 
             if goal.progress >= 1.0:
                 goal.completed = True
@@ -128,22 +133,44 @@ class GoalManager:
         # Remove completed/failed from active
         self.active_goals = [g for g in self.active_goals if not g.completed and not g.failed]
 
-    def _compute_goal_progress(self, goal: Goal, state: GameState) -> float:
-        """Compute progress (0-1) for a single goal against game state."""
+    def _compute_goal_progress(
+        self, goal: Goal, state: GameState, observed_keys: frozenset[str] | None = None
+    ) -> float | None:
+        """Compute progress from a known metric; unreadable data stays unknown."""
         metric = goal.metric
         target = goal.target
 
         # Numeric metrics — target must be convertible to float
         try:
             if metric == "population":
+                if observed_keys is not None and "population" not in observed_keys:
+                    return None
                 return state.population / float(target) if float(target) > 0 else 0.0
 
+            if metric == "villagers":
+                if state.villagers is None or (
+                    observed_keys is not None and "villagers" not in observed_keys
+                ):
+                    return None
+                return state.villagers / float(target) if float(target) > 0 else 0.0
+
+            if metric.endswith("_workers"):
+                kind = metric.removesuffix("_workers")
+                count = state.worker_counts.get(kind)
+                if count is None or (observed_keys is not None and metric not in observed_keys):
+                    return None
+                return count / float(target) if float(target) > 0 else 0.0
+
             if metric in ("food", "wood", "gold", "stone"):
+                if observed_keys is not None and metric not in observed_keys:
+                    return None
                 return state.resources.get(metric, 0) / float(target) if float(target) > 0 else 0.0
         except (ValueError, TypeError):
             return 0.0
 
         if metric == "age" and isinstance(target, str):
+            if observed_keys is not None and "age" not in observed_keys:
+                return None
             current_score = AGE_SCORES.get(state.current_age, 0.0)
             target_score = AGE_SCORES.get(target, 1.0)
             return current_score / target_score if target_score > 0 else 0.0
@@ -217,6 +244,8 @@ class GoalManager:
             "resources": dict(game_state.resources),
             "population": game_state.population,
             "population_cap": game_state.population_cap,
+            "villagers": game_state.villagers,
+            "worker_counts": dict(game_state.worker_counts),
             "age": game_state.current_age,
             "idle_tc": game_state.idle_tc,
             "under_attack": game_state.under_attack,
@@ -251,36 +280,15 @@ class GoalManager:
         """Cache perception OCR readings and update observed game state."""
         if not readings:
             self._resource_readings = {}
+            if memory is not None:
+                memory.apply_hud_readings({})
             return
         self._resource_readings = readings
         log.debug("resource_readings_cached", **readings)
 
         # Also update the memory's game state if provided
         if memory:
-            obs: dict[str, object] = {}
-            resources = {
-                name: readings[name]
-                for name in ("food", "wood", "gold", "stone")
-                if name in readings
-            }
-            if resources:
-                obs["resources"] = resources
-            if "population" in readings:
-                obs["population"] = readings["population"]
-            if "idle_present" in readings:
-                obs["idle_present"] = readings["idle_present"]
-            if "idle_count" in readings:
-                obs["idle_count"] = readings["idle_count"]
-            if obs:
-                memory.update_from_observations(obs)
-            # Gathered-food accounting: this method only receives OCR frames
-            # (game loop + strategist), so it's the trustworthy place to feed
-            # the income counter — deltas telescope, so call frequency is fine.
-            if "food" in readings:
-                with contextlib.suppress(TypeError, ValueError):
-                    # OCR-boundary cast; int() keeps coercing (and the suppress
-                    # keeps tolerating) junk exactly as before.
-                    memory.record_food_reading(int(cast("int | str", readings["food"])))
+            memory.apply_hud_readings(readings)
             # Age goes through a dedicated observation channel; model responses
             # cannot change the current age.
             if "age" in readings:

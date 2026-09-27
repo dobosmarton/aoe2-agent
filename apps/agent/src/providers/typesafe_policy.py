@@ -150,7 +150,9 @@ def _request_state(request: PolicyRequest) -> JSONContent:
             "population": {
                 "current": state.population if state.population_known else None,
                 "capacity": state.population_cap if state.population_known else None,
+                "villagers_observed": state.villagers,
                 "villagers_ordered": state.villagers_ordered,
+                "villagers_committed": state.pending_villagers,
                 "committed_unobserved": state.pending_population,
             },
             "buildings": sorted(state.buildings_seen),
@@ -167,6 +169,9 @@ def _request_state(request: PolicyRequest) -> JSONContent:
         },
         "computed_signals": {
             "food_crisis": is_famine(state),
+            "food_progress_stalled": state.food_stalled,
+            "town_center_progress_stalled": state.tc_stalled,
+            "idle_assignment_pending": state.assignment_pending,
             "population_blocked": state.population_known
             and state.population_cap > 0
             and state.population + state.pending_population >= state.population_cap,

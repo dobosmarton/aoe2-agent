@@ -55,6 +55,7 @@ if TYPE_CHECKING:
 # On-screen left-to-right order of the four resource counters + population.
 RESOURCE_FIELDS: tuple[str, ...] = ("wood", "food", "gold", "stone")
 POP_FIELD = "population"
+WORKER_FIELDS = ("wood_workers", "food_workers", "gold_workers", "stone_workers")
 
 # Idle-villager PRESENCE (not count). The idle badge sits on the resource row just
 # right of population; its circle glows bright yellow when villagers are idle and is
@@ -104,6 +105,11 @@ class ResourceReadings(TypedDict, total=False):
     age: str
     idle_present: bool
     idle_count: int
+    wood_workers: int
+    food_workers: int
+    gold_workers: int
+    stone_workers: int
+    villagers: int
 
 
 # Per-field character sets — used as the Tesseract whitelist and to filter the
@@ -686,6 +692,26 @@ def read_idle_count(rgb: np.ndarray, pop: FieldBox) -> int | None:
     return int(digits) if digits.isdigit() else None
 
 
+def read_hud_count(rgb: np.ndarray, box: FieldBox) -> int | None:
+    """Read a small white-on-icon workforce count without guessing on bad glyphs."""
+    patch = box.crop(rgb)
+    if patch.size == 0:
+        return None
+    white_mask = cast("np.ndarray", patch.min(axis=2) >= _IDLE_WHITE_THR)
+    mask = cast("np.ndarray", white_mask.astype(np.uint8) * 255)
+    glyphs = _segment_components(mask, min_h=10, max_h=28, max_w=22, min_area=10)
+    if not glyphs or len(glyphs) > 3:
+        return None
+    bank = _load_hud_digit_bank()
+    digits = ""
+    for _x, glyph in glyphs:
+        char, score = _classify_bank(glyph, bank)
+        if score < _IDLE_COUNT_MIN_NCC:
+            return None
+        digits += char
+    return int(digits) if digits.isdigit() else None
+
+
 def _column_centers(x0s: list[int], k: int = 4, gap: int = 70) -> list[int]:
     """Cluster numeric left-edges into the k resource columns (1D, split on gaps)."""
     if not x0s:
@@ -867,6 +893,16 @@ def read_resource_bar(
             out[name] = int(digits)
 
     pop_box = calibration.fields.get(POP_FIELD)
+    rgb: np.ndarray | None = None
+    for name in (*WORKER_FIELDS, "villagers"):
+        box = calibration.fields.get(name)
+        if box is None:
+            continue
+        if rgb is None:
+            rgb = _decode_rgb(screenshot_bytes)
+        value = read_hud_count(rgb, box)
+        if value is not None:
+            out[name] = value
     if pop_box is not None:
         raw = read_pop(pop_box.crop(gray))
         if "/" in raw:
@@ -876,7 +912,8 @@ def read_resource_bar(
         # template NCC — the count refines how many idles to dispatch, presence
         # stays the gate. Both omitted when population isn't calibrated (no
         # anchor → unknown, caller skips).
-        rgb = _decode_rgb(screenshot_bytes)
+        if rgb is None:
+            rgb = _decode_rgb(screenshot_bytes)
         idle_present = detect_idle_present(rgb, pop_box)
         out["idle_present"] = idle_present
         # The badge colour is the gate, the digit only sizes the batch. A dark
@@ -915,6 +952,32 @@ def read_age(screenshot_bytes: bytes, calibration: Calibration) -> str:
     crop = age_box.crop(_decode_gray(screenshot_bytes))
     # Age is large text — OCR the raw crop (binarize corrupts the bigger letters).
     return _map_age(_read_field_rapidocr(crop, whitelist=_LETTERS, binarize=False))
+
+
+def read_selected_unit(screenshot_bytes: bytes, calibration: Calibration) -> str | None:
+    """Read the command-panel selection; unknown labels never authorize input."""
+    box = calibration.fields.get("selection")
+    if box is None:
+        return None
+    text = _read_field_rapidocr(
+        box.crop(_decode_gray(screenshot_bytes)), whitelist=_LETTERS, binarize=False
+    )
+    label = text.strip().lower().replace(" ", "_")
+    if label in {
+        "villager",
+        "builder",
+        "farmer",
+        "forager",
+        "lumberjack",
+        "gold_miner",
+        "stone_miner",
+        "shepherd",
+        "hunter",
+        "fisherman",
+        "repairer",
+    }:
+        return "villager"
+    return label or None
 
 
 # ---------------------------------------------------------------------------

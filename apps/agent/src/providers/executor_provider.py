@@ -16,19 +16,16 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
 from ..config import config
-from ..entity_utils import ResourceKind
+from ..entity_utils import GATHER_CLASSES_BY_KIND, RESOURCE_KINDS
 from ..executor import (
     ECON_MENU,
     STALE_COORDS_DETAIL,
-    build_menu_steps,
     build_rejection,
-    build_steps,
     current_ledger,
     execute_action,
     get_detected_entities,
 )
 from ..models import LLMResponse, Observations, validate_actions
-from ..villager_roles import select_worker
 from .action_tools import _ACTION_TOOLS, _RECOVERY_TOOLS
 from .base import (
     AssistantTurn,
@@ -47,50 +44,7 @@ from .base import (
 from .pricing import cost_usd
 from .wire_factory import make_wire
 
-# Camera "go to work site" hotkey per source job (see prompts/hotkeys.md): jumps the
-# view to the drop-off camp so the workers of that job are on screen to pick from.
-_JOB_CAMERA_HOTKEY: dict[ResourceKind, tuple[str, list[str]]] = {
-    "wood": ("z", ["ctrl"]),  # Lumber Camp
-    "gold": ("g", ["ctrl"]),  # Mining Camp
-    "stone": ("g", ["ctrl"]),  # Mining Camp
-    "food": ("i", ["ctrl"]),  # Mill
-}
-# Unknown/omitted job falls back to the Lumber Camp jump (wood is the most common pull).
-_DEFAULT_JOB_HOTKEY = _JOB_CAMERA_HOTKEY["wood"]
 _SAFE_RAW_KEYS = frozenset({"h", ".", ",", "space", "home", "g", "b", "t"})
-
-
-def _tracker_velocities() -> dict[str, tuple[float, float]]:
-    """Best-effort per-entity velocity from the already-initialized detector.
-
-    Reads the local detector singleton if one exists (it does whenever local YOLO
-    is running) — never creates one, so the remote/mock paths simply return {} and
-    selection falls back to nearest-to-camp. Velocity lets `select_worker` prefer a
-    stationary (easy-to-click) worker.
-    """
-    try:
-        from detection.inference.detector import current_detector
-    except ImportError:
-        return {}
-    detector = current_detector()
-    if detector is None or detector.tracker is None:
-        return {}
-    # track.state is a numpy array (indexing returns library-typed Any); the layout
-    # is [x, y, vx, vy, w, h] — see EntityTracker.
-    return {t.id: (float(t.state[2]), float(t.state[3])) for t in detector.tracker.tracks}
-
-
-def _target_right_click(inp: dict, intent: object) -> dict[str, object] | None:
-    """Right-click step for a send composite; None when only raw x/y were given.
-
-    The executor resolves `target_class` against the post-rescan entity cache.
-    Raw coordinates are refused: the preceding idle-select re-centers the
-    camera, so a spot computed from the previous frame lands on arbitrary
-    terrain (run 8, F-33 — villagers walked to random places).
-    """
-    if "target_class" not in inp:
-        return None
-    return {"type": "right_click", "target_class": inp["target_class"], "intent": intent}
 
 
 log = structlog.stdlib.get_logger()
@@ -419,7 +373,7 @@ class ExecutorProvider:
                 success=r.success,
             )
             if not r.success:
-                return False, f"failed at {step['intent']}"
+                return False, f"failed at {step.get('intent', step['type'])}: {r.detail}"
         return True, "ok"
 
     # -- Composite tool handlers ------------------------------------------------
@@ -428,8 +382,8 @@ class ExecutorProvider:
     _COMPOSITE_NAMES: ClassVar[set[str]] = {
         "build",
         "send_villager",
+        "send_all_idle",
         "queue_villager",
-        "reassign_villager",
     }
 
     async def _run_composite(
@@ -468,7 +422,7 @@ class ExecutorProvider:
         if rejection is not None:
             action_dict = {"type": "build", **inp}
             return action_dict, self._make_tool_result(block, False, rejection)
-        steps = build_steps(building_key, intent, menu=menu)
+        steps = [{"type": "build", "building_key": building_key, "menu": menu, "intent": intent}]
         return await self._run_composite(block, "build", steps)
 
     def _refuse_raw_send(self, block: ToolCall, name: str) -> tuple[dict, ToolOutcome]:
@@ -478,47 +432,33 @@ class ExecutorProvider:
         )
 
     async def _execute_send_villager(self, block: ToolCall) -> tuple[dict, ToolOutcome]:
-        """Composite: press . (with rescan) → right_click target.
-
-        The "." press moves the camera, so we rescan to get fresh entity
-        positions before right-clicking. Raw x/y are refused (F-33).
-        """
+        """Use the actor's named assignment and its exact post-jump target binding."""
         inp = block.arguments
-        intent = inp.get("intent", "Send villager")
-        right_click = _target_right_click(inp, intent)
-        if right_click is None:
+        target_class = inp.get("target_class")
+        kind = next(
+            (kind for kind in RESOURCE_KINDS if target_class in GATHER_CLASSES_BY_KIND[kind]),
+            None,
+        )
+        if kind is None:
             return self._refuse_raw_send(block, "send_villager")
-        steps: list[dict] = [
-            {
-                "type": "press",
-                "key": ".",
-                "rescan": True,
-                "intent": f"Select idle villager ({intent})",
-            },
-            right_click,
-        ]
+        steps = [{"type": "assign_idle", "resource": kind, "intent": str(inp.get("intent", ""))}]
         return await self._run_composite(block, "send_villager", steps)
 
     async def _execute_send_all_idle(self, block: ToolCall) -> tuple[dict, ToolOutcome]:
-        """Composite: Shift-. (select ALL idle) → right_click target.
-
-        Dispatches every idle villager in one action. Mirrors send_villager but
-        uses the select-all hotkey so no idle count is needed.
-        """
-        inp = block.arguments
-        intent = inp.get("intent", "Send all idle villagers")
-        right_click = _target_right_click(inp, intent)
-        if right_click is None:
+        """One pending assignment at a time; repeated dispatch needs evidence."""
+        target_class = block.arguments.get("target_class")
+        kind = next(
+            (kind for kind in RESOURCE_KINDS if target_class in GATHER_CLASSES_BY_KIND[kind]),
+            None,
+        )
+        if kind is None:
             return self._refuse_raw_send(block, "send_all_idle")
-        steps: list[dict] = [
+        steps = [
             {
-                "type": "press",
-                "key": ".",
-                "modifiers": ["shift"],
-                "rescan": True,
-                "intent": f"Select ALL idle villagers ({intent})",
-            },
-            right_click,
+                "type": "assign_idle",
+                "resource": kind,
+                "intent": str(block.arguments.get("intent", "")),
+            }
         ]
         return await self._run_composite(block, "send_all_idle", steps)
 
@@ -535,81 +475,6 @@ class ExecutorProvider:
         ]
         return await self._run_composite(block, "queue_villager", steps, include_entities=False)
 
-    async def _execute_reassign_villager(self, block: ToolCall) -> tuple[dict, ToolOutcome]:
-        """Composite: jump to a work site → pick a working villager → build.
-
-        Two phases because the worker's screen position only exists AFTER the camera
-        jump: (1) run the go-to-camp press with a rescan, then (2) read the fresh
-        detections, choose a worker of `from_job` (stationary-first when tracker
-        velocities are available), and select→build→place. Falls back to selecting
-        the highest-confidence villager on screen if the job model finds none.
-        """
-        inp = block.arguments
-        intent = str(inp.get("intent", "Reassign villager"))
-        # LLM boundary: the tool schema restricts from_job to the resource kinds, so
-        # narrow the raw string here; an off-schema value keeps today's behavior
-        # (default hotkey jump → no candidates → highest-confidence villager).
-        from_job = cast("ResourceKind", str(inp.get("from_job", "wood")))
-        building_key = str(inp.get("building_key", "a"))  # 'a' = Farm in the econ menu
-        action_dict = {"type": "reassign_villager", **inp}
-
-        # Same gates as the plain build composite (prerequisite / cost / headroom):
-        # reassigning a worker to a build that can't exist wastes the whole jump.
-        # Note this reads the PRE-jump frame, so a camp key ("r"/"e") can be skipped
-        # for a resource the phase-1 jump would have brought into view. Accepted:
-        # the cost is one turn with a logged reason, and the common call is "a".
-        rejection = build_rejection(building_key, intent)
-        if rejection is not None:
-            return action_dict, self._make_tool_result(block, False, rejection)
-
-        # Phase 1 — jump the camera to the source work site and re-detect.
-        goto_key, goto_mods = _JOB_CAMERA_HOTKEY.get(from_job, _DEFAULT_JOB_HOTKEY)
-        ok, detail = await self._run_steps(
-            "reassign_villager",
-            [
-                {
-                    "type": "press",
-                    "key": goto_key,
-                    "modifiers": goto_mods,
-                    "rescan": True,
-                    "intent": f"Go to {from_job} work site ({intent})",
-                }
-            ],
-        )
-        if not ok:
-            return action_dict, self._make_tool_result(block, False, detail, include_entities=True)
-
-        # Phase 2 — pick a worker from the fresh view, then select → build → place.
-        worker_click = select_worker(
-            cast("list[object]", get_detected_entities()),
-            from_job,
-            velocities=_tracker_velocities(),
-        )
-        if worker_click is not None:
-            select_step: dict = {
-                "type": "click",
-                "x": worker_click[0],
-                "y": worker_click[1],
-                "intent": f"Select {from_job} villager ({intent})",
-            }
-        else:
-            # No worker of that job resolved — grab the best villager on screen.
-            select_step = {
-                "type": "click",
-                "target_class": "villager",
-                "intent": f"Select villager ({intent})",
-            }
-        steps = [
-            select_step,
-            *build_menu_steps(
-                building_key,
-                intent,
-                menu_intent=f"Open economic build menu ({intent})",
-            ),
-        ]
-        ok, detail = await self._run_steps("reassign_villager", steps)
-        return action_dict, self._make_tool_result(block, ok, detail, include_entities=True)
-
     # -- Tool dispatch ---------------------------------------------------------
 
     _COMPOSITE_HANDLERS: ClassVar[dict[str, str]] = {
@@ -617,7 +482,6 @@ class ExecutorProvider:
         "send_villager": "_execute_send_villager",
         "send_all_idle": "_execute_send_all_idle",
         "queue_villager": "_execute_queue_villager",
-        "reassign_villager": "_execute_reassign_villager",
     }
 
     async def _execute_tool_call(self, block: ToolCall) -> tuple[dict, ToolOutcome]:

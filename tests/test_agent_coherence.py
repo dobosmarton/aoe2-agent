@@ -14,6 +14,7 @@ from gameplay_agent.loops.context import LoopContext
 from gameplay_agent.loops.perceive import perceive_once
 from gameplay_agent.loops.snapshot import Perception
 from gameplay_agent.memory import AgentMemory
+from gameplay_agent.policy.advice import PolicyGoal
 from gameplay_agent.policy.allocation import Allocation, focused
 from gameplay_agent.policy.candidates import eligible, feasible_candidates
 from gameplay_agent.policy.catalog import BY_ID
@@ -143,9 +144,11 @@ def test_pending_house_suppresses_duplicates_until_failure_expires(
     assert ledger.pending_placements == [pending]  # inconclusive, not failed yet
     now = pending.settle_deadline + 1
     executor.observe_hud(4, 5, {"wood": 220}, idle_present=True)
-    assert ledger.pending_placements == []
-    assert ledger.reservations()["wood"] == 0
-    assert ledger.outcomes[-1].status == "failed"
+    assert ledger.pending_placements == [pending]
+    assert ledger.reservations()["wood"] == 25
+    assert ledger.outcomes[-1].status == "uncertain"
+    assert not eligible(house, executor.ledger_policy_state())
+    executor.observe_hud(7, 10, {"wood": 220}, idle_present=True)
     assert eligible(house, executor.ledger_policy_state())
 
 
@@ -275,6 +278,21 @@ def test_empty_workforce_respects_wood_only_allocation() -> None:
         villager_jobs={},
     )
     choice = select_fallback(feasible_candidates(state), state, Allocation(targets={"wood": 1}))
+    assert choice.id == "assign_wood"
+
+
+def test_unreadable_food_worker_count_does_not_force_a_food_goal() -> None:
+    state = PolicyState(
+        food=100,
+        wood=100,
+        idle_present=True,
+        visible_classes=frozenset({"tree", "sheep"}),
+        villager_jobs={},
+    )
+    goal = PolicyGoal("Establish food workers", "food_workers", "2", 10, 0.5)
+    choice = select_fallback(
+        feasible_candidates(state), state, Allocation(targets={"wood": 1}), (goal,)
+    )
     assert choice.id == "assign_wood"
 
 

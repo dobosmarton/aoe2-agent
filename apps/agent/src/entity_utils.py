@@ -129,11 +129,17 @@ def nearest_class_of_kind(
     Uses the gather-targeting taxonomy, so farms are never returned (see
     GATHER_CLASSES_BY_KIND).
     """
-    classes = GATHER_CLASSES_BY_KIND.get(kind, frozenset())
+    target = nearest_gather_target(entities, kind, origin)
+    return target.class_name if target is not None else None
+
+
+def nearest_gather_target(
+    entities: list[object], kind: ResourceKind, origin: tuple[float, float]
+) -> EntityAttrs | None:
+    """The actual nearest gatherable, retaining its identity and coordinates."""
+    classes = GATHER_CLASSES_BY_KIND[kind]
     candidates = [a for a in iter_attrs(entities) if a.class_name in classes]
-    if not candidates:
-        return None
-    return min(candidates, key=lambda a: dist(a.center, origin)).class_name
+    return min(candidates, key=lambda a: dist(a.center, origin)) if candidates else None
 
 
 def extract_attrs(entity: object) -> EntityAttrs:

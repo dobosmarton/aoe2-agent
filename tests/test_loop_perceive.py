@@ -69,7 +69,7 @@ def test_a_pass_records_its_own_latency(tmp_path, gates) -> None:
     assert PERCEIVE_LOOP in ctx.latency.snapshot().loops
 
 
-def test_spatial_capture_skips_hud_ocr(monkeypatch) -> None:
+def test_spatial_capture_includes_hud_baseline(monkeypatch) -> None:
     game_source = GameSource()
     detected: list[bytes] = []
 
@@ -82,7 +82,7 @@ def test_spatial_capture_skips_hud_ocr(monkeypatch) -> None:
         return []
 
     async def hud(*_args):
-        raise AssertionError("a spatial refresh must not wait for HUD OCR")
+        return {"food": 200}
 
     monkeypatch.setattr(game_source, "_screen", screen)
     monkeypatch.setattr(game_source, "_detect_entities", detect)
@@ -92,6 +92,7 @@ def test_spatial_capture_skips_hud_ocr(monkeypatch) -> None:
 
     assert refresh.spatial_valid is True
     assert detected == [b"jpeg"]
+    assert refresh.hud_readings == {"food": 200}
 
 
 def test_spatial_capture_rejects_input_that_changes_during_detection(monkeypatch) -> None:
@@ -125,6 +126,17 @@ def _read_hud(tmp_path) -> LoopContext:
 
 def test_a_hud_reading_reaches_the_game_state(tmp_path, gates) -> None:
     assert _read_hud(tmp_path).memory.game_state.resources.get("wood") == 250
+
+
+def test_capture_crossing_input_cannot_replace_observed_hud(tmp_path, gates) -> None:
+    ctx = _context(
+        tmp_path,
+        FakeSource([Perception(hud_readings={"food": 999}, spatial_valid=False)]),
+    )
+    before = ctx.memory.game_state.resources["food"]
+    _run(perceive.perceive_once(ctx, tick=1))
+    assert ctx.memory.game_state.resources["food"] == before
+    assert ctx.frames.latest() is None
 
 
 def test_a_hud_reading_reaches_the_build_gates(tmp_path, gates) -> None:

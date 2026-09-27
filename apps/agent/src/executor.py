@@ -22,9 +22,8 @@ from .entity_utils import (
     CLASSES_BY_KIND,
     RESOURCE_KINDS,
     ResourceKind,
-    first_center_of_class,
     nearest_center_of_classes,
-    nearest_class_of_kind,
+    nearest_gather_target,
 )
 from .models import Action, validate_action
 from .policy.candidates import eligible
@@ -132,23 +131,11 @@ def clear_detected_entities() -> None:
 
 # The game's population-cap maximum: houses past it add nothing.
 _GAME_POP_CAP_LIMIT = 200
-# Residual noise a settlement tolerates AFTER estimated gather income is
-# deducted (OCR jitter, income-estimate error). The income itself is modeled,
-# not slack-covered: run 13 (F-45/T-537) had a 30-villager economy gathering
-# +140 wood across a 25-wood house settlement — no fixed slack survives both
-# that and a 4-villager opening.
-_PLACEMENT_INCOME_SLACK = 20
-# EMA weight for the per-snapshot wood-income estimate (updated only on
-# windows with no pending spend). 0.5 tracks the fast income ramp of a
-# growing villager count while smoothing single-frame OCR blips.
-_INCOME_EMA_WEIGHT = 0.5
-# Stale-OCR grace: how long a pending placement waits for the wood reading to
-# move before it is settled anyway. 30 s is what the old 3-snapshot grace bought
-# at the measured 9.6 s turn (run 2026_08_22_2).
+# After this deadline, an inconclusive placement is reported uncertain but
+# retains its reservation and duplicate guard until evidence arrives.
 _PLACEMENT_SETTLE_SECONDS = 30.0
-# A house settles on the population cap, not the wood delta: 25 wood against a
-# 20-wood slack leaves a 5-wood margin on an ESTIMATED income. Run 2026_08_21_2
-# built 6 houses and the wood test called 9 confirmed and 21 missing.
+# A completed house is visible in the population cap even if gathering masked
+# its 25-wood purchase in the resource HUD.
 _HOUSE_CLASS = "house"
 _HOUSE_CAP_STEP = 5  # cap gained per completed house
 # Houses need more grace than the wood path: a house takes ~25 s to CONSTRUCT
@@ -198,13 +185,11 @@ CASTLE_PREREQ_COUNT = 2
 # Technologies — the research counterpart of the build menus
 # ---------------------------------------------------------------------------
 
-# A research is confirmed when the cost resource falls by at least this fraction
-# of its price. A fraction, not an exact match, because the HUD reading lags and
-# the economy keeps earning; half is wide enough to survive that and still tell
-# an 800-food age-up apart from a 50-food villager.
-_RESEARCH_CONFIRM_FRACTION = 0.5
 # How long a pending research waits for the HUD to move before it is judged.
 _RESEARCH_SETTLE_SECONDS = 30.0
+_ASSIGNMENT_SETTLE_SECONDS = 12.0
+_ASSIGNMENT_RETRY_DELAY = 20.0
+_FOOD_STALL_SECONDS = 30.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -276,6 +261,18 @@ class _QueuedTraining:
 
 
 @dataclass(frozen=True, slots=True)
+class _PendingAssignment:
+    operation_id: int
+    resource: ResourceKind
+    target_id: str
+    idle_count_before: int | None
+    workers_before: int | None
+    noted_at_snapshot: int
+    command_revision: int
+    settle_deadline: float
+
+
+@dataclass(frozen=True, slots=True)
 class ActionOutcome:
     operation_id: int
     action: str
@@ -289,11 +286,9 @@ class ActionOutcome:
 _MISSING_STREAK_LIMIT = 3
 _MISSING_SUPPRESS_SECONDS = 50.0
 # Villager-order ledger (T-531). Orders lead the HUD population by the TC
-# queue depth (~25 s per villager vs a ~10 s turn). Paid but undelivered units
-# now reserve population separately, so queue capacity does not depend on
-# the age-specific villager preference. The game starts with 4 villagers
-# (mirrors memory.INITIAL_POPULATION; drift test pins the two).
-_STARTING_VILLAGERS = 4
+# queue depth. Starting villagers are unknown until the villager HUD is read;
+# the initial population can include a scout and is not a villager count.
+_STARTING_VILLAGERS = 0
 _VILLAGER_FOOD_COST = 50
 # How `_select_villager_step` picked the villager that builds.
 SelectionMode = Literal["click", "idle_press", "unknown"]
@@ -333,6 +328,7 @@ class _PendingPlacement:
 class _PurchasedBuilding:
     operation_id: int
     preexisting_entity_ids: frozenset[str]
+    cap_before: int = 0
 
 
 @dataclass
@@ -346,11 +342,20 @@ class ActionLedger:
 
     population: tuple[int, int] | None = None
     last_known_population: int | None = None
+    villagers: int | None = None
+    last_known_villagers: int | None = None
+    worker_counts: dict[str, int] = field(default_factory=dict)
     resources: dict[str, int] | None = None
     # This iteration's idle-villager reading, and how the last build acted on
     # it — see _select_villager_step, which owns both.
     idle_present: bool | None = None
+    idle_count: int | None = None
+    pending_assignment: _PendingAssignment | None = None
+    assignment_suppressed_until: dict[ResourceKind, float] = field(default_factory=dict)
+    food_progress_at: float | None = None
     selected_by: SelectionMode = "unknown"
+    selected_unit: str | None = None
+    selected_at_revision: int = -1
     buildings_confirmed: set[str] = field(default_factory=set)
     # A wood drop proves placement was purchased, not that construction is
     # complete. These classes still block duplicates until a new matching
@@ -361,10 +366,6 @@ class ActionLedger:
     # _SIGHTING_MIN_FRAMES as unverified sightings).
     building_sightings: dict[str, int] = field(default_factory=dict)
     pending_placements: list[_PendingPlacement] = field(default_factory=list)
-    # Estimated wood gathered per snapshot window (EMA over windows with no
-    # pending spend; None until the first clean window). Settlement deducts it
-    # from the observed delta so gather income can't mask a purchase (T-537).
-    wood_income_per_snapshot: float | None = None
     # Circuit breaker (T-530): consecutive missing settlements per class, and
     # the monotonic instant until which a repeatedly-missing class stays blocked.
     missing_streaks: dict[str, int] = field(default_factory=dict)
@@ -390,6 +391,7 @@ class ActionLedger:
     current_age: str = "Dark Age"
     age_known: bool = False
     input_revision: int = 0
+    hud_revision: int = -1
     failure_streak: int = 0
     failure_count: int = 0
     recent_failures: list[str] = field(default_factory=list)
@@ -399,6 +401,12 @@ class ActionLedger:
     population_known: bool = False
     spatial_valid: bool = True
     claimed_spend: dict[tuple[str, int, int], int] = field(default_factory=dict)
+    uncertain_operations: set[int] = field(default_factory=set)
+    outcome_screenshots: dict[int, str] = field(default_factory=dict)
+    attempted_economic_ids: set[int] = field(default_factory=set)
+    confirmed_economic_ids: set[int] = field(default_factory=set)
+    food_gathered: int = 0
+    tc_progress_at: float | None = None
 
     def new_operation_id(self) -> int:
         operation_id = self.next_operation_id
@@ -406,8 +414,11 @@ class ActionLedger:
         return operation_id
 
     def has_pending_since(self, first_operation_id: int) -> bool:
-        """Whether this action left a new, unsettled purchase behind."""
-        return any(
+        """Whether this action left a new operation awaiting observation."""
+        return (
+            self.pending_assignment is not None
+            and self.pending_assignment.operation_id >= first_operation_id
+        ) or any(
             item.operation_id >= first_operation_id
             for items in (self.pending_placements, self.pending_research, self.pending_training)
             for item in items
@@ -427,6 +438,17 @@ class ActionLedger:
     def record_outcome(self, outcome: ActionOutcome) -> None:
         self.outcomes.append(outcome)
         del self.outcomes[:-20]
+        if outcome.status in {"pending", "failed", "uncertain", "cancelled"}:
+            self.attempted_economic_ids.add(outcome.operation_id)
+        if outcome.status == "confirmed":
+            self.confirmed_economic_ids.add(outcome.operation_id)
+            self.uncertain_operations.discard(outcome.operation_id)
+        elif outcome.status == "uncertain":
+            self.uncertain_operations.add(outcome.operation_id)
+            self.recent_failures.append(f"{outcome.action}: {outcome.detail}")
+            del self.recent_failures[:-5]
+        elif outcome.status in {"failed", "cancelled"}:
+            self.uncertain_operations.discard(outcome.operation_id)
         if outcome.status == "failed":
             self.record_failure(f"{outcome.action}: {outcome.detail}")
         elif outcome.status in {"purchased", "confirmed"}:
@@ -439,6 +461,56 @@ class ActionLedger:
             detail=outcome.detail,
             reservations=self.reservations(),
         )
+
+    def finalize_unverified(self) -> None:
+        """Retain unresolved commitments and mark the recorded score invalid."""
+        unresolved: list[tuple[int, str]] = [
+            (pending.operation_id, f"build_{pending.building_class}")
+            for pending in self.pending_placements
+        ]
+        unresolved.extend(
+            (pending.operation_id, _research_action_id(pending.name))
+            for pending in self.pending_research
+        )
+        unresolved.extend(
+            (
+                pending.operation_id,
+                "queue_villager" if pending.unit == "villager" else f"train_{pending.unit}",
+            )
+            for pending in self.pending_training
+        )
+        unresolved.extend(
+            (
+                queued.operation_id,
+                "queue_villager" if queued.unit == "villager" else f"train_{queued.unit}",
+            )
+            for queued in self.queued_training
+        )
+        unresolved.extend(
+            (purchase.operation_id, f"build_{name}")
+            for name, purchase in self.building_purchases.items()
+        )
+        unresolved.extend(
+            (operation_id, _research_action_id(name))
+            for name, operation_id in self.age_up_paid.items()
+        )
+        if self.pending_assignment is not None:
+            unresolved.append(
+                (
+                    self.pending_assignment.operation_id,
+                    f"assign_{self.pending_assignment.resource}",
+                )
+            )
+        for operation_id, action in unresolved:
+            if operation_id not in self.uncertain_operations:
+                self.record_outcome(
+                    ActionOutcome(
+                        operation_id,
+                        action,
+                        "uncertain",
+                        "run ended before the intended effect could be verified",
+                    )
+                )
 
     def record_failure(self, reason: str) -> None:
         self.failure_streak += 1
@@ -517,7 +589,9 @@ def ledger_policy_state(ledger: ActionLedger | None = None) -> PolicyState:
         population=population,
         population_cap=cap,
         population_known=ledger.population_known,
+        villagers=ledger.villagers,
         villagers_ordered=ledger.villagers_ordered,
+        villager_jobs=ledger.worker_counts,
         buildings_seen=frozenset(ledger.buildings_confirmed),
         pending_buildings=frozenset(p.building_class for p in ledger.pending_placements)
         | frozenset(ledger.building_purchases),
@@ -541,6 +615,11 @@ def ledger_policy_state(ledger: ActionLedger | None = None) -> PolicyState:
         suppressed_actions=frozenset(
             [f"build_{name}" for name, until in ledger.suppressed_until.items() if until > now]
             + [
+                f"assign_{kind}"
+                for kind, until in ledger.assignment_suppressed_until.items()
+                if until > now
+            ]
+            + [
                 _research_action_id(name)
                 for name, until in ledger.research_blocked_until.items()
                 if until > now
@@ -548,8 +627,22 @@ def ledger_policy_state(ledger: ActionLedger | None = None) -> PolicyState:
         ),
         reserved_resources=ledger.reservations(),
         pending_population=len(ledger.pending_training) + len(ledger.queued_training),
+        pending_villagers=sum(p.unit == "villager" for p in ledger.pending_training)
+        + sum(p.unit == "villager" for p in ledger.queued_training),
+        assignment_pending=ledger.pending_assignment is not None,
+        food_stalled=(
+            "food" in ledger.known_resources
+            and ledger.food_progress_at is not None
+            and now - ledger.food_progress_at >= _FOOD_STALL_SECONDS
+        ),
+        tc_stalled=(
+            ledger.villagers is not None
+            and ledger.tc_progress_at is not None
+            and now - ledger.tc_progress_at >= _FOOD_STALL_SECONDS
+        ),
         known_resources=ledger.known_resources,
         idle_present=ledger.idle_present,
+        idle_count=ledger.idle_count,
         visible_classes=frozenset(str(entity.get("class", "")) for entity in _detected_entities),
         spatial_valid=ledger.spatial_valid,
     )
@@ -561,16 +654,18 @@ def observe_hud(
     resources: Mapping[str, int],
     *,
     idle_present: bool | None = None,
+    idle_count: int | None = None,
     known_resources: frozenset[str] | None = None,
     population_known: bool = True,
     input_revision: int | None = None,
+    villagers: int | None = None,
+    worker_counts: Mapping[str, int] | None = None,
 ) -> None:
     """Feed this turn's HUD reading into the build gates.
 
-    Not just a cache write: the fresh wood value first updates the gather-income
-    estimate, then SETTLES pending placements (confirming purchases / flagging
-    missing ones) before the snapshot is replaced — the ordering the wood-delta
-    check depends on.
+    Settle pending operations against the previous HUD baseline before replacing
+    that baseline. Unknown fields remain unknown; a small net drop is not proof
+    that a purchase failed or succeeded.
     """
     current_ledger().snapshot_count += 1
     fresh_resources = (
@@ -578,19 +673,58 @@ def observe_hud(
         if known_resources is None
         else {name: value for name, value in resources.items() if name in known_resources}
     )
-    _reconcile_queued_training(population if population_known else None)
-    _observe_wood_income(fresh_resources.get("wood"))
+    ledger = current_ledger()
+    food_now = fresh_resources.get("food")
+    food_before = (ledger.resources or {}).get("food")
+    if food_now is not None and food_before is None:
+        ledger.food_progress_at = _now()
+    if villagers is not None and ledger.last_known_villagers is None:
+        ledger.tc_progress_at = _now()
     # Both readings are passed in, not read off the gates: settlement runs
     # BEFORE the snapshot is replaced, which is the ordering the deltas need.
     claimed_spend = current_ledger().claimed_spend
+    food_claimed_before = sum(
+        amount for (kind, _, _), amount in claimed_spend.items() if kind == "food"
+    )
     _settle_pending_placements(
         fresh_resources.get("wood"),
         population_cap if population_known else None,
         claimed_spend,
         input_revision=input_revision,
     )
+    purchased_house = ledger.building_purchases.get(_HOUSE_CLASS)
+    if (
+        purchased_house is not None
+        and population_known
+        and population_cap >= purchased_house.cap_before + _HOUSE_CAP_STEP
+    ):
+        record_confirmed_buildings([_HOUSE_CLASS])
     _settle_pending_research(fresh_resources, claimed_spend, input_revision=input_revision)
-    _settle_pending_training(fresh_resources, claimed_spend, input_revision=input_revision)
+    _settle_pending_training(
+        fresh_resources,
+        claimed_spend,
+        input_revision=input_revision,
+        villagers_now=villagers,
+        population_now=population if population_known else None,
+    )
+    _reconcile_queued_training(population if population_known else None, villagers)
+    _settle_pending_assignment(
+        idle_present,
+        idle_count,
+        worker_counts,
+        input_revision=input_revision,
+    )
+    food_claimed_after = sum(
+        amount for (kind, _, _), amount in claimed_spend.items() if kind == "food"
+    )
+    ambiguous_food = any(
+        any(kind == "food" for kind, _ in pending.cost) for pending in ledger.pending_training
+    ) or any(pending.tech.food for pending in ledger.pending_research)
+    if food_now is not None and food_before is not None and not ambiguous_food:
+        income = food_now - food_before + food_claimed_after - food_claimed_before
+        if 0 < income <= 300:
+            ledger.food_gathered += income
+            ledger.food_progress_at = _now()
     active_snapshots = (
         [p.noted_at_snapshot for p in current_ledger().pending_placements]
         + [p.noted_at_snapshot for p in current_ledger().pending_research]
@@ -609,6 +743,73 @@ def observe_hud(
         frozenset(resources) if known_resources is None else known_resources
     )
     current_ledger().idle_present = idle_present
+    current_ledger().idle_count = idle_count
+    if villagers is not None:
+        if ledger.last_known_villagers is not None and villagers > ledger.last_known_villagers:
+            ledger.tc_progress_at = _now()
+        ledger.last_known_villagers = villagers
+    ledger.villagers = villagers
+    ledger.worker_counts = dict(worker_counts or {})
+    ledger.hud_revision = ledger.input_revision if input_revision is None else input_revision
+    if villagers is not None:
+        ledger.villagers_ordered = (
+            villagers
+            + sum(pending.unit == "villager" for pending in ledger.pending_training)
+            + sum(queued.unit == "villager" for queued in ledger.queued_training)
+        )
+
+
+def _settle_pending_assignment(
+    idle_present: bool | None,
+    idle_count: int | None,
+    worker_counts: Mapping[str, int] | None = None,
+    *,
+    input_revision: int | None,
+) -> None:
+    """Require a matching worker-count increase, using idle evidence when readable."""
+    ledger = current_ledger()
+    pending = ledger.pending_assignment
+    if pending is None or ledger.snapshot_count <= pending.noted_at_snapshot:
+        return
+    observed_revision = ledger.input_revision if input_revision is None else input_revision
+    if observed_revision < pending.command_revision:
+        return
+    workers_now = None if worker_counts is None else worker_counts.get(pending.resource)
+    idle_decreased = idle_present is False or (
+        idle_count is not None
+        and pending.idle_count_before is not None
+        and idle_count < pending.idle_count_before
+    )
+    idle_unreadable = idle_present is None and idle_count is None
+    if (
+        workers_now is not None
+        and pending.workers_before is not None
+        and workers_now > pending.workers_before
+        and (idle_decreased or idle_unreadable)
+    ):
+        ledger.pending_assignment = None
+        ledger.record_outcome(
+            ActionOutcome(
+                pending.operation_id,
+                f"assign_{pending.resource}",
+                "confirmed",
+                "worker count increased with no contradictory idle evidence",
+            )
+        )
+        return
+    if _now() < pending.settle_deadline:
+        return
+    if pending.operation_id in ledger.uncertain_operations:
+        return
+    ledger.assignment_suppressed_until[pending.resource] = _now() + _ASSIGNMENT_RETRY_DELAY
+    ledger.record_outcome(
+        ActionOutcome(
+            pending.operation_id,
+            f"assign_{pending.resource}",
+            "uncertain",
+            f"worker assignment to {pending.target_id} not confirmed",
+        )
+    )
 
 
 def observe_age(age: str | None, *, input_revision: int | None = None) -> None:
@@ -656,42 +857,6 @@ def observe_age(age: str | None, *, input_revision: int | None = None) -> None:
                 )
 
 
-def _observe_wood_income(wood_now: int | None) -> None:
-    """Update the per-snapshot wood-income EMA from a clean window.
-
-    Only windows with NO pending placements count — a window containing a
-    spend would drag the estimate down and re-open the false-missing hole the
-    estimate exists to close. Negative deltas (OCR blips) clamp to 0, which
-    pulls the estimate toward the safe direction (under-crediting income).
-    """
-    wood_before = (current_ledger().resources or {}).get("wood")
-    if wood_now is None or wood_before is None or current_ledger().pending_placements:
-        return
-    delta = max(wood_now - wood_before, 0)
-    previous = current_ledger().wood_income_per_snapshot
-    if previous is None:
-        current_ledger().wood_income_per_snapshot = float(delta)
-    else:
-        current_ledger().wood_income_per_snapshot = (
-            _INCOME_EMA_WEIGHT * delta + (1 - _INCOME_EMA_WEIGHT) * previous
-        )
-
-
-def _expected_income(noted_at_snapshot: int) -> float:
-    """Wood the economy likely gathered since a placement's baseline reading.
-
-    Scales with elapsed snapshots so stale-OCR retries (which accumulate
-    several windows of income before the reading moves) are credited fully.
-    0.0 while no clean window has been observed yet — settlement then behaves
-    exactly as before the income model existed.
-    """
-    ema = current_ledger().wood_income_per_snapshot
-    if ema is None:
-        return 0.0
-    elapsed = max(current_ledger().snapshot_count - noted_at_snapshot, 1)
-    return ema * elapsed
-
-
 def _note_pending_placement(
     building_key: str,
     *,
@@ -706,7 +871,13 @@ def _note_pending_placement(
     cost = _WOOD_COST_BY_CLASS.get(cls or "")
     if wood_before is None:
         wood_before = (current_ledger().resources or {}).get("wood")
-    if cls is None or cost is None or wood_before is None:
+    if (
+        cls is None
+        or cost is None
+        or wood_before is None
+        or current_ledger().hud_revision != current_ledger().input_revision
+        or "wood" not in current_ledger().known_resources
+    ):
         # No wood baseline to settle against — the placement stays unconfirmed
         # for good, despite the caller's "settled next turn" detail. Say so.
         log.debug("placement_pending_dropped", building_key=building_key)
@@ -747,20 +918,13 @@ def _settle_pending_placements(
     *,
     input_revision: int | None = None,
 ) -> None:
-    """Confirm or drop pending placements using the game's own ledger — the HUD.
+    """Settle purchases from full HUD cost or completed-house cap evidence.
 
-    A placement that consumed its cost DID succeed regardless of what detection
-    saw (the HUD is authoritative; the vision model can't see foundations).
-    Houses settle on the population cap and every other class on the wood delta
-    — see `_house_verdict` and `_wood_verdict`. Judged FIFO, erring toward
-    confirmation: a false "failed" report is what caused the duplicate mill,
-    while a false success merely delays the retry by a turn. An "undecided"
-    reading waits for the next snapshot, until `settle_deadline` passes.
-
-    A missing wood reading stops the whole pass, houses included: one OCR frame
-    supplies both numbers, so an unreadable wood value means an unreliable cap.
+    An inconclusive reading stays pending after its deadline and records an
+    uncertain outcome. The reservation and duplicate guard remain until
+    independent evidence resolves the operation.
     """
-    if not current_ledger().pending_placements or wood_now is None:
+    if not current_ledger().pending_placements:
         return
     still_pending: list[_PendingPlacement] = []
     outcomes: list[ActionOutcome] = []
@@ -770,27 +934,46 @@ def _settle_pending_placements(
         if input_revision is not None and input_revision < pending.spend_revision:
             still_pending.append(pending)
             continue
-        verdict = (
-            _house_verdict(pending, cap_now, claimed_cap)
-            if pending.is_house
-            else _wood_verdict(pending, wood_now, spent)
+        completed_house = (
+            pending.is_house and _house_verdict(pending, cap_now, claimed_cap) == "confirmed"
         )
-        if verdict == "undecided" and _now() < pending.settle_deadline:
+        verdict = (
+            "confirmed"
+            if completed_house
+            else _wood_verdict(pending, wood_now, spent)
+            if wood_now is not None
+            else "undecided"
+        )
+        if verdict == "undecided":
             still_pending.append(pending)
+            if (
+                _now() >= pending.settle_deadline
+                and pending.operation_id not in current_ledger().uncertain_operations
+            ):
+                outcomes.append(
+                    ActionOutcome(
+                        pending.operation_id,
+                        f"build_{pending.building_class}",
+                        "uncertain",
+                        "purchase not verifiable from HUD or building evidence",
+                    )
+                )
             continue
         evidence = _settlement_evidence(pending, wood_now, cap_now)
         if verdict == "confirmed":
-            if pending.is_house:
+            if completed_house:
                 # Population capacity only rises after a house is complete.
                 record_confirmed_buildings([pending.building_class])
             else:
                 spec = BY_ID[f"build_{pending.building_class}"]
-                if spec.unique:
+                if spec.unique or pending.is_house:
                     # Unique prerequisites stay unavailable until construction
                     # is seen. Repeatable farms only need purchase settlement;
                     # another farm can be started while the first is building.
                     current_ledger().building_purchases[pending.building_class] = (
-                        _PurchasedBuilding(pending.operation_id, pending.preexisting_entity_ids)
+                        _PurchasedBuilding(
+                            pending.operation_id, pending.preexisting_entity_ids, pending.cap_before
+                        )
                     )
                 _clear_missing_streak(pending.building_class)
             log.info("build_purchase_confirmed", **evidence)
@@ -798,8 +981,8 @@ def _settle_pending_placements(
                 ActionOutcome(
                     pending.operation_id,
                     f"build_{pending.building_class}",
-                    "confirmed" if pending.is_house else "purchased",
-                    "house capacity observed" if pending.is_house else "HUD purchase confirmed",
+                    "confirmed" if completed_house else "purchased",
+                    "house capacity observed" if completed_house else "HUD purchase confirmed",
                 )
             )
         else:
@@ -849,26 +1032,20 @@ def _wood_verdict(
 
     An unchanged reading is stale OCR, not a miss.
 
-    Estimated gather income is deducted from the delta first — run 13 (F-45)
-    gathered +140 wood across a 25-wood house settlement, so the raw delta alone
-    judged every real purchase MISSING and the circuit breaker locked out five
-    classes. Confirmed spend is deducted per shared baseline, so one wood drop
-    confirms at most one pending of a given cost.
+    Only a full net cost proves payment. Gathering can hide some or all of a
+    purchase, so a smaller drop remains undecided. Claimed spend is deducted
+    per shared baseline so one drop cannot confirm multiple operations.
     """
-    if wood_now == pending.wood_before:
-        return "undecided"
     baseline = ("wood", pending.wood_before, pending.noted_at_snapshot)
     spent = spend_by_baseline.get(baseline, 0)
-    income = _expected_income(pending.noted_at_snapshot)
-    budget = pending.wood_before - spent - pending.wood_cost + _PLACEMENT_INCOME_SLACK
-    if wood_now - income > budget:
-        return "missing"
+    if pending.wood_before - wood_now - spent < pending.wood_cost:
+        return "undecided"
     spend_by_baseline[baseline] = spent + pending.wood_cost
     return "confirmed"
 
 
 def _settlement_evidence(
-    pending: _PendingPlacement, wood_now: int, cap_now: int | None
+    pending: _PendingPlacement, wood_now: int | None, cap_now: int | None
 ) -> dict[str, object]:
     """The numbers the settlement judged on, for either log line."""
     if pending.is_house:
@@ -882,14 +1059,17 @@ def _settlement_evidence(
         "wood_before": pending.wood_before,
         "wood_now": wood_now,
         "cost": pending.wood_cost,
-        "income_estimate": round(_expected_income(pending.noted_at_snapshot), 1),
     }
 
 
 def _note_pending_research(name: str, tech: Tech) -> _PendingResearch | None:
     """Queue a research for HUD settlement next snapshot."""
     before = current_ledger().resources
-    if before is None:
+    if (
+        before is None
+        or current_ledger().hud_revision != current_ledger().input_revision
+        or any(kind not in current_ledger().known_resources for kind in _research_costs(tech))
+    ):
         log.debug("research_pending_dropped", tech=name)
         return None
     pending = _PendingResearch(
@@ -935,8 +1115,20 @@ def _settle_pending_research(
             still_pending.append(pending)
             continue
         verdict = _research_verdict(pending, resources, claimed)
-        if verdict == "undecided" and _now() < pending.settle_deadline:
+        if verdict == "undecided":
             still_pending.append(pending)
+            if (
+                _now() >= pending.settle_deadline
+                and pending.operation_id not in current_ledger().uncertain_operations
+            ):
+                outcomes.append(
+                    ActionOutcome(
+                        pending.operation_id,
+                        _research_action_id(pending.name),
+                        "uncertain",
+                        "research purchase not verifiable from HUD",
+                    )
+                )
             continue
         if verdict == "confirmed":
             age_up = pending.name in {"feudal_age", "castle_age", "imperial_age"}
@@ -981,7 +1173,11 @@ def _settle_pending_research(
 def _note_pending_training(unit: str) -> _PendingTraining | None:
     before = current_ledger().resources
     spec = UNITS[unit]
-    if before is None:
+    if (
+        before is None
+        or current_ledger().hud_revision != current_ledger().input_revision
+        or any(kind not in current_ledger().known_resources for kind, _ in spec.cost)
+    ):
         return None
     pending = _PendingTraining(
         unit=unit,
@@ -1004,10 +1200,32 @@ def _settle_pending_training(
     claimed_spend: dict[tuple[str, int, int], int] | None = None,
     *,
     input_revision: int | None = None,
+    villagers_now: int | None = None,
+    population_now: int | None = None,
 ) -> None:
     still_pending: list[_PendingTraining] = []
     outcomes: list[ActionOutcome] = []
     claimed = claimed_spend if claimed_spend is not None else {}
+    ledger = current_ledger()
+    villager_gain = (
+        max(villagers_now - ledger.last_known_villagers, 0)
+        if villagers_now is not None and ledger.last_known_villagers is not None
+        else 0
+    )
+    population_gain = (
+        max(population_now - ledger.last_known_population, 0)
+        if population_now is not None and ledger.last_known_population is not None
+        else 0
+    )
+    available_villagers = max(
+        villager_gain - sum(queued.unit == "villager" for queued in ledger.queued_training), 0
+    )
+    available_military = max(
+        population_gain
+        - villager_gain
+        - sum(queued.unit != "villager" for queued in ledger.queued_training),
+        0,
+    )
     for pending in current_ledger().pending_training:
         if input_revision is not None and input_revision < pending.spend_revision:
             still_pending.append(pending)
@@ -1015,8 +1233,33 @@ def _settle_pending_training(
         verdict = _cost_verdict(
             pending.cost, pending.before, resources, pending.noted_at_snapshot, claimed
         )
-        if verdict == "undecided" and _now() < pending.settle_deadline:
+        delivery_proves_purchase = (pending.unit == "villager" and available_villagers > 0) or (
+            pending.unit != "villager" and available_military > 0
+        )
+        if delivery_proves_purchase:
+            if pending.unit == "villager":
+                available_villagers -= 1
+            else:
+                available_military -= 1
+            if verdict != "confirmed":
+                for kind, price in pending.cost:
+                    key = (kind, pending.before[kind], pending.noted_at_snapshot)
+                    claimed[key] = claimed.get(key, 0) + price
+            verdict = "confirmed"
+        if verdict == "undecided":
             still_pending.append(pending)
+            if (
+                _now() >= pending.settle_deadline
+                and pending.operation_id not in current_ledger().uncertain_operations
+            ):
+                outcomes.append(
+                    ActionOutcome(
+                        pending.operation_id,
+                        "queue_villager" if pending.unit == "villager" else f"train_{pending.unit}",
+                        "uncertain",
+                        "training purchase not verifiable from HUD",
+                    )
+                )
             continue
         status: Literal["confirmed", "failed"] = "confirmed" if verdict == "confirmed" else "failed"
         if status == "confirmed" and pending.unit == "villager":
@@ -1038,22 +1281,45 @@ def _settle_pending_training(
         current_ledger().record_outcome(outcome)
 
 
-def _reconcile_queued_training(population_now: int | None) -> None:
-    """Release a production slot only when the HUD shows delivered population."""
+def _reconcile_queued_training(
+    population_now: int | None, villagers_now: int | None = None
+) -> None:
+    """Attribute villager deliveries to villagers, military to other population."""
     ledger = current_ledger()
     previous = ledger.last_known_population
-    if population_now is None or previous is None or population_now <= previous:
-        return
-    delivered_count = min(population_now - previous, len(ledger.queued_training))
-    delivered = ledger.queued_training[:delivered_count]
-    del ledger.queued_training[:delivered_count]
+    prior_villagers = ledger.last_known_villagers
+    villager_gain = (
+        max(villagers_now - prior_villagers, 0)
+        if villagers_now is not None and prior_villagers is not None
+        else 0
+    )
+    population_gain = (
+        max(population_now - previous, 0)
+        if population_now is not None and previous is not None
+        else 0
+    )
+    military_gain = max(population_gain - villager_gain, 0)
+    delivered: list[_QueuedTraining] = []
+    remaining: list[_QueuedTraining] = []
+    for item in ledger.queued_training:
+        if item.unit == "villager" and villager_gain:
+            delivered.append(item)
+            villager_gain -= 1
+        elif item.unit != "villager" and military_gain:
+            delivered.append(item)
+            military_gain -= 1
+        else:
+            remaining.append(item)
+    ledger.queued_training = remaining
     for item in delivered:
         ledger.record_outcome(
             ActionOutcome(
                 item.operation_id,
                 "queue_villager" if item.unit == "villager" else f"train_{item.unit}",
                 "confirmed",
-                "population delivery observed",
+                "villager HUD count increased"
+                if item.unit == "villager"
+                else "military population delivered",
             )
         )
 
@@ -1070,14 +1336,11 @@ def _cost_verdict(
     for kind, price in cost:
         now = resources.get(kind)
         was = before.get(kind)
-        if now is None or was is None or now == was:
+        if now is None or was is None:
             return "undecided"
-        shortfalls.append(
-            was - now - claimed.get((kind, was, snapshot_count), 0)
-            < price * _RESEARCH_CONFIRM_FRACTION
-        )
+        shortfalls.append(was - now - claimed.get((kind, was, snapshot_count), 0) < price)
     if any(shortfalls):
-        return "missing"
+        return "undecided"
     for kind, price in cost:
         baseline = before[kind]
         key = (kind, baseline, snapshot_count)
@@ -1206,13 +1469,37 @@ def record_observed_buildings(entities: Iterable[tuple[str, str]]) -> None:
     Ownership classification currently covers military units, not buildings.
     The caller excludes any entity explicitly identified as enemy-owned.
     """
-    purchased = current_ledger().building_purchases
+    ledger = current_ledger()
+    observed = tuple(entities)
+    purchased = ledger.building_purchases
     completed = {
         cls
-        for entity_id, cls in entities
+        for entity_id, cls in observed
         if cls in purchased and entity_id not in purchased[cls].preexisting_entity_ids
     }
     record_confirmed_buildings(completed)
+    directly_completed = [
+        pending
+        for pending in ledger.pending_placements
+        if any(
+            cls == pending.building_class and entity_id not in pending.preexisting_entity_ids
+            for entity_id, cls in observed
+        )
+    ]
+    if directly_completed:
+        ledger.pending_placements = [
+            pending for pending in ledger.pending_placements if pending not in directly_completed
+        ]
+        for pending in directly_completed:
+            record_confirmed_buildings([pending.building_class])
+            ledger.record_outcome(
+                ActionOutcome(
+                    pending.operation_id,
+                    f"build_{pending.building_class}",
+                    "confirmed",
+                    "new building entity observed",
+                )
+            )
 
 
 def confirmed_buildings() -> frozenset[str]:
@@ -1223,9 +1510,7 @@ def confirmed_buildings() -> frozenset[str]:
 
 
 def villagers_ordered() -> int:
-    """Villagers ordered this game (incl. the 4 starting ones) — copied into
-    GameState each turn so the reactive tier gates the queue on ORDERS, not
-    the TC-queue-lagged HUD population (run 11, F-38)."""
+    """Observed villagers plus confirmed, undelivered orders."""
     return current_ledger().villagers_ordered
 
 
@@ -1450,6 +1735,26 @@ def _resolve_coords(action_dict: dict[str, object]) -> tuple[str, tuple[int, int
 
     target_id = action_dict.get("target_id")
     if target_id:
+        bound_revision = action_dict.get("spatial_revision")
+        if bound_revision is not None and bound_revision != current_ledger().input_revision:
+            return ("target observation crossed another input", None)
+        expected_class = action_dict.get("expected_class")
+        expected_coords = action_dict.get("expected_coords")
+        for entity in _detected_entities:
+            if entity.get("id") != target_id:
+                continue
+            if expected_class is not None and entity.get("class") != expected_class:
+                return ("target class changed after selection", None)
+            center = entity.get("center")
+            if not isinstance(center, (list, tuple)) or len(center) != 2:
+                return ("target no longer has a valid center", None)
+            coords = (int(center[0]), int(center[1]))
+            if expected_coords is not None:
+                if not isinstance(expected_coords, (list, tuple)) or len(expected_coords) != 2:
+                    return ("invalid bound target coordinates", None)
+                if (int(expected_coords[0]), int(expected_coords[1])) != coords:
+                    return ("target moved after binding", None)
+            return ("", coords)
         coords = _resolve_target_id(str(target_id))
         if coords is None:
             log.warning("target_id_not_found", target_id=target_id)
@@ -1473,6 +1778,26 @@ def _resolve_coords(action_dict: dict[str, object]) -> tuple[str, tuple[int, int
         return ("", (ix, iy))
 
     return ("no coordinates, target_id, or target_class provided", None)
+
+
+def _selection_rejection(expected: str) -> str | None:
+    """A navigation key is not proof that the intended command panel opened."""
+    ledger = current_ledger()
+    if ledger.selected_unit == expected and ledger.selected_at_revision == ledger.input_revision:
+        return None
+    return (
+        f"{expected} selection unverified "
+        f"(observed={ledger.selected_unit!r}, revision={ledger.selected_at_revision}, "
+        f"input_revision={ledger.input_revision})"
+    )
+
+
+async def _refresh_after_input(action: str, operation_id: int) -> ActionResult:
+    """Capture a post-input HUD reading while the caller still owns input."""
+    if _rescan_fn is not None and await _rescan_fn():
+        return ActionResult(True, "post-input HUD captured")
+    log.warning("post_input_refresh_failed", action=action, action_id=operation_id)
+    return ActionResult(False, "post-input HUD refresh unavailable; operation remains pending")
 
 
 def can_resolve(action_dict: dict[str, object]) -> bool:
@@ -1896,6 +2221,8 @@ async def _handle_click(action_dict: dict[str, object], intent: str) -> ActionRe
         if isinstance(building_key, str)
         else None
     )
+    if isinstance(building_key, str) and pending is None:
+        return ActionResult(False, "fresh wood HUD baseline unavailable before placement")
     before_revision = current_ledger().input_revision
     try:
         current_ledger().note_input()
@@ -2046,37 +2373,6 @@ async def _verify_build_placement(expected: str | None, point: tuple[int, int]) 
     return landed
 
 
-# Classes that appear as the subject ("Send villager to..."), never the target.
-_ACTOR_CLASSES = frozenset({"villager", "town_center"})
-
-
-def _re_resolve_from_intent(x: int, y: int, intent: str) -> tuple[int, int]:
-    """Re-resolve raw coordinates using entity class found in the intent.
-
-    The LLM plans all actions from start-of-turn detection. After camera-moving
-    keys (H, .) with rescan, those coordinates become stale. This matches the
-    entity class mentioned in the intent against freshly detected entities.
-    Skips actor classes (villager, town_center) that appear as the subject.
-    """
-    intent_lower = intent.lower()
-    for entity in _detected_entities:
-        cls = entity.get("class", "")
-        if cls and cls not in _ACTOR_CLASSES and cls in intent_lower:
-            resolved = _resolve_target_class(cls)
-            if resolved:
-                log.debug(
-                    "coords_re_resolved",
-                    cls=cls,
-                    old_x=x,
-                    old_y=y,
-                    new_x=resolved[0],
-                    new_y=resolved[1],
-                )
-                return resolved
-            break
-    return (x, y)
-
-
 async def _handle_right_click(action_dict: dict[str, object], intent: str) -> ActionResult:
     fail_detail, coords = _resolve_coords(action_dict)
     if coords is None:
@@ -2084,9 +2380,6 @@ async def _handle_right_click(action_dict: dict[str, object], intent: str) -> Ac
         return ActionResult(False, fail_detail)
 
     x, y = coords
-    if not action_dict.get("target_id") and not action_dict.get("target_class"):
-        x, y = _re_resolve_from_intent(x, y, intent)
-
     if not _in_play_area(x, y):
         log.warning("right_click_off_map", x=x, y=y, intent=intent)
         return ActionResult(False, f"({x}, {y}) is in the HUD margin, not on the map")
@@ -2191,12 +2484,19 @@ async def _handle_build(action_dict: dict[str, object], intent: str) -> ActionRe
     rejection = build_rejection(key, intent, menu=menu)
     if rejection is not None:
         return ActionResult(False, rejection)
-    for step in build_steps(key, intent, menu=menu):
+    for index, step in enumerate(build_steps(key, intent, menu=menu)):
         result = await execute_action(step)
         if not result.success:
             return ActionResult(
                 False, f"build failed at: {step.get('intent', '')}: {result.detail}"
             )
+        if index == 0:
+            if step.get("type") == "click" and (_rescan_fn is None or not await _rescan_fn()):
+                return ActionResult(False, "villager selection refresh unavailable")
+            if rejection := _selection_rejection("villager"):
+                return ActionResult(False, rejection)
+        if index == 2 and (_rescan_fn is None or not await _rescan_fn()):
+            return ActionResult(False, "pre-placement HUD refresh unavailable")
     return ActionResult(True, f"built ({intent})")
 
 
@@ -2222,6 +2522,8 @@ async def _handle_research(action_dict: dict[str, object], intent: str) -> Actio
             return ActionResult(
                 False, f"research failed at: {step.get('intent', '')}: {result.detail}"
             )
+    if selection_error := _selection_rejection(_TECHS[name].requires or "town_center"):
+        return ActionResult(False, selection_error)
     if rejection := research_rejection(name):
         return ActionResult(False, rejection)
     pending = _note_pending_research(name, _TECHS[name])
@@ -2247,6 +2549,9 @@ async def _handle_research(action_dict: dict[str, object], intent: str) -> Actio
             before_spend_status="failed",
         )
         return ActionResult(False, result.detail)
+    refresh = await _refresh_after_input(_research_action_id(name), pending.operation_id)
+    if not refresh.success:
+        return refresh
     return ActionResult(
         True,
         f"{name} pressed; the HUD spend settles it next turn — do not re-press it",
@@ -2269,6 +2574,8 @@ async def _handle_queue_villager(action_dict: dict[str, object], intent: str) ->
     )
     if not result.success:
         return ActionResult(False, f"queue_villager selection failed: {result.detail}")
+    if selection_error := _selection_rejection("town_center"):
+        return ActionResult(False, selection_error)
     if rejection := villager_queue_rejection():
         return ActionResult(False, rejection)
     if not eligible(UNITS["villager"], ledger_policy_state()):
@@ -2296,6 +2603,9 @@ async def _handle_queue_villager(action_dict: dict[str, object], intent: str) ->
         )
         return ActionResult(False, result.detail)
     log.info("villager_order_pending", action_id=pending.operation_id, intent=intent)
+    refresh = await _refresh_after_input("queue_villager", pending.operation_id)
+    if not refresh.success:
+        return refresh
     return ActionResult(True, f"villager queue pending HUD settlement ({pending.operation_id})")
 
 
@@ -2317,6 +2627,9 @@ async def _handle_train_unit(action_dict: dict[str, object], intent: str) -> Act
     )
     if not result.success:
         return ActionResult(False, result.detail)
+    expected_building = next(iter(spec.requires), "")
+    if expected_building and (selection_error := _selection_rejection(expected_building)):
+        return ActionResult(False, selection_error)
     if not eligible(spec, ledger_policy_state()):
         return ActionResult(False, f"train_{unit} no longer eligible after navigation")
     pending = _note_pending_training(unit)
@@ -2344,6 +2657,9 @@ async def _handle_train_unit(action_dict: dict[str, object], intent: str) -> Act
             before_spend_status="failed",
         )
         return result
+    refresh = await _refresh_after_input(f"train_{unit}", pending.operation_id)
+    if not refresh.success:
+        return refresh
     return ActionResult(True, f"train_{unit} pressed; awaiting HUD settlement")
 
 
@@ -2358,20 +2674,72 @@ async def _handle_assign_idle(action_dict: dict[str, object], intent: str) -> Ac
     )
     if not result.success:
         return ActionResult(False, result.detail)
-    entities: list[object] = list(_detected_entities)
-    origin = first_center_of_class(entities, "town_center") or (0.0, 0.0)
-    targets = (resource, *(kind for kind in RESOURCE_KINDS if kind != resource))
-    for kind in targets:
-        target = nearest_class_of_kind(entities, cast("ResourceKind", kind), origin)
-        if target is not None:
-            return await execute_action(
-                {
-                    "type": "right_click",
-                    "target_class": target,
-                    "intent": f"Assign idle villager to {kind} ({intent})",
-                }
+    if selection_error := _selection_rejection("villager"):
+        return ActionResult(False, selection_error)
+    width, height = _window_size()
+    kind = cast("ResourceKind", resource)
+    target = nearest_gather_target(list(_detected_entities), kind, (width / 2, height / 2))
+    if target is None:
+        return ActionResult(False, f"no {kind} target in refreshed view")
+    ledger = current_ledger()
+    pending = _PendingAssignment(
+        operation_id=ledger.new_operation_id(),
+        resource=kind,
+        target_id=target.entity_id,
+        idle_count_before=ledger.idle_count,
+        workers_before=ledger.worker_counts.get(kind),
+        noted_at_snapshot=ledger.snapshot_count,
+        command_revision=ledger.input_revision + 1,
+        settle_deadline=_now() + _ASSIGNMENT_SETTLE_SECONDS,
+    )
+    ledger.pending_assignment = pending
+    ledger.record_outcome(
+        ActionOutcome(pending.operation_id, f"assign_{kind}", "pending", "awaiting worker count")
+    )
+    log.info(
+        "idle_assignment_target",
+        action_id=pending.operation_id,
+        resource=kind,
+        target_id=target.entity_id,
+        target_class=target.class_name,
+        x=int(target.center[0]),
+        y=int(target.center[1]),
+    )
+    try:
+        result = await _handle_right_click(
+            {
+                "type": "right_click",
+                "target_id": target.entity_id,
+                "expected_class": target.class_name,
+                "expected_coords": (int(target.center[0]), int(target.center[1])),
+                "spatial_revision": ledger.input_revision,
+                "intent": f"Assign idle villager to {kind} ({intent})",
+            },
+            intent,
+        )
+    except asyncio.CancelledError:
+        if ledger.input_revision < pending.command_revision:
+            ledger.pending_assignment = None
+            ledger.record_outcome(
+                ActionOutcome(pending.operation_id, f"assign_{kind}", "cancelled", "before click")
             )
-    return ActionResult(False, "no gatherable resource in refreshed view")
+        else:
+            ledger.record_outcome(
+                ActionOutcome(
+                    pending.operation_id, f"assign_{kind}", "uncertain", "click interrupted"
+                )
+            )
+        raise
+    if not result.success:
+        ledger.pending_assignment = None
+        ledger.record_outcome(
+            ActionOutcome(pending.operation_id, f"assign_{kind}", "failed", result.detail)
+        )
+        return result
+    refresh = await _refresh_after_input(f"assign_{kind}", pending.operation_id)
+    if not refresh.success:
+        return refresh
+    return ActionResult(True, "assignment pending workforce confirmation")
 
 
 # Dispatch table: action type -> handler

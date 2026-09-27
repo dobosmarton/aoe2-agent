@@ -18,6 +18,7 @@ from ..config import config
 from ..detection_phase import detect_frame, summarize_frame
 from ..executor import execute_actions
 from ..providers.strategist import read_hud_readings
+from ..resource_ocr import calibration_for, read_selected_unit
 from ..screen import capture_screenshot, save_screenshot
 from ..window import get_game_window_rect
 from .snapshot import FramePipe, Perception, SpatialRefresh
@@ -162,9 +163,16 @@ class GameSource:
         )
 
     async def capture_spatial(self, timings: TickTimings) -> SpatialRefresh:
-        """Refresh the executor's coordinate cache without delaying on OCR."""
+        """Refresh coordinates, HUD baseline, and selected command-panel unit."""
         revision = self._ledger.input_revision if self._ledger is not None else 0
         screenshot, _width, _height, captured_at = await self._screen(None, timings)
+        hud_readings = await self._hud(screenshot, 0, timings)
+        selection_calibration = calibration_for(_width, _height)
+        selected_unit = (
+            await asyncio.to_thread(read_selected_unit, screenshot, selection_calibration)
+            if selection_calibration is not None
+            else None
+        )
         with timings.phase("detect"):
             entities = await self._detect_entities(screenshot)
         spatial_valid = self._ledger is None or self._ledger.input_revision == revision
@@ -173,8 +181,11 @@ class GameSource:
             entity_count=len(entities),
             input_revision=revision,
             spatial_valid=spatial_valid,
+            selected_unit=selected_unit,
         )
-        return SpatialRefresh(captured_at, revision, spatial_valid)
+        return SpatialRefresh(
+            captured_at, revision, spatial_valid, hud_readings, selected_unit, screenshot
+        )
 
     async def _screen(
         self, tick: int | None, timings: TickTimings

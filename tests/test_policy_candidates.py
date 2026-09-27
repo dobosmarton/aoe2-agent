@@ -30,13 +30,15 @@ def test_exact_feudal_cost_and_prerequisites_stay_in_code() -> None:
     assert "advance_to_feudal" in _ids(ready)
 
 
-def test_house_requires_a_known_cap_and_worker_but_not_a_strategy_headroom_gate() -> None:
+def test_house_requires_known_cap_worker_and_low_headroom() -> None:
     unknown = PolicyState(population=0, population_cap=0, wood=25, idle_present=True)
     without_worker = PolicyState(population=5, population_cap=10, wood=25)
-    useful = PolicyState(population=5, population_cap=10, wood=25, idle_present=True)
+    premature = PolicyState(population=5, population_cap=10, wood=25, idle_present=True)
+    useful = PolicyState(population=6, population_cap=10, wood=25, idle_present=True)
 
     assert "build_house" not in _ids(unknown)
     assert "build_house" not in _ids(without_worker)
+    assert "build_house" not in _ids(premature)
     assert "build_house" in _ids(useful)
 
 
@@ -51,6 +53,18 @@ def test_pending_house_is_hidden_until_settlement_finishes() -> None:
     settled = PolicyState(population=6, population_cap=10, wood=25, idle_present=True)
 
     assert ("build_house" in _ids(pending), "build_house" in _ids(settled)) == (False, True)
+
+
+def test_pending_idle_assignment_hides_other_idle_assignments() -> None:
+    state = PolicyState(
+        population=4,
+        population_cap=5,
+        idle_present=True,
+        assignment_pending=True,
+        visible_classes=frozenset({"sheep", "tree"}),
+    )
+
+    assert not {"assign_food", "assign_wood"} & _ids(state)
 
 
 def test_render_returns_fresh_mutable_action_dictionaries() -> None:

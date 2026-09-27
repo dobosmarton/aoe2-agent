@@ -46,7 +46,7 @@ from .goals import GoalManager
 from .loops.act import act_loop
 from .loops.context import LoopContext
 from .loops.deliberate import deliberate_loop
-from .loops.perceive import perceive_loop
+from .loops.perceive import perceive_loop, save_action_evidence
 from .loops.source import GameActuator, GameSource, frame_refresh
 from .memory import AgentMemory
 from .models import validate_actions
@@ -202,6 +202,7 @@ async def game_loop(
         memory = AgentMemory()
     memory.start_game()
     ledger = ActionLedger()
+    memory.action_ledger = ledger
     ledger_token = bind_ledger(ledger)
 
     warm_ups = _start_warm_ups(provider)
@@ -286,6 +287,9 @@ async def _close_out(
     # stop (T-543). This is the one choke point.
     if not memory.game_end_reason:
         memory.game_end_reason = "interrupted"
+    if ctx.ledger is not None:
+        ctx.ledger.finalize_unverified()
+        save_action_evidence(ctx.ledger, ctx.frames.evidence_screenshot())
     log.info("game_metrics_final", **memory.get_metrics_snapshot())
     ctx.goal_logger.log_game_end(
         memory.turn_count,

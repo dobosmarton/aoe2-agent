@@ -8,7 +8,7 @@ from dataclasses import FrozenInstanceError
 from typing import TYPE_CHECKING
 
 import pytest
-from gameplay_agent.loops.snapshot import FramePipe, Perception
+from gameplay_agent.loops.snapshot import FramePipe, Perception, SpatialRefresh
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable
@@ -61,6 +61,19 @@ def test_latest_returns_the_newest_frame() -> None:
     pipe.put(first)
     pipe.put(second)
     assert pipe.latest() is second
+
+
+def test_evidence_uses_the_newest_spatial_or_full_capture() -> None:
+    async def drive() -> None:
+        pipe = FramePipe()
+        pipe.put(Perception(screenshot=b"before", captured_at=1.0))
+        request = pipe.request_spatial_refresh()
+        pipe.complete_spatial_refresh(request, SpatialRefresh(2.0, 1, True, screenshot=b"after"))
+        assert pipe.evidence_screenshot() == b"after"
+        pipe.put(Perception(screenshot=b"later", captured_at=3.0))
+        assert pipe.evidence_screenshot() == b"later"
+
+    asyncio.run(drive())
 
 
 def test_after_returns_a_frame_that_already_arrived() -> None:

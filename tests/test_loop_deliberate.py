@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from dataclasses import replace
 
 from gameplay_agent.executor import ActionLedger, ActionOutcome
 from gameplay_agent.goal_logger import GoalLogger
@@ -73,7 +74,10 @@ def _trigger(
     ctx: LoopContext, frame: Perception, *, food_age: float = 0.0, cooldown: float = 0.0
 ) -> deliberate.Trigger | None:
     now = time.monotonic()
-    return deliberate._trigger(ctx, frame, now - food_age, now - cooldown if cooldown else 0.0)
+    if food_age:
+        assert frame.world is not None
+        frame = replace(frame, world=replace(frame.world, food_stalled=food_age >= 30.0))
+    return deliberate._trigger(ctx, frame, now - cooldown if cooldown else 0.0)
 
 
 def test_quiet_frames_do_not_request_a_discarded_plan(tmp_path) -> None:

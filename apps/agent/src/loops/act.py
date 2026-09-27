@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import structlog
 
 from ..config import config
+from ..executor import ActionOutcome
 from ..models import validate_actions
 from ..policy.allocation import focused
 from ..policy.candidates import feasible_candidates, find_candidate
@@ -16,6 +17,7 @@ from ..policy.fallback import select_fallback
 from ..policy.request import policy_request, state_for_frame
 from ..providers.policy import PolicyAdvisorError
 from ..turn_timing import ACT_LOOP
+from .perceive import save_action_evidence
 
 if TYPE_CHECKING:
     from ..policy.advice import PolicyAdvice, PolicyRequest
@@ -117,7 +119,15 @@ async def act_once(
                 if len(actions) != len(commands):
                     log.error("catalog_render_invalid", action=selected.id)
                     if ctx.ledger is not None:
-                        ctx.ledger.record_failure(f"invalid catalog render: {selected.id}")
+                        ctx.ledger.record_outcome(
+                            ActionOutcome(
+                                ctx.ledger.new_operation_id(),
+                                selected.id,
+                                "failed",
+                                "invalid catalog render",
+                            )
+                        )
+                        save_action_evidence(ctx.ledger, ctx.frames.evidence_screenshot())
                     return latest.captured_at
 
                 log.info(
@@ -129,30 +139,35 @@ async def act_once(
                     state_age_ms=round(latest.age_ms),
                     reservations=ctx.ledger.reservations() if ctx.ledger is not None else {},
                 )
-                failures_before = ctx.ledger.failure_count if ctx.ledger is not None else 0
                 operation_before = ctx.ledger.next_operation_id if ctx.ledger is not None else 0
                 results = await ctx.actuator.execute(actions)
                 ctx.memory.record_action_results(
                     sum(result.success for result in results), len(results)
                 )
+                if (
+                    ctx.ledger is not None
+                    and (not results or not all(result.success for result in results))
+                    and not any(
+                        outcome.operation_id >= operation_before for outcome in ctx.ledger.outcomes
+                    )
+                ):
+                    detail = next(
+                        (result.detail for result in results if not result.success), "no result"
+                    )
+                    ctx.ledger.record_outcome(
+                        ActionOutcome(ctx.ledger.new_operation_id(), selected.id, "failed", detail)
+                    )
                 if ctx.ledger is not None:
-                    if (
-                        (not results or not all(result.success for result in results))
-                        and ctx.ledger.failure_count == failures_before
-                        and not ctx.ledger.has_pending_since(operation_before)
-                    ):
-                        detail = next(
-                            (result.detail for result in results if not result.success), "no result"
-                        )
-                        ctx.ledger.record_failure(f"{selected.id}: {detail}")
-                    elif selected.id.startswith(("assign_",)):
-                        ctx.ledger.record_success()
+                    save_action_evidence(ctx.ledger, ctx.frames.evidence_screenshot())
                 log.info(
                     "act_execution_outcome",
                     action=selected.id,
                     source_tick=frame.tick,
                     execution_tick=latest.tick,
                     success=bool(results) and all(result.success for result in results),
+                    outcome_pending=(
+                        ctx.ledger is not None and ctx.ledger.has_pending_since(operation_before)
+                    ),
                     details=[result.detail for result in results],
                 )
                 return latest.captured_at
@@ -170,10 +185,14 @@ def _choose_action(
     state = state_for_frame(ctx, latest)
     if failure is not None:
         status = "timed_out" if failure == "provider_timeout" else "fallback"
-        return select_fallback(candidates, state, ctx.goal_manager.allocation), status, failure
+        return (
+            select_fallback(candidates, state, ctx.goal_manager.allocation, request.goals),
+            status,
+            failure,
+        )
     if advice is None:
         return (
-            select_fallback(candidates, state, ctx.goal_manager.allocation),
+            select_fallback(candidates, state, ctx.goal_manager.allocation, request.goals),
             "fallback",
             "no_advice",
         )
@@ -201,7 +220,7 @@ def _choose_action(
     allocation = ctx.goal_manager.allocation
     if advice.allocation_confidence >= config.policy_min_confidence:
         allocation = focused(state.age, advice.allocation_focus)
-    return select_fallback(candidates, state, allocation), "rejected", reason
+    return select_fallback(candidates, state, allocation, request.goals), "rejected", reason
 
 
 def _log_outcome(

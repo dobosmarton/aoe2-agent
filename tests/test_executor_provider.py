@@ -414,118 +414,6 @@ def test_serialize_response_preserves_zero_successes() -> None:
 
 
 # ---------------------------------------------------------------------------
-# reassign_villager composite: jump-to-camp → pick worker → build → place
-# ---------------------------------------------------------------------------
-
-
-def _allow_farm(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Satisfy the farm build gate: a mill has been seen this game."""
-    from gameplay_agent import executor as ex
-
-    monkeypatch.setattr(ex._build_gates, "buildings_confirmed", {"mill"})
-
-
-def test_reassign_villager_sequences_camp_select_build(
-    provider: ExecutorProvider, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from gameplay_agent.providers import executor_provider as executor_mod
-
-    steps: list[dict] = []
-
-    async def _record(action: dict) -> object:
-        steps.append(action)
-        return SimpleNamespace(success=True, detail="ok")
-
-    # After the Ctrl-Z rescan the fresh view has a wood villager on a tree.
-    entities = [
-        {"class": "tree", "id": "tree_0", "center": (300, 300), "confidence": 0.9},
-        {"class": "villager", "id": "villager_0", "center": (310, 305), "confidence": 0.9},
-    ]
-    monkeypatch.setattr(executor_mod, "execute_action", _record)
-    monkeypatch.setattr(executor_mod, "get_detected_entities", lambda: entities)
-    monkeypatch.setattr(executor_mod, "_tracker_velocities", lambda: {})
-    monkeypatch.setattr(provider, "_entity_snapshot", lambda: [])
-    _allow_farm(monkeypatch)  # a mill has been seen → the farm gate passes
-
-    block = ToolCall(
-        id="tu1",
-        name="reassign_villager",
-        arguments={"from_job": "wood", "building_key": "a", "intent": "need food"},
-    )
-    action_dict, _result = _run(provider._execute_reassign_villager(block))
-
-    assert action_dict["type"] == "reassign_villager"
-    kinds = [(s["type"], s.get("key"), s.get("modifiers")) for s in steps]
-    # 1) Ctrl-Z to the lumber camp (rescan), 2) click the wood villager,
-    # 3) q (econ menu), 4) a (Farm), 5) place with building_key.
-    assert kinds[0] == ("press", "z", ["ctrl"]) and steps[0]["rescan"] is True
-    assert steps[1]["type"] == "click" and (steps[1]["x"], steps[1]["y"]) == (310, 305)
-    assert kinds[2] == ("press", "q", None)
-    assert kinds[3] == ("press", "a", None)
-    assert steps[4]["type"] == "click" and steps[4]["building_key"] == "a"
-    assert steps[4]["auto_placement"] is True  # placement resolved at click time (F-33)
-
-
-def test_reassign_villager_rejected_when_farm_gate_fails(
-    provider: ExecutorProvider, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """No mill seen → the whole reassign composite is rejected before the camera
-    jump, and the reason reaches the LLM as the tool result."""
-    from gameplay_agent import executor as ex
-    from gameplay_agent.providers import executor_provider as executor_mod
-
-    steps: list[dict] = []
-
-    async def _record(action: dict) -> object:
-        steps.append(action)
-        return SimpleNamespace(success=True, detail="ok")
-
-    monkeypatch.setattr(executor_mod, "execute_action", _record)
-    monkeypatch.setattr(provider, "_entity_snapshot", lambda: [])
-    monkeypatch.setattr(ex._build_gates, "buildings_confirmed", set())
-
-    block = ToolCall(
-        id="tu8",
-        name="reassign_villager",
-        arguments={"from_job": "wood", "building_key": "a", "intent": "need food"},
-    )
-    action_dict, result = _run(provider._execute_reassign_villager(block))
-
-    assert action_dict["type"] == "reassign_villager"
-    assert steps == []  # rejected before the camera jump
-    assert "mill" in str(result)
-
-
-def test_reassign_villager_falls_back_to_villager_class(
-    provider: ExecutorProvider, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from gameplay_agent.providers import executor_provider as executor_mod
-
-    steps: list[dict] = []
-
-    async def _record(action: dict) -> object:
-        steps.append(action)
-        return SimpleNamespace(success=True, detail="ok")
-
-    monkeypatch.setattr(executor_mod, "execute_action", _record)
-    monkeypatch.setattr(executor_mod, "get_detected_entities", lambda: [])  # no worker found
-    monkeypatch.setattr(executor_mod, "_tracker_velocities", lambda: {})
-    monkeypatch.setattr(provider, "_entity_snapshot", lambda: [])
-    _allow_farm(monkeypatch)  # a mill has been seen → the farm gate passes
-
-    block = ToolCall(
-        id="tu2",
-        name="reassign_villager",
-        arguments={"from_job": "gold", "building_key": "a", "intent": "farm"},
-    )
-    _run(provider._execute_reassign_villager(block))
-
-    assert steps[0]["key"] == "g" and steps[0]["modifiers"] == ["ctrl"]  # Ctrl-G mining camp
-    # Selection falls back to nearest villager by class when the job model finds none.
-    assert steps[1]["type"] == "click" and steps[1]["target_class"] == "villager"
-
-
-# ---------------------------------------------------------------------------
 # Composite step-list characterization: the exact step dicts are the contract
 # (guards the shared-helper refactor against silent behavior drift)
 # ---------------------------------------------------------------------------
@@ -556,8 +444,7 @@ def test_send_villager_step_list_verbatim(
     action_dict, _result = _run(provider._execute_send_villager(block))
     assert action_dict == {"type": "send_villager", "target_class": "tree", "intent": "chop"}
     assert recorded_steps == [
-        {"type": "press", "key": ".", "rescan": True, "intent": "Select idle villager (chop)"},
-        {"type": "right_click", "intent": "chop", "target_class": "tree"},
+        {"type": "assign_idle", "resource": "wood", "intent": "chop"},
     ]
 
 
@@ -570,14 +457,7 @@ def test_send_all_idle_step_list_verbatim(
     action_dict, _result = _run(provider._execute_send_all_idle(block))
     assert action_dict == {"type": "send_all_idle", "target_class": "tree", "intent": "regroup"}
     assert recorded_steps == [
-        {
-            "type": "press",
-            "key": ".",
-            "modifiers": ["shift"],
-            "rescan": True,
-            "intent": "Select ALL idle villagers (regroup)",
-        },
-        {"type": "right_click", "intent": "regroup", "target_class": "tree"},
+        {"type": "assign_idle", "resource": "wood", "intent": "regroup"},
     ]
 
 
@@ -596,7 +476,7 @@ def test_send_composites_refuse_raw_coordinates(
     assert "target_class" in str(result)
 
 
-def test_build_house_is_not_blocked_by_strategy_headroom(
+def test_build_house_is_blocked_by_shared_headroom_gate(
     provider: ExecutorProvider, recorded_steps: list[dict], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from gameplay_agent import executor as ex
@@ -605,8 +485,8 @@ def test_build_house_is_not_blocked_by_strategy_headroom(
     block = ToolCall(id="tu6", name="build", arguments={"building_key": "q", "intent": "house"})
     action_dict, result = _run(provider._execute_build(block))
     assert action_dict == {"type": "build", "building_key": "q", "intent": "house"}
-    assert recorded_steps  # the shared catalog permits a strategically early house
-    assert result.success  # headroom is a preference, not an execution prohibition
+    assert recorded_steps == []
+    assert not result.success
 
 
 def test_build_house_allowed_near_cap(

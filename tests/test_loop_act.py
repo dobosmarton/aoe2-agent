@@ -40,13 +40,16 @@ def gates():
     ex.reset_build_gates()
 
 
-def _context(tmp_path, actuator: FakeActuator | None = None) -> LoopContext:
+def _context(
+    tmp_path, actuator: FakeActuator | None = None, ledger: ex.ActionLedger | None = None
+) -> LoopContext:
     return LoopContext(
         memory=AgentMemory(),
         goal_manager=GoalManager(),
         goal_logger=GoalLogger(tmp_path),
         source=FakeSource(),
         actuator=actuator if actuator is not None else FakeActuator(),
+        ledger=ledger,
     )
 
 
@@ -146,6 +149,165 @@ def test_a_decision_reaches_the_actuator(tmp_path, gates) -> None:
     assert [a["type"] for a in actuator.actions] == ["assign_idle"]
 
 
+def test_typesafe_can_choose_food_assignment_in_early_opening(tmp_path, gates) -> None:
+    actuator = FakeActuator()
+    ctx = _context(tmp_path, actuator)
+    frame = Perception(
+        entities=(_ent("sheep", (100.0, 100.0)),),
+        world=PolicyState(
+            food=200,
+            wood=200,
+            population=4,
+            population_cap=5,
+            villagers_ordered=4,
+            idle_present=True,
+        ),
+        tick=1,
+    )
+
+    _run(act.act_once(ctx, _HouseAdvisor(action="assign_food"), frame, tick=1))
+
+    assert [action["type"] for action in actuator.actions] == ["assign_idle"]
+
+
+def test_queued_villager_does_not_override_eligible_typesafe_assignment(tmp_path, gates) -> None:
+    actuator = FakeActuator()
+    ctx = _context(tmp_path, actuator)
+    frame = Perception(
+        entities=(_ent("sheep", (100.0, 100.0)),),
+        world=PolicyState(
+            food=150,
+            wood=200,
+            population=4,
+            population_cap=5,
+            villagers_ordered=5,
+            pending_population=1,
+            idle_present=True,
+        ),
+        tick=1,
+    )
+
+    _run(act.act_once(ctx, _HouseAdvisor(action="assign_food"), frame, tick=1))
+
+    assert actuator.actions[0]["resource"] == "food"
+
+
+def test_stalled_food_is_context_not_a_model_override(tmp_path, gates) -> None:
+    actuator = FakeActuator()
+    ctx = _context(tmp_path, actuator)
+    frame = Perception(
+        entities=(_ent("sheep", (100.0, 100.0)), _ent("tree", (200.0, 100.0))),
+        world=PolicyState(
+            food=150,
+            wood=170,
+            population=5,
+            population_cap=15,
+            villagers_ordered=5,
+            pending_population=1,
+            food_stalled=True,
+            idle_present=True,
+        ),
+        tick=1,
+    )
+
+    _run(act.act_once(ctx, _HouseAdvisor(action="assign_wood"), frame, tick=1))
+
+    assert actuator.actions[0]["resource"] == "wood"
+
+
+def test_food_stall_does_not_prohibit_eligible_tc_order(tmp_path, gates) -> None:
+    actuator = FakeActuator()
+    ctx = _context(tmp_path, actuator)
+    frame = Perception(
+        entities=(_ent("sheep", (100.0, 100.0)),),
+        world=PolicyState(
+            food=150,
+            wood=170,
+            population=5,
+            population_cap=15,
+            villagers_ordered=5,
+            food_stalled=True,
+            idle_present=True,
+        ),
+        tick=1,
+    )
+
+    _run(act.act_once(ctx, _HouseAdvisor(action="queue_villager"), frame, tick=1))
+
+    assert actuator.actions[0]["type"] == "queue_villager"
+
+
+def test_stalled_food_does_not_override_eligible_wood_advice(tmp_path, gates) -> None:
+    actuator = FakeActuator()
+    ctx = _context(tmp_path, actuator)
+    frame = Perception(
+        entities=(
+            _ent("farm", (100.0, 100.0)),
+            _ent("tree", (200.0, 100.0)),
+            _ent("villager", (300.0, 100.0)),
+        ),
+        world=PolicyState(
+            food=150,
+            wood=170,
+            population=5,
+            population_cap=15,
+            pending_population=1,
+            food_stalled=True,
+            idle_present=True,
+        ),
+        tick=1,
+    )
+
+    _run(act.act_once(ctx, _HouseAdvisor(action="assign_wood"), frame, tick=1))
+
+    assert actuator.actions[0]["resource"] == "wood"
+
+
+def test_pending_idle_assignment_waits_for_its_observation(tmp_path, gates) -> None:
+    actuator = FakeActuator()
+    ctx = _context(tmp_path, actuator)
+    frame = Perception(
+        entities=(_ent("sheep", (100.0, 100.0)),),
+        world=PolicyState(
+            food=150,
+            wood=170,
+            population=5,
+            population_cap=15,
+            pending_population=1,
+            assignment_pending=True,
+            idle_present=True,
+        ),
+        tick=1,
+    )
+
+    _run(act.act_once(ctx, _HouseAdvisor(action="build_house"), frame, tick=1))
+
+    assert len(actuator.batches) == 1
+    assert actuator.actions[0]["type"] != "assign_idle"
+
+
+def test_high_confidence_advice_cannot_build_an_unneeded_second_house(tmp_path, gates) -> None:
+    actuator = FakeActuator()
+    ctx = _context(tmp_path, actuator)
+    frame = Perception(
+        entities=(_ent("sheep", (100.0, 100.0)),),
+        world=PolicyState(
+            food=200,
+            wood=175,
+            population=4,
+            population_cap=10,
+            villagers_ordered=4,
+            pending_population=1,
+            idle_present=True,
+        ),
+        tick=1,
+    )
+
+    _run(act.act_once(ctx, _HouseAdvisor(action="build_house"), frame, tick=1))
+
+    assert [action["type"] for action in actuator.actions] == ["assign_idle"]
+
+
 def test_a_tick_records_its_own_latency(tmp_path, gates) -> None:
     """`loop_arch` flips to "clocks" on the presence of an act tick."""
     ctx = _context(tmp_path)
@@ -205,10 +367,21 @@ def test_a_skipped_tick_is_not_measured(tmp_path, gates) -> None:
 
 
 def test_results_reach_the_action_ledger(tmp_path, gates) -> None:
-    """One named action contributes one executed action result."""
+    """Input acceptance is counted separately from observed action effects."""
     ctx = _context(tmp_path)
     _run(act.act_once(ctx, _HouseAdvisor(action="assign_food"), _idle_frame(), tick=1))
-    assert ctx.memory.executed_actions == 1
+    assert ctx.memory.accepted_inputs == 1
+    assert ctx.memory.executed_actions == 0
+
+
+def test_failed_named_action_receives_operation_id_and_is_not_a_success(tmp_path, gates) -> None:
+    ledger = ex.ActionLedger()
+    ctx = _context(tmp_path, FakeActuator(succeed=False), ledger)
+    ctx.memory.action_ledger = ledger
+    _run(act.act_once(ctx, _HouseAdvisor(action="assign_food"), _idle_frame(), tick=1))
+    assert ledger.outcomes[-1].action == "assign_food"
+    assert ledger.outcomes[-1].status == "failed"
+    assert ctx.memory.get_metrics_snapshot()["action_success_rate"] == 0.0
 
 
 def test_the_loop_decides_once_per_frame(tmp_path, gates) -> None:

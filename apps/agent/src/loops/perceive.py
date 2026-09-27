@@ -1,13 +1,14 @@
 """The perceive clock: one frame in, one `Perception` out.
 
 The only writer of `memory.game_state` and the build gates, so "how old is this
-reading" has one answer. Input-triggered spatial refreshes skip HUD upkeep.
+reading" has one answer. Input-triggered spatial refreshes also read the HUD.
 """
 
 from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import structlog
@@ -24,10 +25,12 @@ from ..executor import (
 )
 from ..goals import THREAT_CLASSES
 from ..policy.state import from_game_state
+from ..screen import save_screenshot
 from ..turn_timing import PERCEIVE_LOOP, TickTimings
 from ..window import ensure_game_focused, is_game_running
 
 if TYPE_CHECKING:
+    from ..executor import ActionLedger
     from ..goals import GoalManager
     from ..memory import AgentMemory
     from ..resource_ocr import ResourceReadings
@@ -67,6 +70,18 @@ async def _refresh_spatial_once(ctx: LoopContext, request: asyncio.Future[Spatia
     timings = TickTimings()
     try:
         refresh = await ctx.source.capture_spatial(timings)
+        if refresh.spatial_valid and refresh.hud_readings:
+            sync_world_state(
+                ctx.memory,
+                ctx.goal_manager,
+                refresh.hud_readings,
+                input_revision=refresh.input_revision,
+            )
+            if ctx.ledger is not None:
+                save_action_evidence(ctx.ledger, refresh.screenshot)
+        if ctx.ledger is not None:
+            ctx.ledger.selected_unit = refresh.selected_unit
+            ctx.ledger.selected_at_revision = refresh.input_revision
         ctx.frames.complete_spatial_refresh(request, refresh)
     finally:
         log.info(
@@ -104,14 +119,31 @@ async def perceive_once(ctx: LoopContext, tick: int) -> None:
     with ctx.latency.tick(PERCEIVE_LOOP, tick) as timings:
         sighting = await ctx.source.capture(tick, timings)
         frame = sighting.frame
+        if not frame.spatial_valid or (
+            ctx.ledger is not None and frame.input_revision != ctx.ledger.input_revision
+        ):
+            log.info(
+                "perception_discarded",
+                frame_tick=frame.tick,
+                frame_revision=frame.input_revision,
+                current_revision=ctx.ledger.input_revision if ctx.ledger is not None else None,
+            )
+            ctx.frames.request_now()
+            return
         sync_world_state(
             ctx.memory,
             ctx.goal_manager,
             frame.hud_readings,
             input_revision=frame.input_revision,
         )
+        if ctx.ledger is not None:
+            save_action_evidence(ctx.ledger, frame.screenshot)
+        ctx.goal_manager.evaluate_progress(
+            ctx.memory.game_state, tick, frozenset(frame.hud_readings)
+        )
         entities = list(frame.entities)
         alarm = ctx.goal_manager.check_alarm(entities, sighting.ownership) if entities else False
+        ctx.memory.game_state.under_attack = alarm
         ledger = ctx.ledger
         if (
             ledger is not None
@@ -184,9 +216,16 @@ def sync_world_state(
         game_state.population_cap,
         game_state.resources,
         idle_present=game_state.idle_present,
+        idle_count=game_state.idle_count,
         known_resources=goal_manager.observed_resource_fields,
         population_known=goal_manager.observed_population,
         input_revision=input_revision,
+        villagers=hud_readings.get("villagers"),
+        worker_counts={
+            kind: value
+            for kind in ("food", "wood", "gold", "stone")
+            if isinstance(value := dict(hud_readings).get(f"{kind}_workers"), int)
+        },
     )
     observe_age(
         game_state.current_age if "age" in hud_readings else None,
@@ -196,4 +235,26 @@ def sync_world_state(
     game_state.villagers_ordered = villagers_ordered()
 
 
-__all__ = ["perceive_loop", "perceive_once", "sync_world_state"]
+def save_action_evidence(ledger: ActionLedger, screenshot: bytes) -> None:
+    """Keep the observation behind a failure/uncertainty with its operation ID."""
+    if not screenshot:
+        return
+    for outcome in ledger.outcomes:
+        if outcome.status not in {"failed", "uncertain"}:
+            continue
+        if outcome.operation_id in ledger.outcome_screenshots:
+            continue
+        directory = Path(config.log_dir) / "action_screenshots"
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"action_{outcome.operation_id}_{outcome.status}.jpg"
+        save_screenshot(screenshot, str(path))
+        ledger.outcome_screenshots[outcome.operation_id] = str(path)
+        log.warning(
+            "action_evidence_saved",
+            action_id=outcome.operation_id,
+            status=outcome.status,
+            screenshot=str(path),
+        )
+
+
+__all__ = ["perceive_loop", "perceive_once", "save_action_evidence", "sync_world_state"]

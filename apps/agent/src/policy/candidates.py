@@ -65,7 +65,9 @@ def eligible(spec: ActionSpec, state: PolicyState) -> bool:
         if spec.unique and spec.subject in state.buildings_seen:
             return False
         if spec.subject == "house" and (
-            not state.population_known or not 0 < state.population_cap < 200
+            not state.population_known
+            or not 0 < state.population_cap < 200
+            or state.population_cap - state.population - state.pending_population > 4
         ):
             return False
         if spec.subject == "lumber_camp" and "tree" not in state.visible_classes:
@@ -101,7 +103,7 @@ def eligible(spec: ActionSpec, state: PolicyState) -> bool:
     ):
         return False
     if spec.kind == "assign":
-        if not state.spatial_valid or not state.idle_present:
+        if not state.spatial_valid or not state.idle_present or state.assignment_pending:
             return False
         if spec.subject not in RESOURCE_KINDS:
             return False

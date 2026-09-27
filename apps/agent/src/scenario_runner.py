@@ -81,6 +81,12 @@ class _ScriptedWorld:
         }
         self.population = _integer(initial.get("population"), "population")
         self.population_cap = _integer(initial.get("population_cap"), "population_cap")
+        self.villagers = _integer(initial.get("villagers", self.population), "villagers")
+        worker_counts = _mapping(initial.get("worker_counts", {}), "worker_counts")
+        self.worker_counts = {
+            kind: _integer(worker_counts.get(kind, 0), f"{kind}_workers")
+            for kind in ("food", "wood", "gold", "stone")
+        }
         age = initial.get("age", "Dark Age")
         if not isinstance(age, str):
             raise ValueError("age must be text")
@@ -98,6 +104,13 @@ class _ScriptedWorld:
         for name in ("population", "population_cap", "idle_count"):
             if name in after:
                 setattr(self, name, _integer(after[name], name))
+        if "villagers" in after:
+            self.villagers = _integer(after["villagers"], "villagers")
+        if "worker_counts" in after:
+            for kind, value in _mapping(after["worker_counts"], "after.worker_counts").items():
+                if kind not in self.worker_counts:
+                    raise ValueError(f"unknown worker kind {kind}")
+                self.worker_counts[kind] = _integer(value, f"{kind}_workers")
         if "idle_present" in after:
             self.idle_present = bool(after["idle_present"])
         if "age" in after:
@@ -121,6 +134,8 @@ class _ScriptedWorld:
             "age": self.age,
             "idle_present": self.idle_present,
             "idle_count": self.idle_count,
+            "villagers": self.villagers,
+            **{f"{kind}_workers": count for kind, count in self.worker_counts.items()},
         }
 
 
@@ -204,6 +219,26 @@ class _ScriptedInput:
 
     def _record(self, method: str, key: str = "", point: tuple[float, float] | None = None) -> None:
         self.calls.append(f"{method}:{key}" if key else method)
+        if method == "press":
+            selected: str | None = None
+            if key == "h":
+                selected = "town_center"
+            elif key == ".":
+                selected = "villager"
+            else:
+                spec = executor.BY_ID.get(self.step.action)
+                if spec is not None and spec.kind in {"train", "research"} and key == spec.goto_key:
+                    selected = next(iter(spec.requires), "town_center")
+            if selected is not None:
+                self.ledger.selected_unit = selected
+                self.ledger.selected_at_revision = self.ledger.input_revision
+        elif (
+            method == "click"
+            and self.step.action.startswith("build_")
+            and not self.ledger.pending_placements
+        ):
+            self.ledger.selected_unit = "villager"
+            self.ledger.selected_at_revision = self.ledger.input_revision
         if self.issued:
             return
         action = self.step.action
@@ -226,6 +261,11 @@ class _ScriptedInput:
                     and key == pending.tech.research_key
                     for pending in self.ledger.pending_research
                 )
+            )
+            or (
+                method == "right_click"
+                and action.startswith("assign_")
+                and self.ledger.pending_assignment is not None
             )
             or (
                 method == "press"
@@ -301,6 +341,7 @@ async def run_scenario_async(path: Path) -> ScenarioResult:
                 actuator=GameActuator(),
                 ledger=ledger,
             )
+            ctx.memory.action_ledger = ledger
             executor.get_game_window_rect = lambda: (0, 0, 1920, 1080)
             executor.ensure_game_focused = lambda: True
             tick = 0

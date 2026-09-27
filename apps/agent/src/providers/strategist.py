@@ -82,7 +82,20 @@ def _clean_readings(ocr: dict[str, object]) -> ResourceReadings:
     """
     readings: dict[str, object] = {
         key: ocr[key]
-        for key in ("food", "wood", "gold", "stone", "population", "idle_present", "idle_count")
+        for key in (
+            "food",
+            "wood",
+            "gold",
+            "stone",
+            "population",
+            "idle_present",
+            "idle_count",
+            "food_workers",
+            "wood_workers",
+            "gold_workers",
+            "stone_workers",
+            "villagers",
+        )
         if key in ocr
     }
     if ocr.get("age"):
@@ -187,7 +200,7 @@ def get_default_goals(turn: int = 0) -> list[Goal]:
         Goal(
             name="Queue villagers",
             type="local",
-            metric="population",
+            metric="villagers",
             target=10,
             priority=9,
             created_turn=turn,
@@ -195,8 +208,8 @@ def get_default_goals(turn: int = 0) -> list[Goal]:
         Goal(
             name="Gather food",
             type="local",
-            metric="food",
-            target=200,
+            metric="food_workers",
+            target=2,
             priority=8,
             created_turn=turn,
         ),

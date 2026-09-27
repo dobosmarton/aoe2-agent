@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from ..entity_utils import extract_attrs
 from ..executor import pending_placement_counts
-from ..villager_roles import gather_counts, infer_jobs, job_counts
 from .advice import PolicyGoal, PolicyRequest
 from .candidates import feasible_candidates
 from .state import PolicyState, from_game_state
@@ -68,22 +66,26 @@ def build_policy_request(
 def state_for_frame(ctx: LoopContext, frame: Perception) -> PolicyState:
     """Create the actor and advisor's common state from one perception."""
     entities = list(frame.entities)
-    jobs = gather_counts(job_counts(infer_jobs(entities))) if entities else {}
     visible_classes = frozenset(extract_attrs(entity).class_name for entity in entities)
     if frame.world is not None:
         return replace(
             frame.world,
-            villager_jobs=MappingProxyType(dict(jobs)),
             visible_classes=visible_classes,
             spatial_valid=frame.spatial_valid,
         )
     state = from_game_state(
         ctx.memory.game_state,
         captured_at=frame.captured_at,
-        villager_jobs=jobs,
+        villager_jobs=ctx.memory.game_state.worker_counts,
         pending_buildings=frozenset(pending_placement_counts()),
+        known_resources=ctx.goal_manager.observed_resource_fields,
     )
-    return replace(state, visible_classes=visible_classes, spatial_valid=frame.spatial_valid)
+    return replace(
+        state,
+        population_known=ctx.goal_manager.observed_population,
+        visible_classes=visible_classes,
+        spatial_valid=frame.spatial_valid,
+    )
 
 
 __all__ = ["build_policy_request", "policy_request", "state_for_frame"]

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import time
 
+from gameplay_agent.executor import ActionLedger, ActionOutcome
 from gameplay_agent.memory import (
     AGE_SCORES,
     INITIAL_POPULATION,
@@ -48,7 +49,7 @@ def test_game_state_defaults_match_dark_age() -> None:
     assert s.population == INITIAL_POPULATION
     assert s.population_cap == INITIAL_POPULATION_CAP
     assert s.current_age == "Dark Age"
-    assert s.idle_tc is False
+    assert s.idle_tc is None
     assert s.under_attack is False
 
 
@@ -137,11 +138,12 @@ def test_update_from_observations_empty_dict_noop() -> None:
     assert m.game_state.resources == INITIAL_RESOURCES
 
 
-def test_update_from_observations_resources_merged() -> None:
+def test_model_observations_cannot_change_hud_resources() -> None:
     m = AgentMemory()
     m.update_from_observations({"resources": {"food": 500}})
+    assert m.game_state.resources["food"] == INITIAL_RESOURCES["food"]
+    m.apply_hud_readings({"food": 500})
     assert m.game_state.resources["food"] == 500
-    # other resources unchanged
     assert m.game_state.resources["wood"] == INITIAL_RESOURCES["wood"]
 
 
@@ -161,7 +163,7 @@ def test_update_from_observations_food_handles_non_numeric() -> None:
 
 def test_update_from_observations_population_parses_n_over_cap() -> None:
     m = AgentMemory()
-    m.update_from_observations({"population": "8/15"})
+    m.apply_hud_readings({"population": "8/15"})
     assert m.game_state.population == 8
     assert m.game_state.population_cap == 15
     assert m.peak_population == 8
@@ -169,8 +171,8 @@ def test_update_from_observations_population_parses_n_over_cap() -> None:
 
 def test_update_from_observations_population_tracks_peak() -> None:
     m = AgentMemory()
-    m.update_from_observations({"population": "10/15"})
-    m.update_from_observations({"population": "6/15"})  # drop after losses
+    m.apply_hud_readings({"population": "10/15"})
+    m.apply_hud_readings({"population": "6/15"})  # drop after losses
     assert m.peak_population == 10
 
 
@@ -187,11 +189,11 @@ def test_update_from_observations_does_not_set_age() -> None:
     assert m.game_state.current_age == "Dark Age"  # unchanged
 
 
-def test_update_from_observations_idle_tc_and_under_attack() -> None:
+def test_model_observations_cannot_set_idle_tc_or_attack_status() -> None:
     m = AgentMemory()
     m.update_from_observations({"idle_tc": True, "under_attack": True})
-    assert m.game_state.idle_tc is True
-    assert m.game_state.under_attack is True
+    assert m.game_state.idle_tc is None
+    assert m.game_state.under_attack is False
 
 
 # ---------------------------------------------------------------------------
@@ -273,7 +275,7 @@ def test_context_no_warning_for_one_failure() -> None:
 
 def test_format_game_state_renders_housed_flag() -> None:
     m = AgentMemory()
-    m.update_from_observations({"population": "5/5"})  # at cap
+    m.apply_hud_readings({"population": "5/5"})  # at cap
     out = m.get_context_for_llm()
     assert "HOUSED" in out
 
@@ -313,7 +315,8 @@ def test_record_action_results_accumulates_success() -> None:
     m = AgentMemory()
     m.record_action_results(3, 5)
     m.record_action_results(2, 4)
-    assert m.successful_actions == 5
+    assert m.accepted_inputs == 5
+    assert m.attempted_inputs == 9
 
 
 # ---------------------------------------------------------------------------
@@ -334,6 +337,11 @@ def test_metrics_snapshot_keys() -> None:
         "total_actions",
         "successful_actions",
         "action_success_rate",
+        "accepted_inputs",
+        "attempted_inputs",
+        "input_acceptance_rate",
+        "unverifiable_action_ids",
+        "score_valid",
         "turn_count",
         "game_end_reason",
         "memories_loaded",
@@ -396,17 +404,15 @@ def test_metrics_snapshot_success_rate_zero_total_no_div_zero() -> None:
 
 def test_metrics_snapshot_success_rate_correct() -> None:
     m = AgentMemory()
-    m.add_turn(
-        Turn(
-            iteration=1,
-            timestamp="t",
-            reasoning="r",
-            actions=[{"type": "press"}, {"type": "press"}],
-        )
-    )
+    ledger = ActionLedger()
+    m.action_ledger = ledger
+    ledger.record_outcome(ActionOutcome(1, "queue_villager", "pending", "input issued"))
+    ledger.record_outcome(ActionOutcome(2, "build_mill", "pending", "input issued"))
+    ledger.record_outcome(ActionOutcome(1, "queue_villager", "confirmed", "villager observed"))
     m.record_action_results(1, 2)
     snap = m.get_metrics_snapshot()
     assert snap["action_success_rate"] == 0.5
+    assert snap["input_acceptance_rate"] == 0.5
 
 
 def test_metrics_snapshot_age_score_uses_age_scores_table() -> None:
@@ -510,17 +516,21 @@ def test_create_turn_handles_no_observations() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_action_success_rate_uses_executed_denominator():
-    """Fallback/composite executions never enter turn.actions, so the old
-    successful/total ratio exceeded 1.0 (runs 1 and 3: 2.38, 1.54)."""
+def test_action_success_rate_counts_effects_not_input_acceptance():
     memory = AgentMemory()
-    memory.create_turn(reasoning="r", actions=[])  # planned 0
-    memory.record_action_results(3, 3)  # but 3 fallback actions executed
+    ledger = ActionLedger()
+    memory.action_ledger = ledger
+    for operation_id in range(1, 4):
+        ledger.record_outcome(ActionOutcome(operation_id, "queue_villager", "pending", "issued"))
+    ledger.record_outcome(ActionOutcome(1, "queue_villager", "confirmed", "delivered"))
+    memory.record_action_results(3, 3)
     snap = memory.get_metrics_snapshot()
     assert snap["executed_actions"] == 3
-    assert snap["action_success_rate"] == 1.0  # 3/3, never > 1 by construction
+    assert snap["action_success_rate"] == 1 / 3
+    assert snap["input_acceptance_rate"] == 1.0
     memory.record_action_results(0, 2)
-    assert memory.get_metrics_snapshot()["action_success_rate"] == 0.6  # 3/5
+    assert memory.get_metrics_snapshot()["action_success_rate"] == 1 / 3
+    assert memory.get_metrics_snapshot()["input_acceptance_rate"] == 0.6
 
 
 def test_food_gathered_sums_positive_ocr_deltas():

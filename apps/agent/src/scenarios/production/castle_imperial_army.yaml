@@ -1,29 +1,52 @@
-name: Castle and Imperial progression with a basic army
+name: Observed Dark Age economy through Imperial with a basic army
 initial:
-  age: Feudal Age
-  resources: {food: 3000, wood: 1700, gold: 1500, stone: 0}
-  population: 20
-  population_cap: 50
-  villagers_ordered: 20
+  age: Dark Age
+  resources: {food: 200, wood: 200, gold: 100, stone: 200}
+  population: 4
+  population_cap: 5
+  villagers: 3
+  worker_counts: {food: 0, wood: 0, gold: 0, stone: 0}
   idle_present: true
-  idle_count: 1
-  buildings: [mill, lumber_camp, barracks, stable]
+  idle_count: 3
+  buildings: []
   entities:
     - {id: tc, class: town_center, center: [700, 500]}
     - {id: worker, class: villager, center: [750, 550]}
+    - {id: sheep, class: sheep, center: [900, 600]}
+    - {id: berries, class: berry_bush, center: [1020, 600]}
     - {id: forest, class: tree, center: [1050, 520]}
     - {id: gold, class: gold_mine, center: [1100, 600]}
 steps:
+  - action: queue_villager
+    after: {resources: {food: 150}, population: 5, villagers: 4}
+  - action: assign_food
+    after: {resources: {food: 180}, worker_counts: {food: 1}, idle_count: 2}
+  - action: assign_food
+    after: {resources: {food: 450}, worker_counts: {food: 2}, idle_count: 1}
+  - action: build_house
+    after: {resources: {wood: 175}, population_cap: 10, building: house}
+  - action: assign_wood
+    after: {resources: {food: 500, wood: 300}, worker_counts: {wood: 1}, idle_count: 0, idle_present: false}
+  - action: build_mill
+    after: {resources: {wood: 200}, building: mill}
+  - action: build_lumber_camp
+    after: {resources: {wood: 100}, building: lumber_camp}
+  - action: advance_to_feudal
+    after: {resources: {food: 3000, wood: 1700, gold: 1500}, age: Feudal Age}
+  - action: build_barracks
+    after: {resources: {wood: 1525}, building: barracks}
+  - action: build_stable
+    after: {resources: {wood: 1350}, building: stable}
   - action: build_blacksmith
-    after: {resources: {wood: 1550}, building: blacksmith}
+    after: {resources: {wood: 1200}, building: blacksmith}
   - action: build_market
-    after: {resources: {wood: 1375}, building: market}
+    after: {resources: {wood: 1025}, building: market}
   - action: advance_to_castle
     after: {resources: {food: 2200, gold: 1300}, age: Castle Age}
   - action: build_siege_workshop
-    after: {resources: {wood: 1175}, building: siege_workshop}
+    after: {resources: {wood: 825}, building: siege_workshop}
   - action: build_monastery
-    after: {resources: {wood: 1000}, building: monastery}
+    after: {resources: {wood: 650}, building: monastery}
   - action: train_knight
     after: {resources: {food: 2140, gold: 1225}}
   - action: advance_to_imperial

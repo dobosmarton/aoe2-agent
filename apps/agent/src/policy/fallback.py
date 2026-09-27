@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from .allocation import Allocation, for_state, next_kind
 
 if TYPE_CHECKING:
+    from .advice import PolicyGoal
     from .candidates import ActionCandidate
     from .state import PolicyState
 
@@ -33,15 +34,62 @@ _MILITARY_PATH = (
     "build_archery_range",
     "build_stable",
 )
+_HOUSE_HEADROOM = 4
+
+
+def housing_needed(state: PolicyState) -> bool:
+    """Whether current and already-promised population need another house soon."""
+    return (
+        state.population_known
+        and state.population_cap - state.population - state.pending_population <= _HOUSE_HEADROOM
+    )
+
+
+def priority_action(
+    candidates: tuple[ActionCandidate, ...], state: PolicyState
+) -> ActionCandidate | None:
+    """Correct measurable stalls only in the deterministic fallback path."""
+    by_id = {candidate.id: candidate for candidate in candidates}
+    if (
+        state.tc_stalled
+        and state.villagers is not None
+        and state.pending_villagers == 0
+        and (villager := by_id.get("queue_villager"))
+    ):
+        return villager
+    if state.food_stalled:
+        for action_id in ("assign_food", "build_farm", "build_mill"):
+            if candidate := by_id.get(action_id):
+                return candidate
+    return None
 
 
 def select_fallback(
     candidates: tuple[ActionCandidate, ...],
     state: PolicyState,
     allocation: Allocation | None,
+    goals: tuple[PolicyGoal, ...] = (),
 ) -> ActionCandidate:
     """Choose one useful action; this function never changes feasibility."""
     by_id = {candidate.id: candidate for candidate in candidates}
+    if priority := priority_action(candidates, state):
+        return priority
+    for goal in sorted(goals, key=lambda item: item.priority, reverse=True):
+        if goal.progress >= 1.0:
+            continue
+        metric = goal.metric
+        if metric == "villagers" and state.villagers is None:
+            continue
+        if metric == "food_workers" and "food" not in state.villager_jobs:
+            continue
+        preferred = {
+            "villagers": ("queue_villager", "build_house", "assign_food"),
+            "food_workers": ("assign_food", "build_farm", "build_mill", "assign_wood"),
+            "age": _AGE_PATH.get(state.age, ()),
+        }.get(metric, ())
+        for action_id in preferred:
+            if candidate := by_id.get(action_id):
+                return candidate
     if state.idle_present:
         mix = for_state(state, allocation)
         desired = next_kind(mix, state.villager_jobs)
@@ -51,7 +99,7 @@ def select_fallback(
             if candidate := by_id.get(f"assign_{resource}"):
                 return candidate
 
-    if state.population_cap - state.population <= 4 and (house := by_id.get("build_house")):
+    if housing_needed(state) and (house := by_id.get("build_house")):
         return house
     for action_id in _AGE_PATH.get(state.age, ()):
         if candidate := by_id.get(action_id):

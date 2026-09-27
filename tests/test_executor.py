@@ -50,6 +50,14 @@ class _FakePyautogui:
     def _record(self, name: str) -> Callable[..., None]:
         def fn(*args: object, **kwargs: object) -> None:
             self.calls.append((name, args, kwargs))
+            if name == "press" and args:
+                ledger = ex.current_ledger()
+                if args[0] == "h":
+                    ledger.selected_unit = "town_center"
+                    ledger.selected_at_revision = ledger.input_revision
+                elif args[0] == ".":
+                    ledger.selected_unit = "villager"
+                    ledger.selected_at_revision = ledger.input_revision
 
         return fn
 
@@ -106,12 +114,24 @@ def fake_pyautogui(monkeypatch: pytest.MonkeyPatch, clock: _Clock) -> _FakePyaut
         resources: dict[str, int],
         *,
         idle_present: bool | None = True,
+        idle_count: int | None = None,
+        input_revision: int | None = None,
+        villagers: int | None = None,
+        worker_counts: dict[str, int] | None = None,
+        known_resources: frozenset[str] | None = None,
     ) -> None:
         original_observe_hud(
             population,
             population_cap,
             resources,
             idle_present=idle_present,
+            idle_count=idle_count,
+            input_revision=input_revision,
+            villagers=villagers,
+            known_resources=known_resources,
+            worker_counts=worker_counts
+            if worker_counts is not None
+            else {"food": 0, "wood": 0, "gold": 0, "stone": 0},
         )
 
     monkeypatch.setattr(ex, "observe_hud", observe_with_worker)
@@ -202,31 +222,16 @@ def test_translate_adds_window_offset(fake_pyautogui: _FakePyautogui) -> None:
     assert ex._translate(10, 20) == (110, 70)
 
 
-def test_re_resolve_from_intent_picks_matching_class(
-    fake_pyautogui: _FakePyautogui,
-) -> None:
-    ex._detected_entities = [
-        {"id": "tree_1", "class": "tree", "center": (300, 400)},
-    ]
-    new_x, new_y = ex._re_resolve_from_intent(0, 0, "Send villager to gather from tree")
-    assert (new_x, new_y) == (300, 400)
+def test_bound_target_rejects_changed_class(fake_pyautogui: _FakePyautogui) -> None:
+    ex._detected_entities = [{"id": "resource", "class": "tree", "center": (300, 400)}]
+    error, coords = ex._resolve_coords({"target_id": "resource", "expected_class": "sheep"})
+    assert "class changed" in error and coords is None
 
 
-def test_re_resolve_from_intent_skips_actor_classes(fake_pyautogui: _FakePyautogui) -> None:
-    """'villager' / 'town_center' appear as the subject, never the target —
-    re-resolution must not snap to them."""
-    ex._detected_entities = [
-        {"id": "villager_1", "class": "villager", "center": (999, 999)},
-    ]
-    new_x, new_y = ex._re_resolve_from_intent(50, 60, "Send villager to gather wood")
-    assert (new_x, new_y) == (50, 60)  # unchanged
-
-
-def test_re_resolve_from_intent_no_match_returns_original(
-    fake_pyautogui: _FakePyautogui,
-) -> None:
-    ex._detected_entities = [{"id": "tree_1", "class": "tree", "center": (1, 2)}]
-    assert ex._re_resolve_from_intent(7, 8, "build a house") == (7, 8)
+def test_bound_target_rejects_changed_revision(fake_pyautogui: _FakePyautogui) -> None:
+    ex._detected_entities = [{"id": "resource", "class": "tree", "center": (300, 400)}]
+    error, coords = ex._resolve_coords({"target_id": "resource", "spatial_revision": 10})
+    assert "crossed another input" in error and coords is None
 
 
 # ---------------------------------------------------------------------------
@@ -308,14 +313,198 @@ def test_handle_right_click_translates_and_calls(fake_pyautogui: _FakePyautogui)
     assert ("rightClick", (500, 600), {}) in fake_pyautogui.calls
 
 
-def test_handle_right_click_re_resolves_when_no_target(
+def test_handle_right_click_never_retargets_from_intent(
     fake_pyautogui: _FakePyautogui,
 ) -> None:
-    """Without target_id/target_class, the executor should re-resolve from
-    intent — overriding stale x/y coords from the LLM."""
     ex._detected_entities = [{"id": "tree_1", "class": "tree", "center": (700, 800)}]
-    _run(ex._handle_right_click({"x": 1, "y": 2}, "send villager to tree"))
-    assert ("rightClick", (700, 800), {}) in fake_pyautogui.calls
+    _run(ex._handle_right_click({"x": 800, "y": 700}, "send villager to tree"))
+    assert ("rightClick", (800, 700), {}) in fake_pyautogui.calls
+
+
+def test_idle_food_assignment_clicks_the_nearest_detected_sheep(
+    fake_pyautogui: _FakePyautogui, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two sheep of the same class must not turn a near target into the first detection."""
+    ex.observe_hud(4, 5, {"food": 200, "wood": 200}, idle_present=True)
+    ex._detected_entities = [
+        {"id": "far", "class": "sheep", "center": (200, 400)},
+        {"id": "near", "class": "sheep", "center": (1500, 800)},
+        {"id": "worker", "class": "villager", "center": (1510, 810)},
+    ]
+
+    async def fresh_view() -> bool:
+        return True
+
+    ex.set_rescan_fn(fresh_view)
+    monkeypatch.setattr(ex, "RESCAN_SETTLE_DELAY", 0.0)
+    result = _run(ex.execute_action({"type": "assign_idle", "resource": "food"}))
+
+    assert result.success
+    assert ("rightClick", (1500, 800), {}) in fake_pyautogui.calls
+
+
+def test_idle_assignment_fails_when_the_worker_remains_idle(
+    fake_pyautogui: _FakePyautogui, monkeypatch: pytest.MonkeyPatch, clock: _Clock
+) -> None:
+    ex.observe_hud(4, 5, {"food": 200, "wood": 200}, idle_present=True)
+    ex._detected_entities = [
+        {"id": "sheep", "class": "sheep", "center": (1500, 800)},
+    ]
+
+    async def fresh_view() -> bool:
+        return True
+
+    ex.set_rescan_fn(fresh_view)
+    monkeypatch.setattr(ex, "RESCAN_SETTLE_DELAY", 0.0)
+    result = _run(ex.execute_action({"type": "assign_idle", "resource": "food"}))
+
+    assert result.success
+    assert ex.ledger_policy_state().assignment_pending
+    ex.observe_hud(4, 5, {"food": 200, "wood": 200}, idle_present=True)
+    assert ex.ledger_policy_state().assignment_pending
+    clock.advance(15)
+    ex.observe_hud(4, 5, {"food": 200, "wood": 200}, idle_present=True)
+    assert ex._build_gates.outcomes[-1].status == "uncertain"
+    assert ex.ledger_policy_state().assignment_pending
+    assert "assign_food" in ex.ledger_policy_state().suppressed_actions
+    clock.advance(20)
+    assert "assign_food" not in ex.ledger_policy_state().suppressed_actions
+
+
+def test_idle_assignment_confirms_only_after_idle_badge_clears(
+    fake_pyautogui: _FakePyautogui, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ex.observe_hud(4, 5, {"food": 200, "wood": 200}, idle_present=True, worker_counts={"food": 0})
+    ex._detected_entities = [
+        {"id": "sheep", "class": "sheep", "center": (1500, 800)},
+    ]
+
+    async def fresh_view() -> bool:
+        return True
+
+    ex.set_rescan_fn(fresh_view)
+    monkeypatch.setattr(ex, "RESCAN_SETTLE_DELAY", 0.0)
+    _run(ex.execute_action({"type": "assign_idle", "resource": "food"}))
+
+    ex.observe_hud(4, 5, {"food": 200, "wood": 200}, idle_present=False, worker_counts={"food": 0})
+    assert ex.ledger_policy_state().assignment_pending
+    ex.observe_hud(4, 5, {"food": 200, "wood": 200}, idle_present=False, worker_counts={"food": 1})
+    assert not ex.ledger_policy_state().assignment_pending
+    assert ex._build_gates.outcomes[-1].status == "confirmed"
+
+
+def test_idle_assignment_confirms_when_count_falls_but_badge_remains_lit(
+    fake_pyautogui: _FakePyautogui, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ex.observe_hud(
+        4, 5, {"food": 200, "wood": 200}, idle_present=True, idle_count=2, worker_counts={"food": 0}
+    )
+    ex._detected_entities = [
+        {"id": "sheep", "class": "sheep", "center": (1500, 800)},
+    ]
+
+    async def fresh_view() -> bool:
+        return True
+
+    ex.set_rescan_fn(fresh_view)
+    monkeypatch.setattr(ex, "RESCAN_SETTLE_DELAY", 0.0)
+    _run(ex.execute_action({"type": "assign_idle", "resource": "food"}))
+
+    ex.observe_hud(
+        4, 5, {"food": 200, "wood": 200}, idle_present=True, idle_count=1, worker_counts={"food": 1}
+    )
+
+    assert ex._build_gates.outcomes[-1].status == "confirmed"
+
+
+def test_food_assignment_does_not_silently_target_wood_after_refresh(
+    fake_pyautogui: _FakePyautogui, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ex.observe_hud(4, 5, {"food": 200, "wood": 200}, idle_present=True)
+    ex._detected_entities = [
+        {"id": "sheep", "class": "sheep", "center": (1500, 800)},
+        {"id": "tree", "class": "tree", "center": (1400, 800)},
+    ]
+
+    async def refreshed_without_food() -> bool:
+        ex._detected_entities = [{"id": "tree", "class": "tree", "center": (1400, 800)}]
+        return True
+
+    ex.set_rescan_fn(refreshed_without_food)
+    monkeypatch.setattr(ex, "RESCAN_SETTLE_DELAY", 0.0)
+    result = _run(ex.execute_action({"type": "assign_idle", "resource": "food"}))
+
+    assert not result.success
+    assert "no food target" in result.detail
+    assert "rightClick" not in fake_pyautogui.names()
+
+
+def test_intervening_input_preserves_pending_assignment_evidence(
+    fake_pyautogui: _FakePyautogui, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ex.observe_hud(4, 5, {"food": 200, "wood": 200}, idle_present=True, worker_counts={"food": 0})
+    ex._detected_entities = [
+        {"id": "sheep", "class": "sheep", "center": (1500, 800)},
+    ]
+
+    async def fresh_view() -> bool:
+        return True
+
+    ex.set_rescan_fn(fresh_view)
+    monkeypatch.setattr(ex, "RESCAN_SETTLE_DELAY", 0.0)
+    _run(ex.execute_action({"type": "assign_idle", "resource": "food"}))
+    ex.current_ledger().note_input()
+
+    ex.observe_hud(4, 5, {"food": 200, "wood": 200}, idle_present=False, worker_counts={"food": 0})
+    assert ex.ledger_policy_state().assignment_pending
+    ex.observe_hud(4, 5, {"food": 200, "wood": 200}, idle_present=False, worker_counts={"food": 1})
+    assert ex._build_gates.outcomes[-1].status == "confirmed"
+
+
+def test_pre_click_observation_cannot_settle_idle_assignment(
+    fake_pyautogui: _FakePyautogui, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ex.observe_hud(4, 5, {"food": 200, "wood": 200}, idle_present=True, worker_counts={"food": 0})
+    ex._detected_entities = [
+        {"id": "sheep", "class": "sheep", "center": (1500, 800)},
+    ]
+
+    async def fresh_view() -> bool:
+        return True
+
+    ex.set_rescan_fn(fresh_view)
+    monkeypatch.setattr(ex, "RESCAN_SETTLE_DELAY", 0.0)
+    _run(ex.execute_action({"type": "assign_idle", "resource": "food"}))
+    click_revision = ex.current_ledger().input_revision
+
+    ex.observe_hud(
+        4,
+        5,
+        {"food": 200, "wood": 200},
+        idle_present=False,
+        input_revision=click_revision - 1,
+        worker_counts={"food": 1},
+    )
+    assert ex.ledger_policy_state().assignment_pending
+    ex.observe_hud(
+        4,
+        5,
+        {"food": 200, "wood": 200},
+        idle_present=False,
+        input_revision=click_revision,
+        worker_counts={"food": 1},
+    )
+    assert ex._build_gates.outcomes[-1].status == "confirmed"
+
+
+def test_food_stall_uses_observed_income_not_stock(
+    fake_pyautogui: _FakePyautogui, clock: _Clock
+) -> None:
+    ex.observe_hud(4, 5, {"food": 200, "wood": 200})
+    clock.advance(31)
+    assert ex.ledger_policy_state().food_stalled
+    ex.observe_hud(4, 5, {"food": 210, "wood": 200})
+    assert not ex.ledger_policy_state().food_stalled
 
 
 def test_handle_press_simple_key(fake_pyautogui: _FakePyautogui) -> None:
@@ -356,11 +545,11 @@ def test_build_rejection_fails_closed_without_snapshot(fake_pyautogui: _FakePyau
     assert ex.build_rejection("q") is not None
 
 
-def test_build_rejection_allows_house_with_ample_headroom(
+def test_build_rejection_blocks_premature_house(
     fake_pyautogui: _FakePyautogui,
 ) -> None:
     ex.observe_hud(10, 30, {"wood": 200})
-    assert ex.build_rejection("q") is None
+    assert ex.build_rejection("q") is not None
 
 
 def test_build_rejection_allows_house_near_cap(fake_pyautogui: _FakePyautogui) -> None:
@@ -377,7 +566,7 @@ def test_build_rejection_blocks_house_at_game_cap(fake_pyautogui: _FakePyautogui
 def test_build_rejection_uses_the_same_wood_reading_for_house_and_farm(
     fake_pyautogui: _FakePyautogui,
 ) -> None:
-    ex.observe_hud(10, 30, {"wood": 500})
+    ex.observe_hud(26, 30, {"wood": 500})
     assert ex.build_rejection("q") is None
     assert ex.build_rejection("w") is None  # mill
     ex.record_confirmed_buildings(["mill"])
@@ -387,7 +576,7 @@ def test_build_rejection_uses_the_same_wood_reading_for_house_and_farm(
 def test_handle_build_aborts_without_post_navigation_refresh(
     fake_pyautogui: _FakePyautogui,
 ) -> None:
-    ex.observe_hud(10, 30, {"wood": 200})
+    ex.observe_hud(4, 5, {"wood": 200})
     result = _run(ex._handle_build({"building_key": "q"}, "Build house to increase pop cap"))
     assert result.success is False and "fresh perception" in result.detail
     assert "click" not in fake_pyautogui.names()
@@ -534,7 +723,7 @@ def test_place_click_unconfirmed_stays_success_and_goes_pending(
     false 'failed' caused run 2's duplicate mill); it queues for wood-delta
     settlement instead."""
     _zero_build_delays(monkeypatch)
-    ex.observe_hud(10, 15, {"wood": 200})  # baseline for the pending entry
+    ex.observe_hud(10, 14, {"wood": 200})  # baseline for the pending entry
 
     async def rescan_sees_nothing() -> None:
         ex._detected_entities = []
@@ -578,12 +767,14 @@ def test_pending_placement_purchase_needs_visual_completion(fake_pyautogui: _Fak
     assert ex.build_rejection("a") is None
 
 
-def test_pending_placement_missing_when_wood_kept(fake_pyautogui: _FakePyautogui) -> None:
+def test_pending_placement_remains_when_wood_increase_masks_spending(
+    fake_pyautogui: _FakePyautogui,
+) -> None:
     ex.observe_hud(10, 15, {"wood": 200})
     ex._note_pending_placement("w")
-    # Wood went UP (gathering, nothing spent) → the placement never happened.
+    # Wood went up; gathering could have masked spending.
     ex.observe_hud(10, 15, {"wood": 230})
-    assert ex._build_gates.pending_placements == []
+    assert len(ex._build_gates.pending_placements) == 1
     assert "mill" not in ex._build_gates.buildings_confirmed
 
 
@@ -607,7 +798,7 @@ def test_one_wood_drop_confirms_at_most_one_pending(fake_pyautogui: _FakePyautog
     ex._note_pending_placement("r")  # lumber camp, 100 wood — same baseline
     ex.observe_hud(10, 15, {"wood": 8})  # a single purchase's drop
     assert set(ex._build_gates.building_purchases) == {"mill"}  # FIFO winner only
-    assert ex._build_gates.pending_placements == []
+    assert len(ex._build_gates.pending_placements) == 1
 
 
 def test_budget_covers_two_genuine_purchases(fake_pyautogui: _FakePyautogui) -> None:
@@ -628,7 +819,8 @@ def test_pendings_with_different_baselines_settle_independently(
     ex.observe_hud(10, 15, {"wood": 95})  # settles the mill
     ex._note_pending_placement("r")  # fresh baseline 95 — no deduction carryover
     ex.observe_hud(10, 15, {"wood": 0})
-    assert {"mill", "lumber_camp"} <= ex._build_gates.building_purchases.keys()
+    assert "mill" in ex._build_gates.building_purchases
+    assert len(ex._build_gates.pending_placements) == 1  # 95 cannot prove a 100-wood purchase
 
 
 def _observe_wood(wood: int) -> None:
@@ -636,11 +828,11 @@ def _observe_wood(wood: int) -> None:
 
 
 def _run_missing_settlements(building_key: str, count: int, wood: int) -> int:
-    """Note `count` placements that each vanish (wood only rises); returns wood."""
+    """Record independently verified failed placements for the circuit breaker."""
     for _ in range(count):
-        ex._note_pending_placement(building_key)
-        wood += 5  # income, no spend → the placement never happened
-        _observe_wood(wood)
+        building = ex.building_class(ex.ECON_MENU, building_key)
+        assert building is not None
+        ex._note_missing_settlement(building)
     return wood
 
 
@@ -674,20 +866,20 @@ def test_confirmed_purchase_clears_missing_streak(fake_pyautogui: _FakePyautogui
     assert ex.build_rejection("a") is None  # 2 misses after a success ≠ streak of 3
 
 
-def test_income_masked_purchase_still_confirms(fake_pyautogui: _FakePyautogui) -> None:
+def test_income_masked_purchase_remains_pending_without_visual_evidence(
+    fake_pyautogui: _FakePyautogui,
+) -> None:
     """Run 13 (F-45/T-537): a 30-villager economy gathered +140 wood across one
     settlement, so the raw delta judged every real purchase MISSING and the
     breaker locked out five building classes. Estimated income is deducted from
     the observed delta before judging. A farm, not a house — houses settle on
     the population cap now."""
     _observe_wood(0)
-    _observe_wood(140)  # clean window → income estimate 140/snapshot
+    _observe_wood(140)
     ex._note_pending_placement("a")  # farm, 60 wood, baseline 140
     ex.observe_hud(28, 30, {"wood": 220})  # +80 observed = +140 income, -60 spend
-    assert any(
-        outcome.action == "build_farm" and outcome.status == "purchased"
-        for outcome in ex._build_gates.outcomes
-    )
+    assert "farm" not in ex._build_gates.building_purchases
+    assert len(ex._build_gates.pending_placements) == 1
 
 
 def test_income_alone_does_not_confirm_a_vanished_placement(
@@ -700,26 +892,18 @@ def test_income_alone_does_not_confirm_a_vanished_placement(
     assert "farm" not in ex._build_gates.buildings_confirmed
 
 
-def test_income_estimate_frozen_while_placement_pending(fake_pyautogui: _FakePyautogui) -> None:
-    """A window containing a spend would drag the estimate down and re-open
-    the false-missing hole — only clean windows update the EMA."""
+def test_gathering_across_stale_snapshots_does_not_prove_a_purchase(
+    fake_pyautogui: _FakePyautogui,
+) -> None:
+    """A larger wood reading cannot prove a purchase, even after stale OCR."""
     _observe_wood(0)
-    _observe_wood(10)  # clean window → estimate 10
-    ex._note_pending_placement("w")
-    _observe_wood(300)  # polluted window: the pending settles here
-    assert ex._build_gates.wood_income_per_snapshot == 10
-
-
-def test_income_credit_scales_with_stale_snapshots(fake_pyautogui: _FakePyautogui) -> None:
-    """Stale-OCR retries accumulate several windows of income before the
-    reading moves; the eventual delta must be credited for all of them."""
-    _observe_wood(0)
-    _observe_wood(50)  # estimate 50/snapshot
+    _observe_wood(50)
     ex._note_pending_placement("w")  # mill, 100 wood, baseline 50
     _observe_wood(50)  # stale reading — entry survives
     _observe_wood(50)  # stale again
-    _observe_wood(100)  # 3 windows x 50 income, -100 spend
-    assert "mill" in ex._build_gates.building_purchases
+    _observe_wood(100)  # gathering might have masked a purchase
+    assert "mill" not in ex._build_gates.building_purchases
+    assert len(ex._build_gates.pending_placements) == 1
 
 
 def test_verified_placement_lifts_suppression(fake_pyautogui: _FakePyautogui) -> None:
@@ -928,19 +1112,29 @@ def test_execute_actions_runs_each_in_order(fake_pyautogui: _FakePyautogui) -> N
 # ---------------------------------------------------------------------------
 
 
+async def _refresh_known_hud() -> bool:
+    ledger = ex.current_ledger()
+    assert ledger.population is not None and ledger.resources is not None
+    ex.observe_hud(
+        *ledger.population,
+        dict(ledger.resources),
+        villagers=ledger.villagers,
+        worker_counts=ledger.worker_counts,
+    )
+    return True
+
+
 def test_queue_villager_reserves_then_confirms_order(fake_pyautogui: _FakePyautogui) -> None:
-    ex.observe_hud(10, 15, {"wood": 200, "food": 200})
+    ex.observe_hud(10, 15, {"wood": 200, "food": 200}, villagers=3)
 
-    async def fresh_frame() -> bool:
-        return True
-
-    ex.set_rescan_fn(fresh_frame)
+    ex.set_rescan_fn(_refresh_known_hud)
     result = _run(ex.execute_action({"type": "queue_villager", "intent": "grow"}))
     assert result.success
     assert ex.villagers_ordered() == 4
+    assert ex.ledger_policy_state().pending_villagers == 1
     assert ex._build_gates.reservations()["food"] == 50
-    ex.observe_hud(10, 15, {"wood": 200, "food": 150})
-    assert ex.villagers_ordered() == 5
+    ex.observe_hud(10, 15, {"wood": 200, "food": 150}, villagers=3)
+    assert ex.villagers_ordered() == 4
     press_keys = [c[1][0] for c in fake_pyautogui.calls if c[0] == "press"]
     assert press_keys == ["h", "q"]
 
@@ -948,10 +1142,7 @@ def test_queue_villager_reserves_then_confirms_order(fake_pyautogui: _FakePyauto
 def test_villager_order_target_is_not_an_executor_cap(fake_pyautogui: _FakePyautogui) -> None:
     ex.observe_hud(10, 40, {"food": 200})
 
-    async def fresh_frame() -> bool:
-        return True
-
-    ex.set_rescan_fn(fresh_frame)
+    ex.set_rescan_fn(_refresh_known_hud)
     ex._build_gates.villagers_ordered = 30
     result = _run(ex.execute_action({"type": "queue_villager", "intent": "grow"}))
     assert result.success
@@ -962,10 +1153,7 @@ def test_villager_order_is_allowed_past_feudal_preference(fake_pyautogui: _FakeP
     ex.observe_age("Feudal Age")
     ex.observe_hud(30, 45, {"wood": 200, "food": 200})
 
-    async def fresh_frame() -> bool:
-        return True
-
-    ex.set_rescan_fn(fresh_frame)
+    ex.set_rescan_fn(_refresh_known_hud)
     ex._build_gates.villagers_ordered = 30
     result = _run(ex.execute_action({"type": "queue_villager", "intent": "grow"}))
     assert result.success
@@ -980,10 +1168,7 @@ def test_villager_target_uncapped_past_the_age_map(fake_pyautogui: _FakePyautogu
     ex.observe_age("Castle Age")
     ex.observe_hud(40, 60, {"wood": 200, "food": 200})
 
-    async def fresh_frame() -> bool:
-        return True
-
-    ex.set_rescan_fn(fresh_frame)
+    ex.set_rescan_fn(_refresh_known_hud)
     ex._build_gates.villagers_ordered = 50
     result = _run(ex.execute_action({"type": "queue_villager", "intent": "grow"}))
     assert result.success
@@ -995,14 +1180,13 @@ def test_queue_villager_rejected_without_food(fake_pyautogui: _FakePyautogui) ->
     ex.observe_hud(10, 15, {"wood": 200, "food": 40})
     result = _run(ex.execute_action({"type": "queue_villager", "intent": "grow"}))
     assert not result.success and "food" in result.detail
-    assert ex.villagers_ordered() == 4
+    assert ex.villagers_ordered() == 0
 
 
-def test_starting_villagers_match_initial_population(fake_pyautogui: _FakePyautogui) -> None:
-    from gameplay_agent.memory import INITIAL_POPULATION
-
-    assert ex._STARTING_VILLAGERS == INITIAL_POPULATION  # drift guard (V-4)
-    assert ex.villagers_ordered() == INITIAL_POPULATION  # fresh-game ledger
+def test_villagers_are_observed_separately_from_population(fake_pyautogui: _FakePyautogui) -> None:
+    assert ex.villagers_ordered() == 0
+    ex.observe_hud(4, 5, {"food": 200}, villagers=3)
+    assert ex.villagers_ordered() == 3
 
 
 # ---------------------------------------------------------------------------
@@ -1120,7 +1304,15 @@ def test_a_cap_rise_confirms_a_house_even_when_wood_rose(
     assert "house" in ex._build_gates.buildings_confirmed
 
 
-def test_an_unmoved_cap_leaves_the_house_missing(
+def test_a_cap_rise_confirms_a_house_when_wood_is_unreadable(
+    fake_pyautogui: _FakePyautogui,
+) -> None:
+    _place_house(cap=20)
+    ex.observe_hud(10, 25, {}, known_resources=frozenset())
+    assert "house" in ex._build_gates.buildings_confirmed
+
+
+def test_an_unmoved_cap_leaves_the_house_uncertain(
     fake_pyautogui: _FakePyautogui, clock: _Clock
 ) -> None:
     """Asserts the streak, not the absence of a confirmation: only a JUDGED
@@ -1128,7 +1320,8 @@ def test_an_unmoved_cap_leaves_the_house_missing(
     _place_house(cap=20)
     clock.advance(ex._HOUSE_SETTLE_SECONDS + 1)
     ex.observe_hud(10, 20, {"wood": 400})
-    assert ex._build_gates.missing_streaks["house"] == 1
+    assert ex._build_gates.outcomes[-1].status == "uncertain"
+    assert ex._build_gates.pending_placements
 
 
 def test_a_house_waits_out_its_construction_time(fake_pyautogui: _FakePyautogui) -> None:
@@ -1154,7 +1347,8 @@ def test_fast_snapshots_do_not_expire_a_placement(
     assert ex._build_gates.pending_placements  # 25 s of readings, still waiting
     clock.advance(ex._HOUSE_SETTLE_SECONDS)
     ex.observe_hud(10, 20, {"wood": 400})
-    assert not ex._build_gates.pending_placements  # past the deadline, judged
+    assert ex._build_gates.pending_placements  # unknown spend keeps duplicate protection
+    assert ex._build_gates.outcomes[-1].status == "uncertain"
 
 
 def test_a_cap_jump_leaves_the_unpaid_house_pending(
@@ -1217,14 +1411,15 @@ def test_a_matching_resource_drop_starts_age_research(fake_pyautogui: _FakePyaut
     assert "castle_age" not in ex._build_gates.age_up_paid
 
 
-def test_no_resource_drop_reports_the_research_missing(
+def test_no_resource_drop_keeps_research_uncertain(
     fake_pyautogui: _FakePyautogui, clock: _Clock
 ) -> None:
     """The greyed-out button: resources kept RISING while the key was pressed."""
     _research("castle_age", {"food": 900, "gold": 300})
     clock.advance(ex._RESEARCH_SETTLE_SECONDS + 1)
     ex.observe_hud(10, 30, {"food": 2600, "gold": 900})
-    assert "castle_age" in ex._build_gates.research_blocked_until
+    assert ex._build_gates.outcomes[-1].status == "uncertain"
+    assert ex._build_gates.pending_research
 
 
 def test_an_unmoved_reading_waits_rather_than_failing(fake_pyautogui: _FakePyautogui) -> None:
@@ -1244,7 +1439,7 @@ def test_paid_economy_technology_is_not_fabricated_as_completed(
     assert ex.research_rejection("loom") is not None
 
 
-def test_a_failed_research_is_refused_next_time(
+def test_an_uncertain_research_is_refused_next_time(
     fake_pyautogui: _FakePyautogui, clock: _Clock
 ) -> None:
     """The whole point: one failure, then a reason — not 10 blind retries."""
@@ -1252,7 +1447,7 @@ def test_a_failed_research_is_refused_next_time(
     clock.advance(ex._RESEARCH_SETTLE_SECONDS + 1)
     ex.observe_hud(10, 30, {"food": 2600, "gold": 900})
     reason = ex.research_rejection("castle_age")
-    assert reason is not None and "greyed out" in reason
+    assert reason is not None and "awaiting HUD settlement" in reason
 
 
 def test_a_blocked_research_becomes_retryable(
@@ -1261,9 +1456,8 @@ def test_a_blocked_research_becomes_retryable(
     """The block must expire. castle_age fails for want of 2 Feudal buildings;
     once the agent builds them, a permanent refusal is the same deadlock one
     level up."""
-    _research("castle_age", {"food": 900, "gold": 300})
-    clock.advance(ex._RESEARCH_SETTLE_SECONDS + 1)
     ex.observe_hud(10, 30, {"food": 2600, "gold": 900})
+    ex._build_gates.research_blocked_until["castle_age"] = ex._now() + ex._MISSING_SUPPRESS_SECONDS
     clock.advance(ex._MISSING_SUPPRESS_SECONDS + 1)
     ex.observe_age("Feudal Age")
     ex.record_confirmed_buildings(["blacksmith", "market"])

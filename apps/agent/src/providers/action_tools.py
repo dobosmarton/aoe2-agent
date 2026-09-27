@@ -52,12 +52,12 @@ def _click_schema(description: str) -> dict:
 _ACTION_TOOLS: list[dict] = [
     {
         "name": "click",
-        "description": "Left click at screen coordinates. Use for building placement and UI interaction.",
+        "description": "Tactical left click at screen coordinates; economic builds use the named build tool.",
         "input_schema": _click_schema("What this click does"),
     },
     {
         "name": "right_click",
-        "description": "Right click at screen coordinates. Use for resource gathering, setting gather points, and unit commands.",
+        "description": "Tactical unit command only; resource assignments use the named assign_idle tool.",
         "input_schema": _click_schema("What this right click does"),
     },
     {
@@ -188,7 +188,7 @@ _ACTION_TOOLS: list[dict] = [
     },
     {
         "name": "send_villager",
-        "description": "Composite: select idle villager (press .) → right_click target. MUCH faster than press(.)+right_click() separately. target_class only (e.g. 'sheep', 'tree', 'berry_bush') — selecting the villager moves the camera, so coordinates you compute now would land on the wrong terrain.",
+        "description": "Assign one idle villager through the shared named handler; target_class determines the resource kind.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -207,7 +207,7 @@ _ACTION_TOOLS: list[dict] = [
     },
     {
         "name": "send_all_idle",
-        "description": "Composite: select ALL idle villagers (Shift-.) → right_click target. Dispatches every idle villager at once in a single action — use this instead of repeating send_villager when several villagers are idle. target_class only — the select moves the camera, so pre-computed coordinates would be stale.",
+        "description": "Assign one idle villager through the shared handler. Further assignments wait for workforce evidence.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -233,33 +233,6 @@ _ACTION_TOOLS: list[dict] = [
                 "intent": {"type": "string", "description": "Why queuing this villager"},
             },
             "required": ["intent"],
-            "additionalProperties": False,
-        },
-    },
-    {
-        "name": "reassign_villager",
-        "description": (
-            "Pull a gathering villager into a catalog-guarded economic build. The camera "
-            "refreshes before worker selection and placement. Economic bindings: "
-            f"{_ECON_BUILDING_OPTIONS}."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "from_job": {
-                    "type": "string",
-                    "description": "Which worker to pull: 'wood', 'gold', 'stone', or 'food'",
-                },
-                "building_key": {
-                    "type": "string",
-                    "description": f"Economic building key: {_ECON_BUILDING_OPTIONS}",
-                },
-                "intent": {
-                    "type": "string",
-                    "description": "Which worker you are pulling and what you are building",
-                },
-            },
-            "required": ["from_job", "building_key", "intent"],
             "additionalProperties": False,
         },
     },

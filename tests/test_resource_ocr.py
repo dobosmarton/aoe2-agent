@@ -91,6 +91,59 @@ def test_read_resource_bar_reads_all_fields(synthetic_bar):
     assert readings["population"] == "8/15"
 
 
+@pytest.mark.parametrize(
+    ("name", "height", "expected"),
+    [
+        (
+            "real_000_dark_start.jpg",
+            1964,
+            {
+                "wood_workers": 0,
+                "food_workers": 0,
+                "gold_workers": 0,
+                "stone_workers": 0,
+                "villagers": 3,
+            },
+        ),
+        (
+            "real_1672_dark_midgame.jpg",
+            1672,
+            {
+                "wood_workers": 5,
+                "food_workers": 9,
+                "gold_workers": 0,
+                "stone_workers": 0,
+                "villagers": 18,
+            },
+        ),
+    ],
+)
+def test_real_dark_age_workforce_counts(name: str, height: int, expected: dict[str, int]) -> None:
+    fixture = Path(__file__).parents[1] / "apps/agent/src/vision_fixtures" / name
+    calibration = calibration_for(3024, height)
+    assert calibration is not None
+    readings = read_resource_bar(fixture.read_bytes(), calibration, backend="template")
+    assert {key: readings.get(key) for key in expected} == expected
+
+
+def test_unreadable_worker_count_is_unknown() -> None:
+    fixture = Path(__file__).parents[1] / "apps/agent/src/vision_fixtures/real_000_dark_start.jpg"
+    calibration = calibration_for(3024, 1964)
+    assert calibration is not None
+    calibration.fields["food_workers"] = FieldBox(900, 300, 920, 325)
+    readings = read_resource_bar(fixture.read_bytes(), calibration, backend="template")
+    assert "food_workers" not in readings
+
+
+def test_selected_builder_is_a_villager() -> None:
+    from gameplay_agent.resource_ocr import read_selected_unit
+
+    fixture = Path(__file__).parents[1] / "apps/agent/src/vision_fixtures/real_180_low_pop.jpg"
+    calibration = calibration_for(3024, 1964)
+    assert calibration is not None
+    assert read_selected_unit(fixture.read_bytes(), calibration) == "villager"
+
+
 def test_readings_pass_the_existing_scorer(synthetic_bar):
     """The reader output must score clean against the unchanged harness."""
     shot, calib = synthetic_bar

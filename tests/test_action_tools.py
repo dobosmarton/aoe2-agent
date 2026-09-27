@@ -84,6 +84,7 @@ def test_expected_tool_set_present():
         "send_villager",
         "queue_villager",
     } <= names
+    assert "reassign_villager" not in names  # no separate raw-click economic path
 
 
 def test_every_input_schema_is_object():

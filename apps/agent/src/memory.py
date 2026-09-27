@@ -3,7 +3,10 @@
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Protocol, TypedDict, cast
+from typing import TYPE_CHECKING, Protocol, TypedDict, cast
+
+if TYPE_CHECKING:
+    from .executor import ActionLedger
 
 from .policy.state import PolicyState
 from .turn_timing import ACT_LOOP, PERCEIVE_LOOP, TURN_LOOP, LatencySnapshot
@@ -47,8 +50,10 @@ class GameState:
     resources: dict[str, int] = field(default_factory=lambda: dict(INITIAL_RESOURCES))
     population: int = INITIAL_POPULATION
     population_cap: int = INITIAL_POPULATION_CAP
+    villagers: int | None = None
+    worker_counts: dict[str, int] = field(default_factory=dict)
     current_age: str = "Dark Age"
-    idle_tc: bool = False
+    idle_tc: bool | None = None
     # Whether any villager is idle, from the HUD badge colour (yellow=idle, grey=none).
     # None = unknown (badge not read yet); True/False = read. Callers must treat None
     # as "skip idle handling", never as False. Presence stays the robust gate.
@@ -74,7 +79,7 @@ class GameState:
     # this, NOT on population: orders lead the delivered HUD population by the
     # TC queue depth, and braking on population over-delivered 40 villagers
     # (run 11, F-38).
-    villagers_ordered: int = INITIAL_POPULATION
+    villagers_ordered: int = 0
     under_attack: bool = False
     enemy_located: bool = False
     enemy_location: str = ""
@@ -105,6 +110,11 @@ class MetricsSnapshot(TypedDict):
     successful_actions: int
     executed_actions: int
     action_success_rate: float
+    accepted_inputs: int
+    attempted_inputs: int
+    input_acceptance_rate: float
+    unverifiable_action_ids: list[int]
+    score_valid: bool
     turn_count: int
     game_end_reason: str
     memories_loaded: list[str]
@@ -158,6 +168,9 @@ class AgentMemory:
         # composite executions never enter turn.actions), which is why the old
         # successful/total rate exceeded 1.0 (runs 1 and 3).
         self.executed_actions: int = 0
+        self.accepted_inputs: int = 0
+        self.attempted_inputs: int = 0
+        self.action_ledger: ActionLedger | None = None
         # Executor-outage tracking (T-533). llm_calls/llm_errors feed
         # llm_error_rate; _llm_error_streak is the current run of consecutive
         # failed executor turns, which the game loop alarms on.
@@ -194,62 +207,36 @@ class AgentMemory:
         # Track cumulative actions
         self.total_actions += len(turn.actions)
 
-        # Update game state from turn observations. Food gathering is NOT
-        # accumulated here — LLM-echoed observations hallucinate; only OCR
-        # frames count (record_food_reading, called from
-        # GoalManager.update_resource_readings).
         # A model's observation is useful history, never a HUD measurement.
 
-    def update_from_observations(self, observations: dict[str, object]) -> None:
-        """Update game state from LLM observations."""
-        if not observations:
-            return
+    def update_from_observations(self, _observations: dict[str, object]) -> None:
+        """Keep model hypotheses in turn history, never in observed game state."""
 
-        # Update resources. (Gathered-food accounting lives in
-        # record_food_reading — OCR frames only, never LLM-echoed values.)
-        if "resources" in observations:
-            # Cast, don't validate: observations cross the untyped LLM boundary
-            # and runtime junk must keep failing the same way it always did.
-            self.game_state.resources.update(cast("dict[str, int]", observations["resources"]))
-
-        # Update population
-        if "population" in observations:
-            pop_str = observations["population"]
-            if "/" in str(pop_str):
-                parts = str(pop_str).split("/")
-                try:
-                    self.game_state.population = int(parts[0])
-                    self.game_state.population_cap = int(parts[1])
-                    # Track peak population
-                    self.peak_population = max(self.peak_population, self.game_state.population)
-                except (ValueError, IndexError):
-                    pass
-
-        # NOTE: `age` is intentionally NOT read from executor observations.
-        # The executor self-reports `observations.age` but was observed hallucinating
-        # it (exp_0011: reported "Feudal Age" from turn 2 while game was Dark Age),
-        # which misrouted the age-specific prompt. Age is authoritative from the
-        # strategist only — see `update_age()` below, called from
-        # `GoalManager.update_resource_readings()`.
-
-        # Idle-villager presence read off the HUD badge colour. A missing key leaves
-        # the last-known value (never coerced — see GameState.idle_present).
-        if "idle_present" in observations:
-            self.game_state.idle_present = bool(observations["idle_present"])
-
-        # Idle-villager count from the badge digit — same missing-key convention
-        # as idle_present (observations come from several sources; only an OCR
-        # frame carries the key, others must not clear it).
-        if "idle_count" in observations:
-            # Same boundary cast as resources — int() keeps coercing at runtime.
-            self.game_state.idle_count = int(cast("int | str", observations["idle_count"]))
-
-        # Update flags
-        if "idle_tc" in observations:
-            self.game_state.idle_tc = bool(observations["idle_tc"])
-
-        if "under_attack" in observations:
-            self.game_state.under_attack = bool(observations["under_attack"])
+    def apply_hud_readings(self, readings: dict[str, object]) -> None:
+        """Perception-only entry point for observed resources and population."""
+        for kind in ("food", "wood", "gold", "stone"):
+            value = readings.get(kind)
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                self.game_state.resources[kind] = value
+        population = readings.get("population")
+        if isinstance(population, str):
+            current, separator, capacity = population.partition("/")
+            if separator and current.isdigit() and capacity.isdigit():
+                self.game_state.population = int(current)
+                self.game_state.population_cap = int(capacity)
+                self.peak_population = max(self.peak_population, int(current))
+        idle_present = readings.get("idle_present")
+        if isinstance(idle_present, bool):
+            self.game_state.idle_present = idle_present
+        idle_count = readings.get("idle_count")
+        self.game_state.idle_count = idle_count if isinstance(idle_count, int) else None
+        villagers = readings.get("villagers")
+        self.game_state.villagers = villagers if isinstance(villagers, int) else None
+        self.game_state.worker_counts = {
+            kind: value
+            for kind in ("food", "wood", "gold", "stone")
+            if isinstance(value := readings.get(f"{kind}_workers"), int)
+        }
 
     def update_age(self, age: str) -> None:
         """Update current age from the strategist's reading (authoritative).
@@ -358,7 +345,7 @@ class AgentMemory:
             f"- Population: {state.population}/{state.population_cap}",
             f"- HOUSED (cannot create villagers!): {is_housed}" if is_housed else "- Housed: False",
             f"- Age: {state.current_age}",
-            f"- TC Idle: {state.idle_tc}",
+            f"- TC Idle: {state.idle_tc if state.idle_tc is not None else 'unknown'}",
             f"- Under Attack: {state.under_attack}",
         ]
         # Idle-villager badge (HUD): None = unknown, so only show a known state.
@@ -379,9 +366,9 @@ class AgentMemory:
             self.working_memory[-1].verification = verification
 
     def record_action_results(self, success_count: int, total: int) -> None:
-        """Record executed-action outcomes — the sole inputs to action_success_rate."""
-        self.successful_actions += success_count
-        self.executed_actions += total
+        """Input acceptance is diagnostic; only observed effects score success."""
+        self.accepted_inputs += success_count
+        self.attempted_inputs += total
 
     def record_llm_outcome(self, *, errored: bool) -> int:
         """Record one executor turn's success/failure; return the failure streak.
@@ -434,6 +421,10 @@ class AgentMemory:
 
     def get_metrics_snapshot(self) -> MetricsSnapshot:
         """Return current cumulative metrics for scoring."""
+        ledger = self.action_ledger
+        attempted = len(ledger.attempted_economic_ids) if ledger is not None else 0
+        confirmed = len(ledger.confirmed_economic_ids) if ledger is not None else 0
+        unresolved = sorted(ledger.uncertain_operations) if ledger is not None else []
         latency = self.latency.snapshot() if self.latency is not None else LatencySnapshot()
         turn = latency.of(TURN_LOOP)
         act = latency.of(ACT_LOOP)
@@ -443,15 +434,20 @@ class AgentMemory:
             "peak_population": self.peak_population,
             "highest_age": self.highest_age,
             "age_score": AGE_SCORES.get(self.highest_age, 0.0),
-            "total_food_gathered": self.total_food_gathered,
+            "total_food_gathered": ledger.food_gathered
+            if ledger is not None
+            else self.total_food_gathered,
             "total_actions": self.total_actions,
-            "successful_actions": self.successful_actions,
-            "executed_actions": self.executed_actions,
-            "action_success_rate": (
-                self.successful_actions / self.executed_actions
-                if self.executed_actions > 0
-                else 0.0
-            ),
+            "successful_actions": confirmed,
+            "executed_actions": attempted,
+            "action_success_rate": (confirmed / attempted if attempted > 0 else 0.0),
+            "accepted_inputs": self.accepted_inputs,
+            "attempted_inputs": self.attempted_inputs,
+            "input_acceptance_rate": self.accepted_inputs / self.attempted_inputs
+            if self.attempted_inputs
+            else 0.0,
+            "unverifiable_action_ids": unresolved,
+            "score_valid": not unresolved,
             "turn_count": self.turn_count,
             "game_end_reason": self.game_end_reason,
             "memories_loaded": list(self.memories_loaded),
@@ -483,6 +479,9 @@ class AgentMemory:
         self.total_actions = 0
         self.successful_actions = 0
         self.executed_actions = 0
+        self.accepted_inputs = 0
+        self.attempted_inputs = 0
+        self.action_ledger = None
         self.llm_calls = 0
         self.llm_errors = 0
         self._llm_error_streak = 0

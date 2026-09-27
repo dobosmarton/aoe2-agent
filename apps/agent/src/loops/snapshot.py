@@ -61,11 +61,14 @@ class Perception:
 
 @dataclass(frozen=True, slots=True)
 class SpatialRefresh:
-    """A post-input view for resolving coordinates, without a new HUD reading."""
+    """A post-input view for HUD, selection, and coordinate verification."""
 
     captured_at: float
     input_revision: int
     spatial_valid: bool
+    hud_readings: ResourceReadings = field(default_factory=ResourceReadings)
+    selected_unit: str | None = None
+    screenshot: bytes = b""
 
 
 class FramePipe:
@@ -75,10 +78,11 @@ class FramePipe:
     is the one place a reader waits, and only ONE may: it clears the arrival flag.
     """
 
-    __slots__ = ("_arrived", "_frame", "_spatial_request", "_urgent")
+    __slots__ = ("_arrived", "_frame", "_spatial_request", "_spatial_view", "_urgent")
 
     def __init__(self) -> None:
         self._frame: Perception | None = None
+        self._spatial_view: SpatialRefresh | None = None
         self._arrived = asyncio.Event()
         self._spatial_request: asyncio.Future[SpatialRefresh] | None = None
         self._urgent = asyncio.Event()
@@ -91,6 +95,14 @@ class FramePipe:
     def latest(self) -> Perception | None:
         """The newest frame, or None before the first one. Never blocks."""
         return self._frame
+
+    def evidence_screenshot(self) -> bytes:
+        """The newest captured view, including a post-navigation refresh."""
+        frame = self._frame
+        spatial = self._spatial_view
+        if spatial is not None and (frame is None or spatial.captured_at >= frame.captured_at):
+            return spatial.screenshot
+        return frame.screenshot if frame is not None else b""
 
     async def after(self, captured_at: float) -> Perception:
         """The first frame captured after `captured_at`."""
@@ -124,6 +136,7 @@ class FramePipe:
     ) -> None:
         """Only the requested capture may release its waiter."""
         if self._spatial_request is request and not request.done():
+            self._spatial_view = refresh
             request.set_result(refresh)
 
     def clear_spatial_refresh(self, request: asyncio.Future[SpatialRefresh]) -> None:

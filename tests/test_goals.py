@@ -119,6 +119,18 @@ def test_progress_population_target_partial() -> None:
     assert m.active_goals[0].progress == 0.4
 
 
+def test_unreadable_worker_count_preserves_prior_goal_progress() -> None:
+    manager = GoalManager()
+    goal = _g("food workers", metric="food_workers", target=2)
+    manager.active_goals = [goal]
+    manager.evaluate_progress(
+        GameState(worker_counts={"food": 1}), turn=1, observed_keys=frozenset({"food_workers"})
+    )
+    assert goal.progress == 0.5
+    manager.evaluate_progress(GameState(worker_counts={}), turn=2, observed_keys=frozenset())
+    assert goal.progress == 0.5
+
+
 def test_progress_food_target_full_completes_and_moves_to_completed() -> None:
     m = GoalManager()
     m.active_goals = [_g("food", metric="food", target=100)]

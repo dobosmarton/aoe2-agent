@@ -29,7 +29,6 @@ log = structlog.stdlib.get_logger()
 Trigger = Literal["alarm", "handoff", "recovery"]
 _STOP_POLL = 0.5
 _RECOVERY_COOLDOWN = 30.0
-_FAMINE_STALL = 30.0
 
 
 async def deliberate_loop(
@@ -41,8 +40,6 @@ async def deliberate_loop(
     seen, tick = 0.0, 0
     strategist_task: asyncio.Task[None] | None = None
     last_recovery = 0.0
-    last_food: int | None = None
-    food_progress_at = time.monotonic()
     try:
         while not ctx.stopping:
             try:
@@ -63,12 +60,7 @@ async def deliberate_loop(
                 ctx.goal_logger,
                 strategist_task,
             )
-            state = frame.world
-            if state is not None and "food" in state.known_resources:
-                if last_food is None or state.food > last_food:
-                    food_progress_at = time.monotonic()
-                last_food = state.food
-            trigger = _trigger(ctx, frame, food_progress_at, last_recovery)
+            trigger = _trigger(ctx, frame, last_recovery)
             if trigger is not None:
                 if trigger == "handoff":
                     ctx.tactical_requested.clear()
@@ -84,7 +76,6 @@ async def deliberate_loop(
 def _trigger(
     ctx: LoopContext,
     frame: Perception,
-    food_progress_at: float,
     last_recovery: float,
 ) -> Trigger | None:
     if frame.alarm:
@@ -95,13 +86,19 @@ def _trigger(
         return None
     failed = ctx.ledger is not None and ctx.ledger.failure_streak >= 3
     state = frame.world
-    famine_stalled = (
-        state is not None
-        and "food" in state.known_resources
-        and state.food < 60
-        and time.monotonic() - food_progress_at >= _FAMINE_STALL
+    stalled = state is not None and (
+        (state.tc_stalled and state.pending_villagers == 0)
+        or (state.food_stalled and not state.assignment_pending)
     )
-    return "recovery" if failed or famine_stalled else None
+    if failed or stalled:
+        log.warning(
+            "recovery_triggered",
+            failed_attempts=ctx.ledger.failure_streak if ctx.ledger else 0,
+            tc_stalled=state.tc_stalled if state else False,
+            food_stalled=state.food_stalled if state else False,
+        )
+        return "recovery"
+    return None
 
 
 async def deliberate_once(
