@@ -59,6 +59,15 @@ class Perception:
         return elapsed_ms(self.captured_at)
 
 
+@dataclass(frozen=True, slots=True)
+class SpatialRefresh:
+    """A post-input view for resolving coordinates, without a new HUD reading."""
+
+    captured_at: float
+    input_revision: int
+    spatial_valid: bool
+
+
 class FramePipe:
     """The channel from the perceive loop to the other two.
 
@@ -66,11 +75,12 @@ class FramePipe:
     is the one place a reader waits, and only ONE may: it clears the arrival flag.
     """
 
-    __slots__ = ("_arrived", "_frame", "_urgent")
+    __slots__ = ("_arrived", "_frame", "_spatial_request", "_urgent")
 
     def __init__(self) -> None:
         self._frame: Perception | None = None
         self._arrived = asyncio.Event()
+        self._spatial_request: asyncio.Future[SpatialRefresh] | None = None
         self._urgent = asyncio.Event()
 
     def put(self, frame: Perception) -> None:
@@ -95,6 +105,32 @@ class FramePipe:
         """Ask the perceive loop to skip the rest of its wait."""
         self._urgent.set()
 
+    def request_spatial_refresh(self) -> asyncio.Future[SpatialRefresh]:
+        """Ask perception for a new spatial view; input ownership allows one waiter."""
+        if self.pending_spatial_refresh() is not None:
+            raise RuntimeError("a spatial refresh is already pending")
+        request: asyncio.Future[SpatialRefresh] = asyncio.get_running_loop().create_future()
+        self._spatial_request = request
+        self.request_now()
+        return request
+
+    def pending_spatial_refresh(self) -> asyncio.Future[SpatialRefresh] | None:
+        """The current unresolved refresh request, if any."""
+        request = self._spatial_request
+        return request if request is not None and not request.done() else None
+
+    def complete_spatial_refresh(
+        self, request: asyncio.Future[SpatialRefresh], refresh: SpatialRefresh
+    ) -> None:
+        """Only the requested capture may release its waiter."""
+        if self._spatial_request is request and not request.done():
+            request.set_result(refresh)
+
+    def clear_spatial_refresh(self, request: asyncio.Future[SpatialRefresh]) -> None:
+        """Forget a completed or timed-out request without touching a newer one."""
+        if self._spatial_request is request:
+            self._spatial_request = None
+
     async def wait_for_due(self, interval: float) -> None:
         """Hold the perceive cadence, cut short by a `request_now`."""
         with contextlib.suppress(TimeoutError):
@@ -102,4 +138,4 @@ class FramePipe:
         self._urgent.clear()
 
 
-__all__ = ["FramePipe", "Perception"]
+__all__ = ["FramePipe", "Perception", "SpatialRefresh"]

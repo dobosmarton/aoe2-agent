@@ -25,7 +25,7 @@ from .goals import GoalManager
 from .loops.act import act_once
 from .loops.context import LoopContext
 from .loops.perceive import perceive_once
-from .loops.snapshot import Perception
+from .loops.snapshot import Perception, SpatialRefresh
 from .loops.source import GameActuator, Sighting
 from .memory import AgentMemory
 from .policy.advice import PolicyAdvice, readonly_probabilities
@@ -156,6 +156,11 @@ class _ScriptedSource:
                 captured_at=time.monotonic(),
             )
         return Sighting(frame)
+
+    async def capture_spatial(self, timings: TickTimings) -> SpatialRefresh:
+        with timings.phase("capture"):
+            executor.set_detected_entities(snapshot_entities(self.world.entities))
+            return SpatialRefresh(time.monotonic(), self.ledger.input_revision, True)
 
     def close(self) -> None:
         pass

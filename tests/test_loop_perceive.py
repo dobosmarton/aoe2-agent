@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import TYPE_CHECKING
 
 import pytest
@@ -12,8 +13,9 @@ from gameplay_agent.goals import GoalManager
 from gameplay_agent.loops import perceive
 from gameplay_agent.loops.context import LoopContext
 from gameplay_agent.loops.snapshot import Perception
+from gameplay_agent.loops.source import GameSource
 from gameplay_agent.memory import AgentMemory
-from gameplay_agent.turn_timing import PERCEIVE_LOOP
+from gameplay_agent.turn_timing import PERCEIVE_LOOP, TickTimings
 
 from tests.factories import make_entity as _ent
 from tests.loop_fakes import FakeActuator, FakeSource
@@ -65,6 +67,50 @@ def test_a_pass_records_its_own_latency(tmp_path, gates) -> None:
     ctx = _context(tmp_path, FakeSource())
     _run(perceive.perceive_once(ctx, tick=1))
     assert PERCEIVE_LOOP in ctx.latency.snapshot().loops
+
+
+def test_spatial_capture_skips_hud_ocr(monkeypatch) -> None:
+    game_source = GameSource()
+    detected: list[bytes] = []
+
+    async def screen(tick, timings):
+        assert tick is None
+        return b"jpeg", 800, 600, time.monotonic()
+
+    async def detect(screenshot):
+        detected.append(screenshot)
+        return []
+
+    async def hud(*_args):
+        raise AssertionError("a spatial refresh must not wait for HUD OCR")
+
+    monkeypatch.setattr(game_source, "_screen", screen)
+    monkeypatch.setattr(game_source, "_detect_entities", detect)
+    monkeypatch.setattr(game_source, "_hud", hud)
+
+    refresh = _run(game_source.capture_spatial(TickTimings()))
+
+    assert refresh.spatial_valid is True
+    assert detected == [b"jpeg"]
+
+
+def test_spatial_capture_rejects_input_that_changes_during_detection(monkeypatch) -> None:
+    ledger = ex.ActionLedger()
+    game_source = GameSource(ledger=ledger)
+
+    async def screen(_tick, _timings):
+        return b"jpeg", 800, 600, time.monotonic()
+
+    async def detect(_screenshot):
+        ledger.note_input()
+        return []
+
+    monkeypatch.setattr(game_source, "_screen", screen)
+    monkeypatch.setattr(game_source, "_detect_entities", detect)
+
+    refresh = _run(game_source.capture_spatial(TickTimings()))
+
+    assert refresh.spatial_valid is False
 
 
 def _read_hud(tmp_path) -> LoopContext:

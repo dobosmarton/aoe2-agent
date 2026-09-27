@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
@@ -10,9 +11,9 @@ import pytest
 from gameplay_agent import executor as ex
 from gameplay_agent.goal_logger import GoalLogger
 from gameplay_agent.goals import Goal, GoalManager
-from gameplay_agent.loops import act, source
+from gameplay_agent.loops import act, perceive, source
 from gameplay_agent.loops.context import LoopContext
-from gameplay_agent.loops.snapshot import Perception
+from gameplay_agent.loops.snapshot import Perception, SpatialRefresh
 from gameplay_agent.loops.source import frame_refresh
 from gameplay_agent.memory import AgentMemory
 from gameplay_agent.policy.advice import PolicyAdvice, PolicyRequest, readonly_probabilities
@@ -450,22 +451,81 @@ def test_input_lock_supersedes_in_flight_advice(tmp_path, gates) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_the_refresh_hook_waits_for_the_next_frame(tmp_path, gates) -> None:
-    """A composite action rescans from inside `execute_action`; the hook turns
-    that into a wait on the perceive loop instead of a detection."""
+def test_the_refresh_hook_waits_for_spatial_capture(tmp_path, gates) -> None:
+    """A composite action waits for a post-input spatial capture."""
     ctx = _context(tmp_path)
     refresh = frame_refresh(ctx.frames)
     ctx.frames.put(_idle_frame(tick=1))
 
-    async def drive() -> int:
+    async def drive() -> bool:
         waiting = asyncio.create_task(refresh())
         await asyncio.sleep(0)
-        ctx.frames.put(_idle_frame(tick=2))
-        await asyncio.wait_for(waiting, timeout=2.0)
-        frame = ctx.frames.latest()
-        return frame.tick if frame else 0
+        request = ctx.frames.pending_spatial_refresh()
+        assert request is not None
+        ctx.frames.complete_spatial_refresh(
+            request,
+            SpatialRefresh(captured_at=time.monotonic(), input_revision=0, spatial_valid=True),
+        )
+        return await asyncio.wait_for(waiting, timeout=2.0)
 
-    assert _run(drive()) == 2
+    assert _run(drive()) is True
+
+
+def test_urgent_spatial_refresh_bypasses_the_next_slow_full_pass(
+    tmp_path, gates, monkeypatch
+) -> None:
+    """The camera can be refreshed while full OCR would exceed the deadline."""
+
+    class SlowSource(FakeSource):
+        def __init__(self) -> None:
+            super().__init__()
+            self.full_started = asyncio.Event()
+            self.release_full = asyncio.Event()
+            self.full_calls = 0
+            self.spatial_captures = 0
+
+        async def capture(self, tick, timings):
+            self.full_calls += 1
+            if self.full_calls == 1:
+                self.full_started.set()
+                await self.release_full.wait()
+            else:
+                await asyncio.Event().wait()
+            return await super().capture(tick, timings)
+
+        async def capture_spatial(self, timings):
+            self.spatial_captures += 1
+            return SpatialRefresh(
+                captured_at=time.monotonic(), input_revision=0, spatial_valid=True
+            )
+
+    monkeypatch.setattr(perceive, "is_game_running", lambda: True)
+    monkeypatch.setattr(perceive, "ensure_game_focused", lambda: True)
+    monkeypatch.setattr(source, "_REFRESH_TIMEOUT", 0.1)
+    scripted = SlowSource()
+    ctx = LoopContext(
+        memory=AgentMemory(),
+        goal_manager=GoalManager(),
+        goal_logger=GoalLogger(tmp_path),
+        source=scripted,
+        actuator=FakeActuator(),
+    )
+
+    async def drive() -> bool:
+        perceive_task = asyncio.create_task(perceive.perceive_loop(ctx))
+        try:
+            await asyncio.wait_for(scripted.full_started.wait(), timeout=1.0)
+            refresh_task = asyncio.create_task(frame_refresh(ctx.frames)())
+            await asyncio.sleep(0)
+            scripted.release_full.set()
+            return await asyncio.wait_for(refresh_task, timeout=1.0)
+        finally:
+            perceive_task.cancel()
+            await asyncio.gather(perceive_task, return_exceptions=True)
+
+    assert _run(drive()) is True
+    assert scripted.spatial_captures == 1
+    assert scripted.captures == 1
 
 
 def test_the_refresh_hook_gives_up_after_a_timeout(tmp_path, gates, monkeypatch) -> None:
@@ -473,5 +533,50 @@ def test_the_refresh_hook_gives_up_after_a_timeout(tmp_path, gates, monkeypatch)
     regression into a failure instead of a hung suite."""
     monkeypatch.setattr(source, "_REFRESH_TIMEOUT", 0.01)
     ctx = _context(tmp_path)
-    _run(asyncio.wait_for(frame_refresh(ctx.frames)(), timeout=2.0))
-    assert ctx.frames.latest() is None  # it gave up; no frame ever arrived
+    assert _run(asyncio.wait_for(frame_refresh(ctx.frames)(), timeout=2.0)) is False
+
+
+def test_spatial_refresh_rejects_a_capture_from_before_the_input(tmp_path, gates) -> None:
+    ctx = _context(tmp_path)
+
+    async def drive() -> bool:
+        waiting = asyncio.create_task(frame_refresh(ctx.frames)())
+        await asyncio.sleep(0)
+        request = ctx.frames.pending_spatial_refresh()
+        assert request is not None
+        ctx.frames.complete_spatial_refresh(
+            request, SpatialRefresh(captured_at=0.0, input_revision=0, spatial_valid=True)
+        )
+        return await waiting
+
+    assert _run(drive()) is False
+
+
+def test_a_late_refresh_cannot_satisfy_the_next_request(tmp_path, gates, monkeypatch) -> None:
+    ctx = _context(tmp_path)
+
+    async def drive() -> bool:
+        monkeypatch.setattr(source, "_REFRESH_TIMEOUT", 0.01)
+        first = asyncio.create_task(frame_refresh(ctx.frames)())
+        await asyncio.sleep(0)
+        old_request = ctx.frames.pending_spatial_refresh()
+        assert old_request is not None
+        assert await first is False
+
+        monkeypatch.setattr(source, "_REFRESH_TIMEOUT", 1.0)
+        second = asyncio.create_task(frame_refresh(ctx.frames)())
+        await asyncio.sleep(0)
+        new_request = ctx.frames.pending_spatial_refresh()
+        assert new_request is not None
+        ctx.frames.complete_spatial_refresh(
+            old_request,
+            SpatialRefresh(captured_at=time.monotonic(), input_revision=0, spatial_valid=True),
+        )
+        assert not second.done()
+        ctx.frames.complete_spatial_refresh(
+            new_request,
+            SpatialRefresh(captured_at=time.monotonic(), input_revision=0, spatial_valid=True),
+        )
+        return await second
+
+    assert _run(drive()) is True

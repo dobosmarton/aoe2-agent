@@ -1,7 +1,7 @@
 """The perceive clock: one frame in, one `Perception` out.
 
 The only writer of `memory.game_state` and the build gates, so "how old is this
-reading" has one answer. Budget: 2 s p95. It waits on nothing.
+reading" has one answer. Input-triggered spatial refreshes skip HUD upkeep.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from ..executor import (
 )
 from ..goals import THREAT_CLASSES
 from ..policy.state import from_game_state
-from ..turn_timing import PERCEIVE_LOOP
+from ..turn_timing import PERCEIVE_LOOP, TickTimings
 from ..window import ensure_game_focused, is_game_running
 
 if TYPE_CHECKING:
@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from ..memory import AgentMemory
     from ..resource_ocr import ResourceReadings
     from .context import LoopContext
+    from .snapshot import SpatialRefresh
 
 log = structlog.stdlib.get_logger()
 
@@ -48,12 +49,31 @@ async def perceive_loop(ctx: LoopContext) -> None:
     while not ctx.stopping:
         if not await _wait_until_playable(ctx):
             return
+        request = ctx.frames.pending_spatial_refresh()
+        if request is not None:
+            await _refresh_spatial_once(ctx, request)
+            continue
         tick += 1
         await perceive_once(ctx, tick)
         if ctx.max_iterations is not None and tick >= ctx.max_iterations:
             ctx.request_stop("iterations_exhausted")
             return
-        await ctx.frames.wait_for_due(config.perceive_interval)
+        if ctx.frames.pending_spatial_refresh() is None:
+            await ctx.frames.wait_for_due(config.perceive_interval)
+
+
+async def _refresh_spatial_once(ctx: LoopContext, request: asyncio.Future[SpatialRefresh]) -> None:
+    """Service an input-triggered capture before starting another full OCR pass."""
+    timings = TickTimings()
+    try:
+        refresh = await ctx.source.capture_spatial(timings)
+        ctx.frames.complete_spatial_refresh(request, refresh)
+    finally:
+        log.info(
+            "spatial_refresh_latency",
+            total_ms=round(timings.total_ms),
+            **{f"{name}_ms": round(value) for name, value in timings.phases.items()},
+        )
 
 
 async def _wait_until_playable(ctx: LoopContext) -> bool:

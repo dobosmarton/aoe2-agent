@@ -6,11 +6,12 @@ these with `world_sim`.
 
 from __future__ import annotations
 
+import time
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from gameplay_agent.executor import ActionResult, as_dict
-from gameplay_agent.loops.snapshot import Perception
+from gameplay_agent.loops.snapshot import Perception, SpatialRefresh
 from gameplay_agent.loops.source import Sighting
 from gameplay_agent.policy.advice import PolicyAdvice, readonly_probabilities
 
@@ -36,6 +37,7 @@ class FakeSource:
         self.frames = list(frames or [])
         self.ownership = dict(ownership or {})
         self.captures = 0
+        self.spatial_captures = 0
         self.closed = False
 
     async def capture(self, tick: int, timings: TickTimings) -> Sighting:
@@ -46,6 +48,11 @@ class FakeSource:
         # The frame id is this pass's, not the canned frame's: `after` and the
         # act log both key on it.
         return Sighting(frame=replace(frame, tick=tick), ownership=self.ownership)
+
+    async def capture_spatial(self, timings: TickTimings) -> SpatialRefresh:
+        with timings.phase("capture"):
+            self.spatial_captures += 1
+            return SpatialRefresh(time.monotonic(), 0, True)
 
     def close(self) -> None:
         self.closed = True

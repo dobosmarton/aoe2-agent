@@ -20,7 +20,7 @@ from ..executor import execute_actions
 from ..providers.strategist import read_hud_readings
 from ..screen import capture_screenshot, save_screenshot
 from ..window import get_game_window_rect
-from .snapshot import FramePipe, Perception
+from .snapshot import FramePipe, Perception, SpatialRefresh
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -46,26 +46,37 @@ log = structlog.stdlib.get_logger()
 # Frames between screenshot saves. Saving every frame was affordable at ~10 s
 # per turn; the perceive loop runs far more often, and the write blocks it.
 _SCREENSHOT_SAMPLE = 10
-# How long the executor's rescan hook waits for a fresh frame before giving up.
-_REFRESH_TIMEOUT = 3.0
+# A refresh may first wait for an in-flight full OCR pass, then capture and
+# detect a new view. The 2026-09-27 real run needed 10-15 seconds for both.
+_REFRESH_TIMEOUT = 20.0
 
 
 def frame_refresh(frames: FramePipe) -> Callable[[], Awaitable[bool]]:
-    """The executor's rescan hook, rerouted to the perceive loop.
-
-    Composite handlers rescan from inside `execute_action`, so the hook is the
-    only place that covers every path. A timeout makes the dependent action fail.
-    """
+    """Wait for a post-input spatial capture without waiting for its HUD OCR."""
 
     async def refresh() -> bool:
         asked = time.monotonic()
-        frames.request_now()
+        request = frames.request_spatial_refresh()
         try:
-            await asyncio.wait_for(frames.after(asked), timeout=_REFRESH_TIMEOUT)
-            return True
+            result = await asyncio.wait_for(request, timeout=_REFRESH_TIMEOUT)
         except TimeoutError:
             log.warning("frame_refresh_timed_out", seconds=_REFRESH_TIMEOUT)
             return False
+        finally:
+            frames.clear_spatial_refresh(request)
+        if result.captured_at <= asked or not result.spatial_valid:
+            log.warning(
+                "frame_refresh_rejected",
+                reason="old_capture" if result.captured_at <= asked else "input_changed",
+                input_revision=result.input_revision,
+            )
+            return False
+        log.info(
+            "frame_refresh_completed",
+            waited_ms=round((time.monotonic() - asked) * 1000),
+            input_revision=result.input_revision,
+        )
+        return True
 
     return refresh
 
@@ -84,6 +95,10 @@ class FrameSource(Protocol):
 
     async def capture(self, tick: int, timings: TickTimings) -> Sighting:
         """One frame. Records its own `capture`/`ocr`/`detect` phases."""
+        ...
+
+    async def capture_spatial(self, timings: TickTimings) -> SpatialRefresh:
+        """Capture and detect after input, without reading the HUD."""
         ...
 
     def close(self) -> None:
@@ -146,13 +161,31 @@ class GameSource:
             ownership=ownership,
         )
 
-    async def _screen(self, tick: int, timings: TickTimings) -> tuple[bytes, int, int, float]:
+    async def capture_spatial(self, timings: TickTimings) -> SpatialRefresh:
+        """Refresh the executor's coordinate cache without delaying on OCR."""
+        revision = self._ledger.input_revision if self._ledger is not None else 0
+        screenshot, _width, _height, captured_at = await self._screen(None, timings)
+        with timings.phase("detect"):
+            entities = await self._detect_entities(screenshot)
+        spatial_valid = self._ledger is None or self._ledger.input_revision == revision
+        log.info(
+            "spatial_refresh_captured",
+            entity_count=len(entities),
+            input_revision=revision,
+            spatial_valid=spatial_valid,
+        )
+        return SpatialRefresh(captured_at, revision, spatial_valid)
+
+    async def _screen(
+        self, tick: int | None, timings: TickTimings
+    ) -> tuple[bytes, int, int, float]:
         """Grab the frame. The overlay hides first, so it stays out of the shot."""
         with timings.phase("capture"):
             if self._overlay:
                 self._overlay.hide()
             screenshot, width, height, captured_at = await asyncio.to_thread(_grab)
-            self._save_sample(screenshot, tick)
+            if tick is not None:
+                self._save_sample(screenshot, tick)
         return screenshot, width, height, captured_at
 
     async def _hud(self, screenshot: bytes, tick: int, timings: TickTimings) -> ResourceReadings:
@@ -168,13 +201,17 @@ class GameSource:
     ) -> tuple[list[EntitySnapshot], str, Mapping[str, tuple[Owner, float]]]:
         """Detect, then tag ownership. Empty without a detector."""
         with timings.phase("detect"):
-            entities: list[EntitySnapshot] = []
-            if self._detector:
-                entities = list(await detect_frame(self._detector, self._differ, screenshot))
-            if self._overlay is not None:
-                self._overlay.show(entities, get_game_window_rect())
+            entities = await self._detect_entities(screenshot)
             entity_summary, ownership = await summarize_frame(entities, screenshot)
         return entities, entity_summary, ownership
+
+    async def _detect_entities(self, screenshot: bytes) -> list[EntitySnapshot]:
+        entities: list[EntitySnapshot] = []
+        if self._detector:
+            entities = list(await detect_frame(self._detector, self._differ, screenshot))
+        if self._overlay is not None:
+            self._overlay.show(entities, get_game_window_rect())
+        return entities
 
     def _save_sample(self, screenshot: bytes, tick: int) -> None:
         """Keep one frame in `_SCREENSHOT_SAMPLE`, for the run's image trail."""
