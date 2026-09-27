@@ -1,26 +1,17 @@
-"""The deliberate clock: the LLM, on exceptions only.
-
-It writes parameters, and its actions are discarded on a routine tick. Only
-combat and a pop cap let it press keys, and then it holds the input lock.
-"""
+"""Deliberate work only for combat, requested handoff, and bounded recovery."""
 
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import TYPE_CHECKING, Literal
 
 import structlog
 
-from ..config import config
-from ..executor import is_pop_capped
-from ..memory import STUCK_LOOP_THRESHOLD
-from ..policy.allocation import is_famine
-from ..policy.state import from_game_state
 from ..strategist_phase import maybe_launch_strategist
 from ..turn_phases import (
     build_llm_context,
     check_game_over,
-    execute_turn_actions,
     known_buildings_line,
     record_llm_turn,
 )
@@ -35,14 +26,10 @@ if TYPE_CHECKING:
     from .snapshot import Perception
 
 log = structlog.stdlib.get_logger()
-
-# The exception list from IMPROVEMENT-PLAN.md P3.1.
-Trigger = Literal["alarm", "housed", "stuck", "goals", "famine", "interval"]
-# The 2 that may act. Both need mid-turn rescans and composite tools that the
-# single-shot Action union cannot express.
-_ACTING: frozenset[Trigger] = frozenset({"alarm", "housed"})
-# How long to wait for a frame before checking whether the game ended.
+Trigger = Literal["alarm", "handoff", "recovery"]
 _STOP_POLL = 0.5
+_RECOVERY_COOLDOWN = 30.0
+_FAMINE_STALL = 30.0
 
 
 async def deliberate_loop(
@@ -50,51 +37,71 @@ async def deliberate_loop(
     strategist: StrategistProvider,
     provider: ExecutorProvider,
 ) -> None:
-    """Ask the LLM only when something exceptional happened."""
+    """Own the background strategist and any in-flight recovery on shutdown."""
     seen, tick = 0.0, 0
     strategist_task: asyncio.Task[None] | None = None
-    while not ctx.stopping:
-        try:
-            frame = await asyncio.wait_for(ctx.frames.after(seen), timeout=_STOP_POLL)
-        except TimeoutError:
-            continue
-        seen = frame.captured_at
-        tick += 1
-        strategist_task = maybe_launch_strategist(
-            strategist,
-            tick,
-            frame.alarm,
-            ctx.memory,
-            ctx.goal_manager,
-            frame.entity_summary,
-            frame.hud_readings,
-            known_buildings_line(list(frame.entities)),
-            ctx.goal_logger,
-            strategist_task,
-        )
-        trigger = _trigger(ctx, frame, tick)
-        if trigger is not None:
-            await deliberate_once(ctx, provider, frame, tick, trigger)
+    last_recovery = 0.0
+    last_food: int | None = None
+    food_progress_at = time.monotonic()
+    try:
+        while not ctx.stopping:
+            try:
+                frame = await asyncio.wait_for(ctx.frames.after(seen), timeout=_STOP_POLL)
+            except TimeoutError:
+                continue
+            seen = frame.captured_at
+            tick += 1
+            strategist_task = maybe_launch_strategist(
+                strategist,
+                tick,
+                frame.alarm,
+                ctx.memory,
+                ctx.goal_manager,
+                frame.entity_summary,
+                frame.hud_readings,
+                known_buildings_line(list(frame.entities)),
+                ctx.goal_logger,
+                strategist_task,
+            )
+            state = frame.world
+            if state is not None and "food" in state.known_resources:
+                if last_food is None or state.food > last_food:
+                    food_progress_at = time.monotonic()
+                last_food = state.food
+            trigger = _trigger(ctx, frame, food_progress_at, last_recovery)
+            if trigger is not None:
+                if trigger == "handoff":
+                    ctx.tactical_requested.clear()
+                if trigger == "recovery":
+                    last_recovery = time.monotonic()
+                await deliberate_once(ctx, provider, frame, tick, trigger)
+    finally:
+        if strategist_task is not None:
+            strategist_task.cancel()
+            await asyncio.gather(strategist_task, return_exceptions=True)
 
 
-def _trigger(ctx: LoopContext, frame: Perception, tick: int) -> Trigger | None:
-    """Why the LLM should run this frame, or None to stay quiet."""
+def _trigger(
+    ctx: LoopContext,
+    frame: Perception,
+    food_progress_at: float,
+    last_recovery: float,
+) -> Trigger | None:
     if frame.alarm:
         return "alarm"
-    if is_pop_capped():
-        return "housed"
-    if ctx.memory.no_change_streak() >= STUCK_LOOP_THRESHOLD:
-        return "stuck"
-    if ctx.goal_manager.take_goals_changed():
-        return "goals"
-    # The whole state, for one field: `is_famine` owns the threshold, so this
-    # keeps it in one place. It ignores `captured_at`.
-    state = from_game_state(ctx.memory.game_state, captured_at=frame.captured_at)
-    if is_famine(state):
-        return "famine"
-    if config.deliberate_interval > 0 and tick % config.deliberate_interval == 0:
-        return "interval"
-    return None
+    if ctx.tactical_requested.is_set():
+        return "handoff"
+    if time.monotonic() - last_recovery < _RECOVERY_COOLDOWN:
+        return None
+    failed = ctx.ledger is not None and ctx.ledger.failure_streak >= 3
+    state = frame.world
+    famine_stalled = (
+        state is not None
+        and "food" in state.known_resources
+        and state.food < 60
+        and time.monotonic() - food_progress_at >= _FAMINE_STALL
+    )
+    return "recovery" if failed or famine_stalled else None
 
 
 async def deliberate_once(
@@ -104,7 +111,7 @@ async def deliberate_once(
     tick: int,
     trigger: Trigger,
 ) -> None:
-    """One LLM turn: act on an exception, else plan and discard."""
+    """Act within one owned input window; never discard a routine model plan."""
     with ctx.latency.tick(DELIBERATE_LOOP, tick) as timings:
         with timings.phase("context"):
             context = build_llm_context(
@@ -112,44 +119,22 @@ async def deliberate_once(
                 ctx.goal_manager,
                 frame.entity_summary,
                 list(frame.entities),
+                observed_state=frame.world,
             )
+            context = f"Trigger: {trigger}. Recent failures: {ctx.ledger.recent_failures if ctx.ledger else []}.\n{context}"
         with timings.phase("executor"):
-            turn = _act_turn if trigger in _ACTING else _plan_turn
-            response = await turn(ctx, provider, context, frame, tick)
+            async with ctx.input_lock:
+                if trigger == "recovery":
+                    response = await provider.act_recovery(context, frame.width, frame.height)
+                else:
+                    response = await provider.act(context, frame.width, frame.height)
+                actions = record_llm_turn(
+                    response, ctx.memory, ctx.goal_manager, tick, ctx.goal_logger
+                )
+                await _execute_or_record(response, actions, ctx.memory, tick)
     reason = check_game_over(response, ctx.memory, tick)
     if reason:
         ctx.request_stop(reason)
-
-
-async def _act_turn(
-    ctx: LoopContext,
-    provider: ExecutorProvider,
-    context: str,
-    frame: Perception,
-    tick: int,
-) -> LLMResult:
-    """Combat and housing: the tool loop presses its own keys, so hold the lock."""
-    async with ctx.input_lock:
-        response = await provider.act(context, frame.width, frame.height)
-        actions = record_llm_turn(response, ctx.memory, ctx.goal_manager, tick, ctx.goal_logger)
-        await _execute_or_record(response, actions, ctx.memory, tick)
-    return response
-
-
-async def _plan_turn(
-    ctx: LoopContext,
-    provider: ExecutorProvider,
-    context: str,
-    frame: Perception,
-    tick: int,
-) -> LLMResult:
-    """Routine: the rules own the acting, so the LLM's clicks are dropped."""
-    response = await provider.plan(context, frame.width, frame.height)
-    actions = record_llm_turn(response, ctx.memory, ctx.goal_manager, tick, ctx.goal_logger)
-    if actions:
-        # What the rules overrode. Phase 6.3 reads this to size the gap.
-        log.info("llm_actions_discarded", count=len(actions), tick=tick)
-    return response
 
 
 async def _execute_or_record(
@@ -158,14 +143,14 @@ async def _execute_or_record(
     memory: AgentMemory,
     tick: int,
 ) -> None:
-    """Execute the turn's actions, or only record them when the tool loop
-    already ran them during its own call."""
     if response.get("actions_already_executed"):
         success = response.get("success_count", len(actions))
         memory.record_action_results(success, len(actions))
         log.info("actions_executed", iteration=tick, total=len(actions), successful=success)
         return
-    await execute_turn_actions(actions, tick, memory, response.get("reasoning", ""))
+    # The deliberate provider may only act through guarded tools. A plain
+    # returned action list is reasoning output, never an alternate input path.
+    log.warning("unexecuted_deliberate_actions_rejected", iteration=tick, count=len(actions))
 
 
 __all__ = ["deliberate_loop", "deliberate_once"]

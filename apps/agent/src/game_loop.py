@@ -25,17 +25,21 @@ from .config import config
 from .detection_phase import (
     DETECTION_AVAILABLE,
     ENTITY_DISPLAY_LIMIT,
+    DetectionUnavailableError,
+    DetectorFactory,
     init_detector,
     init_frame_differ,
 )
 from .entity_utils import build_entity_summary
 from .executor import (
+    ActionLedger,
+    bind_ledger,
     clear_detected_entities,
     execute_actions,
-    reset_build_gates,
     set_detected_entities,
     set_rescan_fn,
     set_rescan_full_fn,
+    unbind_ledger,
 )
 from .goal_logger import GoalLogger
 from .goals import GoalManager
@@ -43,7 +47,6 @@ from .loops.act import act_loop
 from .loops.context import LoopContext
 from .loops.deliberate import deliberate_loop
 from .loops.perceive import perceive_loop
-from .loops.policy import policy_loop
 from .loops.source import GameActuator, GameSource, frame_refresh
 from .memory import AgentMemory
 from .models import validate_actions
@@ -107,6 +110,8 @@ def _build_context(
     use_overlay: bool,
     time_budget: float | None,
     max_iterations: int | None,
+    detector_factory: DetectorFactory | None,
+    ledger: ActionLedger,
 ) -> LoopContext:
     """Everything the clocks share, wired to the real game."""
     log_dir = Path(config.log_dir)
@@ -124,12 +129,14 @@ def _build_context(
         goal_manager=goal_manager,
         goal_logger=GoalLogger(log_dir),
         source=GameSource(
-            detector=init_detector() if use_detection else None,
+            detector=(detector_factory or init_detector)() if use_detection else None,
             overlay=overlay,
             frame_differ=init_frame_differ(),
             screenshots_dir=screenshots_dir,
+            ledger=ledger,
         ),
         actuator=GameActuator(),
+        ledger=ledger,
         time_budget=time_budget,
         max_iterations=max_iterations,
     )
@@ -157,15 +164,7 @@ async def _run_clocks(
     """Run the clocks until one of them ends the game, then stop the rest."""
     tasks = [
         asyncio.create_task(perceive_loop(ctx), name="perceive"),
-        asyncio.create_task(act_loop(ctx), name="act"),
-        asyncio.create_task(
-            policy_loop(
-                ctx,
-                policy_advisor,
-                interval_seconds=config.policy_interval,
-            ),
-            name="policy",
-        ),
+        asyncio.create_task(act_loop(ctx, policy_advisor), name="act"),
         asyncio.create_task(deliberate_loop(ctx, strategist, provider), name="deliberate"),
         asyncio.create_task(_stop_on_budget(ctx), name="budget"),
     ]
@@ -180,6 +179,9 @@ async def _run_clocks(
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        close = getattr(strategist, "aclose", None)
+        if close is not None:
+            await close()
 
 
 async def game_loop(
@@ -190,57 +192,83 @@ async def game_loop(
     use_detection: bool = True,
     time_budget: float | None = None,
     use_overlay: bool = False,
+    detector_factory: DetectorFactory | None = None,
 ) -> AgentMemory:
-    """Play one game on the perceive, policy, act and deliberate clocks.
+    """Play one game on the perceive, act-with-policy and deliberate clocks.
 
     `max_iterations` bounds PERCEIVE FRAMES, about 0.5 s each, where a turn used
     to be 10. Use `time_budget` to bound a real game."""
     if memory is None:
         memory = AgentMemory()
     memory.start_game()
-    reset_build_gates()  # per-game state: HUD snapshot + buildings seen
+    ledger = ActionLedger()
+    ledger_token = bind_ledger(ledger)
 
     warm_ups = _start_warm_ups(provider)
-    ctx = _build_context(
-        memory,
-        use_detection=use_detection,
-        use_overlay=use_overlay,
-        time_budget=time_budget,
-        max_iterations=max_iterations,
-    )
-    memory.latency = ctx.latency
-    # Every inline rescan becomes a wait on the perceive loop, so no detection
-    # ever runs on the act task. Registered after GameSource, which installs the
-    # old inline callbacks.
-    refresh = frame_refresh(ctx.frames)
-    set_rescan_fn(refresh)
-    set_rescan_full_fn(refresh)
-
-    memory.memories_loaded = list(provider.loaded_memory_titles)
-    log.info(
-        "game_loop_start",
-        loop_arch="clocks",
-        detection=use_detection,
-        iteration_budget=max_iterations,
-        iteration_counts="frames",
-        time_budget=time_budget,
-        memories=len(memory.memories_loaded),
-    )
-
+    ctx: LoopContext | None = None
+    clocks_started = False
     try:
+        ctx = _build_context(
+            memory,
+            use_detection=use_detection,
+            use_overlay=use_overlay,
+            time_budget=time_budget,
+            max_iterations=max_iterations,
+            detector_factory=detector_factory,
+            ledger=ledger,
+        )
+        memory.latency = ctx.latency
+        # Every inline rescan becomes a wait on the perceive loop, so no detection
+        # ever runs on the act task. Registered after GameSource, which installs the
+        # old inline callbacks.
+        refresh = frame_refresh(ctx.frames)
+        set_rescan_fn(refresh)
+        set_rescan_full_fn(refresh)
+
+        memory.memories_loaded = list(provider.loaded_memory_titles)
+        log.info(
+            "game_loop_start",
+            loop_arch="clocks",
+            detection=use_detection,
+            iteration_budget=max_iterations,
+            iteration_counts="frames",
+            time_budget=time_budget,
+            memories=len(memory.memories_loaded),
+        )
         # Before the first frame on purpose: the scout explores during the
         # slowest perception pass of the game (engine warm-up).
         await ctx.actuator.execute(validate_actions(get_ground_commands(1)))
+        clocks_started = True
         await _run_clocks(ctx, StrategistProvider(), provider, policy_advisor)
     except KeyboardInterrupt:
         log.info("game_loop_interrupted")
-        ctx.request_stop("interrupted")
+        _request_stop(ctx, memory, "interrupted")
+    except DetectionUnavailableError as exc:
+        log.error(
+            "detector_unavailable",
+            error_type=type(exc).__name__,
+            error=repr(exc),
+        )
+        _request_stop(ctx, memory, "detector_unavailable")
+        raise
     except Exception as e:
-        log.error("game_loop_error", error=str(e))
-        ctx.request_stop("error")
+        log.error("game_loop_error", error_type=type(e).__name__, error=repr(e))
+        _request_stop(ctx, memory, "error")
         raise
     finally:
-        await _close_out(ctx, memory, warm_ups)
+        try:
+            if not clocks_started:
+                await policy_advisor.aclose()
+            if ctx is None:
+                await _stop_warm_ups(warm_ups)
+                log.info("game_metrics_final", **memory.get_metrics_snapshot())
+            else:
+                await _close_out(ctx, memory, warm_ups)
+            close = getattr(provider, "aclose", None)
+            if close is not None:
+                await close()
+        finally:
+            unbind_ledger(ledger_token)
 
     return memory
 
@@ -251,9 +279,7 @@ async def _close_out(
     warm_ups: list[asyncio.Task[None]],
 ) -> None:
     """Stop the warm-ups, release the source, and label the end."""
-    for warm_up in warm_ups:
-        warm_up.cancel()
-    await asyncio.gather(*warm_ups, return_exceptions=True)
+    await _stop_warm_ups(warm_ups)
     ctx.source.close()
     # Exits that bypass both except clauses (CancelledError is a BaseException)
     # reach here unlabelled — run 13 logged an empty game_end_reason on a manual
@@ -266,6 +292,19 @@ async def _close_out(
         memory.game_end_reason,
         len(ctx.goal_manager.completed_goals),
     )
+
+
+async def _stop_warm_ups(warm_ups: list[asyncio.Task[None]]) -> None:
+    for warm_up in warm_ups:
+        warm_up.cancel()
+    await asyncio.gather(*warm_ups, return_exceptions=True)
+
+
+def _request_stop(ctx: LoopContext | None, memory: AgentMemory, reason: str) -> None:
+    if ctx is None:
+        memory.game_end_reason = reason
+        return
+    ctx.request_stop(reason)
 
 
 # ---------------------------------------------------------------------------

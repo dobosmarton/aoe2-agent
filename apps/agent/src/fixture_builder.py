@@ -241,7 +241,7 @@ def _print_summary(out: Path, fixture: dict) -> None:
     print(f"  entities:  {len(fixture['inputs']['detected_entities'])} (placeholder coords)")
     print()
     print("NEXT: hand-edit expected/goals/coords before running:")
-    print(f"  python -m gameplay_agent.scenario_runner {out}")
+    print(f"  python -m gameplay_agent.provider_scenario_runner {out}")
 
 
 def main() -> int:

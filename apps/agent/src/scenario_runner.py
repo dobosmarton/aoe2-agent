@@ -1,523 +1,367 @@
-"""Scenario runner: load YAML fixture → run executor → evaluate assertions.
+"""Input-driven replay of the production perception → actor → executor path.
 
-Reuses the production `ExecutorProvider.get_actions()` so the test path matches
-real gameplay exactly. The only thing mocked is `execute_action` (so the
-agentic tool loop runs without pyautogui side effects).
-
-CLI:
-    python -m gameplay_agent.scenario_runner gameplay_agent/scenarios/age_up_gate_fires.yaml
-    python -m gameplay_agent.scenario_runner gameplay_agent/scenarios/*.yaml
-    python -m gameplay_agent.scenario_runner --all
+Fixtures in ``scenarios/production`` declare an initial observed state and
+named action steps. A step's ``after`` observation is applied only when the
+expected spending input actually fires. Older prompt-only fixtures belong to
+``provider_scenario_runner`` and do not measure gameplay feasibility.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
-import contextlib
-import sys
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
-from evaluation.world_sim import (
-    WorldState,
-    apply_actions,
-    evaluate_end_state,
-    init_from_fixture,
-    state_to_fixture_inputs,
-    tick,
-)
-from gameplay_agent.assertions import evaluate, matches
-from gameplay_agent.config import KEY_ENV, config
-from gameplay_agent.context_builder import _build_context
-from gameplay_agent.test_isolation import (
-    _isolate_memories_dir,
-    _mock_executor,
-    _seed_detected_entities,
-)
+import yaml
+
+from . import executor
+from .entity_snapshot import snapshot_entities
+from .goal_logger import GoalLogger
+from .goals import GoalManager
+from .loops.act import act_once
+from .loops.context import LoopContext
+from .loops.perceive import perceive_once
+from .loops.snapshot import Perception
+from .loops.source import GameActuator, Sighting
+from .memory import AgentMemory
+from .policy.advice import PolicyAdvice, readonly_probabilities
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Mapping, Sequence
+
+    from .policy.advice import PolicyRequest
+    from .resource_ocr import ResourceReadings
+    from .turn_timing import TickTimings
 
 
-# ---------------------------------------------------------------------------
-# Constants — named so a future reader doesn't have to guess
-# ---------------------------------------------------------------------------
-
-DEFAULT_GAME_WIDTH = 1920
-DEFAULT_GAME_HEIGHT = 1080
-RECENT_TURNS_CONTEXT_WINDOW = 3
-COST_DECIMAL_PLACES = 4
-SUMMARY_SEPARATOR_WIDTH = 60
-
-ANSI_GREEN = "\033[32m"
-ANSI_RED = "\033[31m"
-ANSI_RESET = "\033[0m"
+@dataclass(frozen=True, slots=True)
+class ScenarioStep:
+    action: str
+    after: Mapping[str, object]
 
 
-# ---------------------------------------------------------------------------
-# Result type
-# ---------------------------------------------------------------------------
-
-
-@dataclass
+@dataclass(slots=True)
 class ScenarioResult:
     name: str
     passed: bool
     failures: list[str] = field(default_factory=list)
-    cost_usd: float = 0.0
-    duration_s: float = 0.0
-    actions: list[dict] = field(default_factory=list)
-    reasoning: str = ""
-    skipped: bool = False
-    skip_reason: str = ""
+    actions: list[str] = field(default_factory=list)
+    inputs: list[str] = field(default_factory=list)
+    observed_age: str = ""
 
 
-# ---------------------------------------------------------------------------
-# Scenario execution
-# ---------------------------------------------------------------------------
+def _mapping(value: object, name: str) -> Mapping[str, object]:
+    if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
+        raise ValueError(f"{name} must be a mapping with string keys")
+    return cast("Mapping[str, object]", value)
 
 
-def _load_fixture(fixture_path: Path) -> dict:
-    import yaml
-
-    return yaml.safe_load(fixture_path.read_text()) or {}
-
-
-def _is_real_screenshot_scenario(fixture: dict) -> bool:
-    return bool(fixture.get("screenshot"))
-
-
-async def _invoke_executor(fixture: dict, model: str | None) -> tuple[list[dict], str, float]:
-    """Run the production executor against the fixture context.
-
-    Returns (executed_actions, reasoning, cost_usd). The memory + executor
-    mocks are managed by the caller's `with` statements.
-    """
-    from gameplay_agent.providers.executor_provider import ExecutorProvider
-
-    provider = ExecutorProvider(model=model)
-    _seed_detected_entities(fixture.get("inputs", {}).get("detected_entities", []))
-    context = _build_context(fixture)
-
-    try:
-        response = await provider.get_actions(
-            context,
-            width=DEFAULT_GAME_WIDTH,
-            height=DEFAULT_GAME_HEIGHT,
-        )
-        return (
-            response.get("actions", []),
-            response.get("reasoning", ""),
-            round(provider._cumulative_cost_usd(), COST_DECIMAL_PLACES),
-        )
-    finally:
-        # AsyncAnthropic owns an httpx pool; close it so connections don't
-        # leak across scenarios in the shared event loop.
-        with contextlib.suppress(Exception):
-            await provider.client.close()
+def _steps(value: object) -> tuple[ScenarioStep, ...]:
+    if not isinstance(value, list) or not value:
+        raise ValueError("steps must be a non-empty list")
+    steps: list[ScenarioStep] = []
+    for index, raw in enumerate(value):
+        item = _mapping(raw, f"steps[{index}]")
+        action = item.get("action")
+        if not isinstance(action, str):
+            raise ValueError(f"steps[{index}].action must be a name")
+        steps.append(ScenarioStep(action, _mapping(item.get("after", {}), "after")))
+    return tuple(steps)
 
 
-_VARIANT_OVERRIDABLE_INPUTS = ("memories", "strategist_overrides")
+class _ScriptedWorld:
+    def __init__(self, initial: Mapping[str, object]) -> None:
+        self.resources = {
+            name: _integer(_mapping(initial.get("resources", {}), "resources").get(name), name)
+            for name in ("food", "wood", "gold", "stone")
+        }
+        self.population = _integer(initial.get("population"), "population")
+        self.population_cap = _integer(initial.get("population_cap"), "population_cap")
+        age = initial.get("age", "Dark Age")
+        if not isinstance(age, str):
+            raise ValueError("age must be text")
+        self.age = age
+        self.entities = _entities(initial.get("entities", []))
+        self.idle_present = bool(initial.get("idle_present", False))
+        self.idle_count = _integer(initial.get("idle_count", 0), "idle_count")
 
-
-def _expand_variants(fixture: dict) -> list[dict]:
-    """Return one fixture-per-variant. No `variants:` key = single anonymous run.
-
-    Each returned fixture has `_variant_name` set (None for non-variant fixtures).
-    Variants can override these `inputs:` keys: `memories`, `strategist_overrides`.
-    Each variant's `expected:` block is its own; falls back to the top-level one
-    if the variant doesn't supply its own.
-    """
-    if "variants" not in fixture:
-        return [{**fixture, "_variant_name": None}]
-
-    base_inputs = fixture.get("inputs", {})
-    expanded: list[dict] = []
-    for index, variant in enumerate(fixture["variants"]):
-        variant_inputs = {**base_inputs}
-        for key in _VARIANT_OVERRIDABLE_INPUTS:
-            if key in variant:
-                variant_inputs[key] = variant[key]
-        expanded.append(
-            {
-                **fixture,
-                "inputs": variant_inputs,
-                "expected": variant.get("expected", fixture.get("expected", {})),
-                "_variant_name": variant.get("name", f"variant_{index}"),
-            }
-        )
-    return expanded
-
-
-def _scenario_display_name(fixture_path: Path, variant_name: str | None) -> str:
-    base = fixture_path.stem
-    return f"{base} [{variant_name}]" if variant_name else base
-
-
-async def _run_one_variant_async(
-    fixture: dict,
-    fixture_path: Path,
-    *,
-    model: str | None = None,
-    baseline_actions: list[dict] | None = None,
-) -> ScenarioResult:
-    """Run a single (possibly variant-overlaid) fixture through the executor.
-
-    `baseline_actions` is the first variant's executed actions, threaded
-    through to `evaluate()` so `differs_from_baseline_by` assertions can
-    compare against it. None for the baseline variant itself.
-    """
-    name = _scenario_display_name(fixture_path, fixture.get("_variant_name"))
-
-    if _is_real_screenshot_scenario(fixture):
-        return ScenarioResult(
-            name=name,
-            passed=True,
-            skipped=True,
-            skip_reason="real-screenshot scenarios not yet supported in v1 runner",
-        )
-
-    inputs = fixture.get("inputs", {})
-    expected = fixture.get("expected", {})
-    fixture_memories = inputs.get("memories", [])
-    started = time.monotonic()
-
-    with _isolate_memories_dir(fixture_memories), _mock_executor():
-        try:
-            actions, reasoning, cost = await _invoke_executor(fixture, model)
-        except Exception as exc:
-            return ScenarioResult(
-                name=name,
-                passed=False,
-                failures=[f"runner exception: {type(exc).__name__}: {exc}"],
-                duration_s=time.monotonic() - started,
+    def apply(self, after: Mapping[str, object], point: tuple[float, float] | None) -> None:
+        if "resources" in after:
+            for name, value in _mapping(after["resources"], "after.resources").items():
+                if name not in self.resources:
+                    raise ValueError(f"unknown resource {name}")
+                self.resources[name] = _integer(value, name)
+        for name in ("population", "population_cap", "idle_count"):
+            if name in after:
+                setattr(self, name, _integer(after[name], name))
+        if "idle_present" in after:
+            self.idle_present = bool(after["idle_present"])
+        if "age" in after:
+            age = after["age"]
+            if not isinstance(age, str):
+                raise ValueError("after.age must be text")
+            self.age = age
+        if "building" in after:
+            building = after["building"]
+            if not isinstance(building, str):
+                raise ValueError("after.building must be text")
+            center = point or (700.0, 500.0)
+            self.entities.append(
+                {"id": f"{building}_{len(self.entities)}", "class": building, "center": center}
             )
 
-    failures = (
-        evaluate(expected, actions=actions, reasoning=reasoning, baseline_actions=baseline_actions)
-        if expected
-        else []
-    )
-    return ScenarioResult(
-        name=name,
-        passed=(not failures),
-        failures=failures,
-        cost_usd=cost,
-        duration_s=time.monotonic() - started,
-        actions=actions,
-        reasoning=reasoning,
-    )
+    def readings(self) -> dict[str, object]:
+        return {
+            **self.resources,
+            "population": f"{self.population}/{self.population_cap}",
+            "age": self.age,
+            "idle_present": self.idle_present,
+            "idle_count": self.idle_count,
+        }
 
 
-@dataclass
-class _MultiTurnConfig:
-    """Parsed `multi_turn:` section of a scenario fixture."""
+def _integer(value: object, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{name} must be an integer")
+    return value
 
-    max_turns: int
-    per_turn_expected: dict
-    end_state_spec: dict
-    eventually_pattern: dict | None
 
-    @classmethod
-    def from_fixture(cls, fixture: dict) -> _MultiTurnConfig:
-        cfg = fixture["multi_turn"]
-        return cls(
-            max_turns=int(cfg.get("max_turns", 10)),
-            per_turn_expected=cfg.get("expected", {}),
-            end_state_spec=cfg.get("end_state", {}),
-            eventually_pattern=cfg.get("eventually_includes"),
+def _entities(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        raise ValueError("entities must be a list")
+    return [dict(_mapping(entity, "entity")) for entity in value]
+
+
+class _ScriptedSource:
+    def __init__(self, world: _ScriptedWorld, ledger: executor.ActionLedger) -> None:
+        self.world = world
+        self.ledger = ledger
+
+    async def capture(self, tick: int, timings: TickTimings) -> Sighting:
+        with timings.phase("capture"):
+            entities = snapshot_entities(self.world.entities)
+            executor.set_detected_entities(entities)
+            frame = Perception(
+                width=1920,
+                height=1080,
+                entities=entities,
+                hud_readings=cast("ResourceReadings", self.world.readings()),
+                input_revision=self.ledger.input_revision,
+                spatial_valid=True,
+                tick=tick,
+                captured_at=time.monotonic(),
+            )
+        return Sighting(frame)
+
+    def close(self) -> None:
+        pass
+
+
+class _ScriptedAdvisor:
+    def __init__(self, action: str) -> None:
+        self.action = action
+        self.advertised = False
+
+    async def advise(self, request: PolicyRequest) -> PolicyAdvice:
+        self.advertised = self.action in {candidate.id for candidate in request.candidates}
+        return PolicyAdvice(
+            source_tick=request.source_tick,
+            source_captured_at=request.source_captured_at,
+            model="scripted",
+            action_choice=self.action,
+            action_confidence=1.0,
+            action_probabilities=readonly_probabilities({self.action: 1.0}),
+            allocation_focus="balanced",
+            allocation_confidence=1.0,
+            allocation_probabilities=readonly_probabilities({"balanced": 1.0}),
         )
 
+    async def aclose(self) -> None:
+        pass
 
-async def _run_multi_turn_step(
-    fixture: dict,
-    base_inputs: dict,
-    world_state: WorldState,
-    recent_turns: list[dict],
-    turn_num: int,
-    per_turn_expected: dict,
-    model: str | None,
-) -> tuple[WorldState, list[dict], str, float, list[str]]:
-    """Build context → invoke executor → assert → apply → tick. Returns (new_state, actions, reasoning, cost, per_turn_failures)."""
-    current_inputs = state_to_fixture_inputs(world_state, base_inputs)
-    current_inputs = {
-        **current_inputs,
-        "recent_turns": recent_turns[-RECENT_TURNS_CONTEXT_WINDOW:],
-    }
-    current_fixture = {**fixture, "inputs": current_inputs}
 
-    actions, reasoning, cost = await _invoke_executor(current_fixture, model)
+class _ScriptedInput:
+    def __init__(
+        self,
+        world: _ScriptedWorld,
+        ledger: executor.ActionLedger,
+        step: ScenarioStep,
+    ) -> None:
+        self.world = world
+        self.ledger = ledger
+        self.step = step
+        self.calls: list[str] = []
+        self.issued = False
 
-    failures: list[str] = []
-    if per_turn_expected:
-        failures.extend(
-            f"turn {turn_num}: {f}"
-            for f in evaluate(per_turn_expected, actions=actions, reasoning=reasoning)
+    def _record(self, method: str, key: str = "", point: tuple[float, float] | None = None) -> None:
+        self.calls.append(f"{method}:{key}" if key else method)
+        if self.issued:
+            return
+        action = self.step.action
+        spent = (
+            (
+                method == "click"
+                and any(
+                    action == f"build_{pending.building_class}"
+                    for pending in self.ledger.pending_placements
+                )
+            )
+            or (
+                method == "press"
+                and any(
+                    action
+                    in {
+                        f"advance_to_{pending.name.removesuffix('_age')}",
+                        f"research_{pending.name}",
+                    }
+                    and key == pending.tech.research_key
+                    for pending in self.ledger.pending_research
+                )
+            )
+            or (
+                method == "press"
+                and any(
+                    action
+                    == ("queue_villager" if pending.unit == "villager" else f"train_{pending.unit}")
+                    and key == executor.UNITS[pending.unit].key
+                    for pending in self.ledger.pending_training
+                )
+            )
         )
+        if spent:
+            self.issued = True
+            self.world.apply(self.step.after, point)
 
-    new_state = tick(apply_actions(world_state, actions))
-    return new_state, actions, reasoning, cost, failures
+    def press(self, key: str) -> None:
+        self._record("press", key)
+
+    def hotkey(self, *keys: str) -> None:
+        self._record("press", keys[-1])
+
+    def click(self, x: float, y: float) -> None:
+        self._record("click", point=(x, y))
+
+    def rightClick(self, x: float, y: float) -> None:
+        self._record("right_click", point=(x, y))
+
+    def moveTo(self, *_args: object) -> None:
+        pass
+
+    def drag(self, *_args: object, **_kwargs: object) -> None:
+        self._record("drag")
+
+    def scroll(self, *_args: object, **_kwargs: object) -> None:
+        self._record("scroll")
 
 
-def _evaluate_multi_turn_end(
-    cfg: _MultiTurnConfig,
-    world_state: WorldState,
-    all_actions: list[dict],
-) -> list[str]:
-    """Aggregate end-of-run assertions: end_state and eventually_includes."""
-    failures: list[str] = []
-    if cfg.end_state_spec:
-        failures.extend(evaluate_end_state(cfg.end_state_spec, world_state))
-    if cfg.eventually_pattern is not None and not any(
-        matches(a, cfg.eventually_pattern) for a in all_actions
+async def run_scenario_async(path: Path) -> ScenarioResult:
+    """Run one scripted trace through the real candidate and executor paths."""
+    raw = cast("object", yaml.safe_load(path.read_text(encoding="utf-8")))
+    fixture = _mapping(raw, "fixture")
+    initial = _mapping(fixture.get("initial"), "initial")
+    steps = _steps(fixture.get("steps"))
+    world = _ScriptedWorld(initial)
+    ledger = executor.ActionLedger()
+    initial_buildings = initial.get("buildings", [])
+    if not isinstance(initial_buildings, list) or not all(
+        isinstance(item, str) for item in initial_buildings
     ):
-        failures.append(
-            f"eventually_includes FAILED — no turn produced an action matching "
-            f"{cfg.eventually_pattern!r} across {cfg.max_turns} turns"
-        )
-    return failures
-
-
-async def _run_multi_turn_scenario_async(
-    fixture: dict,
-    fixture_path: Path,
-    *,
-    model: str | None = None,
-) -> list[ScenarioResult]:
-    """Run a multi-turn scenario through the world simulator.
-
-    Each turn: tick world state → build context → invoke executor → apply actions.
-    The world simulator evolves resources, population, and age across N turns
-    without booting the real game. Only `execute_action` is mocked.
-
-    Fixture schema (under `multi_turn:`):
-      max_turns: int          — how many turns to run (default 10)
-      end_state:              — WorldState fields to assert after the final turn
-        age: "Feudal Age"       (string → exact equality)
-        population: 15          (int/float → ≥ semantics)
-      eventually_includes:    — action pattern that must appear in ANY turn
-        type: press
-        key: z
-      expected:               — assertion block applied to EACH turn's actions
-        must_not_include: {type: press, key: b}
-    """
-    name = fixture_path.stem
-    cfg = _MultiTurnConfig.from_fixture(fixture)
-    base_inputs = fixture.get("inputs", {})
-    world_state = init_from_fixture(base_inputs)
-    fixture_memories = base_inputs.get("memories", [])
-
-    all_actions: list[dict] = []
-    all_failures: list[str] = []
-    recent_turns: list[dict] = []
-    total_cost = 0.0
-    started = time.monotonic()
-
-    with _isolate_memories_dir(fixture_memories), _mock_executor():
-        for turn_num in range(1, cfg.max_turns + 1):
-            try:
-                world_state, actions, reasoning, cost, step_failures = await _run_multi_turn_step(
-                    fixture,
-                    base_inputs,
-                    world_state,
-                    recent_turns,
-                    turn_num,
-                    cfg.per_turn_expected,
-                    model,
-                )
-            except Exception as exc:
-                # Executor crashed mid-run: stop the loop but still evaluate the
-                # end-state spec against the partial world below — the assertion
-                # is "what did the agent build before it crashed", not just
-                # "did the agent crash".
-                all_failures.append(
-                    f"turn {turn_num}: runner exception: {type(exc).__name__}: {exc}"
-                )
-                break
-
-            total_cost += cost
-            all_actions.extend(actions)
-            all_failures.extend(step_failures)
-            recent_turns.append({"iteration": turn_num, "reasoning": reasoning})
-
-    all_failures.extend(_evaluate_multi_turn_end(cfg, world_state, all_actions))
-
-    return [
-        ScenarioResult(
-            name=name,
-            passed=not all_failures,
-            failures=all_failures,
-            cost_usd=round(total_cost, COST_DECIMAL_PLACES),
-            duration_s=time.monotonic() - started,
-            actions=all_actions,
-            reasoning=f"(multi-turn: {world_state.turn} turns run)",
-        )
-    ]
-
-
-async def _run_scenario_async(
-    fixture_path: Path,
-    *,
-    model: str | None = None,
-) -> list[ScenarioResult]:
-    """Run all variants of a scenario. Returns one ScenarioResult per variant.
-
-    Multi-turn fixtures (containing `multi_turn:` key) are handled by
-    `_run_multi_turn_scenario_async`; everything else goes through the
-    single-turn variant path.
-
-    The first variant's executed actions become the baseline for any
-    subsequent variants that use `differs_from_baseline_by`.
-    Non-variant fixtures produce a single-element list with no baseline.
-    """
-    fixture = _load_fixture(fixture_path)
-
-    if "multi_turn" in fixture:
-        return await _run_multi_turn_scenario_async(fixture, fixture_path, model=model)
-
-    variants = _expand_variants(fixture)
-    results: list[ScenarioResult] = []
-    baseline_actions: list[dict] | None = None
-    for index, variant_fixture in enumerate(variants):
-        result = await _run_one_variant_async(
-            variant_fixture,
-            fixture_path,
-            model=model,
-            baseline_actions=baseline_actions,
-        )
-        results.append(result)
-        if index == 0 and not result.skipped:
-            baseline_actions = result.actions
-    return results
-
-
-async def _run_all_async(
-    fixtures: list[Path],
-    *,
-    model: str | None,
-    on_each: Callable[[ScenarioResult], None] = lambda result: None,
-) -> list[ScenarioResult]:
-    """Run every scenario (possibly multi-variant) in a SINGLE shared event loop.
-
-    Each variant gets its own ExecutorProvider (so memories are correctly
-    isolated) but they share the asyncio loop, which prevents httpx
-    transport cleanup from racing against a closed loop.
-    """
-    results: list[ScenarioResult] = []
-    for path in fixtures:
-        for result in await _run_scenario_async(path, model=model):
-            results.append(result)
-            on_each(result)
-    return results
-
-
-def run_scenario(fixture_path: Path, *, model: str | None = None) -> list[ScenarioResult]:
-    """Synchronous entry point for one-off use (e.g. pytest).
-
-    Returns a list — one ScenarioResult per variant, or a single-element
-    list for non-variant fixtures.
-    """
-    return asyncio.run(_run_scenario_async(fixture_path, model=model))
-
-
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
-
-
-def _format_result(result: ScenarioResult) -> str:
-    if result.skipped:
-        return f"  ⚪ {result.name}  SKIPPED — {result.skip_reason}"
-
-    color = ANSI_GREEN if result.passed else ANSI_RED
-    status = "✓ PASS" if result.passed else "✗ FAIL"
-    header = (
-        f"  {color}{status}{ANSI_RESET}  {result.name}  "
-        f"({result.duration_s:.1f}s, ${result.cost_usd:.4f}, {len(result.actions)} actions)"
+        raise ValueError("initial.buildings must be a list of names")
+    ledger.buildings_confirmed.update(initial_buildings)
+    ledger.villagers_ordered = _integer(
+        initial.get("villagers_ordered", world.population), "villagers_ordered"
     )
-    if not result.failures:
-        return header
-    failure_lines = "\n".join(
-        "      " + line for failure in result.failures for line in failure.splitlines()
+    source = _ScriptedSource(world, ledger)
+    failures: list[str] = []
+    inputs: list[str] = []
+    actions: list[str] = []
+    token = executor.bind_ledger(ledger)
+    original = (
+        executor.pyautogui,
+        executor.get_game_window_rect,
+        executor.ensure_game_focused,
+        executor.get_rescan_fn(),
     )
-    return f"{header}\n{failure_lines}"
+    try:
+        with tempfile.TemporaryDirectory(prefix="agent-scenario-") as temporary:
+            ctx = LoopContext(
+                memory=AgentMemory(),
+                goal_manager=GoalManager(),
+                goal_logger=GoalLogger(Path(temporary)),
+                source=source,
+                actuator=GameActuator(),
+                ledger=ledger,
+            )
+            executor.get_game_window_rect = lambda: (0, 0, 1920, 1080)
+            executor.ensure_game_focused = lambda: True
+            tick = 0
+
+            async def refresh() -> bool:
+                nonlocal tick
+                tick += 1
+                await perceive_once(ctx, tick)
+                return True
+
+            executor.set_rescan_fn(refresh)
+            tick += 1
+            await perceive_once(ctx, tick)
+            for index, step in enumerate(steps, start=1):
+                fake_input = _ScriptedInput(world, ledger, step)
+                executor.pyautogui = cast("object", fake_input)
+                advisor = _ScriptedAdvisor(step.action)
+                frame = ctx.frames.latest()
+                if frame is None:
+                    raise RuntimeError("scripted source published no frame")
+                await act_once(ctx, advisor, frame, index)
+                actions.append(step.action)
+                inputs.extend(fake_input.calls)
+                if not advisor.advertised:
+                    failures.append(f"step {index}: {step.action} was not eligible")
+                    break
+                if step.action not in {"wait", "tactical_handoff"} and not fake_input.issued:
+                    failures.append(f"step {index}: no spending input issued for {step.action}")
+                    break
+                tick += 1
+                await perceive_once(ctx, tick)
+                if ledger.failure_streak:
+                    failures.append(f"step {index}: {ledger.recent_failures[-1]}")
+                    break
+    finally:
+        executor.pyautogui = original[0]
+        executor.get_game_window_rect = original[1]
+        executor.ensure_game_focused = original[2]
+        executor._rescan_fn = original[3]
+        executor.clear_detected_entities()
+        executor.unbind_ledger(token)
+    return ScenarioResult(path.stem, not failures, failures, actions, inputs, world.age)
 
 
-def _print_summary(results: list[ScenarioResult]) -> None:
-    passed = sum(1 for r in results if r.passed and not r.skipped)
-    failed = sum(1 for r in results if not r.passed and not r.skipped)
-    skipped = sum(1 for r in results if r.skipped)
-    total_cost = sum(r.cost_usd for r in results)
-    total_time = sum(r.duration_s for r in results)
-
-    separator = "=" * SUMMARY_SEPARATOR_WIDTH
-    print()
-    print(separator)
-    print(f"  {passed} passed, {failed} failed, {skipped} skipped")
-    print(f"  ${total_cost:.4f} total cost, {total_time:.1f}s wall-clock")
-    print(separator)
+def run_scenario(path: Path) -> ScenarioResult:
+    return asyncio.run(run_scenario_async(path))
 
 
-class _RunnerArgs(argparse.Namespace):
-    fixtures: list[str]
-    all: bool
-    model: str | None
-
-
-_SCENARIOS_DIR = Path(__file__).resolve().parent / "scenarios"
-
-
-def _resolve_fixtures(args: _RunnerArgs) -> list[Path]:
-    if args.all:
-        return sorted(_SCENARIOS_DIR.rglob("*.yaml"))
-    return [Path(p) for p in args.fixtures]
-
-
-def _parse_args() -> _RunnerArgs:
-    parser = argparse.ArgumentParser(
-        description="Run scenario evaluations against ExecutorProvider"
-    )
-    parser.add_argument("fixtures", nargs="*", help="YAML fixture paths (or use --all)")
-    parser.add_argument(
-        "--all", action="store_true", help="Run every fixture in gameplay_agent/scenarios/"
-    )
-    parser.add_argument("--model", help="Override the model (default: config.model)")
-    return parser.parse_args(namespace=_RunnerArgs())
-
-
-def main() -> int:
-    if not config.llm_api_key:
-        print(f"ERROR: {KEY_ENV} not set (checked env + .env file).")
-        return 1
-
-    args = _parse_args()
-    fixtures = _resolve_fixtures(args)
-    if not fixtures:
-        print("No fixtures specified. Use --all or pass YAML paths.")
-        return 1
-
-    valid_fixtures: list[Path] = []
-    for fixture_path in fixtures:
-        if fixture_path.exists():
-            valid_fixtures.append(fixture_path)
-        else:
-            print(f"  ⚠ {fixture_path}: not found")
-
-    print(f"Running {len(valid_fixtures)} scenario(s)...\n")
-    results = asyncio.run(
-        _run_all_async(
-            valid_fixtures,
-            model=args.model,
-            on_each=lambda result: print(_format_result(result)),
-        )
-    )
-    _print_summary(results)
-
-    return 0 if all(r.passed or r.skipped for r in results) else 1
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("fixtures", nargs="*", type=Path)
+    parser.add_argument("--all", action="store_true")
+    parsed = cast("dict[str, object]", vars(parser.parse_args(argv)))
+    raw_paths = parsed["fixtures"]
+    if not isinstance(raw_paths, list) or not all(isinstance(path, Path) for path in raw_paths):
+        raise ValueError("fixtures must be paths")
+    paths = list(cast("list[Path]", raw_paths))
+    if parsed["all"] is True:
+        paths.extend(sorted((Path(__file__).parent / "scenarios" / "production").glob("*.yaml")))
+    if not paths:
+        parser.error("provide a production fixture or --all")
+    results = [run_scenario(path) for path in paths]
+    for result in results:
+        print(f"{'PASS' if result.passed else 'FAIL'} {result.name}: {', '.join(result.failures)}")
+    return int(not all(result.passed for result in results))
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

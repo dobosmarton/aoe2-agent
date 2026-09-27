@@ -40,9 +40,9 @@ def _ephemeral() -> dict[str, str]:
     return {"type": "ephemeral"}
 
 
-def _temperature(value: float | None) -> float | anthropic.NotGiven:
+def _temperature(value: float | None) -> float | anthropic.Omit:
     """Omit when unset, so the model applies its own default."""
-    return anthropic.NOT_GIVEN if value is None else value
+    return anthropic.omit if value is None else value
 
 
 class _HasUsage(Protocol):
@@ -60,6 +60,9 @@ class AnthropicWire:
         # is why this repo carries no tenacity decorators.
         self.client = anthropic.AsyncAnthropic(api_key=api_key, max_retries=max_retries)
         self.endpoint = str(self.client.base_url)
+
+    async def aclose(self) -> None:
+        await self.client.close()
 
     # -- Rendering ----------------------------------------------------------
 

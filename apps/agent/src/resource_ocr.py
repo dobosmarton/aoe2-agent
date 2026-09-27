@@ -37,7 +37,7 @@ import threading
 from dataclasses import dataclass
 from itertools import pairwise
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, Literal, NamedTuple, NotRequired, TypedDict, cast
+from typing import TYPE_CHECKING, Literal, NamedTuple, NotRequired, TypedDict, cast
 
 import numpy as np
 from PIL import Image
@@ -390,7 +390,15 @@ def _preprocess_for_ocr(field_img: np.ndarray, *, pad: int, binarize: bool = Tru
         proc = cast("np.ndarray", cv2.bitwise_not(_binarize_digits(field_img)))  # black on white
         proc = cast(
             "np.ndarray",
-            cv2.copyMakeBorder(proc, pad, pad, pad + 10, pad + 10, cv2.BORDER_CONSTANT, value=255),
+            cv2.copyMakeBorder(
+                proc,
+                pad,
+                pad,
+                pad + 10,
+                pad + 10,
+                cv2.BORDER_CONSTANT,
+                value=(255.0, 255.0, 255.0, 255.0),
+            ),
         )
         scale = 4
     else:
@@ -422,30 +430,28 @@ _ENGINES: dict[str, RapidOCR] = {}
 # same engine, and the build took 32 s on the VM.
 _ENGINE_LOCK = threading.Lock()
 
+
 # RapidOCR's stock `limit_type: min` scales an image UP until its shortest side
 # reaches 736, so a 552x336 field crop became 1216x736 and the 6 field reads cost
 # more pixels than the whole screenshot. Capping the LONGEST side leaves the crop
 # alone: 3852 -> 845 ms per frame over the real fixtures, identical readings.
-_FIELD_LIMITS: Final = {
-    "det_limit_type": "max",
-    "det_limit_side_len": 3072,
-    "use_cls": False,  # the HUD never tilts
-}
-
-
-def _engine(name: str, **settings: object) -> RapidOCR:
+def _engine(name: str) -> RapidOCR:
     """One cached engine per name. Init is expensive, so build it once."""
     with _ENGINE_LOCK:
         if name not in _ENGINES:
             from rapidocr_onnxruntime import RapidOCR
 
-            _ENGINES[name] = RapidOCR(**settings)
+            _ENGINES[name] = (
+                RapidOCR(det_limit_type="max", det_limit_side_len=3072, use_cls=False)
+                if name == "field"
+                else RapidOCR()
+            )
         return _ENGINES[name]
 
 
 def _field_engine() -> RapidOCR:
     """The engine for one tight field crop."""
-    return _engine("field", **_FIELD_LIMITS)
+    return _engine("field")
 
 
 def _band_engine() -> RapidOCR:
@@ -602,8 +608,11 @@ def detect_idle_present(rgb: np.ndarray, pop: FieldBox) -> bool:
     y0, y1 = max(0, y0), min(h, y1)
     if x1 <= x0 or y1 <= y0:
         return False
+    import cv2
+
     patch = rgb[y0:y1, x0:x1].astype(np.float32)
-    saturation = float((patch.max(axis=2) - patch.min(axis=2)).mean())
+    channel_range = cast("np.ndarray", patch.max(axis=2) - patch.min(axis=2))
+    saturation = cv2.mean(channel_range)[0]
     return saturation > _IDLE_SAT_THRESHOLD
 
 
@@ -656,7 +665,8 @@ def read_idle_count(rgb: np.ndarray, pop: FieldBox) -> int | None:
         return None
 
     patch = rgb[y0:y1, x0:x1]
-    mask = cast("np.ndarray", (patch.min(axis=2) >= _IDLE_WHITE_THR).astype(np.uint8) * 255)
+    white_mask = cast("np.ndarray", patch.min(axis=2) >= _IDLE_WHITE_THR)
+    mask = cast("np.ndarray", white_mask.astype(np.uint8) * 255)
     glyphs = _segment_components(
         mask,
         min_h=_IDLE_DIGIT_MIN_H_FRAC * ph,

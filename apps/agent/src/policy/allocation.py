@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
 
 from ..entity_utils import RESOURCE_KINDS, ResourceKind
@@ -38,6 +39,9 @@ class Allocation:
 
     targets: Mapping[ResourceKind, int]
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "targets", MappingProxyType(dict(self.targets)))
+
     def share(self, kind: ResourceKind) -> float:
         """This resource's fraction of the total target; 0.0 when unallocated."""
         total = sum(self.targets.values())
@@ -62,7 +66,7 @@ def is_famine(state: PolicyState) -> bool:
     villagers starve is how run 1 lost its production (F-8). The famine mix
     below already reserves the wood a farm needs.
     """
-    return state.food < _FOOD_CRISIS_THRESHOLD
+    return "food" in state.known_resources and state.food < _FOOD_CRISIS_THRESHOLD
 
 
 def for_state(
@@ -83,7 +87,7 @@ def for_state(
         return Allocation(targets={"food": 1, "wood": 0, "gold": 0, "stone": 0})
 
     base = strategist or seeded(state.age)
-    if wood_target is not None and state.wood < wood_target:
+    if wood_target is not None and "wood" in state.known_resources and state.wood < wood_target:
         base = _with_extra(base, "wood")
     if state.age == "Feudal Age" and state.gold < _CASTLE_GOLD_COST:
         base = _with_extra(base, "gold")
@@ -104,10 +108,18 @@ def next_kind(allocation: Allocation, jobs: Mapping[str, int]) -> ResourceKind:
     Callers routing a batch must fold each choice back into `jobs`, or the whole
     batch goes to the same resource.
     """
-    staffed = sum(jobs.get(kind, 0) for kind in RESOURCE_KINDS)
+    staffed = sum(jobs.get(kind, 0) for kind in RESOURCE_KINDS) + 1
+    eligible: tuple[ResourceKind, ...] = tuple(
+        kind for kind in RESOURCE_KINDS if allocation.targets.get(kind, 0) > 0
+    )
+    if not eligible:
+        return RESOURCE_KINDS[0]
     return min(
-        RESOURCE_KINDS,
-        key=lambda kind: (jobs.get(kind, 0) - allocation.share(kind) * staffed, kind),
+        eligible,
+        key=lambda kind: (
+            jobs.get(kind, 0) - allocation.share(kind) * staffed,
+            RESOURCE_KINDS.index(kind),
+        ),
     )
 
 

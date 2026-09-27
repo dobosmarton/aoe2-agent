@@ -10,7 +10,7 @@ Read the **strategist's Resource Status** block in context — that is the autho
 - Strategist's Age reads `Feudal Age`
 - Food ≥ 800
 - Gold ≥ 200
-- I have built at least **2 Feudal Age buildings** detected on screen — qualifying classes: barracks, archery_range, stable, blacksmith, market. (Houses, Mills, Lumber Camps, Mining Camps do NOT count.)
+- I have built at least **2 Feudal Age buildings** confirmed by purchase — qualifying classes: archery_range, stable, blacksmith, market. The Dark-Age barracks, houses, mills, and camps do NOT count.
 
 Castle Age research takes ~2.5 minutes and runs in the background. Resume farming, queueing, and military training on the NEXT turn after the research is in flight.
 

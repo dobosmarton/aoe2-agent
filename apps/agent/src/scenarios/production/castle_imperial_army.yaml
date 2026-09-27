@@ -1,0 +1,30 @@
+name: Castle and Imperial progression with a basic army
+initial:
+  age: Feudal Age
+  resources: {food: 3000, wood: 1700, gold: 1500, stone: 0}
+  population: 20
+  population_cap: 50
+  villagers_ordered: 20
+  idle_present: true
+  idle_count: 1
+  buildings: [mill, lumber_camp, barracks, stable]
+  entities:
+    - {id: tc, class: town_center, center: [700, 500]}
+    - {id: worker, class: villager, center: [750, 550]}
+    - {id: forest, class: tree, center: [1050, 520]}
+    - {id: gold, class: gold_mine, center: [1100, 600]}
+steps:
+  - action: build_blacksmith
+    after: {resources: {wood: 1550}, building: blacksmith}
+  - action: build_market
+    after: {resources: {wood: 1375}, building: market}
+  - action: advance_to_castle
+    after: {resources: {food: 2200, gold: 1300}, age: Castle Age}
+  - action: build_siege_workshop
+    after: {resources: {wood: 1175}, building: siege_workshop}
+  - action: build_monastery
+    after: {resources: {wood: 1000}, building: monastery}
+  - action: train_knight
+    after: {resources: {food: 2140, gold: 1225}}
+  - action: advance_to_imperial
+    after: {resources: {food: 1140, gold: 425}, age: Imperial Age}

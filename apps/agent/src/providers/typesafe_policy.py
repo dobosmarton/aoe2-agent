@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from typing import TYPE_CHECKING, Protocol, cast
 
 from typesafe_sdk import (
@@ -27,10 +26,8 @@ if TYPE_CHECKING:
     from ..policy.allocation import AllocationFocus
     from ..policy.candidates import ActionCandidate, CandidateId
 
-_ACTION_QUESTION = "economy_action"
+_ACTION_QUESTION = "gameplay_action"
 _ALLOCATION_QUESTION = "allocation_focus"
-_REQUEST_TIMEOUT_SECONDS = 2.0
-
 _ALLOCATION_CRITERIA: Mapping[str, str] = {
     "balanced": "Keep the normal age-appropriate balance across useful resources.",
     "food": "Bias new or idle villagers toward food for production and age advancement.",
@@ -60,6 +57,7 @@ class TypeSafePolicyAdvisor:
         *,
         api_key: str,
         model: str,
+        timeout_seconds: float,
         client: _SystemOneClient | None = None,
     ) -> None:
         if not api_key.strip():
@@ -70,7 +68,7 @@ class TypeSafePolicyAdvisor:
                 api_key=api_key,
                 model=model,
                 retry=RetryPolicy(max_retries=0),
-                timeout=_REQUEST_TIMEOUT_SECONDS,
+                timeout=timeout_seconds,
             )
             # The SDK overload returns SystemOneResponse when response_model is
             # omitted. The Protocol records the narrower contract used here.
@@ -97,9 +95,7 @@ class TypeSafePolicyAdvisor:
         return PolicyAdvice(
             source_tick=request.source_tick,
             source_captured_at=request.source_captured_at,
-            created_at=time.monotonic(),
             model=response.model,
-            candidate_ids=candidate_ids,
             action_choice=_candidate_id(action.choice, candidate_ids),
             action_confidence=action.confidence,
             action_probabilities=readonly_probabilities(action.probabilities),
@@ -128,9 +124,10 @@ def _questions(request: PolicyRequest) -> dict[str, Question]:
     if len(request.candidates) > 1:
         questions[_ACTION_QUESTION] = Choice(
             instructions=(
-                "Choose the single available economic action that best advances `active_goals` "
+                "Choose the single available named action that best advances `active_goals` "
                 "from the current `game` state. Every option is executable now. Choose `wait` "
-                "when spending now would delay a more important goal."
+                "when spending now would delay a more important goal. Consider age progression, "
+                "basic military preparation, and recent failed actions."
             ),
             criteria={
                 candidate.id: _candidate_description(candidate) for candidate in request.candidates
@@ -143,26 +140,36 @@ def _request_state(request: PolicyRequest) -> JSONContent:
     state = request.state
     payload: dict[str, object] = {
         "game": {
-            "age": state.age,
+            "age": state.age if state.age_known else None,
             "resources": {
-                "food": state.food,
-                "wood": state.wood,
-                "gold": state.gold,
-                "stone": state.stone,
+                "food": state.food if "food" in state.known_resources else None,
+                "wood": state.wood if "wood" in state.known_resources else None,
+                "gold": state.gold if "gold" in state.known_resources else None,
+                "stone": state.stone if "stone" in state.known_resources else None,
             },
             "population": {
-                "current": state.population,
-                "capacity": state.population_cap,
+                "current": state.population if state.population_known else None,
+                "capacity": state.population_cap if state.population_known else None,
                 "villagers_ordered": state.villagers_ordered,
+                "committed_unobserved": state.pending_population,
             },
             "buildings": sorted(state.buildings_seen),
+            "building_purchases_awaiting_completion": sorted(state.building_purchases),
+            "age_advancements_underway": sorted(state.age_up_paid),
+            "research_purchases_completion_unobserved": sorted(state.research_purchases),
+            "completed_research": sorted(state.researched),
+            "pending_actions": sorted(state.pending_actions),
+            "reserved_resources": dict(state.reserved_resources),
+            "known_resources": sorted(state.known_resources),
+            "visible_classes": sorted(state.visible_classes),
             "villager_jobs": dict(state.villager_jobs),
             "idle_villagers_present": state.idle_present,
         },
         "computed_signals": {
             "food_crisis": is_famine(state),
-            "population_blocked": state.population_cap > 0
-            and state.villagers_ordered >= state.population_cap,
+            "population_blocked": state.population_known
+            and state.population_cap > 0
+            and state.population + state.pending_population >= state.population_cap,
         },
         "active_goals": [
             {
@@ -174,6 +181,7 @@ def _request_state(request: PolicyRequest) -> JSONContent:
             }
             for goal in request.goals
         ],
+        "recent_failures": list(request.recent_failures),
     }
     # Every nested value above is JSON-compatible; the cast bridges the SDK's
     # recursive JSON alias without weakening internal types to Any.

@@ -1,18 +1,17 @@
-"""The TypeSafe clock publishes advice without joining the actor's latency path."""
+"""Frame-local policy request construction."""
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING
 
+import pytest
+from gameplay_agent import executor as ex
 from gameplay_agent.goal_logger import GoalLogger
 from gameplay_agent.goals import Goal, GoalManager
 from gameplay_agent.loops.context import LoopContext
-from gameplay_agent.loops.policy import evaluate_policy_once, policy_loop
 from gameplay_agent.loops.snapshot import Perception
 from gameplay_agent.memory import AgentMemory
-from gameplay_agent.policy.advice import PolicyAdvice, PolicyRequest, readonly_probabilities
-from gameplay_agent.providers.policy import PolicyAdvisorError
+from gameplay_agent.policy.request import policy_request
 
 from tests.loop_fakes import FakeActuator, FakeSource
 
@@ -20,33 +19,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-class FakeAdvisor:
-    def __init__(self, *, fail: bool = False) -> None:
-        self.fail = fail
-        self.requests: list[PolicyRequest] = []
-        self.closed = False
-
-    async def advise(self, request: PolicyRequest) -> PolicyAdvice:
-        self.requests.append(request)
-        if self.fail:
-            raise PolicyAdvisorError("service unavailable")
-        candidate = next(item for item in request.candidates if item.id == "build_house")
-        return PolicyAdvice(
-            source_tick=request.source_tick,
-            source_captured_at=request.source_captured_at,
-            created_at=request.source_captured_at,
-            model="jev-1.13.0",
-            candidate_ids=frozenset(item.id for item in request.candidates),
-            action_choice=candidate.id,
-            action_confidence=0.9,
-            action_probabilities=readonly_probabilities({candidate.id: 0.9}),
-            allocation_focus="wood",
-            allocation_confidence=0.8,
-            allocation_probabilities=readonly_probabilities({"wood": 0.8}),
-        )
-
-    async def aclose(self) -> None:
-        self.closed = True
+@pytest.fixture(autouse=True)
+def _reset_build_gates() -> None:
+    ex.reset_build_gates()
 
 
 def _context(tmp_path: Path) -> LoopContext:
@@ -72,39 +47,23 @@ def _context(tmp_path: Path) -> LoopContext:
     )
 
 
-def test_one_evaluation_publishes_frame_tied_advice(tmp_path: Path) -> None:
+def test_request_is_tied_to_one_frame_and_its_goals(tmp_path: Path) -> None:
+    request = policy_request(_context(tmp_path), Perception(tick=8, captured_at=12.5))
+
+    assert request.source_tick == 8
+    assert request.source_captured_at == 12.5
+    assert request.goals[0].name == "Reach Feudal"
+
+
+def test_pending_house_is_part_of_policy_state_and_not_a_candidate(tmp_path: Path) -> None:
     ctx = _context(tmp_path)
-    advisor = FakeAdvisor()
-    frame = Perception(tick=8)
+    ctx.memory.game_state.population = 4
+    ctx.memory.game_state.population_cap = 5
+    ctx.memory.game_state.resources["wood"] = 200
+    ex.observe_hud(4, 5, {"wood": 200})
+    ex._note_pending_placement("q")
 
-    assert asyncio.run(evaluate_policy_once(ctx, advisor, frame))
-    published = ctx.policy_advice.latest()
+    request = policy_request(ctx, Perception(tick=1))
 
-    assert published is not None
-    assert published.source_tick == 8
-    assert advisor.requests[0].goals[0].name == "Reach Feudal"
-
-
-def test_expected_provider_failure_preserves_the_rule_fallback(tmp_path: Path) -> None:
-    ctx = _context(tmp_path)
-    advisor = FakeAdvisor(fail=True)
-
-    assert not asyncio.run(evaluate_policy_once(ctx, advisor, Perception(tick=2)))
-    assert ctx.policy_advice.latest() is None
-
-
-def test_policy_loop_skips_alarm_frames_and_closes_provider(tmp_path: Path) -> None:
-    ctx = _context(tmp_path)
-    advisor = FakeAdvisor()
-    ctx.frames.put(Perception(tick=1, alarm=True))
-
-    async def drive() -> None:
-        task = asyncio.create_task(policy_loop(ctx, advisor, interval_seconds=0.001))
-        await asyncio.sleep(0.01)
-        ctx.request_stop("interrupted")
-        await asyncio.wait_for(task, timeout=1.0)
-
-    asyncio.run(drive())
-
-    assert advisor.requests == []
-    assert advisor.closed
+    assert request.state.pending_buildings == frozenset({"house"})
+    assert "build_house" not in {candidate.id for candidate in request.candidates}

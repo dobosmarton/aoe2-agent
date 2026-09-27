@@ -484,6 +484,7 @@ def test_reset_clears_all_state() -> None:
 
 def test_create_turn_attaches_to_working_memory_and_increments() -> None:
     m = AgentMemory()
+    observed_food = m.game_state.resources["food"]
     turn = m.create_turn(
         reasoning="hello",
         actions=[{"type": "press", "key": "h"}],
@@ -492,8 +493,9 @@ def test_create_turn_attaches_to_working_memory_and_increments() -> None:
     assert turn.iteration == 1
     assert m.turn_count == 1
     assert m.working_memory[-1] is turn
-    # Observations also flowed through update_from_observations
-    assert m.game_state.resources["food"] == 250
+    # A model claim is history, not an authoritative HUD observation.
+    assert turn.observed_resources == {"food": 250}
+    assert m.game_state.resources["food"] == observed_food
 
 
 def test_create_turn_handles_no_observations() -> None:

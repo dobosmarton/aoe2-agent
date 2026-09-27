@@ -45,6 +45,7 @@ def _make_policy_advisor() -> PolicyAdvisor:
     return TypeSafePolicyAdvisor(
         api_key=config.typesafe_api_key,
         model=config.typesafe_model,
+        timeout_seconds=config.policy_timeout,
     )
 
 
@@ -80,7 +81,11 @@ async def main_async(args: _AgentArgs) -> None:
         )
     else:
         # Run main game loop
-        log.info("starting_game_loop", act_interval=config.act_interval)
+        log.info(
+            "starting_game_loop",
+            perceive_interval=config.perceive_interval,
+            policy_timeout=config.policy_timeout,
+        )
         await game_loop(
             provider,
             max_iterations=args.iterations,

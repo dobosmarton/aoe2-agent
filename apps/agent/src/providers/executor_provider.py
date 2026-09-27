@@ -23,12 +23,13 @@ from ..executor import (
     build_menu_steps,
     build_rejection,
     build_steps,
+    current_ledger,
     execute_action,
     get_detected_entities,
 )
 from ..models import LLMResponse, Observations, validate_actions
 from ..villager_roles import select_worker
-from .action_tools import _ACTION_TOOLS
+from .action_tools import _ACTION_TOOLS, _RECOVERY_TOOLS
 from .base import (
     AssistantTurn,
     ChatRequest,
@@ -56,6 +57,7 @@ _JOB_CAMERA_HOTKEY: dict[ResourceKind, tuple[str, list[str]]] = {
 }
 # Unknown/omitted job falls back to the Lumber Camp jump (wood is the most common pull).
 _DEFAULT_JOB_HOTKEY = _JOB_CAMERA_HOTKEY["wood"]
+_SAFE_RAW_KEYS = frozenset({"h", ".", ",", "space", "home", "g", "b", "t"})
 
 
 def _tracker_velocities() -> dict[str, tuple[float, float]]:
@@ -158,6 +160,12 @@ class ExecutorProvider:
             except Exception as e:
                 log.warning("game_knowledge_init_failed", error=str(e))
                 self.use_dynamic_context = False
+
+    async def aclose(self) -> None:
+        """Release this provider's transport when a game finishes."""
+        close = getattr(self.wire, "aclose", None)
+        if close is not None:
+            await close()
 
     _AGE_NAMES = ("dark", "feudal", "castle", "imperial")
     _FALLBACK_PROMPT = "You are playing Age of Empires 2: Definitive Edition. Your goal is to defeat the enemy AI. Play to win!"
@@ -615,6 +623,23 @@ class ExecutorProvider:
     async def _execute_tool_call(self, block: ToolCall) -> tuple[dict, ToolOutcome]:
         """Execute a single tool call and build the result payload."""
         tool_name = block.name
+        if tool_name == "press":
+            key = block.arguments.get("key")
+            modifiers = block.arguments.get("modifiers", [])
+            navigation_hotkey = (
+                modifiers == ["ctrl"]
+                and isinstance(key, str)
+                and key.lower() in {"a", "b", "g", "i", "l", "m", "s", "y", "z"}
+            )
+            if not isinstance(key, str) or (
+                key.lower() not in _SAFE_RAW_KEYS and not navigation_hotkey
+            ):
+                action_dict = {"type": tool_name, **block.arguments}
+                return action_dict, self._make_tool_result(
+                    block,
+                    False,
+                    "raw purchase or ambiguous hotkey refused; use a named catalog action",
+                )
         handler_name = self._COMPOSITE_HANDLERS.get(tool_name)
         if handler_name:
             handler = cast(
@@ -643,7 +668,14 @@ class ExecutorProvider:
         """Fold one call's tokens into the running per-game total."""
         self._usage = self._usage + usage
 
-    async def _call_api(self, content: list[dict], age: str = "Dark Age") -> LLMResponse:
+    async def _call_api(
+        self,
+        content: list[dict],
+        age: str = "Dark Age",
+        *,
+        tools: list[dict] | None = None,
+        max_tool_actions: int | None = None,
+    ) -> LLMResponse:
         """Run the agentic tool loop.
 
         Each iteration: model calls one tool → we execute it → feed the result
@@ -657,7 +689,10 @@ class ExecutorProvider:
         reasoning_parts: list[str] = []
         system = self.get_system_prompt(age)
 
+        available_tools = _ACTION_TOOLS if tools is None else tools
         for _ in range(config.max_tool_iterations):
+            if max_tool_actions is not None and len(executed_actions) >= max_tool_actions:
+                break
             reply = await self.wire.tool_turn(
                 ChatRequest(
                     system=system,
@@ -666,7 +701,7 @@ class ExecutorProvider:
                     temperature=config.temperature,
                     effort=config.executor_effort,
                 ),
-                _ACTION_TOOLS,
+                available_tools,
             )
             self._record_usage(reply.usage)
             if reply.text:
@@ -678,11 +713,21 @@ class ExecutorProvider:
             turns.append(AssistantTurn(text=reply.text, tool_calls=reply.tool_calls))
             outcomes: list[ToolOutcome] = []
             for call in reply.tool_calls:
+                if max_tool_actions is not None and len(executed_actions) >= max_tool_actions:
+                    break
+                failures_before = current_ledger().failure_count
+                operation_before = current_ledger().next_operation_id
                 action_dict, outcome = await self._execute_tool_call(call)
                 executed_actions.append(action_dict)
                 outcomes.append(outcome)
                 if outcome.success:
                     success_count += 1
+                elif (
+                    action_dict.get("type") != "wait"
+                    and current_ledger().failure_count == failures_before
+                    and not current_ledger().has_pending_since(operation_before)
+                ):
+                    current_ledger().record_failure(f"{action_dict.get('type')}: {outcome.detail}")
 
             turns.append(ToolResultsTurn(outcomes=tuple(outcomes)))
 
@@ -799,6 +844,10 @@ class ExecutorProvider:
         """
         return await self._respond(context, width, height, self._call_tool_loop)
 
+    async def act_recovery(self, context: str, width: int = 1920, height: int = 1080) -> LLMResult:
+        """At most three catalog-guarded recovery tools; no raw purchase keys."""
+        return await self._respond(context, width, height, self._call_recovery_loop)
+
     async def get_actions(
         self,
         context: str,
@@ -831,6 +880,15 @@ class ExecutorProvider:
         """The agentic path, as one named call beside `_call_single_shot`."""
         result = await self._call_api(content, age=age)
         log.debug("claude_response", age=age, reasoning=result.reasoning[:200])
+        return self._serialize_response(result)
+
+    async def _call_recovery_loop(self, content: list[dict], *, age: str) -> LLMResult:
+        result = await self._call_api(
+            content,
+            age=age,
+            tools=_RECOVERY_TOOLS,
+            max_tool_actions=3,
+        )
         return self._serialize_response(result)
 
     async def _single_shot_or_tool_loop(self, content: list[dict], *, age: str) -> LLMResult:

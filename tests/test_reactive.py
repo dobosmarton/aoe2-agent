@@ -516,22 +516,6 @@ def test_the_farm_is_the_only_cost_idle_still_owns() -> None:
 
     assert ex._BUILD_WOOD_COST["a"] == idle._FARM_WOOD_COST
     assert ex.building_class(ex.ECON_MENU, idle._FARM_BUILD_KEY) == "farm"
-    assert ex._VILLAGER_ORDER_TARGET_BY_AGE.keys() == ex._NEXT_AGE.keys()
-
-
-def test_house_rule_stays_inside_the_executors_allow_band() -> None:
-    """A trigger above _HOUSE_HEADROOM_MAX would have every emit rejected."""
-    from gameplay_agent import executor as ex
-    from gameplay_agent.policy.engine import registry
-
-    house = next(r for r in registry() if r.id == "house_when_headroom_gone")
-    for headroom in range(ex._HOUSE_HEADROOM_MAX + 1):
-        state = from_game_state(
-            _state(population=30 - headroom, population_cap=30), captured_at=time.monotonic()
-        )
-        if house.matches(state):
-            return
-    raise AssertionError("house rule never fires inside the executor's allow band")
 
 
 # ---------------------------------------------------------------------------

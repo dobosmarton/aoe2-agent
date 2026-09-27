@@ -251,6 +251,18 @@ def test_shipped_registry_is_sorted_by_descending_weight() -> None:
     assert weights == sorted(weights, reverse=True)
 
 
+def test_shipped_house_rule_stays_quiet_while_a_house_is_pending() -> None:
+    state = PolicyState(
+        population=4,
+        population_cap=5,
+        wood=25,
+        pending_buildings=frozenset({"house"}),
+    )
+
+    actions = matched_actions(state, registry())
+    assert not any(action.get("building_key") == "q" for action in actions)
+
+
 def test_shipped_rules_have_unique_ids() -> None:
     ids = [rule.id for rule in registry()]
     assert len(ids) == len(set(ids))

@@ -41,7 +41,7 @@
   # spends the wrong turn. 2000 ms returns once the act loop lands.
 
 - id: house_when_headroom_gone
-  when: population_cap < 200 and (population_cap - population) <= 2
+  when: population_cap < 200 and (population_cap - population) <= 2 and 'house' not in pending_buildings
   then:
     type: build
     building_key: q

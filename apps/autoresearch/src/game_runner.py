@@ -12,6 +12,7 @@ from autoresearch.experiment_log import get_next_experiment_id, log_experiment
 from autoresearch.metrics import compute_score
 from autoresearch.trace import build_game_trace, save_trace
 from gameplay_agent.config import config
+from gameplay_agent.detection_phase import init_required_detector
 from gameplay_agent.game_loop import game_loop
 from gameplay_agent.memory import AgentMemory
 from gameplay_agent.memory_chain import MemoryChain
@@ -45,6 +46,7 @@ async def run_game(
     policy_advisor = TypeSafePolicyAdvisor(
         api_key=config.typesafe_api_key,
         model=config.typesafe_model,
+        timeout_seconds=config.policy_timeout,
     )
     memory = AgentMemory()
 
@@ -63,6 +65,7 @@ async def run_game(
         use_detection=use_detection,
         time_budget=time_budget,
         use_overlay=use_overlay,
+        detector_factory=init_required_detector,
     )
 
     metrics = memory.get_metrics_snapshot()

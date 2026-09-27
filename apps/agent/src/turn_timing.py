@@ -33,7 +33,7 @@ P50 = 0.50
 P90 = 0.90
 P95 = 0.95
 
-# "turn" is the single-tick loop, until Phase 3 replaces it with the other 3.
+# "turn" is the legacy single-tick loop; real play uses the other three.
 LoopName = Literal["turn", "act", "perceive", "deliberate"]
 
 TURN_LOOP: Final[LoopName] = "turn"
@@ -45,7 +45,7 @@ DELIBERATE_LOOP: Final[LoopName] = "deliberate"
 # visible: an unlisted name is timed and logged, but dropped from the snapshot.
 PHASES_BY_LOOP: Final[dict[LoopName, tuple[str, ...]]] = {
     TURN_LOOP: ("capture", "ocr", "detect", "upkeep", "deliberate"),
-    ACT_LOOP: ("decide", "execute"),
+    ACT_LOOP: ("policy", "decide", "execute"),
     PERCEIVE_LOOP: ("capture", "ocr", "detect"),
     DELIBERATE_LOOP: ("context", "strategist", "executor"),
 }

@@ -10,7 +10,7 @@ import asyncio
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, TypeAlias
 
 import structlog
 
@@ -31,14 +31,15 @@ if TYPE_CHECKING:
     from detection.inference.ownership import Owner
     from detection.inference.remote_detector import RemoteDetector
 
-    from ..executor import ActionResult
+    from ..entity_snapshot import EntitySnapshot
+    from ..executor import ActionLedger, ActionResult
     from ..models import Action
     from ..overlay import DetectionOverlay
     from ..resource_ocr import ResourceReadings
     from ..turn_timing import TickTimings
 
     # Mirrors `detection_phase.Detector` — local weights or the remote server.
-    Detector = EntityDetector | RemoteDetector
+    Detector: TypeAlias = EntityDetector | RemoteDetector
 
 log = structlog.stdlib.get_logger()
 
@@ -49,20 +50,22 @@ _SCREENSHOT_SAMPLE = 10
 _REFRESH_TIMEOUT = 3.0
 
 
-def frame_refresh(frames: FramePipe) -> Callable[[], Awaitable[None]]:
+def frame_refresh(frames: FramePipe) -> Callable[[], Awaitable[bool]]:
     """The executor's rescan hook, rerouted to the perceive loop.
 
     Composite handlers rescan from inside `execute_action`, so the hook is the
-    only place that covers every path. A timeout proceeds on the stale frame.
+    only place that covers every path. A timeout makes the dependent action fail.
     """
 
-    async def refresh() -> None:
+    async def refresh() -> bool:
         asked = time.monotonic()
         frames.request_now()
         try:
             await asyncio.wait_for(frames.after(asked), timeout=_REFRESH_TIMEOUT)
+            return True
         except TimeoutError:
             log.warning("frame_refresh_timed_out", seconds=_REFRESH_TIMEOUT)
+            return False
 
     return refresh
 
@@ -113,16 +116,20 @@ class GameSource:
         overlay: DetectionOverlay | None = None,
         frame_differ: FrameDiffer | None = None,
         screenshots_dir: Path | None = None,
+        ledger: ActionLedger | None = None,
     ) -> None:
         self._detector = detector
         self._overlay = overlay
         self._differ = frame_differ
         self._screenshots_dir = screenshots_dir
+        self._ledger = ledger
 
     async def capture(self, tick: int, timings: TickTimings) -> Sighting:
+        revision = self._ledger.input_revision if self._ledger is not None else 0
         screenshot, width, height, captured_at = await self._screen(tick, timings)
         hud_readings = await self._hud(screenshot, tick, timings)
         entities, entity_summary, ownership = await self._entities(screenshot, timings)
+        spatial_valid = self._ledger is None or self._ledger.input_revision == revision
         return Sighting(
             frame=Perception(
                 screenshot=screenshot,
@@ -133,6 +140,8 @@ class GameSource:
                 hud_readings=hud_readings,
                 tick=tick,
                 captured_at=captured_at,
+                input_revision=revision,
+                spatial_valid=spatial_valid,
             ),
             ownership=ownership,
         )
@@ -156,10 +165,10 @@ class GameSource:
 
     async def _entities(
         self, screenshot: bytes, timings: TickTimings
-    ) -> tuple[list[object], str, Mapping[str, tuple[Owner, float]]]:
+    ) -> tuple[list[EntitySnapshot], str, Mapping[str, tuple[Owner, float]]]:
         """Detect, then tag ownership. Empty without a detector."""
         with timings.phase("detect"):
-            entities: list[object] = []
+            entities: list[EntitySnapshot] = []
             if self._detector:
                 entities = list(await detect_frame(self._detector, self._differ, screenshot))
             if self._overlay is not None:

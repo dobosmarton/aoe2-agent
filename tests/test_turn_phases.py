@@ -356,7 +356,7 @@ def test_castle_gate_line_counts_only_qualifying_classes(build_gates) -> None:
 
 def test_castle_gate_line_names_what_is_standing(build_gates) -> None:
     ex.record_confirmed_buildings(["barracks", "market"])
-    assert castle_gate_line("Feudal Age").startswith("Feudal-Age buildings: 2/2 (barracks market)")
+    assert castle_gate_line("Feudal Age").startswith("Feudal-Age buildings: 1/2 (market)")
 
 
 def test_castle_gate_line_is_silent_outside_feudal(build_gates) -> None:

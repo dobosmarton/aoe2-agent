@@ -246,7 +246,7 @@ def test_differs_combined_must_include_and_must_not_include():
 
 
 def test_expand_variants_no_variants_returns_single_anonymous():
-    from gameplay_agent.scenario_runner import _expand_variants
+    from gameplay_agent.provider_scenario_runner import _expand_variants
 
     fixture = {"name": "x", "inputs": {"age": "Dark Age"}, "expected": {"x": 1}}
     expanded = _expand_variants(fixture)
@@ -256,7 +256,7 @@ def test_expand_variants_no_variants_returns_single_anonymous():
 
 
 def test_expand_variants_overlays_memories_on_base_inputs():
-    from gameplay_agent.scenario_runner import _expand_variants
+    from gameplay_agent.provider_scenario_runner import _expand_variants
 
     base_mem = {"title": "base"}
     variant_mem = {"title": "variant"}
@@ -283,7 +283,7 @@ def test_expand_variants_overlays_memories_on_base_inputs():
 
 
 def test_expand_variants_inherits_base_memories_when_variant_omits():
-    from gameplay_agent.scenario_runner import _expand_variants
+    from gameplay_agent.provider_scenario_runner import _expand_variants
 
     base_mem = {"title": "base"}
     fixture = {
@@ -297,7 +297,7 @@ def test_expand_variants_inherits_base_memories_when_variant_omits():
 
 def test_expand_variants_overrides_strategist_overrides_per_variant():
     """Each variant can carry its own `strategist_overrides:` block."""
-    from gameplay_agent.scenario_runner import _expand_variants
+    from gameplay_agent.provider_scenario_runner import _expand_variants
 
     fixture = {
         "name": "x",
@@ -405,7 +405,7 @@ def test_build_context_applies_strategist_overrides():
 def test_scenario_display_name_with_and_without_variant():
     from pathlib import Path
 
-    from gameplay_agent.scenario_runner import _scenario_display_name
+    from gameplay_agent.provider_scenario_runner import _scenario_display_name
 
     path = Path("gameplay_agent/scenarios/x.yaml")
     assert _scenario_display_name(path, None) == "x"
@@ -541,7 +541,7 @@ def test_scenario_runs(fixture_path):
     For variant fixtures, fails if ANY variant fails — the failure message
     aggregates per-variant details so all problems surface at once.
     """
-    from gameplay_agent.scenario_runner import run_scenario
+    from gameplay_agent.provider_scenario_runner import run_scenario
 
     if not os.environ.get("AOE2_LLM_API_KEY"):
         pytest.skip("AOE2_LLM_API_KEY not set")

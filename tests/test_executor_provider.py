@@ -67,11 +67,11 @@ def _install_create(provider: ExecutorProvider, *responses: object) -> AsyncMock
 
 @pytest.fixture(autouse=True)
 def _fresh_build_gates() -> None:
-    """The gates are per-game module state; a leaked pending placement from an
-    earlier test now reserves wood and refuses a build these tests expect."""
+    """Provide a known affordable HUD and an available worker for tool tests."""
     from gameplay_agent import executor as ex
 
     ex.reset_build_gates()
+    ex.observe_hud(10, 30, {"food": 500, "wood": 500, "gold": 500}, idle_present=True)
 
 
 @pytest.fixture
@@ -97,6 +97,38 @@ def test_call_api_forwards_default_effort(provider: ExecutorProvider) -> None:
     create = _install_create(provider, _end_turn_response())
     _run(provider._call_api([{"type": "text", "text": "hi"}]))
     assert create.call_args.kwargs["output_config"] == {"effort": "low"}
+
+
+def test_recovery_is_limited_to_three_catalog_guarded_tools(
+    provider: ExecutorProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from gameplay_agent.models import LLMResponse, Observations
+
+    seen: dict[str, object] = {}
+
+    async def record_call(
+        _content: list[dict],
+        *,
+        age: str,
+        tools: list[dict],
+        max_tool_actions: int,
+    ) -> LLMResponse:
+        seen.update(age=age, tools=tools, limit=max_tool_actions)
+        return LLMResponse.model_construct(
+            actions=[], observations=Observations(), reasoning="done"
+        )
+
+    monkeypatch.setattr(provider, "_call_api", record_call)
+    _run(provider._call_recovery_loop([], age="Dark Age"))
+    assert seen["limit"] == 3
+    assert {tool["name"] for tool in seen["tools"]} == {
+        "build",
+        "research",
+        "queue_villager",
+        "train_unit",
+        "assign_idle",
+        "wait",
+    }
 
 
 def test_call_api_forwards_configured_effort(
@@ -555,7 +587,7 @@ def test_send_composites_refuse_raw_coordinates(
     assert "target_class" in str(result)
 
 
-def test_build_house_rejected_by_headroom_gate(
+def test_build_house_is_not_blocked_by_strategy_headroom(
     provider: ExecutorProvider, recorded_steps: list[dict], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from gameplay_agent import executor as ex
@@ -564,8 +596,8 @@ def test_build_house_rejected_by_headroom_gate(
     block = ToolCall(id="tu6", name="build", arguments={"building_key": "q", "intent": "house"})
     action_dict, result = _run(provider._execute_build(block))
     assert action_dict == {"type": "build", "building_key": "q", "intent": "house"}
-    assert recorded_steps == []  # gate fired before any step executed
-    assert "headroom" in str(result)  # the reason reaches the LLM as the tool result
+    assert recorded_steps  # the shared catalog permits a strategically early house
+    assert result.success  # headroom is a preference, not an execution prohibition
 
 
 def test_build_house_allowed_near_cap(

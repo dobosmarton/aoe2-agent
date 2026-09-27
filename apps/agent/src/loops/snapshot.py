@@ -1,4 +1,4 @@
-"""What the four clocks hand each other: one frame, and the pipe it travels.
+"""What the three clocks hand each other: one frame, and the pipe it travels.
 
 One thread, so no lock. The discipline that replaces one: the writer swaps a
 whole new frame in, so a reader never sees a half-built one.
@@ -10,14 +10,19 @@ import asyncio
 import contextlib
 import time
 from dataclasses import dataclass, field
+from types import MappingProxyType
+from typing import TYPE_CHECKING, cast
 
 from ..resource_ocr import ResourceReadings
 from ..turn_timing import elapsed_ms
 
+if TYPE_CHECKING:
+    from ..policy.state import PolicyState
+
 
 @dataclass(frozen=True, slots=True)
 class Perception:
-    """One frame, shared by reference across the three loops.
+    """One frame, shared by reference across the clocks.
 
     `captured_at` and `age_ms` mirror `policy.state.PolicyState`, so a frame and
     the state built from it answer the freshness question the same way.
@@ -26,14 +31,27 @@ class Perception:
     screenshot: bytes = b""
     width: int = 0
     height: int = 0
-    # `DetectedEntity` from the detector, dicts from a replay or the simulator.
-    # `entity_utils.extract_attrs` reads either.
+    # Real detection publishes `EntitySnapshot`; replays and the simulator may
+    # still provide serialized mappings. `entity_utils.extract_attrs` reads both.
     entities: tuple[object, ...] = ()
     entity_summary: str = ""
     hud_readings: ResourceReadings = field(default_factory=ResourceReadings)
+    world: PolicyState | None = None
+    ownership: tuple[tuple[str, str, float], ...] = ()
+    input_revision: int = 0
+    spatial_valid: bool = True
     alarm: bool = False
     tick: int = 0
     captured_at: float = field(default_factory=time.monotonic)
+
+    def __post_init__(self) -> None:
+        # TypedDict describes the OCR keys; copy it so a published frame cannot
+        # change when the OCR producer reuses its mutable dictionary.
+        object.__setattr__(
+            self,
+            "hud_readings",
+            cast("ResourceReadings", MappingProxyType(dict(self.hud_readings))),
+        )
 
     @property
     def age_ms(self) -> float:

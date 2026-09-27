@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from .goal_logger import GoalLogger
     from .goals import GoalManager
     from .memory import AgentMemory
+    from .policy.state import PolicyState
     from .providers.base import LLMResult
 
 log = structlog.stdlib.get_logger()
@@ -111,11 +112,12 @@ def build_llm_context(
     goal_manager: GoalManager,
     entity_summary: str,
     detected_entities: list[object] | None = None,
+    observed_state: PolicyState | None = None,
 ) -> str:
     """Assemble the full text context for the executor LLM."""
-    context = memory.get_context_for_llm()
+    context = memory.get_context_for_llm(observed_state)
 
-    resource_context = goal_manager.get_resource_context()
+    resource_context = goal_manager.get_resource_context() if observed_state is None else ""
     if resource_context:
         context = resource_context + "\n\n" + context
 

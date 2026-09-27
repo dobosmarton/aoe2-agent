@@ -175,7 +175,9 @@ def as_allocation(targets: VillagerTargets) -> Allocation | None:
     when it has no opinion must still map to None.
     """
     declared = targets.per_kind()
-    clean = {kind: declared[kind] for kind in RESOURCE_KINDS if declared[kind] > 0}
+    clean: dict[ResourceKind, int] = {
+        kind: declared[kind] for kind in RESOURCE_KINDS if declared[kind] > 0
+    }
     return Allocation(targets=clean) if clean else None
 
 
@@ -232,6 +234,12 @@ class StrategistProvider:
         self._has_run: bool = False  # Track first successful run
         # Latest parsed allocation; None until the model supplies one.
         self.last_allocation: Allocation | None = None
+
+    async def aclose(self) -> None:
+        """Release the strategist transport after its task is cancelled."""
+        close = getattr(self.wire, "aclose", None)
+        if close is not None:
+            await close()
 
     def get_system_prompt(self) -> str:
         if self._system_prompt is None:
@@ -311,9 +319,10 @@ class StrategistProvider:
         #    the screenshot itself. An empty reading is a bad frame, not a reason
         #    to re-OCR — game_state fills the gaps below.
         if readings is None:
-            readings, _calib = (
-                await read_hud_readings(screenshot_bytes) if screenshot_bytes else ({}, None)
-            )
+            if screenshot_bytes:
+                readings, _calib = await read_hud_readings(screenshot_bytes)
+            else:
+                readings = ResourceReadings()
 
         # 2. Reasoning — text-only prompt populated with the locally-read state
         #    (falls back to last-known game_state when a field wasn't read).

@@ -79,7 +79,7 @@ From `prompts/ages/feudal.md`. Headline: 85% economy, 15% military.
 ### Castle age-up gate
 
 All 4 must hold: age reads Feudal, food ≥ 800, gold ≥ 200, and **2 Feudal
-buildings** exist — barracks, archery range, stable, blacksmith, or market.
+buildings** exist — archery range, stable, blacksmith, or market. A Dark-Age barracks does not count.
 Houses, mills, lumber camps and mining camps do **not** count.
 
 **No code enforces this.** `reactive.py` has no Castle age-up rule at all — only

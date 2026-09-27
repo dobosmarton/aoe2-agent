@@ -1,6 +1,6 @@
 """A frame source and an actuator with no game behind them.
 
-The offline coverage the four clocks would otherwise lack. Phase 5.3 replaces
+The offline coverage the three clocks would otherwise lack. Phase 5.3 replaces
 these with `world_sim`.
 """
 
@@ -77,13 +77,10 @@ class FakePolicyAdvisor:
 
     async def advise(self, request: PolicyRequest) -> PolicyAdvice:
         self.requests.append(request)
-        candidate_ids = frozenset(candidate.id for candidate in request.candidates)
         return PolicyAdvice(
             source_tick=request.source_tick,
             source_captured_at=request.source_captured_at,
-            created_at=request.source_captured_at,
             model="fake-system-one",
-            candidate_ids=candidate_ids,
             action_choice="wait",
             action_confidence=1.0,
             action_probabilities=readonly_probabilities({"wait": 1.0}),

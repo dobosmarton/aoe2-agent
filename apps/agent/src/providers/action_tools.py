@@ -1,11 +1,7 @@
-"""Tool-schema definitions for the executor's tool-use loop.
+"""Tool schemas for deliberate combat and catalog-guarded recovery.
 
-These are pure data: thirteen tools, of which seven are single-step actions
-(click, right_click, press, drag, wait, scroll, detect) and five expand to
-multi-step sequences (build, research, send_villager, send_all_idle,
-queue_villager, reassign_villager). The composite tools collapse common multi-step UI flows into
-a single tool call so the model doesn't pay per-step API roundtrip latency for
-predictable sequences.
+Economic and production descriptions derive from the shared action catalog;
+raw input tools remain for tactical interaction only.
 
 Schemas are written in Anthropic's shape and converted for OpenAI-compatible
 endpoints by `to_openai_tools` at the bottom of this module.
@@ -14,6 +10,22 @@ Strict per-tool input schemas are intentional — the previous structured-output
 union approach allowed field confusion (e.g. a `click` action getting `key`
 fields), and per-tool schemas eliminate that class of bug at the SDK boundary.
 """
+
+from typing import cast
+
+from ..policy.catalog import BUILDINGS, RESEARCH, UNITS
+
+_BUILDING_OPTIONS = "; ".join(
+    f"{menu}+{key}: {spec.description} ({spec.price('wood')} wood)"
+    for (menu, key), spec in BUILDINGS.items()
+)
+_RESEARCH_OPTIONS = "; ".join(f"{name}: {spec.description}" for name, spec in RESEARCH.items())
+_UNIT_OPTIONS = "; ".join(
+    f"{name}: {spec.description}" for name, spec in UNITS.items() if name != "villager"
+)
+_ECON_BUILDING_OPTIONS = ", ".join(
+    f"{key}={spec.subject}" for (menu, key), spec in BUILDINGS.items() if menu == "q"
+)
 
 
 def _click_schema(description: str) -> dict:
@@ -50,7 +62,7 @@ _ACTION_TOOLS: list[dict] = [
     },
     {
         "name": "press",
-        "description": "Press a keyboard key. Use for hotkeys, queuing units, opening build menus.",
+        "description": "Tactical/navigation key only. Purchases must use named build, research, train_unit, or queue_villager tools.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -130,7 +142,11 @@ _ACTION_TOOLS: list[dict] = [
     # --- Composite tools (multi-step sequences, no intermediate API roundtrips) ---
     {
         "name": "build",
-        "description": "Composite: select a villager → open a build menu → press building_key → place the building on open ground near your Town Center. Menus: menu='q' economic (q=House w=Mill e=Mining Camp r=Lumber Camp a=Farm s=Blacksmith t=Dock), menu='w' military (q=Barracks w=Archery Range e=Stable), menu='v' advanced (d=Market). Barracks, Archery Range, Stable, Blacksmith and Market are the Feudal-Age buildings the Castle Age requires two of. Placement is chosen by the executor AFTER the camera settles — you cannot pass coordinates (selecting the villager moves the camera, so any spot you compute now would be stale). ALWAYS use this instead of a manual press+click sequence.",
+        "description": (
+            "Build one catalogued structure. The executor selects a worker, refreshes after "
+            "camera movement, checks feasibility, and places it. Bindings: "
+            f"{_BUILDING_OPTIONS}."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
@@ -152,26 +168,16 @@ _ACTION_TOOLS: list[dict] = [
     {
         "name": "research",
         "description": (
-            "Composite: go to the building that researches this technology, then press its "
-            "panel key. Named, not keyed — the executor owns the hotkeys. The HUD spend "
-            "confirms it next turn: if the cost never leaves your resources the button was "
-            "greyed out, and the failure detail says so. Do NOT re-press a pending research. "
-            "castle_age needs 800 food + 200 gold AND two Feudal-Age buildings standing "
-            "(barracks, archery_range, stable, blacksmith or market)."
+            "Research one named catalogued technology. The executor checks current age, "
+            "completed prerequisites, available resources, and pending purchases before "
+            f"the spending key. Options: {_RESEARCH_OPTIONS}."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "tech": {
                     "type": "string",
-                    "enum": [
-                        "castle_age",
-                        "loom",
-                        "wheelbarrow",
-                        "horse_collar",
-                        "double_bit_axe",
-                        "gold_mining",
-                    ],
+                    "enum": list(RESEARCH),
                     "description": "Technology to research",
                 },
                 "intent": {"type": "string", "description": "Why you are researching it"},
@@ -232,7 +238,11 @@ _ACTION_TOOLS: list[dict] = [
     },
     {
         "name": "reassign_villager",
-        "description": "Composite: pull a villager already GATHERING one resource and reassign it to build a building. Jumps the camera to the source work site (e.g. the Lumber Camp for wood), picks a worker there, then opens the build menu and places the building. Use to rebalance economy on the fly — e.g. pull a wood villager to build a Farm when food is low. Unlike build (which uses an idle villager), this pulls a working one. building_key: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm.",
+        "description": (
+            "Pull a gathering villager into a catalog-guarded economic build. The camera "
+            "refreshes before worker selection and placement. Economic bindings: "
+            f"{_ECON_BUILDING_OPTIONS}."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
@@ -242,7 +252,7 @@ _ACTION_TOOLS: list[dict] = [
                 },
                 "building_key": {
                     "type": "string",
-                    "description": "Building to place: q=House, w=Mill, e=Mining Camp, r=Lumber Camp, a=Farm",
+                    "description": f"Economic building key: {_ECON_BUILDING_OPTIONS}",
                 },
                 "intent": {
                     "type": "string",
@@ -253,6 +263,52 @@ _ACTION_TOOLS: list[dict] = [
             "additionalProperties": False,
         },
     },
+]
+
+_ACTION_TOOLS.extend(
+    [
+        {
+            "name": "train_unit",
+            "description": (
+                "Train one catalogued military unit. Its cost and population slot remain "
+                f"committed until observed settlement. Options: {_UNIT_OPTIONS}."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "unit": {
+                        "type": "string",
+                        "enum": [name for name in UNITS if name != "villager"],
+                    },
+                    "intent": {"type": "string"},
+                },
+                "required": ["unit", "intent"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "assign_idle",
+            "description": "Select one idle worker, refresh, then find the resource in the new view.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "resource": {
+                        "type": "string",
+                        "enum": ["food", "wood", "gold", "stone"],
+                    },
+                    "intent": {"type": "string"},
+                },
+                "required": ["resource", "intent"],
+                "additionalProperties": False,
+            },
+        },
+    ]
+)
+
+_RECOVERY_TOOLS = [
+    tool
+    for tool in _ACTION_TOOLS
+    if tool["name"] in {"build", "research", "queue_villager", "train_unit", "assign_idle", "wait"}
 ]
 
 
@@ -308,7 +364,7 @@ def to_openai_tools(tools: list[dict[str, object]]) -> list[dict[str, object]]:
             "function": {
                 "name": tool["name"],
                 "description": tool["description"],
-                "parameters": _strictify(tool["input_schema"]),
+                "parameters": _strictify(cast("dict[str, object]", tool["input_schema"])),
                 "strict": True,
             },
         }

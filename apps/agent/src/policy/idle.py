@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from ..entity_utils import (
+    GATHER_CLASSES_BY_KIND,
     RESOURCE_KINDS,
     ResourceKind,
     first_center_of_class,
@@ -60,22 +61,40 @@ def distribute_idle(
     farm_queued = False
     for _ in range(batch):
         kind = allocation.next_kind(target_mix, jobs)
-        jobs = allocation.with_one_more(jobs, kind)
         if kind == "food" and not farm_queued and nearest_class_of_kind(entities, "food") is None:
-            # One per decision: the HUD snapshot the build gate checks cannot
-            # see this spend, so a second build could not be cost-checked.
-            actions.append(
-                {
-                    "type": "build",
-                    "building_key": _FARM_BUILD_KEY,
-                    "intent": "Build farm for idle villager (no forage/huntables visible)",
-                }
-            )
-            farm_queued = True
-            continue
+            if (
+                "mill" in state.buildings_seen
+                and "farm" not in state.pending_buildings
+                and "wood" in state.known_resources
+                and state.wood >= _FARM_WOOD_COST
+            ):
+                actions.append(
+                    {
+                        "type": "build",
+                        "building_key": _FARM_BUILD_KEY,
+                        "intent": "Build farm for idle villager (no forage/huntables visible)",
+                    }
+                )
+                farm_queued = True
+                jobs = allocation.with_one_more(jobs, "food")
+                continue
+            if nearest_class_of_kind(entities, "wood") is not None:
+                kind = "wood"
         target = resolve_idle_target(entities, kind, origin)
         if target is None:
             break  # nothing gatherable on screen — retry next turn
+        actual_kind = cast(
+            "ResourceKind",
+            next(
+                (
+                    resource
+                    for resource in RESOURCE_KINDS
+                    if target in GATHER_CLASSES_BY_KIND[resource]
+                ),
+                kind,
+            ),
+        )
+        jobs = allocation.with_one_more(jobs, actual_kind)
         actions.append(
             {
                 "type": "press",

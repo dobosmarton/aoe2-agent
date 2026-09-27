@@ -1,41 +1,33 @@
-"""Reviewed economic actions that a policy may choose between.
-
-Candidates express affordances, not strategy. Code decides whether an action is
-possible and safe; a policy decides which currently possible action is useful.
-"""
+"""Pure eligibility and executable descriptions for the bounded action catalog."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, TypeAlias, cast
+
+from ..entity_utils import GATHER_CLASSES_BY_KIND, RESOURCE_KINDS, ResourceKind
+from .catalog import (
+    AGE_ORDER,
+    BY_ID,
+    CASTLE_BUILDINGS,
+    DARK_BUILDINGS,
+    FEUDAL_BUILDINGS,
+    SPECS,
+    ActionSpec,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from .state import PolicyState
 
-CandidateId = Literal[
-    "wait",
-    "advance_to_feudal",
-    "build_house",
-    "queue_villager",
-    "build_mill",
-    "build_lumber_camp",
-    "build_mining_camp",
-]
-
-_HOUSE_HEADROOM_LIMIT = 4
-_POPULATION_CAP_LIMIT = 200
-_VILLAGER_FOOD_COST = 50
-_HOUSE_WOOD_COST = 25
-_ECONOMY_BUILDING_WOOD_COST = 100
-_FEUDAL_FOOD_COST = 500
+CandidateId: TypeAlias = str
 
 
 @dataclass(frozen=True, slots=True)
 class ActionCandidate:
-    """One bounded policy option backed by reviewed action templates."""
+    """One eligible action; templates are copied at the validation boundary."""
 
     id: CandidateId
     description: str
@@ -43,147 +35,132 @@ class ActionCandidate:
     actions: tuple[Mapping[str, object], ...]
 
     def render(self) -> list[dict[str, object]]:
-        """Return fresh dictionaries for the validation and execution boundary."""
         return [dict(action) for action in self.actions]
 
 
+def eligible(spec: ActionSpec, state: PolicyState) -> bool:
+    """Game feasibility only. Goals and preferred timing belong to the selector."""
+    if spec.id == "wait":
+        return True
+    if spec.id in state.pending_actions or spec.id in state.suppressed_actions:
+        return False
+    if not state.age_known and (spec.kind == "research" or spec.age != "Dark Age"):
+        return False
+    if state.age not in AGE_ORDER or AGE_ORDER.index(state.age) < AGE_ORDER.index(spec.age):
+        return False
+    if not spec.requires.issubset(state.buildings_seen):
+        return False
+    if any(
+        kind not in state.known_resources
+        or getattr(state, kind) - state.reserved_resources.get(kind, 0) < price
+        for kind, price in spec.cost
+    ):
+        return False
+
+    if spec.kind == "build":
+        if not state.spatial_valid or spec.subject in state.pending_buildings:
+            return False
+        if state.idle_present is not True and "villager" not in state.visible_classes:
+            return False
+        if spec.unique and spec.subject in state.buildings_seen:
+            return False
+        if spec.subject == "house" and (
+            not state.population_known or not 0 < state.population_cap < 200
+        ):
+            return False
+        if spec.subject == "lumber_camp" and "tree" not in state.visible_classes:
+            return False
+        if (
+            spec.subject == "mining_camp"
+            and not {"gold_mine", "stone_mine"} & state.visible_classes
+        ):
+            return False
+    if spec.kind == "research":
+        if (
+            spec.subject in state.researched
+            or spec.subject in state.pending_research
+            or spec.subject in state.research_purchases
+        ):
+            return False
+        if spec.subject == "feudal_age" and (
+            state.age != "Dark Age" or len(state.buildings_seen & DARK_BUILDINGS) < 2
+        ):
+            return False
+        if spec.subject == "castle_age" and (
+            state.age != "Feudal Age" or len(state.buildings_seen & FEUDAL_BUILDINGS) < 2
+        ):
+            return False
+        if spec.subject == "imperial_age" and (
+            state.age != "Castle Age" or len(state.buildings_seen & CASTLE_BUILDINGS) < 2
+        ):
+            return False
+    if spec.kind == "train" and (
+        not state.population_known
+        or state.population_cap <= 0
+        or state.population + state.pending_population >= state.population_cap
+    ):
+        return False
+    if spec.kind == "assign":
+        if not state.spatial_valid or not state.idle_present:
+            return False
+        if spec.subject not in RESOURCE_KINDS:
+            return False
+        if not GATHER_CLASSES_BY_KIND[cast("ResourceKind", spec.subject)] & state.visible_classes:
+            return False
+    return spec.kind != "handoff" or state.own_army_present
+
+
 def feasible_candidates(state: PolicyState) -> tuple[ActionCandidate, ...]:
-    """Return every economic action the current state can safely execute.
-
-    The checks here are game facts: costs, prerequisites, caps and duplicate
-    buildings. Strategic timing deliberately does not belong here.
-    """
-    candidates = [_wait_candidate()]
-
-    if _can_advance_to_feudal(state):
-        candidates.append(_advance_to_feudal_candidate())
-    if _needs_house_and_can_build(state):
-        candidates.append(_build_candidate("build_house", "q", "house", _HOUSE_WOOD_COST))
-    if _can_queue_villager(state):
-        candidates.append(_queue_villager_candidate())
-    if _can_build_unique(state, "mill"):
-        candidates.append(_build_candidate("build_mill", "w", "mill"))
-    if _can_build_unique(state, "lumber_camp"):
-        candidates.append(_build_candidate("build_lumber_camp", "r", "lumber camp"))
-    if _can_build_unique(state, "mining_camp"):
-        candidates.append(_build_candidate("build_mining_camp", "e", "mining camp"))
-
-    return tuple(candidates)
+    return tuple(candidate_for(spec) for spec in SPECS if eligible(spec, state))
 
 
 def find_candidate(
     candidates: tuple[ActionCandidate, ...], candidate_id: str
 ) -> ActionCandidate | None:
-    """Find a selected candidate without trusting an external string."""
     return next((candidate for candidate in candidates if candidate.id == candidate_id), None)
 
 
-def _can_advance_to_feudal(state: PolicyState) -> bool:
-    prerequisites = {"mill", "lumber_camp"}
-    return (
-        state.age == "Dark Age"
-        and state.food >= _FEUDAL_FOOD_COST
-        and prerequisites.issubset(state.buildings_seen)
-    )
-
-
-def _needs_house_and_can_build(state: PolicyState) -> bool:
-    headroom = state.population_cap - state.population
-    return (
-        0 < state.population_cap < _POPULATION_CAP_LIMIT
-        and headroom <= _HOUSE_HEADROOM_LIMIT
-        and state.wood >= _HOUSE_WOOD_COST
-    )
-
-
-def _can_queue_villager(state: PolicyState) -> bool:
-    return (
-        state.population_cap > 0
-        and state.villagers_ordered < state.population_cap
-        and state.food >= _VILLAGER_FOOD_COST
-    )
-
-
-def _can_build_unique(state: PolicyState, building: str) -> bool:
-    return building not in state.buildings_seen and state.wood >= _ECONOMY_BUILDING_WOOD_COST
-
-
-def _wait_candidate() -> ActionCandidate:
-    return _candidate(
-        candidate_id="wait",
-        description=(
-            "Spend nothing now. Preserve resources for a more important purchase while the "
-            "economy continues gathering."
-        ),
-    )
-
-
-def _advance_to_feudal_candidate() -> ActionCandidate:
-    return _candidate(
-        candidate_id="advance_to_feudal",
-        description=(
-            "Research the Feudal Age now. The required food and prerequisite buildings are "
-            "already available."
-        ),
-        cost={"food": _FEUDAL_FOOD_COST},
-        actions=(
-            {"type": "press", "key": "h", "intent": "Select TC for Feudal research"},
-            {"type": "press", "key": "z", "intent": "Research Feudal Age (TypeSafe)"},
-        ),
-    )
-
-
-def _queue_villager_candidate() -> ActionCandidate:
-    return _candidate(
-        candidate_id="queue_villager",
-        description=(
-            "Queue one villager to grow the economy. Food and population capacity are available."
-        ),
-        cost={"food": _VILLAGER_FOOD_COST},
-        actions=({"type": "queue_villager", "intent": "Queue villager (TypeSafe)"},),
-    )
-
-
-def _build_candidate(
-    candidate_id: CandidateId,
-    building_key: str,
-    building_name: str,
-    wood_cost: int = _ECONOMY_BUILDING_WOOD_COST,
-) -> ActionCandidate:
-    descriptions = {
-        "house": "Add population capacity before production becomes blocked.",
-        "mill": "Unlock farms and satisfy one Dark Age prerequisite for Feudal Age.",
-        "lumber camp": "Improve wood income and satisfy one Dark Age prerequisite for Feudal Age.",
-        "mining camp": "Enable efficient gold or stone gathering for later-age requirements.",
-    }
-    return _candidate(
-        candidate_id=candidate_id,
-        description=descriptions[building_name],
-        cost={"wood": wood_cost},
-        actions=(
+def candidate_for(spec: ActionSpec) -> ActionCandidate:
+    commands: tuple[dict[str, object], ...]
+    if spec.kind == "build":
+        commands = (
             {
                 "type": "build",
-                "building_key": building_key,
-                "intent": f"Build {building_name} (TypeSafe)",
+                "menu": spec.menu,
+                "building_key": spec.key,
+                "intent": f"Build {spec.subject.replace('_', ' ')} (TypeSafe)",
             },
-        ),
-    )
-
-
-def _candidate(
-    candidate_id: CandidateId,
-    description: str,
-    cost: dict[str, int] | None = None,
-    actions: tuple[dict[str, object], ...] = (),
-) -> ActionCandidate:
-    readonly_cost: Mapping[str, int] = MappingProxyType(dict(cost or {}))
-    readonly_actions = tuple(MappingProxyType(dict(action)) for action in actions)
+        )
+    elif spec.kind == "research":
+        commands = ({"type": "research", "tech": spec.subject, "intent": spec.id},)
+    elif spec.kind == "train":
+        commands = (
+            ({"type": "queue_villager", "intent": spec.id},)
+            if spec.subject == "villager"
+            else ({"type": "train_unit", "unit": spec.subject, "intent": spec.id},)
+        )
+    elif spec.kind == "assign":
+        commands = ({"type": "assign_idle", "resource": spec.subject, "intent": spec.id},)
+    else:
+        commands = ()
     return ActionCandidate(
-        id=candidate_id,
-        description=description,
-        cost=readonly_cost,
-        actions=readonly_actions,
+        id=spec.id,
+        description=spec.description,
+        cost=MappingProxyType(dict(spec.cost)),
+        actions=tuple(MappingProxyType(dict(command)) for command in commands),
     )
 
 
-__all__ = ["ActionCandidate", "CandidateId", "feasible_candidates", "find_candidate"]
+def candidate_by_id(candidate_id: str, state: PolicyState) -> ActionCandidate | None:
+    spec = BY_ID.get(candidate_id)
+    return candidate_for(spec) if spec is not None and eligible(spec, state) else None
+
+
+__all__ = [
+    "ActionCandidate",
+    "CandidateId",
+    "candidate_by_id",
+    "eligible",
+    "feasible_candidates",
+    "find_candidate",
+]

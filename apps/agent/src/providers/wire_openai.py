@@ -39,10 +39,10 @@ if TYPE_CHECKING:
 log = structlog.stdlib.get_logger()
 
 
-def _temperature(value: float | None) -> float | openai.NotGiven:
+def _temperature(value: float | None) -> float | openai.Omit:
     """Omit when unset. Reasoning models accept only the default (1); sending
     0 returns `unsupported_value` on every call."""
-    return openai.NOT_GIVEN if value is None else value
+    return openai.omit if value is None else value
 
 
 class OpenAIWire:
@@ -64,6 +64,9 @@ class OpenAIWire:
         )
         # Read back from the client so a None here reports the SDK's own default.
         self.endpoint = str(self.client.base_url)
+
+    async def aclose(self) -> None:
+        await self.client.close()
 
     # -- Rendering ----------------------------------------------------------
 

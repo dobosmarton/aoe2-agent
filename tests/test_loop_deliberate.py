@@ -1,56 +1,51 @@
-"""Unit tests for loops/deliberate.py — the LLM, on exceptions only."""
+"""Deliberate work is reserved for combat, handoff, and bounded recovery."""
 
 from __future__ import annotations
 
 import asyncio
+import time
 
-import pytest
-from gameplay_agent import executor as ex
+from gameplay_agent.executor import ActionLedger, ActionOutcome
 from gameplay_agent.goal_logger import GoalLogger
-from gameplay_agent.goals import Goal, GoalManager
+from gameplay_agent.goals import GoalManager
 from gameplay_agent.loops import deliberate
 from gameplay_agent.loops.context import LoopContext
 from gameplay_agent.loops.snapshot import Perception
-from gameplay_agent.memory import STUCK_LOOP_THRESHOLD, AgentMemory
+from gameplay_agent.memory import AgentMemory
+from gameplay_agent.policy.state import PolicyState
 from gameplay_agent.providers.base import LLMResult
 from gameplay_agent.providers.strategist import StrategistProvider
 
 from tests.loop_fakes import FakeActuator, FakeSource
 
-_PRESS = {"type": "press", "key": "q", "intent": "queue"}
-
 
 class _FakeProvider:
-    """Records which path was taken and returns a canned turn."""
-
-    def __init__(self, actions: list[dict[str, object]] | None = None, stall: float = 0.0) -> None:
-        self.actions = actions or []
-        self.stall = stall
+    def __init__(self, *, executed: bool = True) -> None:
+        self.executed = executed
         self.planned = 0
         self.acted = 0
+        self.recovered = 0
 
-    async def plan(self, context: str, width: int = 0, height: int = 0) -> LLMResult:
+    async def plan(self, _context: str, _width: int = 0, _height: int = 0) -> LLMResult:
         self.planned += 1
-        if self.stall:
-            await asyncio.sleep(self.stall)
-        return LLMResult(reasoning="planned", actions=list(self.actions), observations={})
+        return LLMResult(reasoning="unused", actions=[], observations={})
 
-    async def act(self, context: str, width: int = 0, height: int = 0) -> LLMResult:
+    async def act(self, _context: str, _width: int = 0, _height: int = 0) -> LLMResult:
         self.acted += 1
+        return self._response()
+
+    async def act_recovery(self, _context: str, _width: int = 0, _height: int = 0) -> LLMResult:
+        self.recovered += 1
+        return self._response()
+
+    def _response(self) -> LLMResult:
         return LLMResult(
-            reasoning="acted",
-            actions=list(self.actions),
+            reasoning="bounded tool work",
+            actions=[{"type": "press", "key": "q", "intent": "model suggestion"}],
             observations={},
-            actions_already_executed=True,
-            success_count=len(self.actions),
+            actions_already_executed=self.executed,
+            success_count=1 if self.executed else 0,
         )
-
-
-@pytest.fixture
-def gates():
-    ex.reset_build_gates()
-    yield
-    ex.reset_build_gates()
 
 
 def _context(tmp_path) -> LoopContext:
@@ -62,100 +57,66 @@ def _context(tmp_path) -> LoopContext:
         goal_logger=GoalLogger(tmp_path),
         source=FakeSource(),
         actuator=FakeActuator(),
+        ledger=ActionLedger(),
     )
 
 
-def _frame(alarm: bool = False) -> Perception:
-    return Perception(alarm=alarm, tick=1)
-
-
-def _goal(name: str) -> Goal:
-    """A goal whose only job is to move the name set."""
-    return Goal(
-        name=name, type="global", metric="age", target="Feudal Age", priority=5, created_turn=0
+def _frame(*, alarm: bool = False, food: int = 100) -> Perception:
+    return Perception(
+        alarm=alarm,
+        tick=1,
+        world=PolicyState(food=food, known_resources=frozenset({"food"})),
     )
 
 
-# ---------------------------------------------------------------------------
-# The triggers
-# ---------------------------------------------------------------------------
+def _trigger(
+    ctx: LoopContext, frame: Perception, *, food_age: float = 0.0, cooldown: float = 0.0
+) -> deliberate.Trigger | None:
+    now = time.monotonic()
+    return deliberate._trigger(ctx, frame, now - food_age, now - cooldown if cooldown else 0.0)
 
 
-def test_a_quiet_frame_asks_nothing(tmp_path, gates, monkeypatch) -> None:
-    monkeypatch.setattr(deliberate.config, "deliberate_interval", 10)
-    assert deliberate._trigger(_context(tmp_path), _frame(), tick=1) is None
+def test_quiet_frames_do_not_request_a_discarded_plan(tmp_path) -> None:
+    assert _trigger(_context(tmp_path), _frame()) is None
 
 
-def test_an_alarm_triggers(tmp_path, gates) -> None:
-    assert deliberate._trigger(_context(tmp_path), _frame(alarm=True), tick=1) == "alarm"
-
-
-def test_a_pop_cap_triggers(tmp_path, gates) -> None:
-    ex.observe_hud(20, 20, {"wood": 200})  # housed: 20/20
-    assert deliberate._trigger(_context(tmp_path), _frame(), tick=1) == "housed"
-
-
-def test_a_stuck_streak_triggers(tmp_path, gates) -> None:
+def test_alarm_and_requested_handoff_trigger_deliberate_work(tmp_path) -> None:
     ctx = _context(tmp_path)
-    for _ in range(STUCK_LOOP_THRESHOLD):
-        turn = ctx.memory.create_turn(reasoning="x", actions=[])
-        turn.verification = "- no visible change: build produced no new building"
-    assert deliberate._trigger(ctx, _frame(), tick=1) == "stuck"
+    assert _trigger(ctx, _frame(alarm=True)) == "alarm"
+    ctx.tactical_requested.set()
+    assert _trigger(ctx, _frame()) == "handoff"
 
 
-def test_a_goal_change_triggers(tmp_path, gates) -> None:
+def test_population_cap_and_goal_change_are_routine_policy_facts(tmp_path) -> None:
     ctx = _context(tmp_path)
-    ctx.goal_manager.set_goals([_goal("Hold the hill")])
-    assert deliberate._trigger(ctx, _frame(), tick=1) == "goals"
+    ctx.goal_manager.set_goals([])
+    capped = Perception(world=PolicyState(population=20, population_cap=20))
+    assert _trigger(ctx, capped) is None
 
 
-def test_a_goal_change_triggers_only_once(tmp_path, gates, monkeypatch) -> None:
-    monkeypatch.setattr(deliberate.config, "deliberate_interval", 10)
+def test_three_real_failures_trigger_recovery_with_cooldown(tmp_path) -> None:
     ctx = _context(tmp_path)
-    ctx.goal_manager.set_goals([_goal("Hold the hill")])
-    deliberate._trigger(ctx, _frame(), tick=1)
-    assert deliberate._trigger(ctx, _frame(), tick=1) is None
+    assert ctx.ledger is not None
+    for _ in range(3):
+        ctx.ledger.record_failure("build_farm: failed settlement")
+    assert _trigger(ctx, _frame()) == "recovery"
+    assert _trigger(ctx, _frame(), cooldown=1.0) is None
 
 
-def test_famine_triggers(tmp_path, gates) -> None:
+def test_famine_needs_thirty_seconds_without_food_progress(tmp_path) -> None:
     ctx = _context(tmp_path)
-    ctx.memory.game_state.resources["food"] = 10
-    assert deliberate._trigger(ctx, _frame(), tick=1) == "famine"
+    assert _trigger(ctx, _frame(food=10), food_age=29.0) is None
+    assert _trigger(ctx, _frame(food=10), food_age=31.0) == "recovery"
 
 
-def test_the_nth_frame_triggers(tmp_path, gates, monkeypatch) -> None:
-    """The sanity check: it is the only game-over signal the agent has."""
-    monkeypatch.setattr(deliberate.config, "deliberate_interval", 10)
-    assert deliberate._trigger(_context(tmp_path), _frame(), tick=10) == "interval"
-
-
-# ---------------------------------------------------------------------------
-# Routine ticks plan; exceptions act
-# ---------------------------------------------------------------------------
-
-
-def test_a_routine_tick_plans(tmp_path, gates) -> None:
-    provider = _FakeProvider()
-    asyncio.run(deliberate.deliberate_once(_context(tmp_path), provider, _frame(), 1, "interval"))
-    assert (provider.planned, provider.acted) == (1, 0)
-
-
-def test_a_routine_tick_discards_the_llm_actions(tmp_path, gates) -> None:
-    """The rules own routine play. The LLM's clicks are logged, never pressed."""
+def test_intentional_wait_and_pending_operations_are_not_failures(tmp_path) -> None:
     ctx = _context(tmp_path)
-    provider = _FakeProvider(actions=[_PRESS, _PRESS, _PRESS])
-    asyncio.run(deliberate.deliberate_once(ctx, provider, _frame(), 1, "interval"))
-    assert ctx.actuator.batches == []
+    assert ctx.ledger is not None
+    ctx.ledger.record_outcome(ActionOutcome(1, "build_house", "pending", "awaiting HUD settlement"))
+    assert _trigger(ctx, _frame()) is None
 
 
-def test_an_alarm_takes_the_acting_path(tmp_path, gates) -> None:
-    provider = _FakeProvider()
-    asyncio.run(deliberate.deliberate_once(_context(tmp_path), provider, _frame(True), 1, "alarm"))
-    assert (provider.planned, provider.acted) == (0, 1)
-
-
-def test_the_acting_path_holds_the_input_lock(tmp_path, gates) -> None:
-    """Two loops must never type at once."""
+def test_alarm_acts_under_the_input_lock_without_planning(tmp_path) -> None:
     ctx = _context(tmp_path)
     held: list[bool] = []
 
@@ -164,66 +125,56 @@ def test_the_acting_path_holds_the_input_lock(tmp_path, gates) -> None:
             held.append(ctx.input_lock.locked())
             return await super().act(context, width, height)
 
-    asyncio.run(deliberate.deliberate_once(ctx, _Watcher(), _frame(True), 1, "alarm"))
+    provider = _Watcher()
+    asyncio.run(deliberate.deliberate_once(ctx, provider, _frame(alarm=True), 1, "alarm"))
     assert held == [True]
-
-
-def test_a_routine_tick_holds_no_lock(tmp_path, gates) -> None:
-    """`plan` cannot act, so blocking the act loop for it would be waste."""
-    ctx = _context(tmp_path)
-    held: list[bool] = []
-
-    class _Watcher(_FakeProvider):
-        async def plan(self, context: str, width: int = 0, height: int = 0) -> LLMResult:
-            held.append(ctx.input_lock.locked())
-            return await super().plan(context, width, height)
-
-    asyncio.run(deliberate.deliberate_once(ctx, _Watcher(), _frame(), 1, "interval"))
-    assert held == [False]
-
-
-# ---------------------------------------------------------------------------
-# Bookkeeping the rest of the run depends on
-# ---------------------------------------------------------------------------
-
-
-def test_a_turn_is_recorded(tmp_path, gates) -> None:
-    """`turn_count` gates the saved trace and the post-game rule extraction."""
-    ctx = _context(tmp_path)
-    asyncio.run(deliberate.deliberate_once(ctx, _FakeProvider(), _frame(), 1, "interval"))
+    assert (provider.planned, provider.acted, provider.recovered) == (0, 1, 0)
     assert ctx.memory.turn_count == 1
 
 
-def test_victory_ends_the_run(tmp_path, gates) -> None:
+def test_recovery_uses_its_own_bounded_tool_path(tmp_path) -> None:
     ctx = _context(tmp_path)
-
-    class _Winner(_FakeProvider):
-        async def plan(self, context: str, width: int = 0, height: int = 0) -> LLMResult:
-            return LLMResult(reasoning="won", actions=[], observations={"game_state": "victory"})
-
-    asyncio.run(deliberate.deliberate_once(ctx, _Winner(), _frame(), 1, "interval"))
-    assert ctx.memory.game_end_reason == "victory"
+    provider = _FakeProvider()
+    asyncio.run(deliberate.deliberate_once(ctx, provider, _frame(food=10), 1, "recovery"))
+    assert (provider.planned, provider.acted, provider.recovered) == (0, 0, 1)
 
 
-def test_a_tick_records_its_own_latency(tmp_path, gates) -> None:
+def test_unexecuted_model_actions_cannot_bypass_catalog(tmp_path) -> None:
     ctx = _context(tmp_path)
-    asyncio.run(deliberate.deliberate_once(ctx, _FakeProvider(), _frame(), 1, "interval"))
-    assert "deliberate" in ctx.latency.snapshot().loops
+    asyncio.run(
+        deliberate.deliberate_once(
+            ctx, _FakeProvider(executed=False), _frame(alarm=True), 1, "alarm"
+        )
+    )
+    assert ctx.actuator.batches == []
 
 
-# ---------------------------------------------------------------------------
-# The whole point: a slow LLM must not stop the agent acting
-# ---------------------------------------------------------------------------
-
-
-def test_the_loop_leaves_when_the_game_ends(tmp_path, gates) -> None:
-    """No frame will ever arrive, so the loop must poll the stop flag."""
+def test_strategist_task_is_cancelled_when_loop_stops(tmp_path, monkeypatch) -> None:
     ctx = _context(tmp_path)
-    strategist = StrategistProvider()
+    launched = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def hang() -> None:
+        launched.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    monkeypatch.setattr(
+        deliberate,
+        "maybe_launch_strategist",
+        lambda *_args: asyncio.create_task(hang()),
+    )
 
     async def drive() -> None:
+        task = asyncio.create_task(
+            deliberate.deliberate_loop(ctx, StrategistProvider(), _FakeProvider())
+        )
+        ctx.frames.put(_frame())
+        await asyncio.wait_for(launched.wait(), timeout=2.0)
         ctx.request_stop("interrupted")
-        loop = deliberate.deliberate_loop(ctx, strategist, _FakeProvider())
-        await asyncio.wait_for(loop, timeout=2.0)
+        await asyncio.wait_for(task, timeout=2.0)
+        assert cancelled.is_set()
 
     asyncio.run(drive())

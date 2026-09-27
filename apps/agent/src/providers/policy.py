@@ -13,7 +13,7 @@ class PolicyAdvisorError(RuntimeError):
 
 
 class PolicyAdvisor(Protocol):
-    """The small interface used by the policy loop."""
+    """The bounded advisor interface awaited by the actor loop."""
 
     async def advise(self, request: PolicyRequest) -> PolicyAdvice: ...
 

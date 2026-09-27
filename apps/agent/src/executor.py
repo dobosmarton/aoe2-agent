@@ -8,7 +8,9 @@ import math
 import time
 from collections import Counter
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
+from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Literal, cast
 
 import pyautogui
@@ -16,8 +18,24 @@ import structlog
 from pydantic import BaseModel
 
 from .config import config
-from .entity_utils import CLASSES_BY_KIND, nearest_center_of_classes
+from .entity_utils import (
+    CLASSES_BY_KIND,
+    RESOURCE_KINDS,
+    ResourceKind,
+    first_center_of_class,
+    nearest_center_of_classes,
+    nearest_class_of_kind,
+)
 from .models import Action, validate_action
+from .policy.candidates import eligible
+from .policy.catalog import (
+    BUILDINGS,
+    BY_ID,
+    FEUDAL_BUILDINGS,
+    RESEARCH,
+    UNITS,
+)
+from .policy.state import PolicyState
 from .window import ensure_game_focused, get_game_window_rect
 
 log = structlog.stdlib.get_logger()
@@ -36,8 +54,8 @@ pyautogui.PAUSE = 0.02
 # Module-level state (updated per-action batch)
 _window_offset: tuple[int, int] = (0, 0)
 _detected_entities: list[dict] = []
-_rescan_fn: Callable[[], Awaitable[None]] | None = None
-_rescan_full_fn: Callable[[], Awaitable[None]] | None = None
+_rescan_fn: Callable[[], Awaitable[bool]] | None = None
+_rescan_full_fn: Callable[[], Awaitable[bool]] | None = None
 
 
 @dataclass
@@ -53,19 +71,19 @@ class ActionResult:
 # ---------------------------------------------------------------------------
 
 
-def set_rescan_fn(fn: Callable[[], Awaitable[None]]) -> None:
+def set_rescan_fn(fn: Callable[[], Awaitable[bool]]) -> None:
     """Set the rescan callback for mid-turn screenshot+detection."""
     global _rescan_fn
     _rescan_fn = fn
 
 
-def set_rescan_full_fn(fn: Callable[[], Awaitable[None]]) -> None:
+def set_rescan_full_fn(fn: Callable[[], Awaitable[bool]]) -> None:
     """Set the full detection callback for thorough SAHI scan."""
     global _rescan_full_fn
     _rescan_full_fn = fn
 
 
-def get_rescan_fn() -> Callable[[], Awaitable[None]] | None:
+def get_rescan_fn() -> Callable[[], Awaitable[bool]] | None:
     """Return the registered fast-rescan callback, or None if unset."""
     return _rescan_fn
 
@@ -112,11 +130,6 @@ def clear_detected_entities() -> None:
 # Build gates: per-game state feeding build_rejection + placement settlement
 # ---------------------------------------------------------------------------
 
-# Only build a house when within this many pop of the cap. The 2026-07-11 run
-# built houses at 15+ headroom (125 wood) while the first farm starved for 60 —
-# a satisfied "raise pop cap" goal kept re-triggering because every house
-# "succeeds".
-_HOUSE_HEADROOM_MAX = 4
 # The game's population-cap maximum: houses past it add nothing.
 _GAME_POP_CAP_LIMIT = 200
 # Residual noise a settlement tolerates AFTER estimated gather income is
@@ -158,23 +171,8 @@ MILITARY_MENU = "w"
 ADVANCED_MENU = "v"
 
 _MENU_BUILDINGS: dict[str, dict[str, str]] = {
-    ECON_MENU: {
-        "q": "house",
-        "w": "mill",
-        "e": "mining_camp",
-        "r": "lumber_camp",
-        "a": "farm",
-        "s": "blacksmith",
-        "t": "dock",
-    },
-    MILITARY_MENU: {
-        "q": "barracks",
-        "w": "archery_range",
-        "e": "stable",
-    },
-    ADVANCED_MENU: {
-        "d": "market",
-    },
+    menu: {key: spec.subject for (group, key), spec in BUILDINGS.items() if group == menu}
+    for menu in (ECON_MENU, MILITARY_MENU, ADVANCED_MENU)
 }
 
 _MENU_NAMES: dict[str, str] = {
@@ -192,9 +190,7 @@ def building_class(menu: str, key: str) -> str | None:
 # The Castle Age needs two buildings FROM the Feudal Age standing; houses, mills
 # and camps are Dark Age and do not count. Run 2026_08_21_2 built none of these
 # and the age-up stayed greyed out for 13 minutes.
-FEUDAL_PREREQ_CLASSES: frozenset[str] = frozenset(
-    {"barracks", "archery_range", "stable", "blacksmith", "market"}
-)
+FEUDAL_PREREQ_CLASSES: frozenset[str] = FEUDAL_BUILDINGS
 CASTLE_PREREQ_COUNT = 2
 
 
@@ -235,45 +231,56 @@ class Tech:
 # Every key verified against the game's own hotkey screen, 2026-08-22. The goto
 # keys are its Cycle Commands; the research keys its per-building groups.
 _TECHS: dict[str, Tech] = {
-    "castle_age": Tech(goto_key="h", research_key="z", food=800, gold=200),
-    "loom": Tech(goto_key="h", research_key="a", gold=50),
-    "wheelbarrow": Tech(goto_key="h", research_key="s", food=175, wood=50),
-    "horse_collar": Tech(
-        goto_key="i",
-        goto_modifiers=("ctrl",),
-        research_key="q",
-        requires="mill",
-        food=75,
-        wood=75,
-    ),
-    "double_bit_axe": Tech(
-        goto_key="z",
-        goto_modifiers=("ctrl",),
-        research_key="q",
-        requires="lumber_camp",
-        food=100,
-        wood=50,
-    ),
-    "gold_mining": Tech(
-        goto_key="g",
-        goto_modifiers=("ctrl",),
-        research_key="q",
-        requires="mining_camp",
-        food=100,
-        wood=75,
-    ),
+    name: Tech(
+        goto_key=spec.goto_key,
+        research_key=spec.key,
+        goto_modifiers=spec.goto_modifiers,
+        requires=next(iter(spec.requires), ""),
+        food=spec.price("food"),
+        gold=spec.price("gold"),
+        wood=spec.price("wood"),
+    )
+    for name, spec in RESEARCH.items()
 }
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class _PendingResearch:
     """A research awaiting confirmation from the HUD resource drop."""
 
     name: str
     tech: Tech
-    before: dict[str, int]
+    before: Mapping[str, int]
     # Monotonic instant after which an undecided reading is judged anyway.
     settle_deadline: float = 0.0
+    operation_id: int = 0
+    noted_at_snapshot: int = 0
+    spend_revision: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class _PendingTraining:
+    unit: str
+    cost: tuple[tuple[str, int], ...]
+    before: Mapping[str, int]
+    settle_deadline: float
+    operation_id: int
+    noted_at_snapshot: int = 0
+    spend_revision: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class _QueuedTraining:
+    unit: str
+    operation_id: int
+
+
+@dataclass(frozen=True, slots=True)
+class ActionOutcome:
+    operation_id: int
+    action: str
+    status: Literal["pending", "purchased", "confirmed", "failed", "uncertain", "cancelled"]
+    detail: str
 
 
 # Circuit breaker (T-530): consecutive missing settlements for one building
@@ -282,25 +289,12 @@ class _PendingResearch:
 _MISSING_STREAK_LIMIT = 3
 _MISSING_SUPPRESS_SECONDS = 50.0
 # Villager-order ledger (T-531). Orders lead the HUD population by the TC
-# queue depth (~25 s per villager vs a ~10 s turn), so a brake on DELIVERED
-# population overshoots: run 11 (F-38) pressed q 36 times, every one at pop
-# ≤ 15, and the queue delivered 40. The game starts with 4 villagers
+# queue depth (~25 s per villager vs a ~10 s turn). Paid but undelivered units
+# now reserve population separately, so queue capacity does not depend on
+# the age-specific villager preference. The game starts with 4 villagers
 # (mirrors memory.INITIAL_POPULATION; drift test pins the two).
 _STARTING_VILLAGERS = 4
 _VILLAGER_FOOD_COST = 50
-# Villager order targets by age (T-538 — run 13 reached Feudal and the flat
-# Dark Age 30 overruled the reactive tier's Feudal 35 while the rejection
-# message kept teaching "bank for the Feudal Age" IN Feudal). Dark Age 30 is
-# the user directive (run 11): enough economy to bank the 500-food Feudal
-# cost — every order past a target IS that age's bank being spent. Ages past
-# the map (Castle+) have no order cap; only the food gate applies. The
-# reactive tier's _VILLAGER_TARGET_BY_AGE mirrors this map (drift test).
-_VILLAGER_ORDER_TARGET_BY_AGE: dict[str, int] = {"Dark Age": 30, "Feudal Age": 35}
-# What the banked resources are FOR, per age — keeps the rejection message's
-# teaching age-correct. Same keys as the target map (the drift test pins it).
-_NEXT_AGE: dict[str, str] = {"Dark Age": "Feudal Age", "Feudal Age": "Castle Age"}
-
-
 # How `_select_villager_step` picked the villager that builds.
 SelectionMode = Literal["click", "idle_press", "unknown"]
 
@@ -313,12 +307,15 @@ Verdict = Literal["confirmed", "missing", "undecided"]
 # against the HUD wood spend (2026-07-11 run 2, F-11: YOLO can't see foundations,
 # so a fresh rescan reports almost every REAL placement as failed — that false
 # negative caused a duplicate mill).
-@dataclass
+@dataclass(frozen=True, slots=True)
 class _PendingPlacement:
     building_class: str
     wood_cost: int
     wood_before: int  # wood per the HUD snapshot when the placement was made
     noted_at_snapshot: int  # snapshot_count the wood_before reading belongs to
+    operation_id: int = 0
+    preexisting_entity_ids: frozenset[str] = frozenset()
+    spend_revision: int = 0
     cap_before: int = 0  # population cap at the same snapshot — the house signal
     # How the villager was selected and where the click landed, so a missing
     # settlement names its own cause.
@@ -332,29 +329,33 @@ class _PendingPlacement:
         return self.building_class == _HOUSE_CLASS
 
 
-@dataclass
-class _BuildGates:
-    """Per-game state behind build_rejection + placement settlement.
+@dataclass(frozen=True, slots=True)
+class _PurchasedBuilding:
+    operation_id: int
+    preexisting_entity_ids: frozenset[str]
 
-    population/resources: this iteration's HUD reading (None = no reading yet —
-    the gates then allow the build rather than blocking on missing data).
-    buildings_confirmed: PURCHASE-GRADE evidence only — building classes the
-    agent provably bought (wood-delta settlement) or visually verified placing.
-    Detection sightings never enter here: run 7's flickering phantom poisoned
-    the gates at 1 frame, and run 9's PERSISTENT phantom beat the 3-frame
-    threshold too (F-36) — a mill-less econ menu then builds OUTPOSTS through
-    the unlocked farm slot, so gate evidence must be self-generated.
-    pending_placements: builds awaiting wood-delta settlement; pending_research
-    is its technology counterpart, settled on the food/gold drop.
+
+@dataclass
+class ActionLedger:
+    """Per-game observations, commitments, and settled action outcomes.
+
+    Confirmed buildings require purchase or visual-placement evidence. Detector
+    sightings alone never unlock a prerequisite. Unknown HUD fields remain
+    unknown, so a purchase without a known baseline is not attempted.
     """
 
     population: tuple[int, int] | None = None
+    last_known_population: int | None = None
     resources: dict[str, int] | None = None
     # This iteration's idle-villager reading, and how the last build acted on
     # it — see _select_villager_step, which owns both.
     idle_present: bool | None = None
     selected_by: SelectionMode = "unknown"
     buildings_confirmed: set[str] = field(default_factory=set)
+    # A wood drop proves placement was purchased, not that construction is
+    # complete. These classes still block duplicates until a new matching
+    # building entity is observed after the purchase.
+    building_purchases: dict[str, _PurchasedBuilding] = field(default_factory=dict)
     # Frames each gate-relevant building class has been detected in —
     # informational only (the context line reports classes past
     # _SIGHTING_MIN_FRAMES as unverified sightings).
@@ -371,18 +372,187 @@ class _BuildGates:
     # The research counterparts: awaiting settlement, proven paid for, and the
     # instant until which a proven miss stays blocked.
     pending_research: list[_PendingResearch] = field(default_factory=list)
+    # A paid age-up is underway, not a completed age. Keep its action ID until
+    # the age reading changes, without continuing to reserve already-spent food.
+    age_up_paid: dict[str, int] = field(default_factory=dict)
+    # Non-age technology has no completion telemetry. Payment suppresses a
+    # duplicate press, but never fabricates a completed-research observation.
+    research_purchases: set[str] = field(default_factory=set)
+    pending_training: list[_PendingTraining] = field(default_factory=list)
+    queued_training: list[_QueuedTraining] = field(default_factory=list)
     researched: set[str] = field(default_factory=set)
     research_blocked_until: dict[str, float] = field(default_factory=dict)
     snapshot_count: int = 0
-    # Villagers ordered so far (T-531) — self-generated ground truth that
-    # leads the delivered HUD population by the TC queue depth.
+    # Villagers ordered so far — a strategy signal, not the capacity guard.
     villagers_ordered: int = _STARTING_VILLAGERS
     # Validated age from GameState (strategist OCR), synced once per turn —
     # selects the villager order target and the rejection message (T-538).
     current_age: str = "Dark Age"
+    age_known: bool = False
+    input_revision: int = 0
+    failure_streak: int = 0
+    failure_count: int = 0
+    recent_failures: list[str] = field(default_factory=list)
+    outcomes: list[ActionOutcome] = field(default_factory=list)
+    next_operation_id: int = 1
+    known_resources: frozenset[str] = frozenset()
+    population_known: bool = False
+    spatial_valid: bool = True
+    claimed_spend: dict[tuple[str, int, int], int] = field(default_factory=dict)
+
+    def new_operation_id(self) -> int:
+        operation_id = self.next_operation_id
+        self.next_operation_id += 1
+        return operation_id
+
+    def has_pending_since(self, first_operation_id: int) -> bool:
+        """Whether this action left a new, unsettled purchase behind."""
+        return any(
+            item.operation_id >= first_operation_id
+            for items in (self.pending_placements, self.pending_research, self.pending_training)
+            for item in items
+        )
+
+    def reservations(self) -> dict[str, int]:
+        """Commitments not yet reconciled against a fresh HUD reading."""
+        reserved: dict[str, int] = {"wood": sum(p.wood_cost for p in self.pending_placements)}
+        for pending in self.pending_research:
+            for resource, amount in _research_costs(pending.tech).items():
+                reserved[resource] = reserved.get(resource, 0) + amount
+        for pending in self.pending_training:
+            for resource, amount in pending.cost:
+                reserved[resource] = reserved.get(resource, 0) + amount
+        return reserved
+
+    def record_outcome(self, outcome: ActionOutcome) -> None:
+        self.outcomes.append(outcome)
+        del self.outcomes[:-20]
+        if outcome.status == "failed":
+            self.record_failure(f"{outcome.action}: {outcome.detail}")
+        elif outcome.status in {"purchased", "confirmed"}:
+            self.record_success()
+        log.info(
+            "action_outcome",
+            action_id=outcome.operation_id,
+            action=outcome.action,
+            status=outcome.status,
+            detail=outcome.detail,
+            reservations=self.reservations(),
+        )
+
+    def record_failure(self, reason: str) -> None:
+        self.failure_streak += 1
+        self.failure_count += 1
+        self.recent_failures.append(reason)
+        del self.recent_failures[:-5]
+
+    def record_success(self) -> None:
+        self.failure_streak = 0
+
+    def note_input(self) -> None:
+        self.input_revision += 1
+
+    def record_interrupted_purchase(
+        self,
+        operation_id: int,
+        action: str,
+        before_revision: int,
+        detail: str,
+        *,
+        before_spend_status: Literal["cancelled", "failed"] = "cancelled",
+    ) -> None:
+        """Release an unspent commitment; retain a possibly spent one."""
+        pending = any(
+            item.operation_id == operation_id
+            for items in (self.pending_placements, self.pending_research, self.pending_training)
+            for item in items
+        )
+        if not pending:
+            return  # a concurrent observation already settled it
+        if self.input_revision == before_revision:
+            self.pending_placements = [
+                item for item in self.pending_placements if item.operation_id != operation_id
+            ]
+            self.pending_research = [
+                item for item in self.pending_research if item.operation_id != operation_id
+            ]
+            self.pending_training = [
+                item for item in self.pending_training if item.operation_id != operation_id
+            ]
+            status: Literal["cancelled", "failed", "uncertain"] = before_spend_status
+        else:
+            status = "uncertain"
+        self.record_outcome(ActionOutcome(operation_id, action, status, detail))
 
 
-_build_gates = _BuildGates()
+_build_gates = ActionLedger()
+_active_ledger: ContextVar[ActionLedger | None] = ContextVar("active_action_ledger", default=None)
+
+
+def current_ledger() -> ActionLedger:
+    """Return the ledger bound to this game and inherited by its async tasks."""
+    return _active_ledger.get() or _build_gates
+
+
+def bind_ledger(ledger: ActionLedger) -> Token[ActionLedger | None]:
+    return _active_ledger.set(ledger)
+
+
+def unbind_ledger(token: Token[ActionLedger | None]) -> None:
+    _active_ledger.reset(token)
+
+
+def ledger_policy_state(ledger: ActionLedger | None = None) -> PolicyState:
+    """The latest observed facts plus unsettled commitments for input preflight."""
+    ledger = ledger or current_ledger()
+    population, cap = ledger.population or (0, 0)
+    now = _now()
+    return PolicyState(
+        age=ledger.current_age,
+        age_known=ledger.age_known,
+        food=(ledger.resources or {}).get("food", 0),
+        wood=(ledger.resources or {}).get("wood", 0),
+        gold=(ledger.resources or {}).get("gold", 0),
+        stone=(ledger.resources or {}).get("stone", 0),
+        population=population,
+        population_cap=cap,
+        population_known=ledger.population_known,
+        villagers_ordered=ledger.villagers_ordered,
+        buildings_seen=frozenset(ledger.buildings_confirmed),
+        pending_buildings=frozenset(p.building_class for p in ledger.pending_placements)
+        | frozenset(ledger.building_purchases),
+        building_purchases=frozenset(ledger.building_purchases),
+        pending_research=frozenset(p.name for p in ledger.pending_research)
+        | frozenset(ledger.age_up_paid),
+        age_up_paid=frozenset(ledger.age_up_paid),
+        research_purchases=frozenset(ledger.research_purchases),
+        researched=frozenset(ledger.researched),
+        pending_actions=frozenset(
+            [f"build_{p.building_class}" for p in ledger.pending_placements]
+            + [f"build_{name}" for name in ledger.building_purchases]
+            + [_research_action_id(p.name) for p in ledger.pending_research]
+            + [_research_action_id(name) for name in ledger.age_up_paid]
+            + [_research_action_id(name) for name in ledger.research_purchases]
+            + [
+                "queue_villager" if p.unit == "villager" else f"train_{p.unit}"
+                for p in ledger.pending_training
+            ]
+        ),
+        suppressed_actions=frozenset(
+            [f"build_{name}" for name, until in ledger.suppressed_until.items() if until > now]
+            + [
+                _research_action_id(name)
+                for name, until in ledger.research_blocked_until.items()
+                if until > now
+            ]
+        ),
+        reserved_resources=ledger.reservations(),
+        pending_population=len(ledger.pending_training) + len(ledger.queued_training),
+        known_resources=ledger.known_resources,
+        idle_present=ledger.idle_present,
+        visible_classes=frozenset(str(entity.get("class", "")) for entity in _detected_entities),
+        spatial_valid=ledger.spatial_valid,
+    )
 
 
 def observe_hud(
@@ -391,6 +561,9 @@ def observe_hud(
     resources: Mapping[str, int],
     *,
     idle_present: bool | None = None,
+    known_resources: frozenset[str] | None = None,
+    population_known: bool = True,
+    input_revision: int | None = None,
 ) -> None:
     """Feed this turn's HUD reading into the build gates.
 
@@ -399,26 +572,88 @@ def observe_hud(
     missing ones) before the snapshot is replaced — the ordering the wood-delta
     check depends on.
     """
-    _build_gates.snapshot_count += 1
-    _observe_wood_income(resources.get("wood"))
+    current_ledger().snapshot_count += 1
+    fresh_resources = (
+        resources
+        if known_resources is None
+        else {name: value for name, value in resources.items() if name in known_resources}
+    )
+    _reconcile_queued_training(population if population_known else None)
+    _observe_wood_income(fresh_resources.get("wood"))
     # Both readings are passed in, not read off the gates: settlement runs
     # BEFORE the snapshot is replaced, which is the ordering the deltas need.
-    _settle_pending_placements(resources.get("wood"), population_cap)
-    _settle_pending_research(resources)
-    _build_gates.population = (population, population_cap)
-    _build_gates.resources = dict(resources)
-    _build_gates.idle_present = idle_present
+    claimed_spend = current_ledger().claimed_spend
+    _settle_pending_placements(
+        fresh_resources.get("wood"),
+        population_cap if population_known else None,
+        claimed_spend,
+        input_revision=input_revision,
+    )
+    _settle_pending_research(fresh_resources, claimed_spend, input_revision=input_revision)
+    _settle_pending_training(fresh_resources, claimed_spend, input_revision=input_revision)
+    active_snapshots = (
+        [p.noted_at_snapshot for p in current_ledger().pending_placements]
+        + [p.noted_at_snapshot for p in current_ledger().pending_research]
+        + [p.noted_at_snapshot for p in current_ledger().pending_training]
+    )
+    oldest = min(active_snapshots, default=current_ledger().snapshot_count + 1)
+    current_ledger().claimed_spend = {
+        key: amount for key, amount in claimed_spend.items() if key[2] >= oldest
+    }
+    current_ledger().population = (population, population_cap)
+    current_ledger().population_known = population_known
+    if population_known:
+        current_ledger().last_known_population = population
+    current_ledger().resources = dict(resources)
+    current_ledger().known_resources = (
+        frozenset(resources) if known_resources is None else known_resources
+    )
+    current_ledger().idle_present = idle_present
 
 
-def observe_age(age: str) -> None:
-    """Sync the validated age (GameState, strategist OCR) into the gates.
-
-    Selects the villager order target and the rejection message's teaching
-    (T-538). Falsy input (age not yet read this game) keeps the last value —
-    the gates start at Dark Age, which is always correct at game start.
-    """
+def observe_age(age: str | None, *, input_revision: int | None = None) -> None:
+    """Sync the observed age; a completed advancement supersedes HUD settlement."""
+    current_ledger().age_known = bool(age)
     if age:
-        _build_gates.current_age = age
+        ledger = current_ledger()
+        ledger.current_age = age
+        result_ages = {
+            "feudal_age": "Feudal Age",
+            "castle_age": "Castle Age",
+            "imperial_age": "Imperial Age",
+        }
+        completed = [
+            pending
+            for pending in ledger.pending_research
+            if result_ages.get(pending.name) == age
+            and (input_revision is None or input_revision >= pending.spend_revision)
+        ]
+        if completed:
+            ledger.pending_research = [
+                pending for pending in ledger.pending_research if pending not in completed
+            ]
+            for pending in completed:
+                ledger.researched.add(pending.name)
+                ledger.record_outcome(
+                    ActionOutcome(
+                        pending.operation_id,
+                        _research_action_id(pending.name),
+                        "confirmed",
+                        "age advancement observed",
+                    )
+                )
+        for name, target_age in result_ages.items():
+            operation_id = ledger.age_up_paid.pop(name, None) if target_age == age else None
+            if operation_id is not None:
+                ledger.researched.add(name)
+                ledger.record_outcome(
+                    ActionOutcome(
+                        operation_id,
+                        _research_action_id(name),
+                        "confirmed",
+                        "age advancement observed",
+                    )
+                )
 
 
 def _observe_wood_income(wood_now: int | None) -> None:
@@ -429,15 +664,15 @@ def _observe_wood_income(wood_now: int | None) -> None:
     estimate exists to close. Negative deltas (OCR blips) clamp to 0, which
     pulls the estimate toward the safe direction (under-crediting income).
     """
-    wood_before = (_build_gates.resources or {}).get("wood")
-    if wood_now is None or wood_before is None or _build_gates.pending_placements:
+    wood_before = (current_ledger().resources or {}).get("wood")
+    if wood_now is None or wood_before is None or current_ledger().pending_placements:
         return
     delta = max(wood_now - wood_before, 0)
-    previous = _build_gates.wood_income_per_snapshot
+    previous = current_ledger().wood_income_per_snapshot
     if previous is None:
-        _build_gates.wood_income_per_snapshot = float(delta)
+        current_ledger().wood_income_per_snapshot = float(delta)
     else:
-        _build_gates.wood_income_per_snapshot = (
+        current_ledger().wood_income_per_snapshot = (
             _INCOME_EMA_WEIGHT * delta + (1 - _INCOME_EMA_WEIGHT) * previous
         )
 
@@ -450,43 +685,68 @@ def _expected_income(noted_at_snapshot: int) -> float:
     0.0 while no clean window has been observed yet — settlement then behaves
     exactly as before the income model existed.
     """
-    ema = _build_gates.wood_income_per_snapshot
+    ema = current_ledger().wood_income_per_snapshot
     if ema is None:
         return 0.0
-    elapsed = max(_build_gates.snapshot_count - noted_at_snapshot, 1)
+    elapsed = max(current_ledger().snapshot_count - noted_at_snapshot, 1)
     return ema * elapsed
 
 
 def _note_pending_placement(
-    building_key: str, *, menu: str = ECON_MENU, point: tuple[int, int] = (0, 0)
-) -> None:
+    building_key: str,
+    *,
+    menu: str = ECON_MENU,
+    point: tuple[int, int] = (0, 0),
+    wood_before: int | None = None,
+    cap_before: int | None = None,
+    noted_at_snapshot: int | None = None,
+) -> _PendingPlacement | None:
     """Queue an unconfirmed placement for wood-delta settlement next snapshot."""
     cls = building_class(menu, building_key)
     cost = _WOOD_COST_BY_CLASS.get(cls or "")
-    wood_before = (_build_gates.resources or {}).get("wood")
+    if wood_before is None:
+        wood_before = (current_ledger().resources or {}).get("wood")
     if cls is None or cost is None or wood_before is None:
         # No wood baseline to settle against — the placement stays unconfirmed
         # for good, despite the caller's "settled next turn" detail. Say so.
         log.debug("placement_pending_dropped", building_key=building_key)
-        return
-    _, cap_before = _build_gates.population or (0, 0)
+        return None
+    if cap_before is None:
+        _, cap_before = current_ledger().population or (0, 0)
     is_house = cls == _HOUSE_CLASS
-    _build_gates.pending_placements.append(
-        _PendingPlacement(
-            building_class=cls,
-            wood_cost=cost,
-            wood_before=wood_before,
-            noted_at_snapshot=_build_gates.snapshot_count,
-            cap_before=cap_before,
-            selected_by=_build_gates.selected_by,
-            point=point,
-            settle_deadline=_now()
-            + (_HOUSE_SETTLE_SECONDS if is_house else _PLACEMENT_SETTLE_SECONDS),
-        )
+    placement = _PendingPlacement(
+        building_class=cls,
+        wood_cost=cost,
+        wood_before=wood_before,
+        noted_at_snapshot=(
+            current_ledger().snapshot_count if noted_at_snapshot is None else noted_at_snapshot
+        ),
+        cap_before=cap_before,
+        selected_by=current_ledger().selected_by,
+        point=point,
+        settle_deadline=_now() + (_HOUSE_SETTLE_SECONDS if is_house else _PLACEMENT_SETTLE_SECONDS),
+        operation_id=current_ledger().new_operation_id(),
+        preexisting_entity_ids=frozenset(
+            entity_id
+            for entity in _detected_entities
+            if entity.get("class") == cls and isinstance(entity_id := entity.get("id"), str)
+        ),
+        spend_revision=current_ledger().input_revision + 1,
     )
+    current_ledger().pending_placements.append(placement)
+    current_ledger().record_outcome(
+        ActionOutcome(placement.operation_id, f"build_{cls}", "pending", "awaiting HUD settlement")
+    )
+    return placement
 
 
-def _settle_pending_placements(wood_now: int | None, cap_now: int) -> None:
+def _settle_pending_placements(
+    wood_now: int | None,
+    cap_now: int | None,
+    claimed_spend: dict[tuple[str, int, int], int] | None = None,
+    *,
+    input_revision: int | None = None,
+) -> None:
     """Confirm or drop pending placements using the game's own ledger — the HUD.
 
     A placement that consumed its cost DID succeed regardless of what detection
@@ -500,26 +760,58 @@ def _settle_pending_placements(wood_now: int | None, cap_now: int) -> None:
     A missing wood reading stops the whole pass, houses included: one OCR frame
     supplies both numbers, so an unreadable wood value means an unreliable cap.
     """
-    if not _build_gates.pending_placements or wood_now is None:
+    if not current_ledger().pending_placements or wood_now is None:
         return
     still_pending: list[_PendingPlacement] = []
-    spend_by_baseline: dict[int, int] = {}
+    outcomes: list[ActionOutcome] = []
+    spent = claimed_spend if claimed_spend is not None else {}
     claimed_cap: dict[int, int] = {}
-    for pending in _build_gates.pending_placements:
+    for pending in current_ledger().pending_placements:
+        if input_revision is not None and input_revision < pending.spend_revision:
+            still_pending.append(pending)
+            continue
         verdict = (
             _house_verdict(pending, cap_now, claimed_cap)
             if pending.is_house
-            else _wood_verdict(pending, wood_now, spend_by_baseline)
+            else _wood_verdict(pending, wood_now, spent)
         )
         if verdict == "undecided" and _now() < pending.settle_deadline:
             still_pending.append(pending)
             continue
         evidence = _settlement_evidence(pending, wood_now, cap_now)
         if verdict == "confirmed":
-            record_confirmed_buildings([pending.building_class])
+            if pending.is_house:
+                # Population capacity only rises after a house is complete.
+                record_confirmed_buildings([pending.building_class])
+            else:
+                spec = BY_ID[f"build_{pending.building_class}"]
+                if spec.unique:
+                    # Unique prerequisites stay unavailable until construction
+                    # is seen. Repeatable farms only need purchase settlement;
+                    # another farm can be started while the first is building.
+                    current_ledger().building_purchases[pending.building_class] = (
+                        _PurchasedBuilding(pending.operation_id, pending.preexisting_entity_ids)
+                    )
+                _clear_missing_streak(pending.building_class)
             log.info("build_purchase_confirmed", **evidence)
+            outcomes.append(
+                ActionOutcome(
+                    pending.operation_id,
+                    f"build_{pending.building_class}",
+                    "confirmed" if pending.is_house else "purchased",
+                    "house capacity observed" if pending.is_house else "HUD purchase confirmed",
+                )
+            )
         else:
             _note_missing_settlement(pending.building_class)
+            outcomes.append(
+                ActionOutcome(
+                    pending.operation_id,
+                    f"build_{pending.building_class}",
+                    "failed",
+                    "HUD purchase missing",
+                )
+            )
             log.warning(
                 "build_purchase_missing",
                 **evidence,
@@ -527,16 +819,22 @@ def _settle_pending_placements(wood_now: int | None, cap_now: int) -> None:
                 x=pending.point[0],
                 y=pending.point[1],
             )
-    _build_gates.pending_placements = still_pending
+    current_ledger().pending_placements = still_pending
+    for outcome in outcomes:
+        current_ledger().record_outcome(outcome)
 
 
-def _house_verdict(pending: _PendingPlacement, cap_now: int, claimed: dict[int, int]) -> Verdict:
+def _house_verdict(
+    pending: _PendingPlacement, cap_now: int | None, claimed: dict[int, int]
+) -> Verdict:
     """Confirmed once the population cap has risen by a whole house.
 
     Never "missing": an unmoved cap means the house may still be under
     construction. `claimed` stops one +10 jump from confirming three pending
     houses — the cap analogue of `spend_by_baseline` (run 3, F-17).
     """
+    if cap_now is None:
+        return "undecided"
     already = claimed.get(pending.cap_before, 0)
     if cap_now - pending.cap_before - already < _HOUSE_CAP_STEP:
         return "undecided"
@@ -545,7 +843,7 @@ def _house_verdict(pending: _PendingPlacement, cap_now: int, claimed: dict[int, 
 
 
 def _wood_verdict(
-    pending: _PendingPlacement, wood_now: int, spend_by_baseline: dict[int, int]
+    pending: _PendingPlacement, wood_now: int, spend_by_baseline: dict[tuple[str, int, int], int]
 ) -> Verdict:
     """Whether the HUD wood delta covers this placement's cost.
 
@@ -559,17 +857,18 @@ def _wood_verdict(
     """
     if wood_now == pending.wood_before:
         return "undecided"
-    spent = spend_by_baseline.get(pending.wood_before, 0)
+    baseline = ("wood", pending.wood_before, pending.noted_at_snapshot)
+    spent = spend_by_baseline.get(baseline, 0)
     income = _expected_income(pending.noted_at_snapshot)
     budget = pending.wood_before - spent - pending.wood_cost + _PLACEMENT_INCOME_SLACK
     if wood_now - income > budget:
         return "missing"
-    spend_by_baseline[pending.wood_before] = spent + pending.wood_cost
+    spend_by_baseline[baseline] = spent + pending.wood_cost
     return "confirmed"
 
 
 def _settlement_evidence(
-    pending: _PendingPlacement, wood_now: int, cap_now: int
+    pending: _PendingPlacement, wood_now: int, cap_now: int | None
 ) -> dict[str, object]:
     """The numbers the settlement judged on, for either log line."""
     if pending.is_house:
@@ -587,65 +886,222 @@ def _settlement_evidence(
     }
 
 
-def _note_pending_research(name: str, tech: Tech) -> None:
+def _note_pending_research(name: str, tech: Tech) -> _PendingResearch | None:
     """Queue a research for HUD settlement next snapshot."""
-    before = _build_gates.resources
+    before = current_ledger().resources
     if before is None:
         log.debug("research_pending_dropped", tech=name)
-        return
-    _build_gates.pending_research.append(
-        _PendingResearch(
-            name=name,
-            tech=tech,
-            before=dict(before),
-            settle_deadline=_now() + _RESEARCH_SETTLE_SECONDS,
+        return None
+    pending = _PendingResearch(
+        name=name,
+        tech=tech,
+        before=MappingProxyType(dict(before)),
+        settle_deadline=_now() + _RESEARCH_SETTLE_SECONDS,
+        operation_id=current_ledger().new_operation_id(),
+        noted_at_snapshot=current_ledger().snapshot_count,
+        spend_revision=current_ledger().input_revision + 1,
+    )
+    current_ledger().pending_research.append(pending)
+    current_ledger().record_outcome(
+        ActionOutcome(
+            pending.operation_id,
+            _research_action_id(name),
+            "pending",
+            "awaiting HUD settlement",
         )
     )
+    return pending
 
 
-def _settle_pending_research(resources: Mapping[str, int]) -> None:
+def _settle_pending_research(
+    resources: Mapping[str, int],
+    claimed_spend: dict[tuple[str, int, int], int] | None = None,
+    *,
+    input_revision: int | None = None,
+) -> None:
     """Confirm or report each pending research against the HUD resource drop.
 
     This is the feedback a raw `press` never had: a keystroke always "succeeds",
     so a greyed-out button looked identical to a working one. Run 2026_08_21_2
     pressed the age-up key 10 times over 4 minutes on that blind spot.
     """
-    if not _build_gates.pending_research:
+    if not current_ledger().pending_research:
         return
     still_pending: list[_PendingResearch] = []
-    for pending in _build_gates.pending_research:
-        verdict = _research_verdict(pending, resources)
+    outcomes: list[ActionOutcome] = []
+    claimed = claimed_spend if claimed_spend is not None else {}
+    for pending in current_ledger().pending_research:
+        if input_revision is not None and input_revision < pending.spend_revision:
+            still_pending.append(pending)
+            continue
+        verdict = _research_verdict(pending, resources, claimed)
         if verdict == "undecided" and _now() < pending.settle_deadline:
             still_pending.append(pending)
             continue
         if verdict == "confirmed":
-            _build_gates.researched.add(pending.name)
-            log.info("research_confirmed", tech=pending.name)
+            age_up = pending.name in {"feudal_age", "castle_age", "imperial_age"}
+            if age_up:
+                current_ledger().age_up_paid[pending.name] = pending.operation_id
+            else:
+                current_ledger().research_purchases.add(pending.name)
+            log.info("research_purchase_confirmed", tech=pending.name, age_up=age_up)
+            outcomes.append(
+                ActionOutcome(
+                    pending.operation_id,
+                    _research_action_id(pending.name),
+                    "purchased",
+                    "HUD purchase confirmed; awaiting observed age"
+                    if age_up
+                    else "HUD purchase confirmed; completion unobserved",
+                )
+            )
         else:
-            _build_gates.research_blocked_until[pending.name] = _now() + _MISSING_SUPPRESS_SECONDS
+            current_ledger().research_blocked_until[pending.name] = (
+                _now() + _MISSING_SUPPRESS_SECONDS
+            )
+            outcomes.append(
+                ActionOutcome(
+                    pending.operation_id,
+                    _research_action_id(pending.name),
+                    "failed",
+                    "HUD purchase missing",
+                )
+            )
             log.warning(
                 "research_missing",
                 tech=pending.name,
                 retry_in_s=round(_MISSING_SUPPRESS_SECONDS),
                 **_research_costs(pending.tech),
             )
-    _build_gates.pending_research = still_pending
+    current_ledger().pending_research = still_pending
+    for outcome in outcomes:
+        current_ledger().record_outcome(outcome)
 
 
-def _research_verdict(pending: _PendingResearch, resources: Mapping[str, int]) -> Verdict:
+def _note_pending_training(unit: str) -> _PendingTraining | None:
+    before = current_ledger().resources
+    spec = UNITS[unit]
+    if before is None:
+        return None
+    pending = _PendingTraining(
+        unit=unit,
+        cost=spec.cost,
+        before=MappingProxyType(dict(before)),
+        settle_deadline=_now() + _RESEARCH_SETTLE_SECONDS,
+        operation_id=current_ledger().new_operation_id(),
+        noted_at_snapshot=current_ledger().snapshot_count,
+        spend_revision=current_ledger().input_revision + 1,
+    )
+    current_ledger().pending_training.append(pending)
+    current_ledger().record_outcome(
+        ActionOutcome(pending.operation_id, f"train_{unit}", "pending", "awaiting HUD settlement")
+    )
+    return pending
+
+
+def _settle_pending_training(
+    resources: Mapping[str, int],
+    claimed_spend: dict[tuple[str, int, int], int] | None = None,
+    *,
+    input_revision: int | None = None,
+) -> None:
+    still_pending: list[_PendingTraining] = []
+    outcomes: list[ActionOutcome] = []
+    claimed = claimed_spend if claimed_spend is not None else {}
+    for pending in current_ledger().pending_training:
+        if input_revision is not None and input_revision < pending.spend_revision:
+            still_pending.append(pending)
+            continue
+        verdict = _cost_verdict(
+            pending.cost, pending.before, resources, pending.noted_at_snapshot, claimed
+        )
+        if verdict == "undecided" and _now() < pending.settle_deadline:
+            still_pending.append(pending)
+            continue
+        status: Literal["confirmed", "failed"] = "confirmed" if verdict == "confirmed" else "failed"
+        if status == "confirmed" and pending.unit == "villager":
+            current_ledger().villagers_ordered += 1
+        if status == "confirmed":
+            current_ledger().queued_training.append(
+                _QueuedTraining(pending.unit, pending.operation_id)
+            )
+        outcomes.append(
+            ActionOutcome(
+                pending.operation_id,
+                "queue_villager" if pending.unit == "villager" else f"train_{pending.unit}",
+                "purchased" if status == "confirmed" else "failed",
+                "HUD purchase settled",
+            )
+        )
+    current_ledger().pending_training = still_pending
+    for outcome in outcomes:
+        current_ledger().record_outcome(outcome)
+
+
+def _reconcile_queued_training(population_now: int | None) -> None:
+    """Release a production slot only when the HUD shows delivered population."""
+    ledger = current_ledger()
+    previous = ledger.last_known_population
+    if population_now is None or previous is None or population_now <= previous:
+        return
+    delivered_count = min(population_now - previous, len(ledger.queued_training))
+    delivered = ledger.queued_training[:delivered_count]
+    del ledger.queued_training[:delivered_count]
+    for item in delivered:
+        ledger.record_outcome(
+            ActionOutcome(
+                item.operation_id,
+                "queue_villager" if item.unit == "villager" else f"train_{item.unit}",
+                "confirmed",
+                "population delivery observed",
+            )
+        )
+
+
+def _cost_verdict(
+    cost: tuple[tuple[str, int], ...],
+    before: Mapping[str, int],
+    resources: Mapping[str, int],
+    snapshot_count: int,
+    claimed_spend: dict[tuple[str, int, int], int] | None = None,
+) -> Verdict:
+    shortfalls = []
+    claimed = claimed_spend if claimed_spend is not None else {}
+    for kind, price in cost:
+        now = resources.get(kind)
+        was = before.get(kind)
+        if now is None or was is None or now == was:
+            return "undecided"
+        shortfalls.append(
+            was - now - claimed.get((kind, was, snapshot_count), 0)
+            < price * _RESEARCH_CONFIRM_FRACTION
+        )
+    if any(shortfalls):
+        return "missing"
+    for kind, price in cost:
+        baseline = before[kind]
+        key = (kind, baseline, snapshot_count)
+        claimed[key] = claimed.get(key, 0) + price
+    return "confirmed"
+
+
+def _research_verdict(
+    pending: _PendingResearch,
+    resources: Mapping[str, int],
+    claimed_spend: dict[tuple[str, int, int], int] | None = None,
+) -> Verdict:
     """Confirmed once every cost resource has fallen far enough to have paid.
 
     ANY unchanged cost reading is stale OCR, not a refusal: a frame where food
     updated but gold did not once reported a paid-for age-up as missing.
     """
-    shortfalls = []
-    for kind, price in _research_costs(pending.tech).items():
-        now = resources.get(kind)
-        was = pending.before.get(kind)
-        if now is None or was is None or now == was:
-            return "undecided"
-        shortfalls.append(was - now < price * _RESEARCH_CONFIRM_FRACTION)
-    return "missing" if any(shortfalls) else "confirmed"
+    return _cost_verdict(
+        tuple(_research_costs(pending.tech).items()),
+        pending.before,
+        resources,
+        pending.noted_at_snapshot,
+        claimed_spend,
+    )
 
 
 def _research_costs(tech: Tech) -> dict[str, int]:
@@ -657,11 +1113,16 @@ def _research_costs(tech: Tech) -> dict[str, int]:
     }
 
 
+def _research_action_id(name: str) -> str:
+    return RESEARCH[name].id
+
+
 def _is_pop_capped() -> bool:
     """Whether the HUD shows no population headroom. False with no reading yet."""
-    if _build_gates.population is None:
+    population_reading = current_ledger().population
+    if population_reading is None:
         return False
-    population, cap = _build_gates.population
+    population, cap = population_reading
     return cap > 0 and population >= cap
 
 
@@ -672,8 +1133,8 @@ def is_pop_capped() -> bool:
 
 def _clear_missing_streak(building_class: str) -> None:
     """A real purchase proves the build path works — lift any suppression."""
-    _build_gates.missing_streaks.pop(building_class, None)
-    _build_gates.suppressed_until.pop(building_class, None)
+    current_ledger().missing_streaks.pop(building_class, None)
+    current_ledger().suppressed_until.pop(building_class, None)
 
 
 def _note_missing_settlement(building_class: str) -> None:
@@ -690,10 +1151,10 @@ def _note_missing_settlement(building_class: str) -> None:
     """
     if building_class == _HOUSE_CLASS and _is_pop_capped():
         return
-    streak = _build_gates.missing_streaks.get(building_class, 0) + 1
-    _build_gates.missing_streaks[building_class] = streak
+    streak = current_ledger().missing_streaks.get(building_class, 0) + 1
+    current_ledger().missing_streaks[building_class] = streak
     if streak >= _MISSING_STREAK_LIMIT:
-        _build_gates.suppressed_until[building_class] = _now() + _MISSING_SUPPRESS_SECONDS
+        current_ledger().suppressed_until[building_class] = _now() + _MISSING_SUPPRESS_SECONDS
         log.warning(
             "build_suppressed",
             building=building_class,
@@ -710,55 +1171,78 @@ def record_building_sightings(classes: Iterable[str]) -> None:
     outposts). Purchase-grade evidence goes through record_confirmed_buildings.
     """
     for cls in set(classes) & GATE_BUILDING_CLASSES:
-        _build_gates.building_sightings[cls] = _build_gates.building_sightings.get(cls, 0) + 1
+        current_ledger().building_sightings[cls] = (
+            current_ledger().building_sightings.get(cls, 0) + 1
+        )
 
 
 def record_confirmed_buildings(classes: Iterable[str]) -> None:
-    """Remember gate-relevant building classes the agent PROVABLY owns —
-    a wood-delta-confirmed purchase or a visually verified placement. The only
-    writers of buildings_confirmed (detection sightings stay informational).
+    """Remember gate-relevant building classes observed as standing.
+
+    A paid placement alone is not a completed prerequisite. The only other
+    completion signal is a house's observed population-cap increase.
     Proof the build path works also lifts any T-530 suppression: run 13
     (F-45) kept a class suppressed after it was verified standing because
     only the wood-delta path cleared the streak."""
     proven = set(classes) & GATE_BUILDING_CLASSES
-    _build_gates.buildings_confirmed.update(proven)
+    current_ledger().buildings_confirmed.update(proven)
     for cls in proven:
+        purchased = current_ledger().building_purchases.pop(cls, None)
+        if purchased is not None:
+            current_ledger().record_outcome(
+                ActionOutcome(
+                    purchased.operation_id,
+                    f"build_{cls}",
+                    "confirmed",
+                    "new building entity observed",
+                )
+            )
         _clear_missing_streak(cls)
+
+
+def record_observed_buildings(entities: Iterable[tuple[str, str]]) -> None:
+    """Promote a paid placement only when a matching building ID is new.
+
+    Ownership classification currently covers military units, not buildings.
+    The caller excludes any entity explicitly identified as enemy-owned.
+    """
+    purchased = current_ledger().building_purchases
+    completed = {
+        cls
+        for entity_id, cls in entities
+        if cls in purchased and entity_id not in purchased[cls].preexisting_entity_ids
+    }
+    record_confirmed_buildings(completed)
 
 
 def confirmed_buildings() -> frozenset[str]:
     """Building classes the agent provably built this game (purchase-grade
     evidence) — copied into GameState each turn so the reactive tier can gate
     Feudal prep and the age-up press on the two-building requirement."""
-    return frozenset(_build_gates.buildings_confirmed)
+    return frozenset(current_ledger().buildings_confirmed)
 
 
 def villagers_ordered() -> int:
     """Villagers ordered this game (incl. the 4 starting ones) — copied into
     GameState each turn so the reactive tier gates the queue on ORDERS, not
     the TC-queue-lagged HUD population (run 11, F-38)."""
-    return _build_gates.villagers_ordered
+    return current_ledger().villagers_ordered
 
 
 def villager_queue_rejection() -> str | None:
-    """Reason a villager can't be queued right now (logged), or None.
-
-    The age-keyed order target caps TOTAL orders — the HUD population lags by
-    the TC queue depth, so it must never be the brake. An age past the target
-    map has no cap. The food gate keeps a press that would silently no-op
-    in-game from being counted as an order.
-    """
-    ordered = _build_gates.villagers_ordered
-    target = _VILLAGER_ORDER_TARGET_BY_AGE.get(_build_gates.current_age)
-    if target is not None and ordered >= target:
-        reason = (
-            f"villager target reached ({ordered} ordered, incl. the TC queue) — "
-            f"keep villagers busy and bank resources for the "
-            f"{_NEXT_AGE[_build_gates.current_age]} instead"
-        )
+    """Explain the hard population and food gates, never a strategy target."""
+    ledger = current_ledger()
+    ordered = ledger.villagers_ordered
+    population, cap = ledger.population or (0, 0)
+    if not ledger.population_known:
+        reason = "population capacity has not been observed"
+    elif population + len(ledger.pending_training) + len(ledger.queued_training) >= cap:
+        reason = f"population capacity reached ({population}/{cap}; {ordered} ordered)"
+    elif "food" not in ledger.known_resources:
+        reason = "food has not been observed"
     else:
-        food = (_build_gates.resources or {}).get("food")
-        if food is None or food >= _VILLAGER_FOOD_COST:
+        food = (ledger.resources or {}).get("food")
+        if food is not None and food - ledger.reservations().get("food", 0) >= _VILLAGER_FOOD_COST:
             return None
         reason = f"villager costs {_VILLAGER_FOOD_COST} food, you have {food}"
     log.info("villager_queue_rejected", reason=reason, ordered=ordered)
@@ -770,7 +1254,7 @@ def sighted_buildings() -> frozenset[str]:
     context-line information only, never gate evidence (F-36)."""
     return frozenset(
         cls
-        for cls, frames in _build_gates.building_sightings.items()
+        for cls, frames in current_ledger().building_sightings.items()
         if frames >= _SIGHTING_MIN_FRAMES
     )
 
@@ -786,27 +1270,35 @@ def blocked_actions() -> list[str]:
     now = _now()
     blocked = [
         f"{cls} (suppressed {round(until - now)}s)"
-        for cls, until in sorted(_build_gates.suppressed_until.items())
+        for cls, until in sorted(current_ledger().suppressed_until.items())
         if now < until
     ]
     blocked += [
         f"{name} (retryable in {round(until - now)}s)"
-        for name, until in sorted(_build_gates.research_blocked_until.items())
+        for name, until in sorted(current_ledger().research_blocked_until.items())
         if now < until
     ]
-    blocked += [f"{name} (already researched)" for name in sorted(_build_gates.researched)]
+    blocked += [f"{name} (already researched)" for name in sorted(current_ledger().researched)]
+    blocked += [f"{name} (paid, awaiting age observation)" for name in current_ledger().age_up_paid]
+    blocked += [
+        f"{name} (paid, completion unobserved)" for name in current_ledger().research_purchases
+    ]
+    blocked += [
+        f"{name} (paid, awaiting owned-building observation)"
+        for name in current_ledger().building_purchases
+    ]
     return blocked
 
 
 def pending_placement_counts() -> Counter[str]:
     """Building classes awaiting wood-delta settlement, by count."""
-    return Counter(p.building_class for p in _build_gates.pending_placements)
+    return Counter(p.building_class for p in current_ledger().pending_placements)
 
 
 def reset_build_gates() -> None:
     """Fresh build-gate state (new game / tests)."""
     global _build_gates
-    _build_gates = _BuildGates()
+    _build_gates = ActionLedger()
 
 
 def build_rejection(building_key: str, intent: str = "", *, menu: str = ECON_MENU) -> str | None:
@@ -829,24 +1321,17 @@ def _committed_wood() -> int:
     money the first already spent — run 2026_08_22_2 had 125 wood and committed
     200. Self-limiting: a pending placement is judged by its settle deadline.
     """
-    return sum(p.wood_cost for p in _build_gates.pending_placements)
+    return current_ledger().reservations().get("wood", 0)
 
 
 def _rejection_reason(building_key: str, menu: str) -> str | None:
-    """Five gates: suppressed after a missing-settlement streak, unique
-    building already standing, house with ample pop-cap headroom (wasted
-    wood), missing prerequisite (without a mill the farm key selects the
-    OUTPOST — runs 6-7 and 9 built phantom towers this way), and unaffordable
-    cost. The reason string is returned to the LLM as the action's failure
-    detail so the next turn plans around it instead of re-issuing the same
-    doomed build.
-    """
+    """Human-readable reasons for the catalog's hard build restrictions."""
     cls = building_class(menu, building_key)
     if cls is None:
-        return None
-    suppressed_until = _build_gates.suppressed_until.get(cls, 0.0)
+        return f"unknown building binding {menu}+{building_key}"
+    suppressed_until = current_ledger().suppressed_until.get(cls, 0.0)
     if _now() < suppressed_until:
-        streak = _build_gates.missing_streaks.get(cls, 0)
+        streak = current_ledger().missing_streaks.get(cls, 0)
         return (
             f"{cls} builds suppressed for "
             f"{round(suppressed_until - _now())} more seconds: "
@@ -854,30 +1339,30 @@ def _rejection_reason(building_key: str, menu: str) -> str | None:
             "something is systematically wrong (blocked ground, or the "
             "prerequisite isn't really standing)"
         )
+    if cls == _HOUSE_CLASS and any(
+        pending.building_class == _HOUSE_CLASS for pending in current_ledger().pending_placements
+    ):
+        return "house placement already pending HUD settlement — don't double-build"
+    if cls in current_ledger().building_purchases:
+        return f"{cls} was purchased and is awaiting observed construction completion"
     if cls in _UNIQUE_BUILDING_CLASSES:
-        if cls in _build_gates.buildings_confirmed:
+        if cls in current_ledger().buildings_confirmed:
             return f"{cls} already built — one is enough; spend the wood on farms"
-        if any(p.building_class == cls for p in _build_gates.pending_placements):
+        if any(p.building_class == cls for p in current_ledger().pending_placements):
             return f"{cls} placement already pending wood-delta settlement — don't double-build"
-    if cls == "house" and _build_gates.population is not None:
-        population, cap = _build_gates.population
+    population_reading = current_ledger().population
+    if cls == "house" and population_reading is not None:
+        _, cap = population_reading
         if cap >= _GAME_POP_CAP_LIMIT:
             return f"house skipped: population cap {cap} is already the game maximum"
-        headroom = cap - population
-        if headroom > _HOUSE_HEADROOM_MAX:
-            return (
-                f"house skipped: population {population}/{cap} leaves {headroom} headroom "
-                f"(> {_HOUSE_HEADROOM_MAX}) — spend the wood on economy buildings instead"
-            )
-    prereq = _BUILD_PREREQ_CLASS.get(building_key)
-    if prereq is not None and prereq not in _build_gates.buildings_confirmed:
-        return (
-            f"{cls} unavailable: requires a completed {prereq} and none has been "
-            f"seen yet — build a {prereq} first"
-        )
+    prereqs = _BUILD_PREREQ_CLASS.get((menu, building_key), frozenset())
+    missing = prereqs - current_ledger().buildings_confirmed
+    if missing:
+        return f"{cls} unavailable: requires completed {', '.join(sorted(missing))}"
     cost = _WOOD_COST_BY_CLASS.get(cls)
-    if cost is not None and _build_gates.resources is not None:
-        wood = _build_gates.resources.get("wood")
+    resources = current_ledger().resources
+    if cost is not None and resources is not None:
+        wood = resources.get("wood")
         committed = _committed_wood()
         if wood is not None and wood - committed < cost:
             spare = wood - committed
@@ -887,12 +1372,19 @@ def _rejection_reason(building_key: str, menu: str) -> str | None:
                     f"({wood} on the HUD, {committed} owed by placements not yet settled)"
                 )
             return f"{cls} unavailable: costs {cost} wood, you have {wood}"
-    if building_key in _RESOURCE_REQUIRED_KEYS and _resource_anchor(building_key) is None:
+    if (
+        menu == ECON_MENU
+        and building_key in _RESOURCE_REQUIRED_KEYS
+        and _resource_anchor(building_key) is None
+    ):
         classes = ", ".join(sorted(_BUILD_ANCHOR_CLASSES[building_key]))
         return (
             f"{cls} skipped: no {classes} visible to build against — a drop-off camp "
             "away from its resource carries nothing; wait for the view to show one"
         )
+    spec = BUILDINGS[(menu, building_key)]
+    if not eligible(spec, ledger_policy_state()):
+        return f"{cls} no longer eligible against the latest observation and reservations"
     return None
 
 
@@ -940,15 +1432,18 @@ def _resolve_coords(action_dict: dict[str, object]) -> tuple[str, tuple[int, int
     auto_placement resolves NOW — against the entity cache as it is at click
     time, after any camera move earlier in the sequence (run 8, F-33).
     """
+    if not current_ledger().spatial_valid:
+        return ("spatial observation invalid after camera movement; refresh required", None)
     if action_dict.get("auto_placement"):
         key = str(action_dict.get("building_key", ""))
-        placement = default_build_placement(key)
+        menu = str(action_dict.get("menu") or ECON_MENU)
+        placement = default_build_placement(key, menu=menu)
         if placement is None:
             # The camera moved since the pre-flight gate ran, so the resource that
             # authorised this build is no longer in frame. The trailing `h` press
             # in build_menu_steps still clears the open menu.
             return (
-                f"no visible resource to anchor the {building_class(ECON_MENU, key) or key} on",
+                f"no visible resource to anchor the {building_class(menu, key) or key} on",
                 None,
             )
         return ("", placement)
@@ -1064,17 +1559,7 @@ GATE_BUILDING_CLASSES: frozenset[str] = frozenset(
 # purpose: packages/data's aoe2.db holds the full cost table, but the build gate
 # must not depend on a DB handle, and these costs haven't changed in years.
 _WOOD_COST_BY_CLASS: dict[str, int] = {
-    "house": 25,
-    "farm": 60,
-    "mill": 100,
-    "mining_camp": 100,
-    "lumber_camp": 100,
-    "blacksmith": 150,
-    "dock": 150,
-    "barracks": 175,
-    "archery_range": 175,
-    "stable": 175,
-    "market": 175,
+    spec.subject: spec.price("wood") for spec in BUILDINGS.values()
 }
 
 # The econ menu's costs by key — the shape the reactive rules' `cost` blocks and
@@ -1087,13 +1572,17 @@ _BUILD_WOOD_COST: dict[str, int] = {
 # CRITICAL (user-observed, runs 6-7): without a mill the econ menu re-flows and
 # the `A` slot is the OUTPOST — pressing it doesn't no-op, it BUILDS A TOWER.
 # This gate is therefore a safety gate, not just an efficiency gate.
-_BUILD_PREREQ_CLASS: dict[str, str] = {"a": "mill"}  # farm needs a mill
+_BUILD_PREREQ_CLASS: dict[tuple[str, str], frozenset[str]] = {
+    binding: spec.requires for binding, spec in BUILDINGS.items() if spec.requires
+}
 
 # One of each is enough for this bot: a second mill/lumber camp is wasted wood
 # (run 3 attempted a duplicate mill; run 6's Feudal plan re-emits the lumber
 # camp build every turn and relies on this gate to stop once one stands —
 # confirmed OR pending, so the settlement lag can't slip a double through).
-_UNIQUE_BUILDING_CLASSES: frozenset[str] = frozenset({"mill", "lumber_camp"})
+_UNIQUE_BUILDING_CLASSES: frozenset[str] = frozenset(
+    spec.subject for spec in BUILDINGS.values() if spec.unique
+)
 
 # Module-level cumulative retry telemetry (resets per process / per game).
 # Surfaced via build_placement_retry log lines so the user can grep
@@ -1201,11 +1690,12 @@ def _resource_anchor(building_key: str) -> tuple[int, int] | None:
     classes = _BUILD_ANCHOR_CLASSES.get(building_key)
     if classes is None:
         return None
-    center = nearest_center_of_classes(_detected_entities, classes, _home_anchor())
+    entities: list[object] = list(_detected_entities)
+    center = nearest_center_of_classes(entities, classes, _home_anchor())
     return None if center is None else (int(center[0]), int(center[1]))
 
 
-def default_build_placement(building_key: str) -> tuple[int, int] | None:
+def default_build_placement(building_key: str, *, menu: str = ECON_MENU) -> tuple[int, int] | None:
     """Screenshot-relative point to start a placement, since the text-only model
     can't see open ground and the schema carries no coordinates.
 
@@ -1214,7 +1704,7 @@ def default_build_placement(building_key: str) -> tuple[int, int] | None:
     (clicking on the TC always fails). None means the camp's resource is off
     screen and the caller should skip the turn.
     """
-    resource = _resource_anchor(building_key)
+    resource = _resource_anchor(building_key) if menu == ECON_MENU else None
     if resource is not None:
         candidates = _open_ground_candidates(resource, RESOURCE_RING_RADII)
         # The fallback puts the camp ON its mine, where nothing can be built —
@@ -1229,7 +1719,7 @@ def default_build_placement(building_key: str) -> tuple[int, int] | None:
             candidates=len(candidates),
         )
         return point
-    if building_key in _RESOURCE_REQUIRED_KEYS:
+    if menu == ECON_MENU and building_key in _RESOURCE_REQUIRED_KEYS:
         return None
     anchor = _home_anchor()
     candidates = _open_ground_candidates(anchor)
@@ -1314,29 +1804,35 @@ def _research_rejection_reason(name: str) -> str | None:
     tech = _TECHS.get(name)
     if tech is None:
         return f"unknown technology {name!r}; known: {', '.join(sorted(_TECHS))}"
-    if name in _build_gates.researched:
+    if name in current_ledger().researched:
         return f"{name} is already researched — the HUD showed it paid for"
-    blocked_until = _build_gates.research_blocked_until.get(name, 0.0)
+    if name in current_ledger().research_purchases:
+        return f"{name} was paid for; completion is not directly observed"
+    if name in current_ledger().age_up_paid:
+        return f"{name} was paid for and is awaiting the observed age change"
+    blocked_until = current_ledger().research_blocked_until.get(name, 0.0)
     if _now() < blocked_until:
         return (
             f"{name} did not take last time: the cost never left the HUD, so the "
             f"button was greyed out. Satisfy its requirement — retryable in "
             f"{round(blocked_until - _now())} seconds"
         )
-    if any(p.name == name for p in _build_gates.pending_research):
+    if any(p.name == name for p in current_ledger().pending_research):
         return f"{name} is already awaiting HUD settlement — don't re-press it"
-    if tech.requires and tech.requires not in _build_gates.buildings_confirmed:
+    if tech.requires and tech.requires not in current_ledger().buildings_confirmed:
         return (
             f"{name} is researched at a {tech.requires} and none is confirmed "
             f"standing — build a {tech.requires} first"
         )
-    resources = _build_gates.resources
+    resources = current_ledger().resources
     if resources is None:
-        return None
+        return f"{name} unavailable: no authoritative resource reading yet"
     for kind, price in _research_costs(tech).items():
         have = resources.get(kind)
         if have is not None and have < price:
             return f"{name} unavailable: costs {price} {kind}, you have {have}"
+    if not eligible(RESEARCH[name], ledger_policy_state()):
+        return f"{name} no longer eligible against the latest observation and reservations"
     return None
 
 
@@ -1349,8 +1845,8 @@ def _select_villager_step(intent: str) -> dict[str, object]:
     stays selected and the next "q" queues a villager instead of opening the
     menu. Run 2026_08_21_1 lost 19 of 25 placements that way.
     """
-    nothing_is_idle = _build_gates.idle_present is False  # None = no reading yet
-    _build_gates.selected_by = "click" if nothing_is_idle else "idle_press"
+    nothing_is_idle = current_ledger().idle_present is False  # None = no reading yet
+    current_ledger().selected_by = "click" if nothing_is_idle else "idle_press"
     if nothing_is_idle:
         return {
             "type": "click",
@@ -1389,19 +1885,47 @@ async def _handle_click(action_dict: dict[str, object], intent: str) -> ActionRe
 
     x, y = coords
     screen_x, screen_y = _translate(x, y)
-    pyautogui.click(screen_x, screen_y)
-    log.info(
-        "click",
-        x=x,
-        y=y,
-        screen_x=screen_x,
-        screen_y=screen_y,
-        target_id=action_dict.get("target_id", ""),
-        intent=intent,
+    building_key = action_dict.get("building_key")
+    menu = str(action_dict.get("menu") or ECON_MENU)
+    if isinstance(building_key, str) and (
+        rejection := build_rejection(building_key, intent, menu=menu)
+    ):
+        return ActionResult(False, rejection)
+    pending = (
+        _note_pending_placement(building_key, menu=menu, point=(x, y))
+        if isinstance(building_key, str)
+        else None
     )
-
-    if any(word in intent.lower() for word in BUILD_PLACEMENT_KEYWORDS):
-        return await _finish_build_placement(action_dict, (x, y), (screen_x, screen_y))
+    before_revision = current_ledger().input_revision
+    try:
+        current_ledger().note_input()
+        pyautogui.click(screen_x, screen_y)
+        log.info(
+            "click",
+            x=x,
+            y=y,
+            screen_x=screen_x,
+            screen_y=screen_y,
+            target_id=action_dict.get("target_id", ""),
+            intent=intent,
+        )
+        if pending is not None:
+            return await _finish_build_placement(action_dict, (x, y), (screen_x, screen_y), pending)
+    except asyncio.CancelledError:
+        if pending is not None:
+            current_ledger().record_interrupted_purchase(
+                pending.operation_id,
+                f"build_{pending.building_class}",
+                before_revision,
+                "cancelled during placement",
+            )
+        raise
+    except Exception as exc:
+        if pending is not None:
+            current_ledger().record_interrupted_purchase(
+                pending.operation_id, f"build_{pending.building_class}", before_revision, repr(exc)
+            )
+        raise
     return ActionResult(True, "ok")
 
 
@@ -1409,6 +1933,7 @@ async def _finish_build_placement(
     action_dict: dict[str, object],
     point: tuple[int, int],
     screen_point: tuple[int, int],
+    pending: _PendingPlacement,
 ) -> ActionResult:
     """Retry-spray a just-clicked building placement, then verify it landed.
 
@@ -1421,13 +1946,17 @@ async def _finish_build_placement(
     global _build_retry_total_seconds, _build_retry_count
     x, y = point
     screen_x, screen_y = screen_point
+    building_key = action_dict.get("building_key")
+    menu = str(action_dict.get("menu") or ECON_MENU)
     retry_start = time.monotonic()
     await asyncio.sleep(BUILD_SETTLE_DELAY)
     offsets = _compass_offsets(BUILD_RETRY_RADIUS, BUILD_RETRY_ATTEMPTS)
     for dx, dy in offsets:
+        current_ledger().note_input()
         pyautogui.click(screen_x + dx, screen_y + dy)
         await asyncio.sleep(BUILD_RETRY_DELAY)
     # Cancel any remaining ghost — right-click on the original spot.
+    current_ledger().note_input()
     pyautogui.rightClick(screen_x, screen_y)
     elapsed = time.monotonic() - retry_start
     _build_retry_total_seconds += elapsed
@@ -1441,19 +1970,26 @@ async def _finish_build_placement(
         total_count=_build_retry_count,
         total_seconds=round(_build_retry_total_seconds, 1),
     )
-    building_key = action_dict.get("building_key")
-    menu = str(action_dict.get("menu") or ECON_MENU)
     if isinstance(building_key, str):
         cls = building_class(menu, building_key)
         landed = await _verify_build_placement(cls, point)
         if landed is True and cls is not None:
             # The building is real — usable as prerequisite evidence.
             record_confirmed_buildings([cls])
+            if pending in current_ledger().pending_placements:
+                current_ledger().pending_placements.remove(pending)
+                current_ledger().record_outcome(
+                    ActionOutcome(
+                        pending.operation_id,
+                        f"build_{cls}",
+                        "confirmed",
+                        "visual placement confirmed",
+                    )
+                )
         elif landed is False:
             # NOT reported as failure: the model can't see foundations, and a
             # false "failed" makes the LLM rebuild what already exists (the
             # run-2 duplicate mill). The wood spend settles it next snapshot.
-            _note_pending_placement(building_key, menu=menu, point=point)
             return ActionResult(
                 True,
                 "placement not visually confirmed (foundations aren't detectable); "
@@ -1500,7 +2036,8 @@ async def _verify_build_placement(expected: str | None, point: tuple[int, int]) 
         return None
     before = _count_class_near(expected, point)
     await asyncio.sleep(RESCAN_SETTLE_DELAY)
-    await _rescan_fn()
+    if await _rescan_fn() is False:
+        return None
     landed = _count_class_near(expected, point) > before
     if landed:
         log.info("build_placement_verified", building=expected, x=point[0], y=point[1])
@@ -1555,6 +2092,7 @@ async def _handle_right_click(action_dict: dict[str, object], intent: str) -> Ac
         return ActionResult(False, f"({x}, {y}) is in the HUD margin, not on the map")
 
     screen_x, screen_y = _translate(x, y)
+    current_ledger().note_input()
     pyautogui.rightClick(screen_x, screen_y)
     log.info(
         "right_click",
@@ -1572,6 +2110,9 @@ async def _handle_press(action_dict: dict[str, object], intent: str) -> ActionRe
     key = str(action_dict["key"])
     raw_modifiers = action_dict.get("modifiers", [])
     modifiers: list[str] = list(raw_modifiers) if isinstance(raw_modifiers, list) else []
+    current_ledger().note_input()
+    if key.lower() in CAMERA_KEYS or action_dict.get("rescan"):
+        current_ledger().spatial_valid = False
     if modifiers:
         pyautogui.hotkey(*modifiers, key)
         log.info("press", key=key, modifiers=modifiers, intent=intent)
@@ -1580,9 +2121,13 @@ async def _handle_press(action_dict: dict[str, object], intent: str) -> ActionRe
         log.info("press", key=key, intent=intent)
 
     # Rescan: take fresh screenshot + detection after camera-moving keys
-    if action_dict.get("rescan") and _rescan_fn:
+    if action_dict.get("rescan"):
+        if _rescan_fn is None:
+            return ActionResult(False, "fresh perception is unavailable after camera movement")
         await asyncio.sleep(RESCAN_SETTLE_DELAY)
-        await _rescan_fn()
+        if await _rescan_fn() is False:
+            return ActionResult(False, "camera moved but fresh perception did not arrive")
+        current_ledger().spatial_valid = True
         log.info("rescan_after_press", key=key)
 
     return ActionResult(True, "ok")
@@ -1595,6 +2140,7 @@ async def _handle_drag(action_dict: dict[str, object], intent: str) -> ActionRes
     ey = _to_int(action_dict["end_y"])
     screen_sx, screen_sy = _translate(sx, sy)
     screen_ex, screen_ey = _translate(ex, ey)
+    current_ledger().note_input()
     pyautogui.moveTo(screen_sx, screen_sy)
     pyautogui.drag(screen_ex - screen_sx, screen_ey - screen_sy, duration=0.2)
     log.info("drag", start_x=sx, start_y=sy, end_x=ex, end_y=ey, intent=intent)
@@ -1604,6 +2150,7 @@ async def _handle_drag(action_dict: dict[str, object], intent: str) -> ActionRes
 async def _handle_scroll(action_dict: dict[str, object], intent: str) -> ActionResult:
     clicks = _to_int(action_dict["clicks"])
     x, y = action_dict.get("x"), action_dict.get("y")
+    current_ledger().note_input()
     if x is not None and y is not None:
         screen_x, screen_y = _translate(_to_int(x), _to_int(y))
         pyautogui.scroll(clicks, x=screen_x, y=screen_y)
@@ -1615,7 +2162,8 @@ async def _handle_scroll(action_dict: dict[str, object], intent: str) -> ActionR
 
 async def _handle_detect(_action_dict: dict[str, object], intent: str) -> ActionResult:
     if _rescan_full_fn:
-        await _rescan_full_fn()
+        if await _rescan_full_fn() is False:
+            return ActionResult(False, "fresh detection did not arrive")
         log.info("full_detection", intent=intent)
         return ActionResult(True, "ok")
     log.warning("full_detection_unavailable")
@@ -1646,7 +2194,9 @@ async def _handle_build(action_dict: dict[str, object], intent: str) -> ActionRe
     for step in build_steps(key, intent, menu=menu):
         result = await execute_action(step)
         if not result.success:
-            return ActionResult(False, f"build failed at: {step.get('intent', '')}")
+            return ActionResult(
+                False, f"build failed at: {step.get('intent', '')}: {result.detail}"
+            )
     return ActionResult(True, f"built ({intent})")
 
 
@@ -1665,11 +2215,38 @@ async def _handle_research(action_dict: dict[str, object], intent: str) -> Actio
     rejection = research_rejection(name)
     if rejection is not None:
         return ActionResult(False, rejection)
-    for step in research_steps(name, intent):
+    steps = research_steps(name, intent)
+    for step in steps[:-1]:
         result = await execute_action(step)
         if not result.success:
-            return ActionResult(False, f"research failed at: {step.get('intent', '')}")
-    _note_pending_research(name, _TECHS[name])
+            return ActionResult(
+                False, f"research failed at: {step.get('intent', '')}: {result.detail}"
+            )
+    if rejection := research_rejection(name):
+        return ActionResult(False, rejection)
+    pending = _note_pending_research(name, _TECHS[name])
+    if pending is None:
+        return ActionResult(False, "research unavailable: no resource baseline")
+    before_revision = current_ledger().input_revision
+    try:
+        result = await execute_action(steps[-1])
+    except asyncio.CancelledError:
+        current_ledger().record_interrupted_purchase(
+            pending.operation_id,
+            _research_action_id(name),
+            before_revision,
+            "cancelled during research input",
+        )
+        raise
+    if not result.success:
+        current_ledger().record_interrupted_purchase(
+            pending.operation_id,
+            _research_action_id(name),
+            before_revision,
+            result.detail,
+            before_spend_status="failed",
+        )
+        return ActionResult(False, result.detail)
     return ActionResult(
         True,
         f"{name} pressed; the HUD spend settles it next turn — do not re-press it",
@@ -1679,24 +2256,122 @@ async def _handle_research(action_dict: dict[str, object], intent: str) -> Actio
 async def _handle_queue_villager(action_dict: dict[str, object], intent: str) -> ActionResult:
     """Queue one villager at the TC, through the order ledger (T-531).
 
-    Every queue path (reactive, LLM composite, fallback) funnels here so the
-    order target and food gate can't be bypassed by raw h+q presses — the
-    invisible-queue overshoot that delivered 40 villagers in run 11 (F-38).
+    Every queue path funnels here so food, housing, and prior unobserved
+    production commitments cannot be bypassed by raw h+q presses.
     """
     rejection = villager_queue_rejection()
     if rejection is not None:
         return ActionResult(False, rejection)
-    steps: list[dict[str, object]] = [
-        {"type": "press", "key": "h", "intent": f"Select TC ({intent})"},
-        {"type": "press", "key": "q", "intent": f"Queue villager ({intent})"},
-    ]
-    for step in steps:
-        result = await execute_action(step)
-        if not result.success:
-            return ActionResult(False, f"queue_villager failed at: {step.get('intent', '')}")
-    _build_gates.villagers_ordered += 1
-    log.info("villager_ordered", total=_build_gates.villagers_ordered, intent=intent)
-    return ActionResult(True, f"villager queued ({_build_gates.villagers_ordered} ordered)")
+    if not eligible(UNITS["villager"], ledger_policy_state()):
+        return ActionResult(False, "villager no longer eligible against observed state")
+    result = await execute_action(
+        {"type": "press", "key": "h", "rescan": True, "intent": f"Select TC ({intent})"}
+    )
+    if not result.success:
+        return ActionResult(False, f"queue_villager selection failed: {result.detail}")
+    if rejection := villager_queue_rejection():
+        return ActionResult(False, rejection)
+    if not eligible(UNITS["villager"], ledger_policy_state()):
+        return ActionResult(False, "villager no longer eligible after selecting Town Center")
+    pending = _note_pending_training("villager")
+    if pending is None:
+        return ActionResult(False, "villager unavailable: no resource baseline")
+    before_revision = current_ledger().input_revision
+    try:
+        result = await execute_action(
+            {"type": "press", "key": "q", "intent": f"Queue villager ({intent})"}
+        )
+    except asyncio.CancelledError:
+        current_ledger().record_interrupted_purchase(
+            pending.operation_id, "queue_villager", before_revision, "cancelled during queue input"
+        )
+        raise
+    if not result.success:
+        current_ledger().record_interrupted_purchase(
+            pending.operation_id,
+            "queue_villager",
+            before_revision,
+            result.detail,
+            before_spend_status="failed",
+        )
+        return ActionResult(False, result.detail)
+    log.info("villager_order_pending", action_id=pending.operation_id, intent=intent)
+    return ActionResult(True, f"villager queue pending HUD settlement ({pending.operation_id})")
+
+
+async def _handle_train_unit(action_dict: dict[str, object], intent: str) -> ActionResult:
+    unit = action_dict.get("unit")
+    if not isinstance(unit, str) or unit not in UNITS:
+        return ActionResult(False, "unknown unit")
+    spec = UNITS[unit]
+    if unit == "villager" or not eligible(spec, ledger_policy_state()):
+        return ActionResult(False, f"train_{unit} not eligible against observed state")
+    result = await execute_action(
+        {
+            "type": "press",
+            "key": spec.goto_key,
+            "modifiers": list(spec.goto_modifiers),
+            "rescan": True,
+            "intent": f"Select production building for {unit}",
+        }
+    )
+    if not result.success:
+        return ActionResult(False, result.detail)
+    if not eligible(spec, ledger_policy_state()):
+        return ActionResult(False, f"train_{unit} no longer eligible after navigation")
+    pending = _note_pending_training(unit)
+    if pending is None:
+        return ActionResult(False, "unit unavailable: no resource baseline")
+    before_revision = current_ledger().input_revision
+    try:
+        result = await execute_action(
+            {"type": "press", "key": spec.key, "intent": f"Train {unit} ({intent})"}
+        )
+    except asyncio.CancelledError:
+        current_ledger().record_interrupted_purchase(
+            pending.operation_id,
+            f"train_{unit}",
+            before_revision,
+            "cancelled during training input",
+        )
+        raise
+    if not result.success:
+        current_ledger().record_interrupted_purchase(
+            pending.operation_id,
+            f"train_{unit}",
+            before_revision,
+            result.detail,
+            before_spend_status="failed",
+        )
+        return result
+    return ActionResult(True, f"train_{unit} pressed; awaiting HUD settlement")
+
+
+async def _handle_assign_idle(action_dict: dict[str, object], intent: str) -> ActionResult:
+    resource = action_dict.get("resource")
+    if resource not in RESOURCE_KINDS:
+        return ActionResult(False, "unknown gathering resource")
+    if not eligible(BY_ID[f"assign_{resource}"], ledger_policy_state()):
+        return ActionResult(False, "idle assignment no longer eligible against observed state")
+    result = await execute_action(
+        {"type": "press", "key": ".", "rescan": True, "intent": "Select idle villager"}
+    )
+    if not result.success:
+        return ActionResult(False, result.detail)
+    entities: list[object] = list(_detected_entities)
+    origin = first_center_of_class(entities, "town_center") or (0.0, 0.0)
+    targets = (resource, *(kind for kind in RESOURCE_KINDS if kind != resource))
+    for kind in targets:
+        target = nearest_class_of_kind(entities, cast("ResourceKind", kind), origin)
+        if target is not None:
+            return await execute_action(
+                {
+                    "type": "right_click",
+                    "target_class": target,
+                    "intent": f"Assign idle villager to {kind} ({intent})",
+                }
+            )
+    return ActionResult(False, "no gatherable resource in refreshed view")
 
 
 # Dispatch table: action type -> handler
@@ -1710,6 +2385,8 @@ _ACTION_HANDLERS: dict[
     "build": _handle_build,
     "research": _handle_research,
     "queue_villager": _handle_queue_villager,
+    "train_unit": _handle_train_unit,
+    "assign_idle": _handle_assign_idle,
     "drag": _handle_drag,
     "scroll": _handle_scroll,
     "detect": _handle_detect,
@@ -1821,6 +2498,9 @@ async def execute_actions(actions: Sequence[dict[str, object] | Action]) -> list
             log.warning("stale_coords_rejected", intent=preview.get("intent", ""))
             results.append(ActionResult(False, STALE_COORDS_DETAIL))
             continue
-        results.append(await execute_action(action))
+        result = await execute_action(action)
+        results.append(result)
+        if not result.success:
+            break
         camera_moved = camera_moved or _moves_camera(preview)
     return results

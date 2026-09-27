@@ -108,8 +108,7 @@ class Config(BaseModel):
     # TypeSafe drives routine policy; exact game mechanics remain code-owned.
     typesafe_api_key: str = ""
     typesafe_model: str = "jev-1.13.0"
-    policy_interval: float = Field(default=0.5, gt=0)
-    policy_advice_ttl: float = Field(default=2.0, gt=0)
+    policy_timeout: float = Field(default=2.0, gt=0)
     policy_min_confidence: float = Field(default=0.65, ge=0.0, le=1.0)
     # Resource bar is read locally (Claude vision dropped). Backend: rapidocr
     # (pip-only, runs on onnxruntime) | tesseract (needs binary) | template.
@@ -149,14 +148,9 @@ class Config(BaseModel):
     # Timing settings
     action_delay: float = 0.05  # Seconds between actions
 
-    # The four clocks (ADAPTIVE-AGENT-PLAN.md 3). Pacing is a raceable variant
-    # dimension (docs/design/synthetic-arena-analysis.md), so every clock has
-    # an environment override. The policy interval lives with its settings above.
-    act_interval: float = 0.1  # AOE2_ACT_INTERVAL — seconds between act ticks
+    # The actor and deliberate loop consume published frames; only perception
+    # has a time-based cadence.
     perceive_interval: float = 0.5  # AOE2_PERCEIVE_INTERVAL — seconds between frames
-    # AOE2_DELIBERATE_INTERVAL — perceive ticks between executor sanity checks.
-    # The exception triggers (alarm, housed, stuck) fire regardless.
-    deliberate_interval: int = 10
 
     # Logging
     log_dir: Path = Path("logs")
@@ -179,13 +173,10 @@ class Config(BaseModel):
             memory_model=os.environ.get("AOE2_MEMORY_MODEL") or models.memory,
             typesafe_api_key=os.environ.get(TYPESAFE_KEY_ENV, ""),
             typesafe_model=os.environ.get("AOE2_TYPESAFE_MODEL") or "jev-1.13.0",
-            policy_interval=float(os.environ.get("AOE2_POLICY_INTERVAL", "0.5")),
-            policy_advice_ttl=float(os.environ.get("AOE2_POLICY_ADVICE_TTL", "2.0")),
+            policy_timeout=float(os.environ.get("AOE2_POLICY_TIMEOUT", "2.0")),
             policy_min_confidence=float(os.environ.get("AOE2_POLICY_MIN_CONFIDENCE", "0.65")),
             ocr_backend=os.environ.get("AOE2_OCR_BACKEND", "rapidocr"),
-            act_interval=float(os.environ.get("AOE2_ACT_INTERVAL", "0.1")),
             perceive_interval=float(os.environ.get("AOE2_PERCEIVE_INTERVAL", "0.5")),
-            deliberate_interval=int(os.environ.get("AOE2_DELIBERATE_INTERVAL", "10")),
             save_screenshots=os.environ.get("AOE2_SAVE_SCREENSHOTS", "true").lower() == "true",
             detection_host=os.environ.get("AOE2_DETECTION_HOST", ""),
             rescan_cache=os.environ.get("AOE2_RESCAN_CACHE", "true").lower() == "true",

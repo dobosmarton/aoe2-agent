@@ -44,14 +44,20 @@ Each one needs its building STANDING — the go-to key selects nothing otherwise
 
 | tech | building | go to | key | cost |
 | --- | --- | --- | --- | --- |
+| feudal_age | Town Center | H | Z | 500 food |
 | castle_age | Town Center | H | Z | 800 food + 200 gold |
+| imperial_age | Town Center | H | Z | 1000 food + 800 gold |
 | loom | Town Center | H | A | 50 gold |
 | wheelbarrow | Town Center | H | S | 175 food + 50 wood |
 | horse_collar | Mill | Ctrl-I | Q | 75 food + 75 wood |
 | double_bit_axe | Lumber Camp | Ctrl-Z | Q | 100 food + 50 wood |
 | gold_mining | Mining Camp | Ctrl-G | Q | 100 food + 75 wood |
 
-castle_age also needs 2 Feudal-Age buildings standing.
+feudal_age needs 2 Dark-Age buildings standing (for example mill and lumber
+camp; barracks and mining camp also qualify, but houses do not). castle_age
+needs 2 Feudal-Age buildings standing (archery range, stable,
+blacksmith, or market; the Dark-Age barracks does not count). imperial_age needs
+2 Castle-Age buildings standing (for example siege workshop and monastery).
 
 ### Villager Build — Economic (select villager, press Q)
 - Q: House (25 wood)
@@ -59,7 +65,6 @@ castle_age also needs 2 Feudal-Age buildings standing.
 - E: Mining Camp (100 wood)
 - R: Lumber Camp (100 wood)
 - A: Farm (60 wood) — ONLY when a Mill exists; without a Mill this slot is the OUTPOST (pressing A builds a tower!)
-- T: Dock (150 wood)
 - S: Blacksmith (150 wood)
 
 ### Villager Build — Military (select villager, press W)
@@ -71,12 +76,6 @@ castle_age also needs 2 Feudal-Age buildings standing.
 
 ### Villager Build — More Buildings (select villager, press V)
 - D: Market (175 wood)
-- F: Tower (125 wood, 25 stone)
-- S: Palisade Wall
-- D: Stone Wall
-- Z: Town Center (275 wood, 100 stone)
-- G: University (200 wood)
-- C: Castle (650 stone)
 
 ### Unit Commands (when unit is selected)
 - A: Drop Off Resources

@@ -334,6 +334,22 @@ class QueueVillagerAction(BaseModel):
     intent: str = ""
 
 
+class TrainUnitAction(BaseModel):
+    """Train one catalogued military unit at its production building."""
+
+    type: Literal["train_unit"]
+    unit: Literal["militia", "spearman", "archer", "skirmisher", "scout_cavalry", "knight"]
+    intent: str = ""
+
+
+class AssignIdleAction(BaseModel):
+    """Select an idle worker, refresh the view, then resolve a resource there."""
+
+    type: Literal["assign_idle"]
+    resource: Literal["food", "wood", "gold", "stone"]
+    intent: str = ""
+
+
 # A PLAIN union, not Discriminator("type"): a discriminator renders as `oneOf`,
 # which OpenAI strict mode rejects — 98 of 98 executor calls 400'd in run
 # 2026_08_21_1. Plain, pydantic emits the supported `anyOf`, and `type` stays a
@@ -345,6 +361,8 @@ Action = (
     | BuildAction
     | ResearchAction
     | QueueVillagerAction
+    | TrainUnitAction
+    | AssignIdleAction
     | DragAction
     | WaitAction
     | ScrollAction
@@ -373,6 +391,8 @@ _ACTION_TYPE_MAP: dict[str, type[Action]] = {
     "build": BuildAction,
     "research": ResearchAction,
     "queue_villager": QueueVillagerAction,
+    "train_unit": TrainUnitAction,
+    "assign_idle": AssignIdleAction,
     "drag": DragAction,
     "wait": WaitAction,
     "scroll": ScrollAction,

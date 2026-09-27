@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Protocol, TypedDict, cast
 
+from .policy.state import PolicyState
 from .turn_timing import ACT_LOOP, PERCEIVE_LOOP, TURN_LOOP, LatencySnapshot
 
 
@@ -197,8 +198,7 @@ class AgentMemory:
         # accumulated here — LLM-echoed observations hallucinate; only OCR
         # frames count (record_food_reading, called from
         # GoalManager.update_resource_readings).
-        if turn.observed_resources:
-            self.game_state.resources.update(turn.observed_resources)
+        # A model's observation is useful history, never a HUD measurement.
 
     def update_from_observations(self, observations: dict[str, object]) -> None:
         """Update game state from LLM observations."""
@@ -266,7 +266,7 @@ class AgentMemory:
         if AGE_SCORES.get(age, 0) > AGE_SCORES.get(self.highest_age, 0):
             self.highest_age = age
 
-    def get_context_for_llm(self) -> str:
+    def get_context_for_llm(self, observed_state: PolicyState | None = None) -> str:
         """Build context string for LLM prompt.
 
         NOTE: cross-game memories are NOT loaded here anymore. They live in the
@@ -277,7 +277,12 @@ class AgentMemory:
         parts = []
 
         # Current game state
-        parts.append(f"## Current Game State\n{self._format_game_state()}")
+        current_state = (
+            self._format_game_state()
+            if observed_state is None
+            else self._format_observed_state(observed_state)
+        )
+        parts.append(f"## Current Game State\n{current_state}")
 
         # Episode summary (if exists)
         if self.episode_summary:
@@ -310,6 +315,24 @@ class AgentMemory:
             parts.append(header + "\n".join(recent_lines))
 
         return "\n\n".join(parts)
+
+    @staticmethod
+    def _format_observed_state(state: PolicyState) -> str:
+        resources = ", ".join(
+            f"{name}={getattr(state, name) if name in state.known_resources else '?'}"
+            for name in ("food", "wood", "gold", "stone")
+        )
+        return "\n".join(
+            (
+                f"- Resources: {resources}",
+                f"- Population: {state.population}/{state.population_cap}",
+                f"- Age: {state.age}",
+                f"- Idle Villagers: {state.idle_count if state.idle_count is not None else state.idle_present}",
+                f"- Confirmed Buildings: {', '.join(sorted(state.buildings_seen)) or 'none'}",
+                f"- Pending Actions: {', '.join(sorted(state.pending_actions)) or 'none'}",
+                f"- Reserved Resources: {dict(state.reserved_resources)}",
+            )
+        )
 
     def no_change_streak(self) -> int:
         """Trailing turns whose actions had no visible effect.
@@ -493,10 +516,6 @@ class AgentMemory:
                 "list[str]", observations.get("events", []) if observations else []
             ),
         )
-
-        # Update state from observations
-        if observations:
-            self.update_from_observations(observations)
 
         # Add to working memory
         self.add_turn(turn)

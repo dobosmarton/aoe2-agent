@@ -1,8 +1,4 @@
-"""The act clock: one decision per frame, executed at once.
-
-Once per frame, because every rule guard reads the HUD: a second decision on
-one frame would spend the same state twice. Budget: 100 ms p95 on `decide`.
-"""
+"""The actor: ask once, revalidate against current facts, execute one named action."""
 
 from __future__ import annotations
 
@@ -15,109 +11,217 @@ import structlog
 from ..config import config
 from ..models import validate_actions
 from ..policy.allocation import focused
-from ..policy.candidates import feasible_candidates
-from ..policy.engine import decide as fallback_decide
-from ..policy.idle import distribute_idle
+from ..policy.candidates import feasible_candidates, find_candidate
+from ..policy.fallback import select_fallback
+from ..policy.request import policy_request, state_for_frame
+from ..providers.policy import PolicyAdvisorError
 from ..turn_timing import ACT_LOOP
-from .policy import state_for_frame
 
 if TYPE_CHECKING:
-    from ..models import Action
-    from ..policy.state import PolicyState
+    from ..policy.advice import PolicyAdvice, PolicyRequest
+    from ..policy.candidates import ActionCandidate
+    from ..providers.policy import PolicyAdvisor
     from .context import LoopContext
     from .snapshot import Perception
 
 log = structlog.stdlib.get_logger()
-
-# How long to wait for a frame before checking whether the game ended.
 _STOP_POLL = 0.5
 
 
-async def act_loop(ctx: LoopContext) -> None:
-    """Decide on every frame the perceive loop publishes."""
-    decided_at = 0.0  # monotonic stamps are positive, so 0.0 is "no frame yet"
+async def act_loop(ctx: LoopContext, advisor: PolicyAdvisor) -> None:
+    """Consume the execution frame, not merely the frame that started the ask."""
+    consumed_at = 0.0
     tick = 0
-    while not ctx.stopping:
-        try:
-            frame = await asyncio.wait_for(ctx.frames.after(decided_at), timeout=_STOP_POLL)
-        except TimeoutError:
-            continue  # no frame yet — re-check the stop flag
-        decided_at = frame.captured_at
-        tick += 1
-        await act_once(ctx, frame, tick)
+    try:
+        while not ctx.stopping:
+            try:
+                frame = await asyncio.wait_for(ctx.frames.after(consumed_at), timeout=_STOP_POLL)
+            except TimeoutError:
+                continue
+            tick += 1
+            consumed_at = max(consumed_at, await act_once(ctx, advisor, frame, tick))
+    finally:
+        await advisor.aclose()
 
 
-async def act_once(ctx: LoopContext, frame: Perception, tick: int) -> None:
-    """Decide on one frame and execute what it asks for."""
-    if ctx.input_lock.locked():
-        # The combat tool loop is typing. Queueing behind it would act on a
-        # frame the burst has already invalidated.
-        log.debug("act_skipped", reason="input_locked", frame_tick=frame.tick)
-        return
-    with ctx.latency.tick(ACT_LOOP, tick) as timings:
-        with timings.phase("decide"):
-            actions = _decide(ctx, frame)
-        if not actions:
-            return
-        log.info(
-            "act_decided",
-            frame_tick=frame.tick,
-            state_age_ms=round(frame.age_ms),
-            actions=len(actions),
-        )
-        with timings.phase("execute"):
-            # Safe despite the check above: nothing awaits in between, so the lock
-            # cannot change hands. Keep `_decide` synchronous or this breaks.
-            async with ctx.input_lock:
-                results = await ctx.actuator.execute(actions)
-        ctx.memory.record_action_results(sum(1 for r in results if r.success), len(results))
-
-
-def _decide(ctx: LoopContext, frame: Perception) -> list[Action]:
-    """Choose from cached advice synchronously, or use the rule fallback."""
-    entities = list(frame.entities)
-    state = state_for_frame(ctx, frame)
-    if frame.alarm:
-        return validate_actions(_fallback_commands(ctx, entities, state, frame.alarm))
-
-    candidates = feasible_candidates(state)
-    resolution = ctx.policy_advice.consume(
-        candidates,
-        now=time.monotonic(),
-        ttl_seconds=config.policy_advice_ttl,
-        minimum_confidence=config.policy_min_confidence,
-    )
-    if resolution.should_fallback:
-        log.debug("policy_advice_rejected", reason=resolution.status)
-        return validate_actions(_fallback_commands(ctx, entities, state, frame.alarm))
-
-    allocation = (
-        focused(state.age, resolution.allocation_focus)
-        if resolution.allocation_focus is not None
-        else ctx.goal_manager.allocation
-    )
-    commands = resolution.action.render() if resolution.action is not None else []
-    commands.extend(distribute_idle(entities, state, None, allocation))
-    log.info(
-        "policy_advice_applied",
-        status=resolution.status,
-        action=resolution.advice.action_choice if resolution.advice else None,
-        allocation=resolution.allocation_focus,
-    )
-    return validate_actions(commands)
-
-
-def _fallback_commands(
+async def act_once(
     ctx: LoopContext,
-    entities: list[object],
-    state: PolicyState,
-    alarm: bool,
-) -> list[dict[str, object]]:
-    return fallback_decide(
-        entities,
-        state,
-        alarm,
-        strategist_allocation=ctx.goal_manager.allocation,
+    advisor: PolicyAdvisor,
+    frame: Perception,
+    tick: int,
+) -> float:
+    """One bounded judgment, with the latest observation checked under input ownership."""
+    if frame.alarm or ctx.input_lock.locked():
+        log.debug(
+            "act_skipped", reason="alarm" if frame.alarm else "input_locked", frame_tick=frame.tick
+        )
+        return frame.captured_at
+
+    request = policy_request(ctx, frame)
+    started_at = time.monotonic()
+    advice: PolicyAdvice | None = None
+    failure: str | None = None
+    with ctx.latency.tick(ACT_LOOP, tick) as timings:
+        with timings.phase("policy"):
+            try:
+                async with asyncio.timeout(config.policy_timeout):
+                    advice = await advisor.advise(request)
+            except TimeoutError:
+                failure = "provider_timeout"
+            except PolicyAdvisorError as exc:
+                failure = f"provider_error:{type(exc).__name__}"
+            except Exception as exc:
+                failure = f"provider_error:{type(exc).__name__}"
+                log.warning("policy_provider_failed", error=repr(exc))
+
+        if ctx.input_lock.locked():
+            latest = ctx.frames.latest() or frame
+            _log_outcome(frame, latest, started_at, "superseded", "input_locked")
+            return latest.captured_at
+
+        with timings.phase("execute"):
+            async with ctx.input_lock:
+                latest = ctx.frames.latest() or frame
+                if latest.alarm:
+                    _log_outcome(frame, latest, started_at, "superseded", "alarm")
+                    return latest.captured_at
+                if not latest.spatial_valid or (
+                    ctx.ledger is not None and latest.input_revision != ctx.ledger.input_revision
+                ):
+                    _log_outcome(
+                        frame, latest, started_at, "superseded", "observation_crossed_input"
+                    )
+                    return latest.captured_at
+
+                current_state = state_for_frame(ctx, latest)
+                candidates = feasible_candidates(current_state)
+                selected, status, reason = _choose_action(
+                    ctx, request, advice, failure, latest, candidates
+                )
+                _log_outcome(
+                    frame,
+                    latest,
+                    started_at,
+                    status,
+                    reason,
+                    action=selected.id,
+                    model=advice.model if advice is not None else None,
+                )
+                if selected.id == "tactical_handoff":
+                    ctx.tactical_requested.set()
+                    return latest.captured_at
+                commands = selected.render()
+                if not commands:
+                    return latest.captured_at
+                actions = validate_actions(commands)
+                if len(actions) != len(commands):
+                    log.error("catalog_render_invalid", action=selected.id)
+                    if ctx.ledger is not None:
+                        ctx.ledger.record_failure(f"invalid catalog render: {selected.id}")
+                    return latest.captured_at
+
+                log.info(
+                    "act_decided",
+                    action=selected.id,
+                    source_tick=frame.tick,
+                    execution_tick=latest.tick,
+                    source_input_revision=request.source_input_revision,
+                    state_age_ms=round(latest.age_ms),
+                    reservations=ctx.ledger.reservations() if ctx.ledger is not None else {},
+                )
+                failures_before = ctx.ledger.failure_count if ctx.ledger is not None else 0
+                operation_before = ctx.ledger.next_operation_id if ctx.ledger is not None else 0
+                results = await ctx.actuator.execute(actions)
+                ctx.memory.record_action_results(
+                    sum(result.success for result in results), len(results)
+                )
+                if ctx.ledger is not None:
+                    if (
+                        (not results or not all(result.success for result in results))
+                        and ctx.ledger.failure_count == failures_before
+                        and not ctx.ledger.has_pending_since(operation_before)
+                    ):
+                        detail = next(
+                            (result.detail for result in results if not result.success), "no result"
+                        )
+                        ctx.ledger.record_failure(f"{selected.id}: {detail}")
+                    elif selected.id.startswith(("assign_",)):
+                        ctx.ledger.record_success()
+                log.info(
+                    "act_execution_outcome",
+                    action=selected.id,
+                    source_tick=frame.tick,
+                    execution_tick=latest.tick,
+                    success=bool(results) and all(result.success for result in results),
+                    details=[result.detail for result in results],
+                )
+                return latest.captured_at
+
+
+def _choose_action(
+    ctx: LoopContext,
+    request: PolicyRequest,
+    advice: PolicyAdvice | None,
+    failure: str | None,
+    latest: Perception,
+    candidates: tuple[ActionCandidate, ...],
+) -> tuple[ActionCandidate, str, str]:
+    """A newer frame is fine; a changed fact or input needs a fresh eligible choice."""
+    state = state_for_frame(ctx, latest)
+    if failure is not None:
+        status = "timed_out" if failure == "provider_timeout" else "fallback"
+        return select_fallback(candidates, state, ctx.goal_manager.allocation), status, failure
+    if advice is None:
+        return (
+            select_fallback(candidates, state, ctx.goal_manager.allocation),
+            "fallback",
+            "no_advice",
+        )
+
+    reason: str | None = None
+    if (
+        advice.source_tick != request.source_tick
+        or advice.source_captured_at != request.source_captured_at
+    ):
+        reason = "source_frame_mismatch"
+    elif request.source_input_revision != latest.input_revision:
+        reason = "input_revision_changed"
+    elif request.goal_revision != ctx.goal_manager.revision:
+        reason = "goal_revision_changed"
+    elif request.state.age != state.age:
+        reason = "age_changed"
+    elif advice.action_confidence < config.policy_min_confidence:
+        reason = "low_confidence"
+    else:
+        selected = find_candidate(candidates, advice.action_choice)
+        if selected is not None:
+            return selected, "applied", "eligible_on_latest_frame"
+        reason = "candidate_unavailable"
+
+    allocation = ctx.goal_manager.allocation
+    if advice.allocation_confidence >= config.policy_min_confidence:
+        allocation = focused(state.age, advice.allocation_focus)
+    return select_fallback(candidates, state, allocation), "rejected", reason
+
+
+def _log_outcome(
+    source: Perception,
+    execution: Perception,
+    started_at: float,
+    status: str,
+    reason: str,
+    **details: object,
+) -> None:
+    log.info(
+        "policy_advice_outcome",
+        status=status,
+        reason=reason,
+        source_tick=source.tick,
+        execution_tick=execution.tick,
+        revalidated=execution.tick != source.tick,
+        state_age_ms=round(execution.age_ms),
+        latency_ms=round((time.monotonic() - started_at) * 1000),
+        **details,
     )
 
 

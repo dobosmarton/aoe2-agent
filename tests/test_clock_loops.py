@@ -1,4 +1,4 @@
-"""The supervisor: it starts the four clocks, and it labels the end.
+"""The supervisor starts the three clocks and labels the end.
 
 Everything here runs on fake source, actuator and policy providers, so there is
 no game, detector or LLM. That is the point of the environment seam.
@@ -12,7 +12,8 @@ import time
 import pytest
 from gameplay_agent import executor as ex
 from gameplay_agent import game_loop as gl
-from gameplay_agent.loops import deliberate, perceive
+from gameplay_agent.detection_phase import DetectionUnavailableError
+from gameplay_agent.loops import perceive
 from gameplay_agent.loops.snapshot import Perception
 from gameplay_agent.memory import AgentMemory
 from gameplay_agent.providers.base import LLMResult
@@ -134,6 +135,28 @@ def test_a_source_failure_still_labels_the_run(loop_seams, monkeypatch) -> None:
     assert memory.game_end_reason == "interrupted"
 
 
+def test_detector_outage_fails_the_run_with_an_explicit_reason(loop_seams, monkeypatch) -> None:
+    source, _actuator = loop_seams
+
+    async def _unavailable(*_args: object, **_kwargs: object) -> None:
+        raise DetectionUnavailableError("remote detector timed out")
+
+    monkeypatch.setattr(source, "capture", _unavailable)
+    memory = AgentMemory()
+
+    with pytest.raises(DetectionUnavailableError):
+        asyncio.run(
+            gl.game_loop(
+                _FakeProvider(),
+                FakePolicyAdvisor(),
+                max_iterations=1,
+                memory=memory,
+            )
+        )
+
+    assert memory.game_end_reason == "detector_unavailable"
+
+
 def test_the_source_is_closed(loop_seams) -> None:
     """The overlay lives behind the source, so the run must release it."""
     source, _actuator = loop_seams
@@ -158,17 +181,16 @@ def test_the_refresh_hook_replaces_the_inline_rescan(loop_seams) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def _stalled_plan(*_args: object, **_kwargs: object) -> LLMResult:
-    """An LLM that never answers inside a game's lifetime."""
+async def _stalled_advice(*_args: object, **_kwargs: object) -> LLMResult:
+    """A policy call that never answers inside a game's lifetime."""
     await asyncio.sleep(30)
     return LLMResult(reasoning="too late", actions=[], observations={})
 
 
 def test_act_ticks_while_the_llm_stalls(loop_seams, monkeypatch) -> None:
-    """The load-bearing check. Under the old turn loop a 30 s call stopped the
-    agent dead; here the act loop keeps deciding on every frame."""
-    monkeypatch.setattr(deliberate.config, "deliberate_interval", 1)  # ask every frame
-    monkeypatch.setattr(ExecutorProvider, "plan", _stalled_plan)
+    """A bounded policy call does not stop the actor clock."""
+    monkeypatch.setattr(FakePolicyAdvisor, "advise", _stalled_advice)
+    monkeypatch.setattr(gl.config, "policy_timeout", 0.001)
     memory = _play(frames=5)
     assert memory.get_metrics_snapshot()["loop_arch"] == "clocks"
 
@@ -176,8 +198,8 @@ def test_act_ticks_while_the_llm_stalls(loop_seams, monkeypatch) -> None:
 def test_the_frames_keep_coming_while_the_llm_stalls(loop_seams, monkeypatch) -> None:
     source, _actuator = loop_seams
 
-    monkeypatch.setattr(deliberate.config, "deliberate_interval", 1)
-    monkeypatch.setattr(ExecutorProvider, "plan", _stalled_plan)
+    monkeypatch.setattr(FakePolicyAdvisor, "advise", _stalled_advice)
+    monkeypatch.setattr(gl.config, "policy_timeout", 0.001)
     _play(frames=5)
     assert source.captures == 5
 

@@ -251,7 +251,7 @@ def test_temperature_is_omitted_when_unset() -> None:
     import openai
     from gameplay_agent.providers.wire_openai import _temperature
 
-    assert _temperature(None) is openai.NOT_GIVEN
+    assert _temperature(None) is openai.omit
 
 
 def test_temperature_is_forwarded_when_set() -> None:

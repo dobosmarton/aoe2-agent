@@ -1,4 +1,4 @@
-"""The four clocks — act, perceive, policy and deliberate."""
+"""The three clocks — perceive, act-with-policy, and deliberate."""
 
 from .context import LoopContext as LoopContext
 from .snapshot import FramePipe as FramePipe

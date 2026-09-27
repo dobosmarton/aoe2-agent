@@ -79,16 +79,15 @@ class GoalManager:
         # Latest strategist allocation; None until it answers, and for the
         # whole game when the LLM is down — the seeded per-age mix covers that.
         self.allocation: Allocation | None = None
-        # Set when the last `set_goals` moved the goal names; read once through
-        # `take_goals_changed`.
-        self._goals_changed: bool = False
+        self.revision: int = 0
 
     def set_goals(self, goals: list[Goal]) -> None:
         """Replace active goals with new ones from the strategist.
 
-        Merges progress for goals in both lists, matched by name, and flags a
-        moved name set — which the deliberate loop triggers on.
+        Merges progress for goals in both lists and revises the actor's goal
+        generation when the strategic target changes.
         """
+        old_signature = tuple((g.name, g.metric, g.target, g.priority) for g in self.active_goals)
         old_by_name = {g.name: g for g in self.active_goals}
         for goal in goals:
             old = old_by_name.get(goal.name)
@@ -96,12 +95,16 @@ class GoalManager:
                 goal.progress = old.progress
                 goal.completed = old.completed
         self.active_goals = [g for g in goals if not g.completed]
-        self._goals_changed = {g.name for g in self.active_goals} != set(old_by_name)
+        if (
+            tuple((g.name, g.metric, g.target, g.priority) for g in self.active_goals)
+            != old_signature
+        ):
+            self.revision += 1
 
-    def take_goals_changed(self) -> bool:
-        """Whether the goals moved since the last ask. Consumes the flag."""
-        changed, self._goals_changed = self._goals_changed, False
-        return changed
+    def set_allocation(self, allocation: Allocation | None) -> None:
+        if self.allocation != allocation:
+            self.allocation = allocation
+            self.revision += 1
 
     def evaluate_progress(self, game_state: GameState, turn: int) -> None:
         """Update progress for all active goals based on current game state."""
@@ -233,11 +236,21 @@ class GoalManager:
 
     # --- Resource readings cache ---
 
+    @property
+    def observed_resource_fields(self) -> frozenset[str]:
+        """Resource names present in the most recent authoritative OCR read."""
+        return frozenset(self._resource_readings) & frozenset({"food", "wood", "gold", "stone"})
+
+    @property
+    def observed_population(self) -> bool:
+        return "population" in self._resource_readings
+
     def update_resource_readings(
         self, readings: dict[str, object], memory: AgentMemory | None = None
     ) -> None:
-        """Cache resource readings from strategist and update game state."""
+        """Cache perception OCR readings and update observed game state."""
         if not readings:
+            self._resource_readings = {}
             return
         self._resource_readings = readings
         log.debug("resource_readings_cached", **readings)
@@ -245,13 +258,13 @@ class GoalManager:
         # Also update the memory's game state if provided
         if memory:
             obs: dict[str, object] = {}
-            if "food" in readings:
-                obs["resources"] = {
-                    "food": readings.get("food", 0),
-                    "wood": readings.get("wood", 0),
-                    "gold": readings.get("gold", 0),
-                    "stone": readings.get("stone", 0),
-                }
+            resources = {
+                name: readings[name]
+                for name in ("food", "wood", "gold", "stone")
+                if name in readings
+            }
+            if resources:
+                obs["resources"] = resources
             if "population" in readings:
                 obs["population"] = readings["population"]
             if "idle_present" in readings:
@@ -268,8 +281,8 @@ class GoalManager:
                     # OCR-boundary cast; int() keeps coercing (and the suppress
                     # keeps tolerating) junk exactly as before.
                     memory.record_food_reading(int(cast("int | str", readings["food"])))
-            # Age goes through a dedicated channel — the strategist is the only
-            # authoritative source for current_age (executor was hallucinating it).
+            # Age goes through a dedicated observation channel; model responses
+            # cannot change the current age.
             if "age" in readings:
                 memory.update_age(cast("str", readings["age"]))
 
@@ -279,7 +292,7 @@ class GoalManager:
             return ""
         r = self._resource_readings
         lines = [
-            "## Resource Status (from strategist)",
+            "## Resource Status (from perception OCR)",
             f"- Food: {r.get('food', '?')}",
             f"- Wood: {r.get('wood', '?')}",
             f"- Gold: {r.get('gold', '?')}",
@@ -363,4 +376,5 @@ class GoalManager:
 
         # Add to front of active goals (highest priority)
         self.active_goals = emergency_goals + self.active_goals
+        self.revision += 1
         log.info("emergency_goals_injected", threat_types=list(threat_types)[:5])

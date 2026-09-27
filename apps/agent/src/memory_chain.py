@@ -165,9 +165,9 @@ class MemoryChain:
         created = []
         next_num = self._next_file_number()
         for obs in observations:
-            safe_title = re.sub(r"[^a-z0-9_]", "_", (obs.get("title") or "observation").lower())[
-                :50
-            ]
+            raw_title = obs.get("title")
+            title = raw_title if isinstance(raw_title, str) else "observation"
+            safe_title = re.sub(r"[^a-z0-9_]", "_", title.lower())[:50]
             if safe_title in existing_titles:
                 log.info("memory_dedup_skipped", title=safe_title, type=obs.get("type"))
                 continue

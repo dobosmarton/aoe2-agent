@@ -67,7 +67,7 @@ def _response(action: str = "build_house") -> SystemOneResponse:
         model="jev-1.13.0",
         usage=Usage(input_tokens=91, output_tokens=12),
         answers={
-            "economy_action": ChoiceAnswer(
+            "gameplay_action": ChoiceAnswer(
                 choice=action,
                 confidence=0.91,
                 probabilities={action: 0.91, "wait": 0.09},
@@ -82,9 +82,11 @@ def _response(action: str = "build_house") -> SystemOneResponse:
 
 
 def test_adapter_batches_action_and_allocation_into_one_request() -> None:
-    state = PolicyState(population=4, population_cap=5, wood=100, food=200)
+    state = PolicyState(population=4, population_cap=5, wood=100, food=200, idle_present=True)
     client = FakeTypeSafeClient(_response())
-    advisor = TypeSafePolicyAdvisor(api_key="unused", model="jev-1.13.0", client=client)
+    advisor = TypeSafePolicyAdvisor(
+        api_key="unused", model="jev-1.13.0", timeout_seconds=2.0, client=client
+    )
 
     advice = asyncio.run(advisor.advise(_request(state)))
 
@@ -101,21 +103,39 @@ def test_adapter_batches_action_and_allocation_into_one_request() -> None:
     assert isinstance(active_goals, list)
     first_goal = _as_mapping(active_goals[0])
 
-    assert set(questions) == {"economy_action", "allocation_focus"}
+    assert set(questions) == {"gameplay_action", "allocation_focus"}
     assert resources["wood"] == 100
     assert first_goal["name"] == "Reach Feudal"
     assert model == "jev-1.13.0"
 
 
+def test_missing_hud_values_are_null_not_fresh_zeroes() -> None:
+    state = PolicyState(known_resources=frozenset(), population_known=False)
+    client = FakeTypeSafeClient(_response(action="wait"))
+    advisor = TypeSafePolicyAdvisor(
+        api_key="unused", model="jev-1.13.0", timeout_seconds=2.0, client=client
+    )
+
+    _ = asyncio.run(advisor.advise(_request(state)))
+
+    game = _as_mapping(_as_mapping(client.calls[0][0])["game"])
+    resources = _as_mapping(game["resources"])
+    population = _as_mapping(game["population"])
+    assert resources == {"food": None, "wood": None, "gold": None, "stone": None}
+    assert population["current"] is None and population["capacity"] is None
+
+
 def test_adapter_requires_a_server_side_credential() -> None:
     with pytest.raises(ValueError, match="TYPESAFE_API_KEY"):
-        _ = TypeSafePolicyAdvisor(api_key="  ", model="jev-1.13.0")
+        _ = TypeSafePolicyAdvisor(api_key="  ", model="jev-1.13.0", timeout_seconds=2.0)
 
 
 def test_adapter_rejects_a_choice_outside_reviewed_candidates() -> None:
-    state = PolicyState(population=4, population_cap=5, wood=100, food=200)
+    state = PolicyState(population=4, population_cap=5, wood=100, food=200, idle_present=True)
     client = FakeTypeSafeClient(_response(action="delete_town_center"))
-    advisor = TypeSafePolicyAdvisor(api_key="unused", model="jev-1.13.0", client=client)
+    advisor = TypeSafePolicyAdvisor(
+        api_key="unused", model="jev-1.13.0", timeout_seconds=2.0, client=client
+    )
 
     with pytest.raises(PolicyAdvisorError, match="unavailable action"):
         _ = asyncio.run(advisor.advise(_request(state)))
@@ -135,7 +155,9 @@ def test_only_wait_is_selected_locally_without_an_action_question() -> None:
         },
     )
     client = FakeTypeSafeClient(response)
-    advisor = TypeSafePolicyAdvisor(api_key="unused", model="jev-1.13.0", client=client)
+    advisor = TypeSafePolicyAdvisor(
+        api_key="unused", model="jev-1.13.0", timeout_seconds=2.0, client=client
+    )
 
     advice = asyncio.run(advisor.advise(_request(state)))
 
@@ -145,7 +167,9 @@ def test_only_wait_is_selected_locally_without_an_action_question() -> None:
 
 def test_client_is_closed_at_the_lifecycle_boundary() -> None:
     client = FakeTypeSafeClient(_response())
-    advisor = TypeSafePolicyAdvisor(api_key="unused", model="jev-1.13.0", client=client)
+    advisor = TypeSafePolicyAdvisor(
+        api_key="unused", model="jev-1.13.0", timeout_seconds=2.0, client=client
+    )
 
     asyncio.run(advisor.aclose())
 
