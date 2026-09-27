@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
@@ -18,6 +19,9 @@ from gameplay_agent.detection_phase import (
     _translated_static,
 )
 from PIL import Image
+
+if TYPE_CHECKING:
+    from gameplay_agent.entity_snapshot import EntitySnapshot
 
 _SIZE = (640, 360)
 
@@ -260,7 +264,9 @@ class _Detector:
         return self.entities
 
 
-def _run_ladder(detector: _Detector, differ: FrameDiffer | None, frame: bytes) -> list[object]:
+def _run_ladder(
+    detector: _Detector, differ: FrameDiffer | None, frame: bytes
+) -> tuple[EntitySnapshot, ...]:
     import asyncio
 
     from gameplay_agent import detection_phase as dp
@@ -288,7 +294,9 @@ def test_an_unchanged_frame_is_served_from_the_tracker(_cache) -> None:
     """The cheapest rung: nothing moved, so extrapolate instead of detecting."""
     frame = _jpg(_noise_frame(1))
     detector = _Detector(tracker=_Tracker(confidence=0.9, predicted=[{"class": "tree"}]))
-    assert _run_ladder(detector, _settled_differ(frame), frame) == [{"class": "tree"}]
+    assert [
+        entity.class_name for entity in _run_ladder(detector, _settled_differ(frame), frame)
+    ] == ["tree"]
 
 
 def test_an_unchanged_frame_costs_no_detection(_cache) -> None:
@@ -304,7 +312,62 @@ def test_an_unchanged_frame_with_a_lost_tracker_keeps_the_last_entities(_cache) 
     frame = _jpg(_noise_frame(1))
     detector = _Detector(tracker=_Tracker(confidence=0.1))
     held = _run_ladder(detector, _settled_differ(frame), frame)
-    assert [e["class"] for e in held] == ["mill"]
+    assert [entity.class_name for entity in held] == ["mill"]
+
+
+def test_cached_detector_object_remains_renderable_on_unchanged_frame(_cache) -> None:
+    """Regression: the overlay used to receive the executor cache's dictionaries."""
+    from core import DetectedEntity
+    from gameplay_agent.overlay import DetectionOverlay
+
+    class _Canvas:
+        def __init__(self) -> None:
+            self.rectangles: list[tuple[float, float, float, float]] = []
+
+        def delete(self, _tag: str) -> None:
+            return None
+
+        def create_rectangle(
+            self, x0: float, y0: float, x1: float, y1: float, **_kwargs: object
+        ) -> None:
+            self.rectangles.append((x0, y0, x1, y1))
+
+        def create_text(self, *_args: object, **_kwargs: object) -> None:
+            return None
+
+    class _Root:
+        def geometry(self, _value: str) -> None:
+            return None
+
+        def update_idletasks(self) -> None:
+            return None
+
+        def update(self) -> None:
+            return None
+
+    _cache.set_detected_entities(
+        [
+            DetectedEntity(
+                id="mill_0",
+                class_name="mill",
+                bbox=(10.0, 20.0, 30.0, 40.0),
+                center=(20.0, 30.0),
+                confidence=0.9,
+            )
+        ]
+    )
+    frame = _jpg(_noise_frame(1))
+    held = _run_ladder(_Detector(tracker=_Tracker(confidence=0.1)), _settled_differ(frame), frame)
+    overlay = DetectionOverlay.__new__(DetectionOverlay)
+    canvas = _Canvas()
+    overlay._root = _Root()
+    overlay._canvas = canvas
+    overlay._visible = True
+    overlay._ocr_fields = {}
+
+    overlay.show(held, (0, 0, 640, 360))
+
+    assert canvas.rectangles[0] == (10.0, 20.0, 30.0, 40.0)
 
 
 def test_a_panned_frame_is_served_from_the_cache(_cache) -> None:
@@ -315,7 +378,7 @@ def test_a_panned_frame_is_served_from_the_cache(_cache) -> None:
     moved = _run_ladder(detector, _settled_differ(_jpg(first)), _jpg(_panned(first, 80, 0)))
     # Phase correlation is sub-pixel, not exact — the same tolerance the pan
     # measurement itself is tested to.
-    assert moved[0]["center"] == pytest.approx((180, 100), abs=_MAX_PAN_ERROR_PX)
+    assert moved[0].center == pytest.approx((180, 100), abs=_MAX_PAN_ERROR_PX)
 
 
 def test_a_panned_frame_costs_no_detection(_cache) -> None:
@@ -330,7 +393,8 @@ def test_an_unrelated_frame_pays_for_a_detection(_cache) -> None:
     """Two frames that cannot correlate: no rung above the detector applies."""
     detector = _Detector(entities=[{"class": "sheep"}], tracker=None)
     differ = _settled_differ(_jpg(_noise_frame(1)))
-    assert _run_ladder(detector, differ, _jpg(_noise_frame(2))) == [{"class": "sheep"}]
+    detected = _run_ladder(detector, differ, _jpg(_noise_frame(2)))
+    assert [entity.class_name for entity in detected] == ["sheep"]
 
 
 def test_a_disabled_cache_always_detects(_cache, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -357,7 +421,8 @@ def test_a_collapsed_entity_count_resets_the_tracker(_cache) -> None:
 def test_no_differ_still_detects(_cache) -> None:
     """The differ is optional — opencv may be absent on a host."""
     detector = _Detector(entities=[{"class": "sheep"}], tracker=None)
-    assert _run_ladder(detector, None, _jpg(_noise_frame(1))) == [{"class": "sheep"}]
+    detected = _run_ladder(detector, None, _jpg(_noise_frame(1)))
+    assert [entity.class_name for entity in detected] == ["sheep"]
 
 
 def test_a_failed_detection_empties_the_cache(_cache) -> None:

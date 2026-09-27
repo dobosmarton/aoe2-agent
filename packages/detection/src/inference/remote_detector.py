@@ -23,12 +23,17 @@ from .postprocess import nms as _apply_nms
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    import httpx
     from PIL import Image
 
 logger = logging.getLogger(__name__)
 
 # Re-check server health after this many seconds of being unavailable
 _HEALTH_RECHECK_INTERVAL: float = 30.0
+
+
+class DetectionUnavailableError(RuntimeError):
+    """The required detector cannot produce observations."""
 
 
 class RemoteDetector:
@@ -44,6 +49,7 @@ class RemoteDetector:
         confidence_threshold: float = 0.35,
         imgsz: int = 1280,
         fallback_detector: EntityDetector | None = None,
+        client: httpx.AsyncClient | None = None,
     ) -> None:
         import httpx
 
@@ -51,7 +57,7 @@ class RemoteDetector:
         self.confidence_threshold = confidence_threshold
         self.imgsz = imgsz
         self._fallback = fallback_detector
-        self._client = httpx.AsyncClient(timeout=10.0)
+        self._client = client if client is not None else httpx.AsyncClient(timeout=10.0)
         self._server_available = True
         self._last_health_check: float = 0.0
 
@@ -210,6 +216,7 @@ class RemoteDetector:
             self._server_available = True
             logger.info("remote_server_reconnected")
 
+        started_at = time.monotonic()
         try:
             response = await self._client.post(
                 f"{self.server_url}{endpoint}",
@@ -222,7 +229,16 @@ class RemoteDetector:
             detections = data.get("detections", [])
             return cast("list[dict]", detections) if isinstance(detections, list) else []
         except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError) as e:
-            logger.warning("remote_detection_failed: %s", e)
+            logger.warning(
+                "remote_detection_failed server=%s endpoint=%s error_type=%s "
+                "error=%r elapsed=%.2fs fallback=%s",
+                self.server_url,
+                endpoint,
+                type(e).__name__,
+                e,
+                time.monotonic() - started_at,
+                self._fallback is not None,
+            )
             self._server_available = False
             self._last_health_check = time.monotonic()
             return None
@@ -281,12 +297,30 @@ class RemoteDetector:
     ) -> list[DetectedEntity]:
         """Fall back to local ONNX detector."""
         if self._fallback is None:
-            logger.error("remote_detection_failed_no_fallback")
+            logger.error(
+                "remote_detection_unavailable_empty_result server=%s method=%s",
+                self.server_url,
+                method,
+            )
             return []
 
         logger.info("falling_back_to_local_detector method=%s", method)
         fn = cast("Callable[..., list[DetectedEntity]]", getattr(self._fallback, method))
         return await asyncio.to_thread(fn, screenshot)
+
+
+class RequiredRemoteDetector(RemoteDetector):
+    """Remote detector used by experiments where changing observations is invalid."""
+
+    async def _fallback_detect(
+        self,
+        screenshot: bytes | Image.Image,
+        method: str,
+    ) -> list[DetectedEntity]:
+        del screenshot
+        raise DetectionUnavailableError(
+            f"required remote detector {self.server_url!r} cannot run {method!r}"
+        )
 
 
 def _local_model_exists() -> bool:
@@ -302,7 +336,6 @@ def _local_model_exists() -> bool:
 def get_remote_detector(
     server_url: str,
     imgsz: int = 1280,
-    with_fallback: bool = True,
     model_name: str | None = None,
 ) -> RemoteDetector:
     """Create a RemoteDetector, keeping a local model as fallback only if one exists.
@@ -310,15 +343,15 @@ def get_remote_detector(
     A *mock* detector is never kept as the fallback: on a server outage it would
     silently return fabricated detections instead of failing loudly. The fallback
     is populated only when a real local model is present (e.g. the serving host);
-    remote-only deploys get ``None``, so an outage surfaces as empty detections
-    plus a logged error rather than garbage.
+    remote-only interactive deploys get ``None`` and publish an empty result
+    during an outage rather than fabricating detections.
 
     ``model_name`` is the configured served model (``config.detection_model``) —
     passing it lets ``get_detector`` warn loudly when the local fallback has to
     substitute different bundled weights (e.g. only an old version on disk).
     """
     fallback: EntityDetector | None = None
-    if with_fallback and _local_model_exists():
+    if _local_model_exists():
         try:
             candidate = get_detector(imgsz=imgsz, model_name=model_name)
             fallback = candidate if not candidate.use_mock else None
@@ -330,3 +363,24 @@ def get_remote_detector(
         imgsz=imgsz,
         fallback_detector=fallback,
     )
+
+
+def get_required_remote_detector(
+    server_url: str,
+    imgsz: int = 1280,
+) -> RemoteDetector:
+    """Create a detector whose remote-service failure is fatal to the caller."""
+    return RequiredRemoteDetector(
+        server_url=server_url,
+        imgsz=imgsz,
+        fallback_detector=None,
+    )
+
+
+__all__ = [
+    "DetectionUnavailableError",
+    "RemoteDetector",
+    "RequiredRemoteDetector",
+    "get_remote_detector",
+    "get_required_remote_detector",
+]

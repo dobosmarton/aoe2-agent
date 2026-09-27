@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal, Protocol, TypeAlias, cast
 
 import structlog
 
@@ -33,9 +33,10 @@ if TYPE_CHECKING:
 
     from .overlay import DetectionOverlay
 
-    Detector = EntityDetector | RemoteDetector
+    Detector: TypeAlias = EntityDetector | RemoteDetector
 
 from .config import config
+from .entity_snapshot import EntitySnapshot, snapshot_entities
 from .entity_utils import CLASSES_BY_KIND, build_entity_summary
 from .executor import (
     GATE_BUILDING_CLASSES,
@@ -48,9 +49,18 @@ from .screen import capture_screenshot, save_screenshot
 log = structlog.stdlib.get_logger()
 
 
+class DetectionUnavailableError(RuntimeError):
+    """The configured detector cannot serve a recorded game."""
+
+
+_REMOTE_DETECTION_ERROR: type[RuntimeError] = DetectionUnavailableError
 try:
     from detection.inference.detector import get_detector
+    from detection.inference.remote_detector import (
+        DetectionUnavailableError as RemoteDetectionUnavailableError,
+    )
 
+    _REMOTE_DETECTION_ERROR = RemoteDetectionUnavailableError
     DETECTION_AVAILABLE = True
 except ImportError:
     DETECTION_AVAILABLE = False
@@ -74,13 +84,22 @@ async def _invoke_detector(
     so the return type is asserted here.
     """
     fn = cast("Callable[..., object]", getattr(det, method))
-    if asyncio.iscoroutinefunction(fn):
-        return cast("list[DetectedEntity]", await fn(*args, **kwargs))
-    return cast("list[DetectedEntity]", await asyncio.to_thread(fn, *args, **kwargs))
+    try:
+        if asyncio.iscoroutinefunction(fn):
+            return cast("list[DetectedEntity]", await fn(*args, **kwargs))
+        return cast("list[DetectedEntity]", await asyncio.to_thread(fn, *args, **kwargs))
+    except _REMOTE_DETECTION_ERROR as exc:
+        raise DetectionUnavailableError(str(exc)) from exc
+
+
+class DetectorFactory(Protocol):
+    """Construct the detector policy required by one execution environment."""
+
+    def __call__(self) -> Detector | None: ...
 
 
 def init_detector() -> Detector | None:
-    """Initialize YOLO detector (remote or local)."""
+    """Initialize a resilient interactive detector."""
     if not DETECTION_AVAILABLE:
         return None
     try:
@@ -109,8 +128,46 @@ def init_detector() -> Detector | None:
         )
         return detector
     except Exception as e:
-        log.warning("detector_init_failed", error=str(e))
+        log.warning("detector_init_failed", error_type=type(e).__name__, error=repr(e))
         return None
+
+
+def init_required_detector() -> Detector | None:
+    """Initialize the configured detector or fail a recorded experiment."""
+    if not DETECTION_AVAILABLE:
+        raise DetectionUnavailableError("detection package is unavailable")
+    try:
+        if config.detection_host:
+            from detection.inference.remote_detector import get_required_remote_detector
+
+            detector = get_required_remote_detector(
+                config.detection_host,
+                imgsz=config.detection_imgsz,
+            )
+            log.info("detector_initialized", mode="required_remote", server=config.detection_host)
+            return detector
+        detector = get_detector(
+            use_mock=False,
+            imgsz=config.detection_imgsz,
+            use_sahi=False,
+            model_name=config.detection_model,
+        )
+        if detector.use_mock:
+            raise DetectionUnavailableError(
+                f"configured local model {config.detection_model!r} is unavailable"
+            )
+        log.info(
+            "detector_initialized",
+            mode=detector.backend or "yolo",
+            confidence_threshold=detector.confidence_threshold,
+        )
+        return detector
+    except DetectionUnavailableError:
+        raise
+    except Exception as exc:
+        raise DetectionUnavailableError(
+            f"could not initialize configured detector: {type(exc).__name__}: {exc!r}"
+        ) from exc
 
 
 # Classes that never move, so a cached position stays valid once translated by
@@ -199,7 +256,7 @@ async def detect_frame(
     detector: Detector,
     differ: FrameDiffer | None,
     screenshot: bytes,
-) -> Sequence[object]:
+) -> tuple[EntitySnapshot, ...]:
     """The cheapest view of this frame that is still true.
 
     Run 2026_08_22_1 served 112 of 212 frames from the 2 rungs above the
@@ -207,14 +264,14 @@ async def detect_frame(
     """
     change = differ.compare(screenshot) if differ else None
     if change is None:
-        return await _detected_frame(detector, screenshot)
-    if not change.changed:
-        return _unchanged_frame(detector)
-    if config.rescan_cache:
-        translated = _panned_frame(change)
-        if translated is not None:
-            return translated
-    return await _detected_frame(detector, screenshot)
+        entities = await _detected_frame(detector, screenshot)
+    elif not change.changed:
+        entities = _unchanged_frame(detector)
+    elif config.rescan_cache and (translated := _panned_frame(change)) is not None:
+        entities = translated
+    else:
+        entities = await _detected_frame(detector, screenshot)
+    return snapshot_entities(entities)
 
 
 def _unchanged_frame(detector: Detector) -> Sequence[object]:
@@ -256,8 +313,11 @@ async def _detected_frame(detector: Detector, screenshot: bytes) -> Sequence[obj
     previous = get_detected_entities()
     try:
         entities = await _invoke_detector(detector, "detect_fast", screenshot)
+    except DetectionUnavailableError:
+        clear_detected_entities()
+        raise
     except Exception as e:
-        log.warning("detection_failed", error=str(e))
+        log.warning("detection_failed", error_type=type(e).__name__, error=repr(e))
         clear_detected_entities()
         return []
     if detector.tracker and previous and len(entities) < len(previous) * ENTITY_DROP_RATIO:
@@ -294,7 +354,7 @@ async def summarize_frame(
         log.debug("ownership_classification_failed", error=str(e))
 
     entity_summary = build_entity_summary(
-        detected_entities,
+        list(detected_entities),
         max_count=ENTITY_DISPLAY_LIMIT,
         ownership_results=ownership_results,
     )
@@ -305,8 +365,11 @@ __all__ = [
     "DETECTION_AVAILABLE",
     "ENTITY_DISPLAY_LIMIT",
     "STATIC_CLASSES",
+    "DetectionUnavailableError",
+    "DetectorFactory",
     "detect_frame",
     "init_detector",
     "init_frame_differ",
+    "init_required_detector",
     "summarize_frame",
 ]

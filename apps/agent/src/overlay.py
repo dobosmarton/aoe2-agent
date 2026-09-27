@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from detection.inference.detector import DetectedEntity
+    from .entity_snapshot import EntitySnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -174,13 +174,13 @@ class DetectionOverlay:
 
     def show(
         self,
-        entities: Sequence[DetectedEntity],
+        entities: Sequence[EntitySnapshot],
         window_rect: tuple[int, int, int, int] | None,
     ) -> None:
         """Draw detection boxes and show the overlay.
 
         Args:
-            entities: List of DetectedEntity from YOLO detection
+            entities: Normalized detections from the current perception frame
             window_rect: Game window (left, top, width, height) in screen coords
         """
         if not window_rect:
@@ -196,6 +196,8 @@ class DetectionOverlay:
 
         # Draw each entity
         for entity in entities:
+            if entity.bbox is None:
+                continue
             label = f"{entity.class_name} {entity.confidence:.0%}"
             self._draw_labeled_box(entity.bbox, _get_color(entity.class_name), label)
 
