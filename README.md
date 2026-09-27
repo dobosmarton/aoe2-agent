@@ -25,7 +25,7 @@ Alarm / tactical handoff / repeated failure → Executor (LLM, text) → Tactica
 | Policy | `jev-1.13.0` | Immutable snapshot, goals, feasible catalog | Typed action and allocation choices | Every new routine frame |
 | Executor | `gpt-5.6-luna` | Observed text and action outcomes | Guarded tactical or recovery tools | Alarm, handoff, or recovery only |
 
-The actor waits up to two seconds for one TypeSafe answer. A newer frame can revalidate that choice; changed input, age, goals, alarms, or eligibility reject it. Failed or timed-out advice falls back to the same action catalog. The executor uses a tool loop only for combat, handoff, or recovery; recovery is limited to three guarded tools.
+The actor waits up to two seconds for one TypeSafe answer. A newer frame can revalidate that choice; changed input, age, goals, alarms, or eligibility reject it. Failed or timed-out advice falls back to the same action catalog and advances the highest unmet goal. Opening goals are observed villager growth and food-worker coverage; they do not override an eligible TypeSafe choice. The catalog prevents premature or duplicate houses. Idle-worker assignments bind an exact target after the camera jump and remain pending until a matching HUD worker-count increase confirms the assignment. The executor uses a tool loop only for combat, handoff, or recovery; recovery is limited to three guarded tools.
 
 The executor never sees screenshots. All visual information comes from YOLO entity detection (text list of class/position/confidence) and the strategist's cached resource readings.
 
@@ -351,7 +351,7 @@ Action success/failure is tracked via `ActionResult` objects returned by the exe
 
 ### Autoresearch (`autoresearch/`)
 
-Automated experiment framework. Runs timed games, collects metrics (peak population, food gathered, survival time, action success rate), and scores performance for prompt optimization.
+Automated experiment framework. Runs timed games, collects metrics (peak population, food gathered, survival time, confirmed economic-action success rate), and scores performance for prompt optimization. Input acceptance is reported separately. Unverified economic commitments invalidate a recorded score, and the new outcome/food-income accounting establishes a new baseline: do not compare these scores directly with older runs.
 
 ### Synthetic Perception (`evaluation/world_sim.py`)
 

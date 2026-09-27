@@ -69,7 +69,7 @@ HEADER = [
 
 # 2 = age-weighted (plan 2.3). Version 1 weighted survival 0.30 and population
 # 0.25 against age 0.20, which ranked the only Feudal game 3rd of 14.
-SCORE_VERSION = 2
+SCORE_VERSION = 3
 
 
 def _metric(score: GameScore, key: str, default: float = 0.0) -> float:

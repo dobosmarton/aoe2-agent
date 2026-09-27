@@ -147,16 +147,18 @@ async def run_and_log(
         use_overlay=use_overlay,
     )
 
-    # Log to experiment ledger (manual runs are always "accepted")
+    # An uncertain essential operation is a diagnostic run, not a valid score.
+    accepted = bool(result["metrics"]["score_valid"])
     log_experiment(
         experiment_id=experiment_id,
         loop=loop,
         change_description=description,
         score=result["score"],
-        accepted=True,
+        accepted=accepted,
     )
 
     result["experiment_id"] = experiment_id
+    result["accepted"] = accepted
     return result
 
 
@@ -223,6 +225,8 @@ def main() -> None:
     print(f"Survival:       {score.survival:.4f}")
     print(f"End Reason:     {result['metrics']['game_end_reason']}")
     print(f"Turns:          {result['metrics']['turn_count']}")
+    if not result["accepted"]:
+        raise SystemExit("Run invalid for scoring: essential actions remain unverifiable")
 
 
 if __name__ == "__main__":
