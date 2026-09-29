@@ -4,8 +4,11 @@ Usage:
     python -m autoresearch.game_runner [--time-budget 1200] [--experiment-id exp_0001]
 """
 
+from __future__ import annotations
+
 import argparse
 import asyncio
+from typing import TYPE_CHECKING, TypedDict
 
 import structlog
 from autoresearch.experiment_log import get_next_experiment_id, log_experiment
@@ -14,10 +17,31 @@ from autoresearch.trace import build_game_trace, save_trace
 from gameplay_agent.config import config
 from gameplay_agent.detection_phase import init_required_detector
 from gameplay_agent.game_loop import game_loop
+from gameplay_agent.game_profile import load_profile, recording_qualification
 from gameplay_agent.memory import AgentMemory
 from gameplay_agent.memory_chain import MemoryChain
 from gameplay_agent.providers.executor_provider import ExecutorProvider
 from gameplay_agent.providers.typesafe_policy import TypeSafePolicyAdvisor
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from autoresearch.metrics import GameScore
+    from autoresearch.trace import GameTrace
+    from gameplay_agent.memory import MetricsSnapshot
+
+
+class GameRunResult(TypedDict):
+    metrics: MetricsSnapshot
+    score: GameScore
+    memory_files: list[Path]
+    trace: GameTrace
+
+
+class LoggedGameRunResult(GameRunResult):
+    experiment_id: str
+    accepted: bool
+
 
 log = structlog.stdlib.get_logger()
 
@@ -29,7 +53,7 @@ async def run_game(
     game_id: str | None = None,
     extract_memories: bool = True,
     use_overlay: bool = False,
-) -> dict:
+) -> GameRunResult:
     """Run a single game and return metrics.
 
     Args:
@@ -49,12 +73,16 @@ async def run_game(
         timeout_seconds=config.policy_timeout,
     )
     memory = AgentMemory()
+    profile = load_profile(config.game_profile_path) if config.game_profile_path else None
+    missing_qualification = recording_qualification(profile)
 
     log.info(
         "game_start",
         time_budget=time_budget,
         max_iterations=max_iterations,
         model=config.model,
+        declared_map=profile.map_name if profile is not None else None,
+        profile_qualification_gaps=missing_qualification,
     )
 
     memory = await game_loop(
@@ -69,6 +97,13 @@ async def run_game(
     )
 
     metrics = memory.get_metrics_snapshot()
+    if missing_qualification:
+        metrics["score_valid"] = False
+        log.warning(
+            "recorded_profile_unqualified",
+            declared_map=profile.map_name if profile is not None else None,
+            missing=missing_qualification,
+        )
     score = compute_score(metrics)
 
     log.info(
@@ -84,8 +119,8 @@ async def run_game(
     )
 
     # Extract cross-game memory fragments
-    memory_files = []
-    if extract_memories and metrics["turn_count"] > 0:
+    memory_files: list[Path] = []
+    if extract_memories and metrics["score_valid"] and metrics["turn_count"] > 0:
         try:
             chain = MemoryChain()
             memory_files = chain.extract_memories(
@@ -125,7 +160,7 @@ async def run_and_log(
     time_budget: float | None = None,
     max_iterations: int | None = None,
     use_overlay: bool = False,
-) -> dict:
+) -> LoggedGameRunResult:
     """Run a game and log results to the experiment ledger.
 
     Args:
@@ -147,7 +182,7 @@ async def run_and_log(
         use_overlay=use_overlay,
     )
 
-    # An uncertain essential operation is a diagnostic run, not a valid score.
+    # Unqualified setup or uncertain essential effects make a run diagnostic-only.
     accepted = bool(result["metrics"]["score_valid"])
     log_experiment(
         experiment_id=experiment_id,
@@ -157,9 +192,11 @@ async def run_and_log(
         accepted=accepted,
     )
 
-    result["experiment_id"] = experiment_id
-    result["accepted"] = accepted
-    return result
+    return {
+        **result,
+        "experiment_id": experiment_id,
+        "accepted": accepted,
+    }
 
 
 class _GameRunnerArgs(argparse.Namespace):
@@ -226,7 +263,7 @@ def main() -> None:
     print(f"End Reason:     {result['metrics']['game_end_reason']}")
     print(f"Turns:          {result['metrics']['turn_count']}")
     if not result["accepted"]:
-        raise SystemExit("Run invalid for scoring: essential actions remain unverifiable")
+        raise SystemExit("Run invalid for scoring: profile or essential action evidence incomplete")
 
 
 if __name__ == "__main__":

@@ -137,7 +137,7 @@ ValueError: unknown AOE2_LLM_WIRE='zzz'; expected one of 'anthropic', 'openai', 
 | `AOE2_LOOP_DELAY` | `0.3` | Seconds between iterations |
 | `AOE2_SAVE_SCREENSHOTS` | `true` | Save screenshots to logs/ |
 | `AOE2_OCR_BACKEND` | `rapidocr` | Exact-resolution HUD templates run first; this backend resolves unreadable fields and age text |
-| `AOE2_GAME_PROFILE` | — | Path to a recorded 4v4 roster/profile JSON; team colors remain unknown until its roster is verified |
+| `AOE2_GAME_PROFILE` | — | Path to a declared Arabia or Highland 4v4 profile; recorded scores require verified roster, hotkeys, and ownership colors. The map is metadata only. |
 | `AOE2_DETECTION_HOST` | — | Remote detection server URL (e.g., `http://192.168.64.1:8420`) |
 | `AOE2_TEMPERATURE` | — | Sampling temperature; unset = not sent. `gpt-5.6` rejects any value but 1 |
 | `AOE2_SEED` | — | Local RNG seed; unset = OS entropy |

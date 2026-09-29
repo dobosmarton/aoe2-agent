@@ -4,11 +4,12 @@ import json
 from pathlib import Path
 
 import pytest
-from gameplay_agent.game_profile import GameProfile, load_profile
+from gameplay_agent.game_profile import GameProfile, load_profile, recording_qualification
 from gameplay_agent.preflight import inspect_capture, run_preflight
 from pydantic import ValidationError
 
 _EXAMPLE = Path(__file__).parents[1] / "apps/agent/profiles/magyars_arabia_4v4.example.json"
+_HIGHLAND = Path(__file__).parents[1] / "apps/agent/profiles/magyars_highland_4v4.example.json"
 
 
 def test_example_is_structurally_valid_but_not_qualified() -> None:
@@ -17,6 +18,22 @@ def test_example_is_structurally_valid_but_not_qualified() -> None:
     assert profile.roster_verified is False
     assert profile.hotkeys_verified is False
     assert profile.ownership_verified is False
+
+
+def test_highland_is_a_supported_declared_map() -> None:
+    data = load_profile(_EXAMPLE).model_dump()
+    data["map_name"] = "Highland"
+
+    assert GameProfile.model_validate(data).map_name == "Highland"
+    assert load_profile(_HIGHLAND).map_name == "Highland"
+
+
+def test_recorded_profile_requires_a_verified_roster_but_not_map() -> None:
+    profile = load_profile(_EXAMPLE)
+
+    assert "map" not in recording_qualification(profile)
+    assert "roster" in recording_qualification(profile)
+    assert recording_qualification(None) == ("profile",)
 
 
 def test_profile_rejects_a_team_relationship_mismatch() -> None:
@@ -66,3 +83,4 @@ def test_preflight_reads_calibrated_hud_but_does_not_self_certify_window(monkeyp
     assert not checks["roster"].passed
     assert not checks["hotkeys"].passed
     assert not checks["ownership_colors"].passed
+    assert "map" not in checks

@@ -29,7 +29,7 @@ class GameProfile(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
 
     civilization: Literal["Magyars"]
-    map_name: Literal["Arabia"]
+    map_name: Literal["Arabia", "Highland"]
     resources: Literal["standard"]
     population_limit: Literal[200]
     locked_teams: Literal[True]
@@ -73,4 +73,16 @@ def load_profile(path: Path) -> GameProfile:
     return GameProfile.model_validate_json(path.read_text(encoding="utf-8"))
 
 
-__all__ = ["GameProfile", "PlayerSlot", "load_profile"]
+def recording_qualification(profile: GameProfile | None) -> tuple[str, ...]:
+    """Missing declarations that make a screen-controlled run comparable."""
+    if profile is None:
+        return ("profile",)
+    checks = (
+        ("roster", profile.roster_verified),
+        ("hotkeys", profile.hotkeys_verified),
+        ("ownership_colors", profile.ownership_verified),
+    )
+    return tuple(name for name, verified in checks if not verified)
+
+
+__all__ = ["GameProfile", "PlayerSlot", "load_profile", "recording_qualification"]

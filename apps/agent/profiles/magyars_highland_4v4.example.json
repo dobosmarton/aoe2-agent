@@ -1,0 +1,26 @@
+{
+  "civilization": "Magyars",
+  "map_name": "Highland",
+  "resources": "standard",
+  "population_limit": 200,
+  "locked_teams": true,
+  "language": "en",
+  "capture_width": 3024,
+  "capture_height": 1672,
+  "ui_scale": 1.0,
+  "hotkey_profile": "RECORD_EXPORTED_PROFILE",
+  "game_data_version": "RECORD_GAME_BUILD",
+  "roster_verified": false,
+  "hotkeys_verified": false,
+  "ownership_verified": false,
+  "players": [
+    {"number": 1, "name": "RECORD_PLAYER_1", "color": "blue", "team": 1, "relationship": "own"},
+    {"number": 2, "name": "RECORD_PLAYER_2", "color": "red", "team": 1, "relationship": "ally"},
+    {"number": 3, "name": "RECORD_PLAYER_3", "color": "green", "team": 1, "relationship": "ally"},
+    {"number": 4, "name": "RECORD_PLAYER_4", "color": "yellow", "team": 1, "relationship": "ally"},
+    {"number": 5, "name": "RECORD_PLAYER_5", "color": "cyan", "team": 2, "relationship": "enemy"},
+    {"number": 6, "name": "RECORD_PLAYER_6", "color": "purple", "team": 2, "relationship": "enemy"},
+    {"number": 7, "name": "RECORD_PLAYER_7", "color": "gray", "team": 2, "relationship": "enemy"},
+    {"number": 8, "name": "RECORD_PLAYER_8", "color": "orange", "team": 2, "relationship": "enemy"}
+  ]
+}

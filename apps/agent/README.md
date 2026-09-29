@@ -51,8 +51,8 @@ just agent                                       # Real game on Windows VM
 just agent --iterations 50
 just agent --test                                # One iteration, no clicks
 
-# Copy and fill the example with the actual eight-player lobby roster and
-# exported hotkey/game-build details, then validate the Windows setup.
+# Copy the Arabia or Highland example, fill the actual eight-player lobby
+# roster and exported hotkey/game-build details, then validate Windows.
 uv run --no-sync python -m gameplay_agent.preflight --profile my-4v4-profile.json
 AOE2_GAME_PROFILE=my-4v4-profile.json just agent
 
@@ -62,21 +62,33 @@ uv run --package gameplay-agent \
     apps/agent/src/scenarios/age_up_gate_fires.yaml
 ```
 
-The profile example is [magyars_arabia_4v4.example.json](profiles/magyars_arabia_4v4.example.json)
-and is deliberately unqualified. Preflight exits nonzero until the window,
-HUD, selection, roster, hotkey, and ownership-color gates are satisfied. It
+The [Arabia](profiles/magyars_arabia_4v4.example.json) and
+[Highland](profiles/magyars_highland_4v4.example.json) examples are deliberately
+unqualified. The declared map is recorded for comparison but does not change
+gameplay or require verification; the screen reader cannot recognize a map name.
+Recorded experiments with no profile or unverified roster, hotkeys, or ownership
+colors are invalid for scoring. Preflight exits nonzero until the window, HUD,
+selection, roster, hotkey, and ownership-color gates are satisfied. It
 checks geometry and screen readings without sending input; a human must verify
 hotkey effects and labeled team colors in the game before setting those flags.
 Without qualified ownership colors, non-blue units remain `unknown` and cannot
 trigger team alarms. The September 27 run was
 a four-player game, not the target 4v4 profile.
 
+Input-dependent captures use a lightweight HUD read without age text OCR. A
+resource assignment requires a fresh detector view after the idle-villager
+camera jump; old screen coordinates cannot authorize the click. If that view
+has no safe target, the specific assignment is deferred so another eligible
+resource or infrastructure action can proceed.
+
 The screen-controlled 4v4 profile is not yet qualified as a playable game
 agent. Current tests cover HUD replay, selection guards, catalog feasibility,
 and scripted economic/age actions. They do not validate hover feedback,
 production queues, construction previews, minimap navigation, tactical control
 groups, or live binding effects. The Windows opening, sustained-play, and
-three-match gates remain required before claiming successful team play.
+three-match gates remain required before claiming successful team play. Highland
+has water-separated terrain, but this profile does not yet qualify cross-river
+navigation or naval play; its first gate is the same land-opening economy.
 
 ## Where to read more
 
