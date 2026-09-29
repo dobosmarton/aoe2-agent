@@ -113,6 +113,7 @@ class Config(BaseModel):
     # Resource bar is read locally (Claude vision dropped). Backend: rapidocr
     # (pip-only, runs on onnxruntime) | tesseract (needs binary) | template.
     ocr_backend: str = "rapidocr"  # AOE2_OCR_BACKEND
+    game_profile_path: Path | None = None  # AOE2_GAME_PROFILE
 
     # Determinism knobs (Phase 3). Pin model snapshots via AOE2_MODEL /
     # AOE2_STRATEGIST_MODEL to a dated form rather than the floating family
@@ -176,6 +177,9 @@ class Config(BaseModel):
             policy_timeout=float(os.environ.get("AOE2_POLICY_TIMEOUT", "2.0")),
             policy_min_confidence=float(os.environ.get("AOE2_POLICY_MIN_CONFIDENCE", "0.65")),
             ocr_backend=os.environ.get("AOE2_OCR_BACKEND", "rapidocr"),
+            game_profile_path=(
+                Path(path) if (path := os.environ.get("AOE2_GAME_PROFILE")) else None
+            ),
             perceive_interval=float(os.environ.get("AOE2_PERCEIVE_INTERVAL", "0.5")),
             save_screenshots=os.environ.get("AOE2_SAVE_SCREENSHOTS", "true").lower() == "true",
             detection_host=os.environ.get("AOE2_DETECTION_HOST", ""),

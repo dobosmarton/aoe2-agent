@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 
+from ..policy.controller import AgentController
 from ..turn_timing import LatencyRecorder
 from .snapshot import FramePipe
 
@@ -35,6 +36,7 @@ class LoopContext:
     source: FrameSource
     actuator: Actuator
     ledger: ActionLedger | None = None
+    controller: AgentController = field(default_factory=AgentController)
 
     # Perceive publishes; act and deliberate read. See `FramePipe`.
     frames: FramePipe = field(default_factory=FramePipe)

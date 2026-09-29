@@ -63,18 +63,21 @@ async def act_once(
     started_at = time.monotonic()
     advice: PolicyAdvice | None = None
     failure: str | None = None
+    if ctx.controller.overdue(request.state, request.candidates, ctx.goal_manager.allocation):
+        failure = "obligation_overdue"
     with ctx.latency.tick(ACT_LOOP, tick) as timings:
         with timings.phase("policy"):
-            try:
-                async with asyncio.timeout(config.policy_timeout):
-                    advice = await advisor.advise(request)
-            except TimeoutError:
-                failure = "provider_timeout"
-            except PolicyAdvisorError as exc:
-                failure = f"provider_error:{type(exc).__name__}"
-            except Exception as exc:
-                failure = f"provider_error:{type(exc).__name__}"
-                log.warning("policy_provider_failed", error=repr(exc))
+            if failure is None:
+                try:
+                    async with asyncio.timeout(config.policy_timeout):
+                        advice = await advisor.advise(request)
+                except TimeoutError:
+                    failure = "provider_timeout"
+                except PolicyAdvisorError as exc:
+                    failure = f"provider_error:{type(exc).__name__}"
+                except Exception as exc:
+                    failure = f"provider_error:{type(exc).__name__}"
+                    log.warning("policy_provider_failed", error=repr(exc))
 
         if ctx.input_lock.locked():
             latest = ctx.frames.latest() or frame
@@ -87,7 +90,7 @@ async def act_once(
                 if latest.alarm:
                     _log_outcome(frame, latest, started_at, "superseded", "alarm")
                     return latest.captured_at
-                if not latest.spatial_valid or (
+                if (not latest.spatial_valid and not latest.hud_only) or (
                     ctx.ledger is not None and latest.input_revision != ctx.ledger.input_revision
                 ):
                     _log_outcome(
@@ -141,6 +144,7 @@ async def act_once(
                 )
                 operation_before = ctx.ledger.next_operation_id if ctx.ledger is not None else 0
                 results = await ctx.actuator.execute(actions)
+                ctx.controller.record_attempt(selected.id)
                 ctx.memory.record_action_results(
                     sum(result.success for result in results), len(results)
                 )
@@ -183,6 +187,8 @@ def _choose_action(
 ) -> tuple[ActionCandidate, str, str]:
     """A newer frame is fine; a changed fact or input needs a fresh eligible choice."""
     state = state_for_frame(ctx, latest)
+    if overdue := ctx.controller.overdue(state, candidates, ctx.goal_manager.allocation):
+        return overdue, "fallback", "obligation_overdue"
     if failure is not None:
         status = "timed_out" if failure == "provider_timeout" else "fallback"
         return (
@@ -209,18 +215,22 @@ def _choose_action(
         reason = "goal_revision_changed"
     elif request.state.age != state.age:
         reason = "age_changed"
-    elif advice.action_confidence < config.policy_min_confidence:
-        reason = "low_confidence"
     else:
-        selected = find_candidate(candidates, advice.action_choice)
-        if selected is not None:
-            return selected, "applied", "eligible_on_latest_frame"
-        reason = "candidate_unavailable"
+        if advice.allocation_confidence >= config.policy_min_confidence:
+            ctx.goal_manager.set_allocation(focused(state.age, advice.allocation_focus))
+        if advice.action_confidence < config.policy_min_confidence:
+            reason = "low_confidence"
+        else:
+            selected = find_candidate(candidates, advice.action_choice)
+            if selected is not None:
+                return selected, "applied", "eligible_on_latest_frame"
+            reason = "candidate_unavailable"
 
-    allocation = ctx.goal_manager.allocation
-    if advice.allocation_confidence >= config.policy_min_confidence:
-        allocation = focused(state.age, advice.allocation_focus)
-    return select_fallback(candidates, state, allocation, request.goals), "rejected", reason
+    return (
+        select_fallback(candidates, state, ctx.goal_manager.allocation, request.goals),
+        "rejected",
+        reason,
+    )
 
 
 def _log_outcome(

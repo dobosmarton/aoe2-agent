@@ -406,12 +406,14 @@ def test_check_alarm_below_threshold_no_alarm() -> None:
 
 
 def test_check_alarm_three_threats_triggers_and_injects_emergency_goal() -> None:
+    from detection.inference.ownership import Owner
+
     m = GoalManager()
     entities = [
         _FakeEntity(id=f"e{i}", class_name="archer_line", center=(0, 0), confidence=0.9)
         for i in range(3)
     ]
-    assert m.check_alarm(entities, {}) is True
+    assert m.check_alarm(entities, {f"e{i}": (Owner.ENEMY, 0.9) for i in range(3)}) is True
     assert m._alarm_active is True
     # Emergency "Defend base" goal pushed to front
     assert m.active_goals[0].name == "Defend base"
@@ -420,27 +422,44 @@ def test_check_alarm_three_threats_triggers_and_injects_emergency_goal() -> None
 
 def test_check_alarm_does_not_double_inject_emergency_goal() -> None:
     """If 'Defend base' is already active, a second alarm shouldn't add another."""
+    from detection.inference.ownership import Owner
+
     m = GoalManager()
     entities = [
         _FakeEntity(id=f"e{i}", class_name="archer_line", center=(0, 0), confidence=0.9)
         for i in range(3)
     ]
-    m.check_alarm(entities, {})
-    m.check_alarm(entities, {})  # second call
+    enemies = {f"e{i}": (Owner.ENEMY, 0.9) for i in range(3)}
+    m.check_alarm(entities, enemies)
+    m.check_alarm(entities, enemies)  # second call
     defend_count = sum(1 for g in m.active_goals if g.name == "Defend base")
     assert defend_count == 1
 
 
 def test_check_alarm_resets_when_threats_disappear() -> None:
+    from detection.inference.ownership import Owner
+
     m = GoalManager()
     entities = [
         _FakeEntity(id=f"e{i}", class_name="archer_line", center=(0, 0), confidence=0.9)
         for i in range(3)
     ]
-    m.check_alarm(entities, {})
+    m.check_alarm(entities, {f"e{i}": (Owner.ENEMY, 0.9) for i in range(3)})
     assert m._alarm_active is True
     m.check_alarm([], {})  # threats gone
     assert m._alarm_active is False
+
+
+def test_unclassified_or_allied_army_does_not_trigger_team_alarm() -> None:
+    from detection.inference.ownership import Owner
+
+    entities = [
+        _FakeEntity(id=f"e{i}", class_name="archer_line", center=(0, 0), confidence=0.9)
+        for i in range(3)
+    ]
+    assert GoalManager().check_alarm(entities, {}) is False
+    allies = {"e0": (Owner.ALLY, 0.9), "e1": (Owner.ALLY, 0.9), "e2": (Owner.UNKNOWN, 0.0)}
+    assert GoalManager().check_alarm(entities, allies) is False
 
 
 def test_check_alarm_non_threat_class_ignored() -> None:

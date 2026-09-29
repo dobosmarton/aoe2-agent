@@ -17,9 +17,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import yaml
+from detection.inference.ownership import Owner
 
 from . import executor
 from .entity_snapshot import snapshot_entities
+from .entity_utils import GATHER_CLASSES_BY_KIND
 from .goal_logger import GoalLogger
 from .goals import GoalManager
 from .loops.act import act_once
@@ -29,6 +31,7 @@ from .loops.snapshot import Perception, SpatialRefresh
 from .loops.source import GameActuator, Sighting
 from .memory import AgentMemory
 from .policy.advice import PolicyAdvice, readonly_probabilities
+from .policy.controller import AgentController
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -75,6 +78,7 @@ def _steps(value: object) -> tuple[ScenarioStep, ...]:
 
 class _ScriptedWorld:
     def __init__(self, initial: Mapping[str, object]) -> None:
+        self.virtual_time = time.monotonic()
         self.resources = {
             name: _integer(_mapping(initial.get("resources", {}), "resources").get(name), name)
             for name in ("food", "wood", "gold", "stone")
@@ -96,6 +100,9 @@ class _ScriptedWorld:
         self.idle_count = _integer(initial.get("idle_count", 0), "idle_count")
 
     def apply(self, after: Mapping[str, object], point: tuple[float, float] | None) -> None:
+        # A scenario advances only when an expected input earns a consequence.
+        # Model/API wall latency must not alter gameplay deadlines in this harness.
+        self.virtual_time += 0.25
         if "resources" in after:
             for name, value in _mapping(after["resources"], "after.resources").items():
                 if name not in self.resources:
@@ -124,7 +131,13 @@ class _ScriptedWorld:
                 raise ValueError("after.building must be text")
             center = point or (700.0, 500.0)
             self.entities.append(
-                {"id": f"{building}_{len(self.entities)}", "class": building, "center": center}
+                {
+                    "id": f"{building}_{len(self.entities)}",
+                    "class": building,
+                    "center": center,
+                    "bbox": (center[0] - 30, center[1] - 30, center[0] + 30, center[1] + 30),
+                    "confidence": 1.0,
+                }
             )
 
     def readings(self) -> dict[str, object]:
@@ -156,6 +169,9 @@ class _ScriptedSource:
         self.world = world
         self.ledger = ledger
 
+    async def capture_hud(self, tick: int, timings: TickTimings) -> None:
+        """Scenarios drive explicit full observations, not a second HUD clock."""
+
     async def capture(self, tick: int, timings: TickTimings) -> Sighting:
         with timings.phase("capture"):
             entities = snapshot_entities(self.world.entities)
@@ -170,9 +186,13 @@ class _ScriptedSource:
                 tick=tick,
                 captured_at=time.monotonic(),
             )
-        return Sighting(frame)
+        # The scripted world contains controlled-player entities only. Its
+        # ownership fact is explicit, unlike an unlabeled live detector box.
+        return Sighting(frame, {entity.id: (Owner.OWN, 1.0) for entity in entities})
 
-    async def capture_spatial(self, timings: TickTimings) -> SpatialRefresh:
+    async def capture_spatial(
+        self, timings: TickTimings, *, selection_only: bool = False
+    ) -> SpatialRefresh:
         with timings.phase("capture"):
             executor.set_detected_entities(snapshot_entities(self.world.entities))
             return SpatialRefresh(time.monotonic(), self.ledger.input_revision, True)
@@ -217,6 +237,37 @@ class _ScriptedInput:
         self.calls: list[str] = []
         self.issued = False
 
+    def _hit(self, point: tuple[float, float] | None, classes: frozenset[str]) -> bool:
+        if point is None:
+            return False
+        x, y = point
+        return any(
+            entity.class_name in classes
+            and entity.bbox is not None
+            and entity.bbox[0] <= x <= entity.bbox[2]
+            and entity.bbox[1] <= y <= entity.bbox[3]
+            for entity in snapshot_entities(self.world.entities)
+        )
+
+    def _clear_placement(self, point: tuple[float, float] | None) -> bool:
+        if point is None:
+            return False
+        x, y = point
+        return not any(
+            entity.bbox is not None
+            and entity.bbox[0] <= x <= entity.bbox[2]
+            and entity.bbox[1] <= y <= entity.bbox[3]
+            for entity in snapshot_entities(self.world.entities)
+        )
+
+    def _training_selection_valid(self, action: str) -> bool:
+        if action == "queue_villager":
+            return self.ledger.selected_unit == "town_center"
+        if not action.startswith("train_"):
+            return False
+        unit = executor.UNITS.get(action.removeprefix("train_"))
+        return unit is not None and self.ledger.selected_unit in unit.requires
+
     def _record(self, method: str, key: str = "", point: tuple[float, float] | None = None) -> None:
         self.calls.append(f"{method}:{key}" if key else method)
         if method == "press":
@@ -232,11 +283,7 @@ class _ScriptedInput:
             if selected is not None:
                 self.ledger.selected_unit = selected
                 self.ledger.selected_at_revision = self.ledger.input_revision
-        elif (
-            method == "click"
-            and self.step.action.startswith("build_")
-            and not self.ledger.pending_placements
-        ):
+        elif method == "click" and self._hit(point, frozenset({"villager"})):
             self.ledger.selected_unit = "villager"
             self.ledger.selected_at_revision = self.ledger.input_revision
         if self.issued:
@@ -245,6 +292,8 @@ class _ScriptedInput:
         spent = (
             (
                 method == "click"
+                and self.ledger.selected_unit == "villager"
+                and self._clear_placement(point)
                 and any(
                     action == f"build_{pending.building_class}"
                     for pending in self.ledger.pending_placements
@@ -265,10 +314,16 @@ class _ScriptedInput:
             or (
                 method == "right_click"
                 and action.startswith("assign_")
+                and self.ledger.selected_unit == "villager"
                 and self.ledger.pending_assignment is not None
+                and self._hit(
+                    point,
+                    GATHER_CLASSES_BY_KIND[self.ledger.pending_assignment.resource],
+                )
             )
             or (
                 method == "press"
+                and self._training_selection_valid(action)
                 and any(
                     action
                     == ("queue_villager" if pending.unit == "villager" else f"train_{pending.unit}")
@@ -330,6 +385,7 @@ async def run_scenario_async(path: Path) -> ScenarioResult:
         executor.get_game_window_rect,
         executor.ensure_game_focused,
         executor.get_rescan_fn(),
+        executor._selection_refresh_fn,
     )
     try:
         with tempfile.TemporaryDirectory(prefix="agent-scenario-") as temporary:
@@ -340,6 +396,7 @@ async def run_scenario_async(path: Path) -> ScenarioResult:
                 source=source,
                 actuator=GameActuator(),
                 ledger=ledger,
+                controller=AgentController(clock=lambda: world.virtual_time),
             )
             ctx.memory.action_ledger = ledger
             executor.get_game_window_rect = lambda: (0, 0, 1920, 1080)
@@ -353,6 +410,7 @@ async def run_scenario_async(path: Path) -> ScenarioResult:
                 return True
 
             executor.set_rescan_fn(refresh)
+            executor.set_selection_refresh_fn(refresh)
             tick += 1
             await perceive_once(ctx, tick)
             for index, step in enumerate(steps, start=1):
@@ -381,6 +439,7 @@ async def run_scenario_async(path: Path) -> ScenarioResult:
         executor.get_game_window_rect = original[1]
         executor.ensure_game_focused = original[2]
         executor._rescan_fn = original[3]
+        executor._selection_refresh_fn = original[4]
         executor.clear_detected_entities()
         executor.unbind_ledger(token)
     return ScenarioResult(path.stem, not failures, failures, actions, inputs, world.age)

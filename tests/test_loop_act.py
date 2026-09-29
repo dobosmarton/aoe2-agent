@@ -149,6 +149,76 @@ def test_a_decision_reaches_the_actuator(tmp_path, gates) -> None:
     assert [a["type"] for a in actuator.actions] == ["assign_idle"]
 
 
+def test_successful_typesafe_advice_applies_its_allocation_focus(tmp_path, gates) -> None:
+    ctx = _context(tmp_path)
+    _run(act.act_once(ctx, _HouseAdvisor(action="assign_food"), _idle_frame(), tick=1))
+    allocation = ctx.goal_manager.allocation
+    assert allocation is not None
+    assert allocation.targets["wood"] > 0
+
+
+def test_overdue_opening_food_obligation_bypasses_model_wait(tmp_path, gates) -> None:
+    ctx = _context(tmp_path)
+    advisor = _HouseAdvisor(action="wait")
+    captured_at = time.monotonic() - 6.0
+    frame = Perception(
+        captured_at=captured_at,
+        entities=(_ent("sheep", (100.0, 100.0)),),
+        world=PolicyState(
+            food=200,
+            wood=200,
+            population=4,
+            population_cap=5,
+            villagers=3,
+            idle_present=True,
+            villager_jobs={"food": 0, "wood": 0, "gold": 0, "stone": 0},
+            captured_at=captured_at,
+        ),
+    )
+    _run(act.act_once(ctx, advisor, frame, tick=1))
+    assert advisor.requests == []
+    assert ctx.actuator.actions[0]["type"] == "assign_idle"
+
+
+def test_overdue_idle_tc_obligation_queues_one_villager(tmp_path, gates) -> None:
+    ctx = _context(tmp_path)
+    advisor = _HouseAdvisor(action="wait")
+    captured_at = time.monotonic() - 6.0
+    frame = Perception(
+        captured_at=captured_at,
+        world=PolicyState(
+            food=100,
+            population=4,
+            population_cap=5,
+            villagers=3,
+            idle_present=False,
+            captured_at=captured_at,
+        ),
+    )
+    _run(act.act_once(ctx, advisor, frame, tick=1))
+    assert advisor.requests == []
+    assert ctx.actuator.actions[0]["type"] == "queue_villager"
+
+
+def test_hud_only_frame_can_service_tc_without_authorizing_spatial_clicks(tmp_path, gates) -> None:
+    ctx = _context(tmp_path)
+    frame = Perception(
+        hud_only=True,
+        spatial_valid=False,
+        world=PolicyState(
+            food=100,
+            wood=100,
+            population=4,
+            population_cap=5,
+            villagers=3,
+            idle_present=True,
+            spatial_valid=False,
+        ),
+    )
+    _run(act.act_once(ctx, _HouseAdvisor(action="queue_villager"), frame, tick=1))
+    assert ctx.actuator.actions[0]["type"] == "queue_villager"
+
+
 def test_typesafe_can_choose_food_assignment_in_early_opening(tmp_path, gates) -> None:
     actuator = FakeActuator()
     ctx = _context(tmp_path, actuator)
@@ -666,7 +736,7 @@ def test_urgent_spatial_refresh_bypasses_the_next_slow_full_pass(
                 await asyncio.Event().wait()
             return await super().capture(tick, timings)
 
-        async def capture_spatial(self, timings):
+        async def capture_spatial(self, timings, *, selection_only=False):
             self.spatial_captures += 1
             return SpatialRefresh(
                 captured_at=time.monotonic(), input_revision=0, spatial_valid=True

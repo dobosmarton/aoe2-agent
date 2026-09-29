@@ -57,7 +57,33 @@ async def perceive_loop(ctx: LoopContext) -> None:
             await _refresh_spatial_once(ctx, request)
             continue
         tick += 1
-        await perceive_once(ctx, tick)
+        await perceive_hud_once(ctx, tick)
+        if ctx.stopping:
+            return
+        capture_task = asyncio.create_task(perceive_once(ctx, tick))
+        refresh_task = asyncio.create_task(ctx.frames.wait_for_spatial_request())
+        stop_task = asyncio.create_task(ctx.stop.wait())
+        try:
+            done, _pending = await asyncio.wait(
+                {capture_task, refresh_task, stop_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if stop_task in done and capture_task not in done:
+                capture_task.cancel()
+                await asyncio.gather(capture_task, return_exceptions=True)
+                return
+            if refresh_task in done and capture_task not in done:
+                capture_task.cancel()
+                await asyncio.gather(capture_task, return_exceptions=True)
+                log.info("background_perception_preempted", frame_tick=tick)
+                await _refresh_spatial_once(ctx, refresh_task.result())
+                tick -= 1  # A canceled frame was never published.
+                continue
+            await capture_task
+        finally:
+            refresh_task.cancel()
+            stop_task.cancel()
+            await asyncio.gather(refresh_task, stop_task, return_exceptions=True)
         if ctx.max_iterations is not None and tick >= ctx.max_iterations:
             ctx.request_stop("iterations_exhausted")
             return
@@ -69,7 +95,9 @@ async def _refresh_spatial_once(ctx: LoopContext, request: asyncio.Future[Spatia
     """Service an input-triggered capture before starting another full OCR pass."""
     timings = TickTimings()
     try:
-        refresh = await ctx.source.capture_spatial(timings)
+        refresh = await ctx.source.capture_spatial(
+            timings, selection_only=ctx.frames.selection_only(request)
+        )
         if refresh.spatial_valid and refresh.hud_readings:
             sync_world_state(
                 ctx.memory,
@@ -89,6 +117,44 @@ async def _refresh_spatial_once(ctx: LoopContext, request: asyncio.Future[Spatia
             total_ms=round(timings.total_ms),
             **{f"{name}_ms": round(value) for name, value in timings.phases.items()},
         )
+
+
+async def perceive_hud_once(ctx: LoopContext, tick: int) -> None:
+    """Publish known economy facts without granting any spatial click authority."""
+    timings = TickTimings()
+    sighting = await ctx.source.capture_hud(tick, timings)
+    if sighting is None:
+        return
+    frame = sighting.frame
+    if ctx.ledger is not None and frame.input_revision != ctx.ledger.input_revision:
+        return
+    if not frame.hud_readings:
+        return
+    sync_world_state(
+        ctx.memory,
+        ctx.goal_manager,
+        frame.hud_readings,
+        input_revision=frame.input_revision,
+    )
+    ctx.goal_manager.evaluate_progress(ctx.memory.game_state, tick, frozenset(frame.hud_readings))
+    ledger = ctx.ledger
+    world = (
+        ledger_policy_state(ledger)
+        if ledger is not None
+        else from_game_state(
+            ctx.memory.game_state,
+            captured_at=frame.captured_at,
+            known_resources=ctx.goal_manager.observed_resource_fields,
+        )
+    )
+    ctx.frames.put(
+        replace(
+            frame,
+            world=replace(world, captured_at=frame.captured_at, spatial_valid=False),
+            alarm=ctx.memory.game_state.under_attack,
+        )
+    )
+    log.info("hud_observation_published", frame_tick=tick, latency_ms=round(timings.total_ms))
 
 
 async def _wait_until_playable(ctx: LoopContext) -> bool:
@@ -161,8 +227,8 @@ async def perceive_once(ctx: LoopContext, tick: int) -> None:
         building_evidence = frozenset(
             (attrs.entity_id, attrs.class_name)
             for entity in entities
-            if (attrs := extract_attrs(entity)).entity_id not in sighting.ownership
-            or sighting.ownership[attrs.entity_id][0].value != "enemy"
+            if (attrs := extract_attrs(entity)).entity_id in sighting.ownership
+            and sighting.ownership[attrs.entity_id][0].value == "own"
         )
         if frame.spatial_valid and (
             ledger is None or ledger.input_revision == frame.input_revision

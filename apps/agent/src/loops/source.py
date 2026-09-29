@@ -10,6 +10,7 @@ import asyncio
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Protocol, TypeAlias
 
 import structlog
@@ -19,7 +20,7 @@ from ..detection_phase import detect_frame, summarize_frame
 from ..executor import execute_actions
 from ..providers.strategist import read_hud_readings
 from ..resource_ocr import calibration_for, read_selected_unit
-from ..screen import capture_screenshot, save_screenshot
+from ..screen import capture_screenshot_with_native_hud, save_screenshot
 from ..window import get_game_window_rect
 from .snapshot import FramePipe, Perception, SpatialRefresh
 
@@ -34,6 +35,7 @@ if TYPE_CHECKING:
 
     from ..entity_snapshot import EntitySnapshot
     from ..executor import ActionLedger, ActionResult
+    from ..game_profile import GameProfile
     from ..models import Action
     from ..overlay import DetectionOverlay
     from ..resource_ocr import ResourceReadings
@@ -47,17 +49,18 @@ log = structlog.stdlib.get_logger()
 # Frames between screenshot saves. Saving every frame was affordable at ~10 s
 # per turn; the perceive loop runs far more often, and the write blocks it.
 _SCREENSHOT_SAMPLE = 10
-# A refresh may first wait for an in-flight full OCR pass, then capture and
-# detect a new view. The 2026-09-27 real run needed 10-15 seconds for both.
-_REFRESH_TIMEOUT = 20.0
+# A dependent click cannot wait indefinitely for fresh spatial evidence.
+_REFRESH_TIMEOUT = 3.0
 
 
-def frame_refresh(frames: FramePipe) -> Callable[[], Awaitable[bool]]:
-    """Wait for a post-input spatial capture without waiting for its HUD OCR."""
+def frame_refresh(
+    frames: FramePipe, *, selection_only: bool = False
+) -> Callable[[], Awaitable[bool]]:
+    """Wait for a post-input view, optionally skipping expensive detection."""
 
     async def refresh() -> bool:
         asked = time.monotonic()
-        request = frames.request_spatial_refresh()
+        request = frames.request_spatial_refresh(selection_only=selection_only)
         try:
             result = await asyncio.wait_for(request, timeout=_REFRESH_TIMEOUT)
         except TimeoutError:
@@ -90,6 +93,9 @@ class Sighting:
     frame: Perception
     ownership: Mapping[str, tuple[Owner, float]] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "ownership", MappingProxyType(dict(self.ownership)))
+
 
 class FrameSource(Protocol):
     """Perception, whatever is behind it."""
@@ -98,8 +104,14 @@ class FrameSource(Protocol):
         """One frame. Records its own `capture`/`ocr`/`detect` phases."""
         ...
 
-    async def capture_spatial(self, timings: TickTimings) -> SpatialRefresh:
-        """Capture and detect after input, without reading the HUD."""
+    async def capture_hud(self, tick: int, timings: TickTimings) -> Sighting | None:
+        """A quick HUD-only observation, when supported by this source."""
+        ...
+
+    async def capture_spatial(
+        self, timings: TickTimings, *, selection_only: bool = False
+    ) -> SpatialRefresh:
+        """Capture after input; skip detection when only selection/HUD is needed."""
         ...
 
     def close(self) -> None:
@@ -115,12 +127,12 @@ class Actuator(Protocol):
         ...
 
 
-def _grab() -> tuple[bytes, int, int, float]:
+def _grab() -> tuple[bytes, bytes, int, int, float]:
     """Screenshot plus its capture instant, off the event loop. The stamp comes
     first, so a frame reads older than it is — staleness then errs to skipping."""
     stamped = time.monotonic()
-    screenshot, width, height = capture_screenshot()
-    return screenshot, width, height, stamped
+    screenshot, native_hud, width, height = capture_screenshot_with_native_hud()
+    return screenshot, native_hud, width, height, stamped
 
 
 class GameSource:
@@ -133,18 +145,45 @@ class GameSource:
         frame_differ: FrameDiffer | None = None,
         screenshots_dir: Path | None = None,
         ledger: ActionLedger | None = None,
+        profile: GameProfile | None = None,
     ) -> None:
         self._detector = detector
         self._overlay = overlay
         self._differ = frame_differ
         self._screenshots_dir = screenshots_dir
         self._ledger = ledger
+        self._profile = profile
+
+    async def capture_hud(self, tick: int, timings: TickTimings) -> Sighting | None:
+        """Publish economic facts before the more expensive full detector pass."""
+        revision = self._ledger.input_revision if self._ledger is not None else 0
+        screenshot, native_hud, width, height, captured_at = await self._screen(None, timings)
+        hud_readings = await self._hud(native_hud, tick, timings, (width, height))
+        valid = self._ledger is None or self._ledger.input_revision == revision
+        if not valid:
+            return None
+        return Sighting(
+            Perception(
+                screenshot=screenshot,
+                width=width,
+                height=height,
+                hud_readings=hud_readings,
+                tick=tick,
+                captured_at=captured_at,
+                input_revision=revision,
+                spatial_valid=False,
+                hud_only=True,
+            )
+        )
 
     async def capture(self, tick: int, timings: TickTimings) -> Sighting:
         revision = self._ledger.input_revision if self._ledger is not None else 0
-        screenshot, width, height, captured_at = await self._screen(tick, timings)
-        hud_readings = await self._hud(screenshot, tick, timings)
-        entities, entity_summary, ownership = await self._entities(screenshot, timings)
+        screenshot, native_hud, width, height, captured_at = await self._screen(tick, timings)
+        hud_readings, entity_result = await asyncio.gather(
+            self._hud(native_hud, tick, timings, (width, height)),
+            self._entities(screenshot, timings),
+        )
+        entities, entity_summary, ownership = entity_result
         spatial_valid = self._ledger is None or self._ledger.input_revision == revision
         return Sighting(
             frame=Perception(
@@ -162,19 +201,32 @@ class GameSource:
             ownership=ownership,
         )
 
-    async def capture_spatial(self, timings: TickTimings) -> SpatialRefresh:
+    async def capture_spatial(
+        self, timings: TickTimings, *, selection_only: bool = False
+    ) -> SpatialRefresh:
         """Refresh coordinates, HUD baseline, and selected command-panel unit."""
         revision = self._ledger.input_revision if self._ledger is not None else 0
-        screenshot, _width, _height, captured_at = await self._screen(None, timings)
-        hud_readings = await self._hud(screenshot, 0, timings)
+        screenshot, native_hud, _width, _height, captured_at = await self._screen(None, timings)
         selection_calibration = calibration_for(_width, _height)
-        selected_unit = (
-            await asyncio.to_thread(read_selected_unit, screenshot, selection_calibration)
-            if selection_calibration is not None
-            else None
-        )
-        with timings.phase("detect"):
-            entities = await self._detect_entities(screenshot)
+
+        async def selected() -> str | None:
+            if selection_calibration is None:
+                return None
+            return await asyncio.to_thread(read_selected_unit, screenshot, selection_calibration)
+
+        async def detect() -> list[EntitySnapshot]:
+            with timings.phase("detect"):
+                return await self._detect_entities(screenshot, fresh=True)
+
+        if selection_only:
+            hud_readings, selected_unit = await asyncio.gather(
+                self._hud(native_hud, 0, timings, (_width, _height)), selected()
+            )
+            entities: list[EntitySnapshot] = []
+        else:
+            hud_readings, selected_unit, entities = await asyncio.gather(
+                self._hud(native_hud, 0, timings, (_width, _height)), selected(), detect()
+            )
         spatial_valid = self._ledger is None or self._ledger.input_revision == revision
         log.info(
             "spatial_refresh_captured",
@@ -182,6 +234,7 @@ class GameSource:
             input_revision=revision,
             spatial_valid=spatial_valid,
             selected_unit=selected_unit,
+            selection_only=selection_only,
         )
         return SpatialRefresh(
             captured_at, revision, spatial_valid, hud_readings, selected_unit, screenshot
@@ -189,20 +242,28 @@ class GameSource:
 
     async def _screen(
         self, tick: int | None, timings: TickTimings
-    ) -> tuple[bytes, int, int, float]:
+    ) -> tuple[bytes, bytes, int, int, float]:
         """Grab the frame. The overlay hides first, so it stays out of the shot."""
         with timings.phase("capture"):
             if self._overlay:
                 self._overlay.hide()
-            screenshot, width, height, captured_at = await asyncio.to_thread(_grab)
+            screenshot, native_hud, width, height, captured_at = await asyncio.to_thread(_grab)
             if tick is not None:
                 self._save_sample(screenshot, tick)
-        return screenshot, width, height, captured_at
+        return screenshot, native_hud, width, height, captured_at
 
-    async def _hud(self, screenshot: bytes, tick: int, timings: TickTimings) -> ResourceReadings:
+    async def _hud(
+        self,
+        native_hud: bytes,
+        tick: int,
+        timings: TickTimings,
+        full_size: tuple[int, int],
+    ) -> ResourceReadings:
         """Read the resource bar, and show the OCR boxes it calibrated."""
         with timings.phase("ocr"):
-            hud_readings, calib = await read_hud_readings(screenshot, turn=tick)
+            hud_readings, calib = await read_hud_readings(
+                native_hud, turn=tick, full_size=full_size
+            )
         if self._overlay is not None and calib is not None:
             self._overlay.set_ocr_fields(calib.field_rects())
         return hud_readings
@@ -213,13 +274,23 @@ class GameSource:
         """Detect, then tag ownership. Empty without a detector."""
         with timings.phase("detect"):
             entities = await self._detect_entities(screenshot)
-            entity_summary, ownership = await summarize_frame(entities, screenshot)
+            entity_summary, ownership = await summarize_frame(
+                entities, screenshot, profile=self._profile
+            )
         return entities, entity_summary, ownership
 
-    async def _detect_entities(self, screenshot: bytes) -> list[EntitySnapshot]:
+    async def _detect_entities(
+        self, screenshot: bytes, *, fresh: bool = False
+    ) -> list[EntitySnapshot]:
         entities: list[EntitySnapshot] = []
         if self._detector:
-            entities = list(await detect_frame(self._detector, self._differ, screenshot))
+            entities = list(
+                await detect_frame(
+                    self._detector,
+                    None if fresh else self._differ,
+                    screenshot,
+                )
+            )
         if self._overlay is not None:
             self._overlay.show(entities, get_game_window_rect())
         return entities

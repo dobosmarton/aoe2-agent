@@ -142,6 +142,44 @@ def nearest_gather_target(
     return min(candidates, key=lambda a: dist(a.center, origin)) if candidates else None
 
 
+def safe_gather_target(
+    entities: list[object], kind: ResourceKind, origin: tuple[float, float]
+) -> EntityAttrs | None:
+    """Choose a bounded resource click that does not overlap another object.
+
+    This is an input gate, unlike `nearest_gather_target`'s planning hint: a
+    label without a real box cannot authorize a physical right-click.
+    """
+    from .entity_snapshot import snapshot_entities
+
+    snapshots = snapshot_entities(entities)
+    classes = GATHER_CLASSES_BY_KIND[kind]
+    candidates = sorted(
+        (entity for entity in snapshots if entity.class_name in classes),
+        key=lambda entity: dist(entity.center, origin),
+    )
+    for target in candidates:
+        box = target.bbox
+        x, y = target.center
+        if (
+            box is None
+            or target.confidence < 0.45
+            or not (box[0] < x < box[2] and box[1] < y < box[3])
+        ):
+            continue
+        if any(
+            other.id != target.id
+            and other.class_name not in classes
+            and other.bbox is not None
+            and other.bbox[0] <= x <= other.bbox[2]
+            and other.bbox[1] <= y <= other.bbox[3]
+            for other in snapshots
+        ):
+            continue
+        return EntityAttrs(target.id, target.class_name, target.center, target.confidence)
+    return None
+
+
 def extract_attrs(entity: object) -> EntityAttrs:
     """Extract normalized attributes from a DetectedEntity or dict."""
     if isinstance(entity, _EntityLike):

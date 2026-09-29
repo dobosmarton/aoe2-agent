@@ -23,6 +23,16 @@ if TYPE_CHECKING:
     from .state import PolicyState
 
 CandidateId: TypeAlias = str
+_HOUSE_HEADROOM = 2
+
+
+def housing_needed(state: PolicyState) -> bool:
+    """One TC needs a house when committed population leaves little room."""
+    return (
+        state.population_known
+        and 0 < state.population_cap < 200
+        and state.population_cap - state.population - state.pending_population <= _HOUSE_HEADROOM
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,11 +74,7 @@ def eligible(spec: ActionSpec, state: PolicyState) -> bool:
             return False
         if spec.unique and spec.subject in state.buildings_seen:
             return False
-        if spec.subject == "house" and (
-            not state.population_known
-            or not 0 < state.population_cap < 200
-            or state.population_cap - state.population - state.pending_population > 4
-        ):
+        if spec.subject == "house" and not housing_needed(state):
             return False
         if spec.subject == "lumber_camp" and "tree" not in state.visible_classes:
             return False
@@ -101,6 +107,8 @@ def eligible(spec: ActionSpec, state: PolicyState) -> bool:
         or state.population_cap <= 0
         or state.population + state.pending_population >= state.population_cap
     ):
+        return False
+    if spec.id == "queue_villager" and state.pending_villagers > 0:
         return False
     if spec.kind == "assign":
         if not state.spatial_valid or not state.idle_present or state.assignment_pending:
@@ -165,4 +173,5 @@ __all__ = [
     "eligible",
     "feasible_candidates",
     "find_candidate",
+    "housing_needed",
 ]

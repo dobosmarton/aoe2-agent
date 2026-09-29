@@ -163,6 +163,34 @@ def test_walking_worker_is_not_a_confirmed_assignment(ledger: ex.ActionLedger) -
     assert pending.operation_id in ledger.confirmed_economic_ids
 
 
+def test_interrupted_uncertain_assignment_releases_dispatch_slot_at_deadline(
+    ledger: ex.ActionLedger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    instant = 1000.0
+    monkeypatch.setattr(ex, "_now", lambda: instant)
+    ex.observe_hud(4, 5, {"food": 200}, idle_present=True, worker_counts={"food": 0})
+    ledger.note_input()
+    pending = ex._PendingAssignment(
+        operation_id=ledger.new_operation_id(),
+        resource="food",
+        target_id="sheep",
+        idle_count_before=1,
+        workers_before=0,
+        noted_at_snapshot=ledger.snapshot_count,
+        command_revision=ledger.input_revision,
+        settle_deadline=instant + 12,
+    )
+    ledger.pending_assignment = pending
+    ledger.record_outcome(
+        ex.ActionOutcome(pending.operation_id, "assign_food", "uncertain", "click interrupted")
+    )
+    instant += 13
+    ex.observe_hud(4, 5, {"food": 200}, idle_present=True, worker_counts={"food": 0})
+    assert ledger.pending_assignment is None
+    assert pending.operation_id in ledger.uncertain_operations
+    assert "assign_food" in ex.ledger_policy_state().suppressed_actions
+
+
 def test_unverified_tc_selection_never_presses_purchase_key(
     ledger: ex.ActionLedger, monkeypatch: pytest.MonkeyPatch
 ) -> None:

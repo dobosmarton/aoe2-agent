@@ -332,19 +332,17 @@ class GoalManager:
             self._alarm_active = False
             return False
 
-        # Step 2: Filter by ownership. An empty map means the classifier failed
-        # or never ran, and an unclassified candidate stays a threat.
+        # Step 2: Only positively identified enemies can trigger a team alarm.
+        # Unknown units may be allied; a failed classifier is not evidence of
+        # hostility and must not pull the economy into defensive control.
         threats_found = []
         if ownership:
             from detection.inference.ownership import Owner
 
             candidate_ids = {extract_attrs(e).entity_id for e in candidates}
             for eid, (owner, _ratio) in ownership.items():
-                if eid in candidate_ids and owner in (Owner.ENEMY, Owner.UNKNOWN):
+                if eid in candidate_ids and owner is Owner.ENEMY:
                     threats_found.append(eid)
-        else:
-            for entity in candidates:
-                threats_found.append(extract_attrs(entity).class_name)
 
         # Require at least 3 enemy military units before raising the alarm.
         # exp_0013 (turn 14) showed a single spearman triggered alarm reasoning

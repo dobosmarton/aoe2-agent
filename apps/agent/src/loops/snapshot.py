@@ -13,11 +13,17 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, cast
 
+from ..entity_snapshot import snapshot_entities
 from ..resource_ocr import ResourceReadings
 from ..turn_timing import elapsed_ms
 
 if TYPE_CHECKING:
     from ..policy.state import PolicyState
+
+
+def _immutable_readings(readings: ResourceReadings) -> ResourceReadings:
+    """Detach a HUD publication from the producer's mutable dictionary."""
+    return cast("ResourceReadings", MappingProxyType(dict(readings)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,8 +37,8 @@ class Perception:
     screenshot: bytes = b""
     width: int = 0
     height: int = 0
-    # Real detection publishes `EntitySnapshot`; replays and the simulator may
-    # still provide serialized mappings. `entity_utils.extract_attrs` reads both.
+    # Accept detector objects or replay mappings at the boundary; __post_init__
+    # freezes them all into EntitySnapshot values before publication.
     entities: tuple[object, ...] = ()
     entity_summary: str = ""
     hud_readings: ResourceReadings = field(default_factory=ResourceReadings)
@@ -40,6 +46,7 @@ class Perception:
     ownership: tuple[tuple[str, str, float], ...] = ()
     input_revision: int = 0
     spatial_valid: bool = True
+    hud_only: bool = False
     alarm: bool = False
     tick: int = 0
     captured_at: float = field(default_factory=time.monotonic)
@@ -47,11 +54,8 @@ class Perception:
     def __post_init__(self) -> None:
         # TypedDict describes the OCR keys; copy it so a published frame cannot
         # change when the OCR producer reuses its mutable dictionary.
-        object.__setattr__(
-            self,
-            "hud_readings",
-            cast("ResourceReadings", MappingProxyType(dict(self.hud_readings))),
-        )
+        object.__setattr__(self, "hud_readings", _immutable_readings(self.hud_readings))
+        object.__setattr__(self, "entities", snapshot_entities(self.entities))
 
     @property
     def age_ms(self) -> float:
@@ -70,6 +74,9 @@ class SpatialRefresh:
     selected_unit: str | None = None
     screenshot: bytes = b""
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "hud_readings", _immutable_readings(self.hud_readings))
+
 
 class FramePipe:
     """The channel from the perceive loop to the other two.
@@ -78,13 +85,23 @@ class FramePipe:
     is the one place a reader waits, and only ONE may: it clears the arrival flag.
     """
 
-    __slots__ = ("_arrived", "_frame", "_spatial_request", "_spatial_view", "_urgent")
+    __slots__ = (
+        "_arrived",
+        "_frame",
+        "_selection_only",
+        "_spatial_arrived",
+        "_spatial_request",
+        "_spatial_view",
+        "_urgent",
+    )
 
     def __init__(self) -> None:
         self._frame: Perception | None = None
         self._spatial_view: SpatialRefresh | None = None
         self._arrived = asyncio.Event()
         self._spatial_request: asyncio.Future[SpatialRefresh] | None = None
+        self._selection_only = False
+        self._spatial_arrived = asyncio.Event()
         self._urgent = asyncio.Event()
 
     def put(self, frame: Perception) -> None:
@@ -117,14 +134,31 @@ class FramePipe:
         """Ask the perceive loop to skip the rest of its wait."""
         self._urgent.set()
 
-    def request_spatial_refresh(self) -> asyncio.Future[SpatialRefresh]:
-        """Ask perception for a new spatial view; input ownership allows one waiter."""
+    def request_spatial_refresh(
+        self, *, selection_only: bool = False
+    ) -> asyncio.Future[SpatialRefresh]:
+        """Ask perception for a new view; input ownership allows one waiter."""
         if self.pending_spatial_refresh() is not None:
             raise RuntimeError("a spatial refresh is already pending")
         request: asyncio.Future[SpatialRefresh] = asyncio.get_running_loop().create_future()
         self._spatial_request = request
+        self._selection_only = selection_only
+        self._spatial_arrived.set()
         self.request_now()
         return request
+
+    def selection_only(self, request: asyncio.Future[SpatialRefresh]) -> bool:
+        """Whether this exact pending request needs HUD/selection, not detection."""
+        return self._spatial_request is request and self._selection_only
+
+    async def wait_for_spatial_request(self) -> asyncio.Future[SpatialRefresh]:
+        """Wake perception immediately when an input-dependent view is needed."""
+        while True:
+            request = self.pending_spatial_refresh()
+            if request is not None:
+                return request
+            self._spatial_arrived.clear()
+            await self._spatial_arrived.wait()
 
     def pending_spatial_refresh(self) -> asyncio.Future[SpatialRefresh] | None:
         """The current unresolved refresh request, if any."""
@@ -143,6 +177,7 @@ class FramePipe:
         """Forget a completed or timed-out request without touching a newer one."""
         if self._spatial_request is request:
             self._spatial_request = None
+            self._selection_only = False
 
     async def wait_for_due(self, interval: float) -> None:
         """Hold the perceive cadence, cut short by a `request_now`."""

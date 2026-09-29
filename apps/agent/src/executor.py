@@ -23,7 +23,7 @@ from .entity_utils import (
     RESOURCE_KINDS,
     ResourceKind,
     nearest_center_of_classes,
-    nearest_gather_target,
+    safe_gather_target,
 )
 from .models import Action, validate_action
 from .policy.candidates import eligible
@@ -55,6 +55,7 @@ _window_offset: tuple[int, int] = (0, 0)
 _detected_entities: list[dict] = []
 _rescan_fn: Callable[[], Awaitable[bool]] | None = None
 _rescan_full_fn: Callable[[], Awaitable[bool]] | None = None
+_selection_refresh_fn: Callable[[], Awaitable[bool]] | None = None
 
 
 @dataclass
@@ -80,6 +81,25 @@ def set_rescan_full_fn(fn: Callable[[], Awaitable[bool]]) -> None:
     """Set the full detection callback for thorough SAHI scan."""
     global _rescan_full_fn
     _rescan_full_fn = fn
+
+
+def set_selection_refresh_fn(fn: Callable[[], Awaitable[bool]]) -> None:
+    """Set the quick post-input HUD and command-panel refresh callback."""
+    global _selection_refresh_fn
+    _selection_refresh_fn = fn
+
+
+def clear_refresh_callbacks() -> None:
+    """Release per-game capture callbacks after all loops have stopped."""
+    global _rescan_fn, _rescan_full_fn, _selection_refresh_fn
+    _rescan_fn = None
+    _rescan_full_fn = None
+    _selection_refresh_fn = None
+
+
+async def _selection_refresh() -> bool:
+    callback = _selection_refresh_fn or _rescan_fn
+    return callback is not None and await callback()
 
 
 def get_rescan_fn() -> Callable[[], Awaitable[bool]] | None:
@@ -799,9 +819,13 @@ def _settle_pending_assignment(
         return
     if _now() < pending.settle_deadline:
         return
+    # An inconclusive assignment must not monopolize the single dispatch slot.
+    # Keep its outcome uncertain for scoring, then let a later verified idle
+    # worker be retried after the resource-specific cooldown.
+    ledger.pending_assignment = None
+    ledger.assignment_suppressed_until[pending.resource] = _now() + _ASSIGNMENT_RETRY_DELAY
     if pending.operation_id in ledger.uncertain_operations:
         return
-    ledger.assignment_suppressed_until[pending.resource] = _now() + _ASSIGNMENT_RETRY_DELAY
     ledger.record_outcome(
         ActionOutcome(
             pending.operation_id,
@@ -1475,14 +1499,18 @@ def record_observed_buildings(entities: Iterable[tuple[str, str]]) -> None:
     completed = {
         cls
         for entity_id, cls in observed
-        if cls in purchased and entity_id not in purchased[cls].preexisting_entity_ids
+        if cls != _HOUSE_CLASS
+        and cls in purchased
+        and entity_id not in purchased[cls].preexisting_entity_ids
     }
     record_confirmed_buildings(completed)
     directly_completed = [
         pending
         for pending in ledger.pending_placements
         if any(
-            cls == pending.building_class and entity_id not in pending.preexisting_entity_ids
+            cls == pending.building_class
+            and cls != _HOUSE_CLASS
+            and entity_id not in pending.preexisting_entity_ids
             for entity_id, cls in observed
         )
     ]
@@ -1794,7 +1822,7 @@ def _selection_rejection(expected: str) -> str | None:
 
 async def _refresh_after_input(action: str, operation_id: int) -> ActionResult:
     """Capture a post-input HUD reading while the caller still owns input."""
-    if _rescan_fn is not None and await _rescan_fn():
+    if await _selection_refresh():
         return ActionResult(True, "post-input HUD captured")
     log.warning("post_input_refresh_failed", action=action, action_id=operation_id)
     return ActionResult(False, "post-input HUD refresh unavailable; operation remains pending")
@@ -1830,14 +1858,6 @@ STALE_COORDS_DETAIL = (
     "raw x/y coordinates go stale once the camera moves (a '.'/'h'/',' press "
     "re-centers the view) — use target_class or target_id instead"
 )
-# Local retry offsets sprayed around an already-open anchor — systematic compass
-# points (not random) so coverage is deterministic. The anchor itself is now
-# chosen on empty ground (see default_build_placement), so these only need to
-# escape small local blockage rather than the whole base.
-BUILD_RETRY_RADIUS = 130
-BUILD_RETRY_ATTEMPTS = 6
-BUILD_SETTLE_DELAY = 0.15
-BUILD_RETRY_DELAY = 0.1
 RESCAN_SETTLE_DELAY = 0.3
 DEFAULT_WAIT_MS = 100
 
@@ -1846,7 +1866,7 @@ DEFAULT_WAIT_MS = 100
 BUILD_RING_RADII: tuple[int, ...] = (280, 400, 520)
 # Ring for a drop-off camp, measured from the RESOURCE. It has to land adjacent,
 # so these hug far tighter than the TC ring above (a tile is ~130px at the
-# deployment capture size — see BUILD_RETRY_RADIUS).
+# deployment capture size).
 RESOURCE_RING_RADII: tuple[int, ...] = (150, 210, 270)
 BUILD_RING_DIRECTIONS: int = 8
 BUILD_CLUTTER_RADIUS: int = 160  # entities within this of a candidate = clutter
@@ -1913,8 +1933,6 @@ _UNIQUE_BUILDING_CLASSES: frozenset[str] = frozenset(
 # Surfaced via build_placement_retry log lines so the user can grep
 # `total_count`/`total_seconds` to see how much turn budget got eaten by
 # failed placements.
-_build_retry_total_seconds: float = 0.0
-_build_retry_count: int = 0
 
 # Fallback screen size (retina capture) when the window rect is unavailable.
 _DEFAULT_SCREEN: tuple[int, int] = (3024, 1672)
@@ -2103,6 +2121,7 @@ def research_steps(name: str, intent: str) -> list[dict[str, object]]:
             "key": tech.goto_key,
             "modifiers": list(tech.goto_modifiers),
             "rescan": True,
+            "selection_only": True,
             "intent": f"Go to the {name} building ({intent})",
         },
         {"type": "press", "key": tech.research_key, "intent": f"Research {name} ({intent})"},
@@ -2237,7 +2256,7 @@ async def _handle_click(action_dict: dict[str, object], intent: str) -> ActionRe
             intent=intent,
         )
         if pending is not None:
-            return await _finish_build_placement(action_dict, (x, y), (screen_x, screen_y), pending)
+            return _finish_build_placement()
     except asyncio.CancelledError:
         if pending is not None:
             current_ledger().record_interrupted_purchase(
@@ -2256,121 +2275,9 @@ async def _handle_click(action_dict: dict[str, object], intent: str) -> ActionRe
     return ActionResult(True, "ok")
 
 
-async def _finish_build_placement(
-    action_dict: dict[str, object],
-    point: tuple[int, int],
-    screen_point: tuple[int, int],
-    pending: _PendingPlacement,
-) -> ActionResult:
-    """Retry-spray a just-clicked building placement, then verify it landed.
-
-    The anchor is already chosen on open ground (default_build_placement), so
-    spray a few deterministic compass offsets to escape small local blockage,
-    then right-click to cancel the leftover ghost. A build placement consumes
-    at the first valid tile, so extra clicks are inert ground clicks. If the
-    action carries a building_key, check whether the building appeared.
-    """
-    global _build_retry_total_seconds, _build_retry_count
-    x, y = point
-    screen_x, screen_y = screen_point
-    building_key = action_dict.get("building_key")
-    menu = str(action_dict.get("menu") or ECON_MENU)
-    retry_start = time.monotonic()
-    await asyncio.sleep(BUILD_SETTLE_DELAY)
-    offsets = _compass_offsets(BUILD_RETRY_RADIUS, BUILD_RETRY_ATTEMPTS)
-    for dx, dy in offsets:
-        current_ledger().note_input()
-        pyautogui.click(screen_x + dx, screen_y + dy)
-        await asyncio.sleep(BUILD_RETRY_DELAY)
-    # Cancel any remaining ghost — right-click on the original spot.
-    current_ledger().note_input()
-    pyautogui.rightClick(screen_x, screen_y)
-    elapsed = time.monotonic() - retry_start
-    _build_retry_total_seconds += elapsed
-    _build_retry_count += 1
-    log.debug(
-        "build_placement_retry",
-        x=x,
-        y=y,
-        offsets=offsets,
-        elapsed_s=round(elapsed, 3),
-        total_count=_build_retry_count,
-        total_seconds=round(_build_retry_total_seconds, 1),
-    )
-    if isinstance(building_key, str):
-        cls = building_class(menu, building_key)
-        landed = await _verify_build_placement(cls, point)
-        if landed is True and cls is not None:
-            # The building is real — usable as prerequisite evidence.
-            record_confirmed_buildings([cls])
-            if pending in current_ledger().pending_placements:
-                current_ledger().pending_placements.remove(pending)
-                current_ledger().record_outcome(
-                    ActionOutcome(
-                        pending.operation_id,
-                        f"build_{cls}",
-                        "confirmed",
-                        "visual placement confirmed",
-                    )
-                )
-        elif landed is False:
-            # NOT reported as failure: the model can't see foundations, and a
-            # false "failed" makes the LLM rebuild what already exists (the
-            # run-2 duplicate mill). The wood spend settles it next snapshot.
-            return ActionResult(
-                True,
-                "placement not visually confirmed (foundations aren't detectable); "
-                "will be settled against the wood spend next turn",
-            )
-        # None = unverifiable (no rescan callback) — benefit of the doubt.
-    return ActionResult(True, "ok")
-
-
-def _compass_offsets(radius: int, count: int) -> list[tuple[int, int]]:
-    """`count` evenly-spaced (dx, dy) offsets at `radius` px — a deterministic spray."""
-    return [
-        (int(radius * math.cos(a)), int(radius * math.sin(a)))
-        for i in range(count)
-        for a in (2.0 * math.pi * i / count,)
-    ]
-
-
-def _count_class_near(class_name: str, point: tuple[int, int]) -> int:
-    """Detected entities of `class_name` within BUILD_CLUTTER_RADIUS of `point`."""
-    px, py = point
-    r2 = BUILD_CLUTTER_RADIUS * BUILD_CLUTTER_RADIUS
-    return sum(
-        1
-        for entity in _detected_entities
-        if entity.get("class") == class_name
-        and (center := entity.get("center"))
-        and (px - center[0]) ** 2 + (py - center[1]) ** 2 <= r2
-    )
-
-
-async def _verify_build_placement(expected: str | None, point: tuple[int, int]) -> bool | None:
-    """Rescan and check whether a NEW building of `expected` class appeared near
-    `point` — the count must increase, so a pre-existing neighbor (e.g. an old
-    farm inside the radius) can't vouch for a new one.
-
-    Returns True on a confirmed appearance, False when the rescan saw no new
-    one, None when unverifiable (unknown class / no rescan callback). False is
-    NOT proof of failure: foundations aren't detectable by the vision model, so
-    the caller settles unconfirmed placements against the HUD spend instead
-    (see _settle_pending_placements).
-    """
-    if expected is None or _rescan_fn is None:
-        return None
-    before = _count_class_near(expected, point)
-    await asyncio.sleep(RESCAN_SETTLE_DELAY)
-    if await _rescan_fn() is False:
-        return None
-    landed = _count_class_near(expected, point) > before
-    if landed:
-        log.info("build_placement_verified", building=expected, x=point[0], y=point[1])
-    else:
-        log.info("build_placement_unconfirmed", building=expected, x=point[0], y=point[1])
-    return landed
+def _finish_build_placement() -> ActionResult:
+    """Release input after one click; settlement reads later observations."""
+    return ActionResult(True, "placement input issued; awaiting evidence")
 
 
 async def _handle_right_click(action_dict: dict[str, object], intent: str) -> ActionResult:
@@ -2415,13 +2322,16 @@ async def _handle_press(action_dict: dict[str, object], intent: str) -> ActionRe
 
     # Rescan: take fresh screenshot + detection after camera-moving keys
     if action_dict.get("rescan"):
-        if _rescan_fn is None:
+        selection_only = action_dict.get("selection_only") is True
+        callback = (_selection_refresh_fn or _rescan_fn) if selection_only else _rescan_fn
+        if callback is None:
             return ActionResult(False, "fresh perception is unavailable after camera movement")
         await asyncio.sleep(RESCAN_SETTLE_DELAY)
-        if await _rescan_fn() is False:
+        if await callback() is False:
             return ActionResult(False, "camera moved but fresh perception did not arrive")
-        current_ledger().spatial_valid = True
-        log.info("rescan_after_press", key=key)
+        if not selection_only:
+            current_ledger().spatial_valid = True
+        log.info("rescan_after_press", key=key, selection_only=selection_only)
 
     return ActionResult(True, "ok")
 
@@ -2491,11 +2401,11 @@ async def _handle_build(action_dict: dict[str, object], intent: str) -> ActionRe
                 False, f"build failed at: {step.get('intent', '')}: {result.detail}"
             )
         if index == 0:
-            if step.get("type") == "click" and (_rescan_fn is None or not await _rescan_fn()):
+            if step.get("type") == "click" and not await _selection_refresh():
                 return ActionResult(False, "villager selection refresh unavailable")
             if rejection := _selection_rejection("villager"):
                 return ActionResult(False, rejection)
-        if index == 2 and (_rescan_fn is None or not await _rescan_fn()):
+        if index == 2 and not await _selection_refresh():
             return ActionResult(False, "pre-placement HUD refresh unavailable")
     return ActionResult(True, f"built ({intent})")
 
@@ -2570,7 +2480,13 @@ async def _handle_queue_villager(action_dict: dict[str, object], intent: str) ->
     if not eligible(UNITS["villager"], ledger_policy_state()):
         return ActionResult(False, "villager no longer eligible against observed state")
     result = await execute_action(
-        {"type": "press", "key": "h", "rescan": True, "intent": f"Select TC ({intent})"}
+        {
+            "type": "press",
+            "key": "h",
+            "rescan": True,
+            "selection_only": True,
+            "intent": f"Select TC ({intent})",
+        }
     )
     if not result.success:
         return ActionResult(False, f"queue_villager selection failed: {result.detail}")
@@ -2622,6 +2538,7 @@ async def _handle_train_unit(action_dict: dict[str, object], intent: str) -> Act
             "key": spec.goto_key,
             "modifiers": list(spec.goto_modifiers),
             "rescan": True,
+            "selection_only": True,
             "intent": f"Select production building for {unit}",
         }
     )
@@ -2678,9 +2595,9 @@ async def _handle_assign_idle(action_dict: dict[str, object], intent: str) -> Ac
         return ActionResult(False, selection_error)
     width, height = _window_size()
     kind = cast("ResourceKind", resource)
-    target = nearest_gather_target(list(_detected_entities), kind, (width / 2, height / 2))
+    target = safe_gather_target(list(_detected_entities), kind, (width / 2, height / 2))
     if target is None:
-        return ActionResult(False, f"no {kind} target in refreshed view")
+        return ActionResult(False, f"no {kind} target with verified bounds in refreshed view")
     ledger = current_ledger()
     pending = _PendingAssignment(
         operation_id=ledger.new_operation_id(),

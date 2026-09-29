@@ -5,7 +5,10 @@ single-shot/tool-loop routing — and delegates every vendor detail to a
 `ChatWire`, selected by `AOE2_LLM_WIRE`.
 """
 
+from __future__ import annotations
+
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, Protocol, cast
 
@@ -13,6 +16,7 @@ import structlog
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
+    import asyncio
     from collections.abc import Awaitable, Callable
 
 from ..config import config
@@ -49,6 +53,21 @@ _SAFE_RAW_KEYS = frozenset({"h", ".", ",", "space", "home", "g", "b", "t"})
 
 log = structlog.stdlib.get_logger()
 
+
+@dataclass(frozen=True, slots=True)
+class ToolExecutionGate:
+    """Permit one tool command only while its observed input state is current.
+
+    The model may think without owning input. Each returned tool acquires input
+    just long enough to validate and execute that command; another controller
+    action between model turns invalidates the remaining response.
+    """
+
+    input_lock: asyncio.Lock
+    current_revision: Callable[[], int]
+    source_revision: int
+
+
 # Load system prompt from file
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
@@ -65,7 +84,7 @@ except ImportError:
 class _CallPath(Protocol):
     """One way of asking the model for a turn: single-shot, or the tool loop."""
 
-    async def __call__(self, content: list[dict], *, age: str) -> LLMResult: ...
+    async def __call__(self, content: list[dict[str, object]], *, age: str) -> LLMResult: ...
 
 
 class ExecutorProvider:
@@ -256,7 +275,7 @@ class ExecutorProvider:
             log.warning("dynamic_context_error", error=str(e))
             return context
 
-    def _build_content(self, context: str, width: int, height: int) -> list[dict]:
+    def _build_content(self, context: str, width: int, height: int) -> list[dict[str, object]]:
         """Build the message content for Claude.
 
         Pure text content with YOLO-detected entities, goals, cached resources,
@@ -361,7 +380,9 @@ class ExecutorProvider:
             actions_already_executed=False,
         )
 
-    async def _run_steps(self, composite_name: str, steps: list[dict]) -> tuple[bool, str]:
+    async def _run_steps(
+        self, composite_name: str, steps: list[dict[str, object]]
+    ) -> tuple[bool, str]:
         """Execute action steps sequentially, stop on first failure."""
         for step in steps:
             r = await execute_action(step)
@@ -390,7 +411,7 @@ class ExecutorProvider:
         self,
         block: ToolCall,
         name: str,
-        steps: list[dict],
+        steps: list[dict[str, object]],
         *,
         include_entities: bool = True,
     ) -> tuple[dict, ToolOutcome]:
@@ -470,7 +491,7 @@ class ExecutorProvider:
         were invisible to the brake and over-ordered 40 villagers (F-38).
         """
         inp = block.arguments
-        steps: list[dict] = [
+        steps: list[dict[str, object]] = [
             {"type": "queue_villager", "intent": str(inp.get("intent", "Queue villager"))}
         ]
         return await self._run_composite(block, "queue_villager", steps, include_entities=False)
@@ -534,11 +555,12 @@ class ExecutorProvider:
 
     async def _call_api(
         self,
-        content: list[dict],
+        content: list[dict[str, object]],
         age: str = "Dark Age",
         *,
-        tools: list[dict] | None = None,
+        tools: list[dict[str, object]] | None = None,
         max_tool_actions: int | None = None,
+        gate: ToolExecutionGate | None = None,
     ) -> LLMResponse:
         """Run the agentic tool loop.
 
@@ -548,10 +570,11 @@ class ExecutorProvider:
         after every camera-moving action.
         """
         turns: list[Turn] = [UserTurn(text=text_of_blocks(content))]
-        executed_actions: list[dict] = []
+        executed_actions: list[dict[str, object]] = []
         success_count = 0
         reasoning_parts: list[str] = []
         system = self.get_system_prompt(age)
+        expected_revision = gate.source_revision if gate is not None else None
 
         available_tools = _ACTION_TOOLS if tools is None else tools
         for _ in range(config.max_tool_iterations):
@@ -576,12 +599,30 @@ class ExecutorProvider:
 
             turns.append(AssistantTurn(text=reply.text, tool_calls=reply.tool_calls))
             outcomes: list[ToolOutcome] = []
+            interrupted = False
             for call in reply.tool_calls:
                 if max_tool_actions is not None and len(executed_actions) >= max_tool_actions:
                     break
-                failures_before = current_ledger().failure_count
-                operation_before = current_ledger().next_operation_id
-                action_dict, outcome = await self._execute_tool_call(call)
+                if gate is not None:
+                    async with gate.input_lock:
+                        actual_revision = gate.current_revision()
+                        if actual_revision != expected_revision:
+                            log.info(
+                                "deliberate_tool_superseded",
+                                tool=call.name,
+                                expected_revision=expected_revision,
+                                actual_revision=actual_revision,
+                            )
+                            interrupted = True
+                            break
+                        failures_before = current_ledger().failure_count
+                        operation_before = current_ledger().next_operation_id
+                        action_dict, outcome = await self._execute_tool_call(call)
+                        expected_revision = gate.current_revision()
+                else:
+                    failures_before = current_ledger().failure_count
+                    operation_before = current_ledger().next_operation_id
+                    action_dict, outcome = await self._execute_tool_call(call)
                 executed_actions.append(action_dict)
                 outcomes.append(outcome)
                 if outcome.success:
@@ -594,6 +635,8 @@ class ExecutorProvider:
                     current_ledger().record_failure(f"{action_dict.get('type')}: {outcome.detail}")
 
             turns.append(ToolResultsTurn(outcomes=tuple(outcomes)))
+            if interrupted:
+                break
 
         # Validate standard actions; keep composite actions as-is (already executed).
         _COMPOSITE_NAMES = self._COMPOSITE_NAMES
@@ -633,7 +676,9 @@ class ExecutorProvider:
         self._record_usage(usage)
         return parsed
 
-    async def _call_single_shot(self, content: list[dict], *, age: str = "Dark Age") -> LLMResult:
+    async def _call_single_shot(
+        self, content: list[dict[str, object]], *, age: str = "Dark Age"
+    ) -> LLMResult:
         """Fast path for routine turns: one structured-output call, no tool loop.
 
         Returns actions for the game loop to execute (actions_already_executed is
@@ -700,17 +745,39 @@ class ExecutorProvider:
         """
         return await self._respond(context, width, height, self._call_single_shot)
 
-    async def act(self, context: str, width: int = 1920, height: int = 1080) -> LLMResult:
-        """The agentic tool loop, which presses keys during the call.
+    async def act(
+        self,
+        context: str,
+        width: int = 1920,
+        height: int = 1080,
+        *,
+        gate: ToolExecutionGate | None = None,
+    ) -> LLMResult:
+        """Run tactical tools, acquiring input for each command rather than model latency."""
+        if gate is None:
+            return await self._respond(context, width, height, self._call_tool_loop)
 
-        The caller must hold the input lock: the result carries
-        `actions_already_executed`.
-        """
-        return await self._respond(context, width, height, self._call_tool_loop)
+        async def gated(content: list[dict[str, object]], *, age: str) -> LLMResult:
+            return await self._call_tool_loop(content, age=age, gate=gate)
 
-    async def act_recovery(self, context: str, width: int = 1920, height: int = 1080) -> LLMResult:
+        return await self._respond(context, width, height, gated)
+
+    async def act_recovery(
+        self,
+        context: str,
+        width: int = 1920,
+        height: int = 1080,
+        *,
+        gate: ToolExecutionGate | None = None,
+    ) -> LLMResult:
         """At most three catalog-guarded recovery tools; no raw purchase keys."""
-        return await self._respond(context, width, height, self._call_recovery_loop)
+        if gate is None:
+            return await self._respond(context, width, height, self._call_recovery_loop)
+
+        async def gated(content: list[dict[str, object]], *, age: str) -> LLMResult:
+            return await self._call_recovery_loop(content, age=age, gate=gate)
+
+        return await self._respond(context, width, height, gated)
 
     async def get_actions(
         self,
@@ -740,22 +807,38 @@ class ExecutorProvider:
             log.error("llm_error", error=str(e))
             return self._error_response(f"Error: {e}")
 
-    async def _call_tool_loop(self, content: list[dict], *, age: str) -> LLMResult:
+    async def _call_tool_loop(
+        self,
+        content: list[dict[str, object]],
+        *,
+        age: str,
+        gate: ToolExecutionGate | None = None,
+    ) -> LLMResult:
         """The agentic path, as one named call beside `_call_single_shot`."""
-        result = await self._call_api(content, age=age)
+        result = (
+            await self._call_api(content, age=age, gate=gate)
+            if gate is not None
+            else await self._call_api(content, age=age)
+        )
         log.debug("claude_response", age=age, reasoning=result.reasoning[:200])
         return self._serialize_response(result)
 
-    async def _call_recovery_loop(self, content: list[dict], *, age: str) -> LLMResult:
+    async def _call_recovery_loop(
+        self,
+        content: list[dict[str, object]],
+        *,
+        age: str,
+        gate: ToolExecutionGate | None = None,
+    ) -> LLMResult:
+        kwargs = {"gate": gate} if gate is not None else {}
         result = await self._call_api(
-            content,
-            age=age,
-            tools=_RECOVERY_TOOLS,
-            max_tool_actions=3,
+            content, age=age, tools=_RECOVERY_TOOLS, max_tool_actions=3, **kwargs
         )
         return self._serialize_response(result)
 
-    async def _single_shot_or_tool_loop(self, content: list[dict], *, age: str) -> LLMResult:
+    async def _single_shot_or_tool_loop(
+        self, content: list[dict[str, object]], *, age: str
+    ) -> LLMResult:
         """Single-shot fast path, falling back to the tool loop on a 400.
 
         The single-shot path sends LLMResponse's schema to Anthropic structured

@@ -35,10 +35,12 @@ from .executor import (
     ActionLedger,
     bind_ledger,
     clear_detected_entities,
+    clear_refresh_callbacks,
     execute_actions,
     set_detected_entities,
     set_rescan_fn,
     set_rescan_full_fn,
+    set_selection_refresh_fn,
     unbind_ledger,
 )
 from .goal_logger import GoalLogger
@@ -124,6 +126,9 @@ def _build_context(
     overlay = _open_overlay() if use_overlay else None
     goal_manager = GoalManager()
     goal_manager.set_goals(get_default_goals(turn=0))
+    from .game_profile import load_profile
+
+    profile = load_profile(config.game_profile_path) if config.game_profile_path else None
     return LoopContext(
         memory=memory,
         goal_manager=goal_manager,
@@ -134,6 +139,7 @@ def _build_context(
             frame_differ=init_frame_differ(),
             screenshots_dir=screenshots_dir,
             ledger=ledger,
+            profile=profile,
         ),
         actuator=GameActuator(),
         ledger=ledger,
@@ -219,12 +225,11 @@ async def game_loop(
             ledger=ledger,
         )
         memory.latency = ctx.latency
-        # Every inline rescan becomes a wait on the perceive loop, so no detection
-        # ever runs on the act task. Registered after GameSource, which installs the
-        # old inline callbacks.
+        # Perception owns captures; selection/HUD reads need not wait for YOLO.
         refresh = frame_refresh(ctx.frames)
         set_rescan_fn(refresh)
         set_rescan_full_fn(refresh)
+        set_selection_refresh_fn(frame_refresh(ctx.frames, selection_only=True))
 
         memory.memories_loaded = list(provider.loaded_memory_titles)
         log.info(
@@ -269,6 +274,7 @@ async def game_loop(
             if close is not None:
                 await close()
         finally:
+            clear_refresh_callbacks()
             unbind_ledger(ledger_token)
 
     return memory

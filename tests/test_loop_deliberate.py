@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import replace
+from typing import TYPE_CHECKING
 
 from gameplay_agent.executor import ActionLedger, ActionOutcome
 from gameplay_agent.goal_logger import GoalLogger
@@ -16,6 +17,9 @@ from gameplay_agent.memory import AgentMemory
 from gameplay_agent.policy.state import PolicyState
 from gameplay_agent.providers.base import LLMResult
 from gameplay_agent.providers.strategist import StrategistProvider
+
+if TYPE_CHECKING:
+    from gameplay_agent.providers.executor_provider import ToolExecutionGate
 
 from tests.loop_fakes import FakeActuator, FakeSource
 
@@ -31,11 +35,25 @@ class _FakeProvider:
         self.planned += 1
         return LLMResult(reasoning="unused", actions=[], observations={})
 
-    async def act(self, _context: str, _width: int = 0, _height: int = 0) -> LLMResult:
+    async def act(
+        self,
+        _context: str,
+        _width: int = 0,
+        _height: int = 0,
+        *,
+        gate: ToolExecutionGate | None = None,
+    ) -> LLMResult:
         self.acted += 1
         return self._response()
 
-    async def act_recovery(self, _context: str, _width: int = 0, _height: int = 0) -> LLMResult:
+    async def act_recovery(
+        self,
+        _context: str,
+        _width: int = 0,
+        _height: int = 0,
+        *,
+        gate: ToolExecutionGate | None = None,
+    ) -> LLMResult:
         self.recovered += 1
         return self._response()
 
@@ -113,6 +131,14 @@ def test_famine_needs_thirty_seconds_without_food_progress(tmp_path) -> None:
     assert _trigger(ctx, _frame(food=10), food_age=31.0) == "recovery"
 
 
+def test_recovery_budget_stops_after_three_cycles_without_progress() -> None:
+    budget = deliberate.RecoveryBudget()
+    budget.observe(100.0, 100.0)
+    assert [budget.use_cycle() for _ in range(4)] == [True, True, True, False]
+    budget.observe(101.0, 100.0)
+    assert budget.use_cycle() is True
+
+
 def test_intentional_wait_and_pending_operations_are_not_failures(tmp_path) -> None:
     ctx = _context(tmp_path)
     assert ctx.ledger is not None
@@ -120,18 +146,25 @@ def test_intentional_wait_and_pending_operations_are_not_failures(tmp_path) -> N
     assert _trigger(ctx, _frame()) is None
 
 
-def test_alarm_acts_under_the_input_lock_without_planning(tmp_path) -> None:
+def test_alarm_model_call_does_not_hold_input_lock(tmp_path) -> None:
     ctx = _context(tmp_path)
     held: list[bool] = []
 
     class _Watcher(_FakeProvider):
-        async def act(self, context: str, width: int = 0, height: int = 0) -> LLMResult:
+        async def act(
+            self,
+            context: str,
+            width: int = 0,
+            height: int = 0,
+            *,
+            gate: ToolExecutionGate | None = None,
+        ) -> LLMResult:
             held.append(ctx.input_lock.locked())
-            return await super().act(context, width, height)
+            return await super().act(context, width, height, gate=gate)
 
     provider = _Watcher()
     asyncio.run(deliberate.deliberate_once(ctx, provider, _frame(alarm=True), 1, "alarm"))
-    assert held == [True]
+    assert held == [False]
     assert (provider.planned, provider.acted, provider.recovered) == (0, 1, 0)
     assert ctx.memory.turn_count == 1
 
@@ -151,6 +184,22 @@ def test_unexecuted_model_actions_cannot_bypass_catalog(tmp_path) -> None:
         )
     )
     assert ctx.actuator.batches == []
+
+
+def test_model_text_cannot_declare_a_team_victory(tmp_path) -> None:
+    ctx = _context(tmp_path)
+
+    class _FalseVictory(_FakeProvider):
+        def _response(self) -> LLMResult:
+            return LLMResult(
+                reasoning="I think we won",
+                actions=[],
+                observations={"game_state": "victory"},
+            )
+
+    asyncio.run(deliberate.deliberate_once(ctx, _FalseVictory(), _frame(alarm=True), 1, "alarm"))
+    assert not ctx.stopping
+    assert ctx.memory.game_end_reason == ""
 
 
 def test_strategist_task_is_cancelled_when_loop_stops(tmp_path, monkeypatch) -> None:

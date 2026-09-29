@@ -20,7 +20,12 @@ from gameplay_agent.policy.candidates import eligible, feasible_candidates
 from gameplay_agent.policy.catalog import BY_ID
 from gameplay_agent.policy.fallback import select_fallback
 from gameplay_agent.policy.state import PolicyState
-from gameplay_agent.scenario_runner import run_scenario_async
+from gameplay_agent.scenario_runner import (
+    ScenarioStep,
+    _ScriptedInput,
+    _ScriptedWorld,
+    run_scenario_async,
+)
 
 from tests.loop_fakes import FakeActuator, FakeSource
 
@@ -95,9 +100,9 @@ def test_new_building_observation_completes_a_paid_placement(
     asyncio.run(perceive_once(ctx, 1))
     assert "mill" in ledger.building_purchases
     assert "mill" not in ledger.buildings_confirmed
-    # The current classifier does not label buildings; absence of an enemy
-    # label must still permit a new matching entity to complete the purchase.
-    source.ownership = {}
+    # A matching detector ID alone is insufficient; the next frame must
+    # positively identify this as our building, not an ally's or an enemy's.
+    source.ownership = {"mill_1": (Owner.OWN, 0.95)}
     asyncio.run(perceive_once(ctx, 2))
 
     assert ctx.frames.latest() is not None
@@ -148,7 +153,7 @@ def test_pending_house_suppresses_duplicates_until_failure_expires(
     assert ledger.reservations()["wood"] == 25
     assert ledger.outcomes[-1].status == "uncertain"
     assert not eligible(house, executor.ledger_policy_state())
-    executor.observe_hud(7, 10, {"wood": 220}, idle_present=True)
+    executor.observe_hud(8, 10, {"wood": 220}, idle_present=True)
     assert eligible(house, executor.ledger_policy_state())
 
 
@@ -299,8 +304,6 @@ def test_unreadable_food_worker_count_does_not_force_a_food_goal() -> None:
 def test_production_scenario_reaches_imperial_and_trains_a_unit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(executor, "BUILD_SETTLE_DELAY", 0.0)
-    monkeypatch.setattr(executor, "BUILD_RETRY_DELAY", 0.0)
     monkeypatch.setattr(executor, "RESCAN_SETTLE_DELAY", 0.0)
     monkeypatch.setattr(executor.config, "action_delay", 0.0)
     fixture = (
@@ -313,6 +316,41 @@ def test_production_scenario_reaches_imperial_and_trains_a_unit(
     assert "advance_to_imperial" in result.actions
     assert "train_knight" in result.actions
     assert "press:z" in result.inputs
+
+
+def test_scenario_does_not_award_a_house_for_a_blocked_click() -> None:
+    world = _ScriptedWorld(
+        {
+            "age": "Dark Age",
+            "resources": {"food": 200, "wood": 200, "gold": 100, "stone": 200},
+            "population": 4,
+            "population_cap": 5,
+            "villagers": 3,
+            "entities": [
+                {
+                    "id": "tc",
+                    "class": "town_center",
+                    "center": [700, 500],
+                    "bbox": [620, 420, 780, 580],
+                },
+            ],
+        }
+    )
+    active = executor.ActionLedger()
+    token = executor.bind_ledger(active)
+    try:
+        executor.observe_hud(4, 5, {"wood": 200}, idle_present=True)
+        assert executor._note_pending_placement("q") is not None
+    finally:
+        executor.unbind_ledger(token)
+    active.selected_unit = "villager"
+    game_input = _ScriptedInput(world, active, ScenarioStep("build_house", {"population_cap": 10}))
+    game_input.click(700, 500)
+    assert not game_input.issued
+    assert world.population_cap == 5
+    game_input.click(1200, 700)
+    assert game_input.issued
+    assert world.population_cap == 10
 
 
 def test_production_scenario_does_not_apply_unearned_consequences(tmp_path: Path) -> None:

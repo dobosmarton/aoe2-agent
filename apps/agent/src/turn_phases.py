@@ -290,20 +290,6 @@ def record_llm_turn(
     return actions
 
 
-def check_game_over(response: LLMResult, memory: AgentMemory, iteration: int) -> str | None:
-    """The end reason the LLM just reported, or None.
-
-    `observations.game_state` is the only game-over signal the agent has; the
-    supervisor owns the time budget.
-    """
-    observations = response.get("observations", {})
-    state = observations.get("game_state", "playing") if observations else "playing"
-    if state in ("victory", "defeat"):
-        log.info("game_over_detected", result=state, iteration=iteration)
-        return str(state)
-    return None
-
-
 # ---------------------------------------------------------------------------
 # Action-effect verification (R1)
 # ---------------------------------------------------------------------------
@@ -482,7 +468,6 @@ __all__ = [
     "blocked_actions_line",
     "build_llm_context",
     "castle_gate_line",
-    "check_game_over",
     "execute_turn_actions",
     "get_ground_commands",
     "known_buildings_line",

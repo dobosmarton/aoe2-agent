@@ -49,7 +49,7 @@ def _click_schema(description: str) -> dict:
 # Tool definitions for each action type — strict per-tool schemas.
 # Each tool has its own enforced schema, preventing field confusion
 # that occurred with structured output union types.
-_ACTION_TOOLS: list[dict] = [
+_ACTION_TOOLS: list[dict[str, object]] = [
     {
         "name": "click",
         "description": "Tactical left click at screen coordinates; economic builds use the named build tool.",

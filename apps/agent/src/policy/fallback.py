@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .allocation import Allocation, for_state, next_kind
+from .candidates import housing_needed
 
 if TYPE_CHECKING:
     from .advice import PolicyGoal
@@ -34,15 +35,6 @@ _MILITARY_PATH = (
     "build_archery_range",
     "build_stable",
 )
-_HOUSE_HEADROOM = 4
-
-
-def housing_needed(state: PolicyState) -> bool:
-    """Whether current and already-promised population need another house soon."""
-    return (
-        state.population_known
-        and state.population_cap - state.population - state.pending_population <= _HOUSE_HEADROOM
-    )
 
 
 def priority_action(

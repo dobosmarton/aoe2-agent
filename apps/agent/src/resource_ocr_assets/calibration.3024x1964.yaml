@@ -27,11 +27,12 @@ fields:
   - 176
   - 800
   - 204
-  wood_workers: [58, 195, 78, 221]
-  food_workers: [212, 195, 234, 221]
-  gold_workers: [367, 195, 389, 221]
-  stone_workers: [523, 195, 545, 221]
-  villagers: [672, 195, 701, 221]
+  wood_workers: [46, 195, 78, 221]
+  food_workers: [202, 195, 234, 221]
+  gold_workers: [357, 195, 389, 221]
+  stone_workers: [512, 195, 545, 221]
+  villagers: [657, 195, 701, 221]
+  idle_count: [831, 187, 861, 212]
   selection: [420, 1540, 760, 1620]
   age:
   - 1000

@@ -41,6 +41,8 @@ class EntitySnapshot:
 
 def snapshot_entity(entity: object) -> EntitySnapshot:
     """Normalize one detector object or serialized cache entry."""
+    if isinstance(entity, EntitySnapshot):
+        return entity
     if isinstance(entity, _EntityLike):
         return EntitySnapshot(
             id=_text(entity.id, "unknown"),

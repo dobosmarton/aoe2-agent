@@ -169,11 +169,21 @@ def test_the_source_is_closed(loop_seams) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_the_refresh_hook_replaces_the_inline_rescan(loop_seams) -> None:
+def test_the_refresh_hook_is_registered_and_cleared(loop_seams, monkeypatch) -> None:
     """Composite handlers rescan from inside `execute_action`. Pointing the hook
-    at the frame pipe is what keeps a detection off the act task."""
+    at the frame pipe is what keeps a detection off the act task. Cleanup must
+    not leave an old game's callback for the next run."""
+    registered = []
+    original = gl.set_rescan_fn
+
+    def record(callback):
+        registered.append(callback)
+        original(callback)
+
+    monkeypatch.setattr(gl, "set_rescan_fn", record)
     _play()
-    assert ex.get_rescan_fn() is not None
+    assert len(registered) == 1
+    assert ex.get_rescan_fn() is None
 
 
 # ---------------------------------------------------------------------------

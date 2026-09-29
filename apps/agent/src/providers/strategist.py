@@ -100,8 +100,40 @@ def _clean_readings(ocr: dict[str, object]) -> ResourceReadings:
     }
     if ocr.get("age"):
         readings["age"] = ocr["age"]
+    _discard_contradictory_workforce(readings)
     # Per-key value types are enforced where read_resource_bar builds them.
     return cast("ResourceReadings", readings)
+
+
+def _discard_contradictory_workforce(readings: dict[str, object]) -> None:
+    """Leave impossible HUD counts unknown; never replace them with guesses."""
+    population = readings.get("population")
+    villagers = readings.get("villagers")
+    if isinstance(population, str) and isinstance(villagers, int):
+        current, separator, _cap = population.partition("/")
+        if separator and current.isdigit() and villagers > int(current):
+            log.warning(
+                "hud_workforce_conflict", field="villagers", value=villagers, population=current
+            )
+            readings.pop("villagers", None)
+            villagers = None
+    if not isinstance(villagers, int):
+        return
+    workers = ("food_workers", "wood_workers", "gold_workers", "stone_workers")
+    counts = [readings.get(field) for field in workers]
+    if (
+        any(isinstance(count, int) and count < 0 for count in counts)
+        or sum(count for count in counts if isinstance(count, int)) > villagers
+    ):
+        log.warning("hud_workforce_conflict", field="workers", villagers=villagers, counts=counts)
+        for field in workers:
+            readings.pop(field, None)
+    idle_count = readings.get("idle_count")
+    if isinstance(idle_count, int) and (idle_count < 0 or idle_count > villagers):
+        log.warning(
+            "hud_workforce_conflict", field="idle_count", value=idle_count, villagers=villagers
+        )
+        readings.pop("idle_count", None)
 
 
 # A frame is trusted only when OCR decoded most of the core resources. A frame that
@@ -122,19 +154,27 @@ def _is_reliable_frame(readings: ResourceReadings) -> bool:
 _AGE_OCR_INTERVAL = 5
 
 
-def _age_read_due(turn: int | None) -> bool:
+def _age_read_due(turn: int | None, *, template_primary: bool) -> bool:
     """Whether this tick pays for the slow RapidOCR age read.
 
-    Only the template backend needs it (the OCR backends read age inline);
+    Only a template-first read needs it (the OCR backends read age inline);
     an unknown turn (standalone/eval callers) always reads.
     """
-    if config.ocr_backend != "template":
+    if not template_primary:
         return False
     return turn is None or turn % _AGE_OCR_INTERVAL == 0
 
 
+def _has_fast_templates(calib: Calibration) -> bool:
+    """Use calibrated glyphs when shipped for this exact HUD resolution."""
+    return calib.template_dir.is_dir()
+
+
 async def read_hud_readings(
-    screenshot_bytes: bytes, *, turn: int | None = None
+    screenshot_bytes: bytes,
+    *,
+    turn: int | None = None,
+    full_size: tuple[int, int] | None = None,
 ) -> tuple[ResourceReadings, Calibration | None]:
     """Read resources/population/age off the resource bar via local OCR.
 
@@ -149,7 +189,7 @@ async def read_hud_readings(
     """
     try:
         with Image.open(io.BytesIO(screenshot_bytes)) as im:
-            width, height = im.width, im.height
+            width, height = full_size or im.size
         calib = calibration_for(width, height)
         if calib is None:
             # Detection runs RapidOCR over the top band — CPU-bound, off the loop.
@@ -159,18 +199,34 @@ async def read_hud_readings(
         if calib is None:
             log.error("ocr_no_calibration_autodetect_failed", width=width, height=height)
             return {}, None
-        # OCR is sync/CPU-bound — run off the event loop.
-        ocr = await asyncio.to_thread(
-            read_resource_bar,
-            screenshot_bytes,
-            calib,
-            backend=cast("Backend", config.ocr_backend),
-        )
+        template_primary = config.ocr_backend == "template" or _has_fast_templates(calib)
+        backend: Backend = "template" if template_primary else cast("Backend", config.ocr_backend)
+        ocr = await asyncio.to_thread(read_resource_bar, screenshot_bytes, calib, backend=backend)
         readings = _clean_readings(ocr)
+        if (
+            template_primary
+            and (not _is_reliable_frame(readings) or "population" not in readings)
+            and config.ocr_backend != "template"
+        ):
+            # Escalate an unresolved field, rather than paying full-image OCR on
+            # every ordinary frame. Keep the calibrated worker digits: the text
+            # OCR backend does not read this small HUD font reliably.
+            slow = _clean_readings(
+                await asyncio.to_thread(
+                    read_resource_bar,
+                    screenshot_bytes,
+                    calib,
+                    backend=cast("Backend", config.ocr_backend),
+                )
+            )
+            merged: dict[str, object] = dict(readings)
+            for key, value in slow.items():
+                merged.setdefault(key, value)
+            readings = cast("ResourceReadings", merged)
         if not _is_reliable_frame(readings):
             log.warning("ocr_frame_discarded", fields=sorted(readings))
             return {}, calib
-        if _age_read_due(turn):
+        if _age_read_due(turn, template_primary=template_primary):
             age = await asyncio.to_thread(read_age, screenshot_bytes, calib)
             if age:
                 readings["age"] = age

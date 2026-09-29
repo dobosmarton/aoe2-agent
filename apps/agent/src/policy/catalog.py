@@ -248,9 +248,9 @@ SPECS: tuple[ActionSpec, ...] = (
     ),
     ActionSpec(
         "train_scout_cavalry",
-        "Train one scout cavalry at a stable.",
+        "Train one Magyar scout cavalry at a stable (15% food discount).",
         "train",
-        (("food", 80),),
+        (("food", 68),),
         age="Feudal Age",
         subject="scout_cavalry",
         key="q",

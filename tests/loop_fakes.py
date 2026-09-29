@@ -49,7 +49,12 @@ class FakeSource:
         # act log both key on it.
         return Sighting(frame=replace(frame, tick=tick), ownership=self.ownership)
 
-    async def capture_spatial(self, timings: TickTimings) -> SpatialRefresh:
+    async def capture_hud(self, tick: int, timings: TickTimings) -> None:
+        return None
+
+    async def capture_spatial(
+        self, timings: TickTimings, *, selection_only: bool = False
+    ) -> SpatialRefresh:
         with timings.phase("capture"):
             self.spatial_captures += 1
             return SpatialRefresh(time.monotonic(), 0, True)

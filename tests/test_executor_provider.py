@@ -23,9 +23,10 @@ from gameplay_agent.providers.base import (
     ToolCall,
     ToolOutcome,
     ToolResultsTurn,
+    ToolTurnResult,
     UserTurn,
 )
-from gameplay_agent.providers.executor_provider import ExecutorProvider
+from gameplay_agent.providers.executor_provider import ExecutorProvider, ToolExecutionGate
 from gameplay_agent.providers.wire_anthropic import AnthropicWire
 
 if TYPE_CHECKING:
@@ -349,6 +350,72 @@ def test_cache_read_tokens_accumulate(
     monkeypatch.setattr(provider, "_execute_tool_call", _fake_exec)
     _run(provider._call_api([{"type": "text", "text": "hi"}]))
     assert provider._usage.cache_read_tokens == 100
+
+
+def test_deliberate_model_wait_does_not_own_input(
+    provider: ExecutorProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def run() -> None:
+        lock = asyncio.Lock()
+        revision = 4
+        model_started = asyncio.Event()
+        model_continue = asyncio.Event()
+        executed = False
+
+        async def model_turn(_request: object, _tools: object) -> ToolTurnResult:
+            assert not lock.locked()
+            model_started.set()
+            await model_continue.wait()
+            return ToolTurnResult("", (ToolCall("tool-1", "wait", {}),))
+
+        async def execute(_call: ToolCall) -> tuple[dict, ToolOutcome]:
+            nonlocal executed
+            assert lock.locked()
+            executed = True
+            return {"type": "wait"}, ToolOutcome("tool-1", True, "ok")
+
+        monkeypatch.setattr(provider.wire, "tool_turn", model_turn)
+        monkeypatch.setattr(provider, "_execute_tool_call", execute)
+        gate = ToolExecutionGate(lock, lambda: revision, revision)
+        task = asyncio.create_task(provider._call_api([], gate=gate))
+        await model_started.wait()
+        async with lock:
+            revision += 1
+        model_continue.set()
+        await task
+        assert not executed
+
+    asyncio.run(run())
+
+
+def test_deliberate_tool_owns_input_only_for_command(
+    provider: ExecutorProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def run() -> None:
+        lock = asyncio.Lock()
+        calls = 0
+
+        async def model_turn(_request: object, _tools: object) -> ToolTurnResult:
+            nonlocal calls
+            assert not lock.locked()
+            calls += 1
+            return (
+                ToolTurnResult("", (ToolCall("tool-1", "wait", {}),))
+                if calls == 1
+                else ToolTurnResult("done")
+            )
+
+        async def execute(_call: ToolCall) -> tuple[dict, ToolOutcome]:
+            assert lock.locked()
+            return {"type": "wait"}, ToolOutcome("tool-1", True, "ok")
+
+        monkeypatch.setattr(provider.wire, "tool_turn", model_turn)
+        monkeypatch.setattr(provider, "_execute_tool_call", execute)
+        await provider._call_api([], gate=ToolExecutionGate(lock, lambda: 4, 4))
+        assert calls == 2
+        assert not lock.locked()
+
+    asyncio.run(run())
 
 
 # ---------------------------------------------------------------------------

@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from detection.inference.ownership import Owner
     from detection.inference.remote_detector import RemoteDetector
 
+    from .game_profile import GameProfile
     from .overlay import DetectionOverlay
 
     Detector: TypeAlias = EntityDetector | RemoteDetector
@@ -331,6 +332,8 @@ async def _detected_frame(detector: Detector, screenshot: bytes) -> Sequence[obj
 async def summarize_frame(
     detected_entities: Sequence[object],
     screenshot: bytes,
+    *,
+    profile: GameProfile | None = None,
 ) -> tuple[str, dict[str, tuple[Owner, float]]]:
     """The frame as the LLM reads it: a summary line, plus who owns each unit.
 
@@ -342,12 +345,22 @@ async def summarize_frame(
         return "", ownership_results
 
     try:
+        from detection.inference.ownership import Owner
         from detection.inference.ownership import classify_entities as classify_ownership
 
         from .goals import THREAT_CLASSES
 
+        color_owners = (
+            {player.color: Owner(player.relationship) for player in profile.players}
+            if profile is not None and profile.roster_verified and profile.ownership_verified
+            else None
+        )
         ownership_results = await asyncio.to_thread(
-            classify_ownership, screenshot, list(detected_entities), THREAT_CLASSES
+            classify_ownership,
+            screenshot,
+            list(detected_entities),
+            THREAT_CLASSES | GATE_BUILDING_CLASSES,
+            color_owners,
         )
     except Exception as e:
         # Ownership is an enrichment: the summary is still worth returning.

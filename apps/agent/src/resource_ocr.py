@@ -8,8 +8,9 @@ for the HUD, which replaced Claude vision. The output dict uses the same keys as
 
 Backends (``read_resource_bar(..., backend=...)``)
 --------------------------------------------------
-- ``"rapidocr"`` (production): PaddleOCR models on onnxruntime — pip-only, no
-  system binary. Used by the live strategist.
+- ``"rapidocr"`` (configured text/fallback backend): PaddleOCR models on
+  onnxruntime — pip-only, no system binary. Exact-resolution digit templates
+  run first in the live HUD path; RapidOCR handles unresolved fields and age.
 - ``"template"``: OpenCV NCC against per-digit glyph crops; needs only ``opencv``
   plus per-resolution templates. Useful with no OCR engine, and as a
   lone-single-digit fallback for the engine backends.
@@ -81,6 +82,7 @@ _IDLE_COUNT_X_HI = 6.8
 _IDLE_COUNT_Y_HI = 1.8
 _IDLE_WHITE_THR = 185
 _IDLE_COUNT_MIN_NCC = 0.45
+_WORKFORCE_COUNT_MIN_NCC = 0.38
 # Digit-candidate component filter, in pop-field-height fractions (glyphs are
 # roughly one pop-row tall; anything squatter/taller/wider is disc edge or noise).
 _IDLE_DIGIT_MIN_H_FRAC = 0.45
@@ -643,7 +645,7 @@ def _load_hud_digit_bank() -> dict[str, list[np.ndarray]]:
     return _hud_digit_bank
 
 
-def read_idle_count(rgb: np.ndarray, pop: FieldBox) -> int | None:
+def read_idle_count(rgb: np.ndarray, pop: FieldBox, idle_box: FieldBox | None = None) -> int | None:
     """Idle-villager COUNT from the badge's corner digit(s); None = unreadable.
 
     The count is drawn bottom-right of the badge in the HUD digit font: white
@@ -660,10 +662,15 @@ def read_idle_count(rgb: np.ndarray, pop: FieldBox) -> int | None:
     """
     ph = pop.y1 - pop.y0
     frame_h, frame_w = cast("tuple[int, int]", rgb.shape[:2])
-    x0 = pop.x0 + int(_IDLE_COUNT_X_LO * ph)
-    x1 = min(frame_w, pop.x0 + int(_IDLE_COUNT_X_HI * ph))
-    y0 = max(0, pop.y0)
-    y1 = min(frame_h, pop.y0 + int(_IDLE_COUNT_Y_HI * ph))
+    if idle_box is None:
+        x0 = pop.x0 + int(_IDLE_COUNT_X_LO * ph)
+        x1 = pop.x0 + int(_IDLE_COUNT_X_HI * ph)
+        y0 = pop.y0
+        y1 = pop.y0 + int(_IDLE_COUNT_Y_HI * ph)
+    else:
+        x0, y0, x1, y1 = idle_box.x0, idle_box.y0, idle_box.x1, idle_box.y1
+    x0, x1 = max(0, x0), min(frame_w, x1)
+    y0, y1 = max(0, y0), min(frame_h, y1)
     if x1 <= x0 or y1 <= y0:
         return None
     bank = _load_hud_digit_bank()
@@ -675,9 +682,9 @@ def read_idle_count(rgb: np.ndarray, pop: FieldBox) -> int | None:
     mask = cast("np.ndarray", white_mask.astype(np.uint8) * 255)
     glyphs = _segment_components(
         mask,
-        min_h=_IDLE_DIGIT_MIN_H_FRAC * ph,
-        max_h=_IDLE_DIGIT_MAX_H_FRAC * ph,
-        max_w=_IDLE_DIGIT_MAX_W_FRAC * ph,
+        min_h=10 if idle_box is not None else _IDLE_DIGIT_MIN_H_FRAC * ph,
+        max_h=18 if idle_box is not None else _IDLE_DIGIT_MAX_H_FRAC * ph,
+        max_w=14 if idle_box is not None else _IDLE_DIGIT_MAX_W_FRAC * ph,
         min_area=_IDLE_DIGIT_MIN_AREA,
     )
     if not glyphs:
@@ -706,7 +713,7 @@ def read_hud_count(rgb: np.ndarray, box: FieldBox) -> int | None:
     digits = ""
     for _x, glyph in glyphs:
         char, score = _classify_bank(glyph, bank)
-        if score < _IDLE_COUNT_MIN_NCC:
+        if score < _WORKFORCE_COUNT_MIN_NCC:
             return None
         digits += char
     return int(digits) if digits.isdigit() else None
@@ -923,7 +930,7 @@ def read_resource_bar(
         if not idle_present:
             out["idle_count"] = 0
         else:
-            idle_count = read_idle_count(rgb, pop_box)
+            idle_count = read_idle_count(rgb, pop_box, calibration.fields.get("idle_count"))
             if idle_count is not None:
                 out["idle_count"] = idle_count
 

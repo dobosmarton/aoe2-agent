@@ -1,11 +1,10 @@
 # `gameplay-agent/` — Real-Game Agent + Scenario Runner
 
-The Windows VM tier: the loop that screenshots AoE2:DE, sends frames to a
-detection server, and clicks. A deterministic **reactive tier** handles routine
-upkeep with no LLM call; Claude is asked what to do on the turns that need
-judgement. Also home to the scenario runner and its test helpers (the same
-Pydantic action model and providers are exercised by both real-game and
-synth-tier scenario tests).
+The Windows VM tier captures AoE2:DE screenshots, reads the HUD locally,
+detects entities, and issues mouse/keyboard input. TypeSafe chooses routine
+named actions; the actor enforces basic-economy deadlines and shared catalog
+feasibility. Strategic and bounded tactical calls use the configured provider.
+Automated replays test logic, not live Windows game effects.
 
 ## What's here
 
@@ -13,7 +12,7 @@ synth-tier scenario tests).
 apps/agent/src/            # importable as `gameplay_agent`
 ├── main.py                # CLI entry: `aoe2-agent`
 ├── game_loop.py           # Real-game capture → detect → think → act cycle
-├── reactive.py            # Deterministic no-LLM tier: villager orders, Feudal/Castle prep, houses, age-up
+├── policy/                # Shared action catalog, fallback, and economy obligations
 ├── villager_roles.py      # Villager job inference (what each detected villager is gathering)
 ├── synth_game_loop.py     # Stripped-down loop arena uses (talks to WorldState, no pyautogui)
 ├── executor.py            # Action dispatch + execution (pyautogui)
@@ -23,6 +22,8 @@ apps/agent/src/            # importable as `gameplay_agent`
 ├── goals.py               # Goal manager + alarm system + reward tracking
 ├── entity_utils.py        # DetectedEntity formatting helpers
 ├── resource_ocr.py        # Local resource-bar + idle-badge OCR (RapidOCR / template backend; replaced Claude vision)
+├── game_profile.py        # Validated roster and fixed 4v4 setup contract
+├── preflight.py           # Read-only live-window/HUD/selection qualification checks
 ├── detection_phase.py     # YOLO call + ownership classification per loop iteration
 ├── strategist_phase.py    # Periodic Sonnet text call (resources via local OCR) → goal updates
 ├── turn_phases.py         # Glue between detection / strategist / executor per turn
@@ -50,11 +51,32 @@ just agent                                       # Real game on Windows VM
 just agent --iterations 50
 just agent --test                                # One iteration, no clicks
 
+# Copy and fill the example with the actual eight-player lobby roster and
+# exported hotkey/game-build details, then validate the Windows setup.
+uv run --no-sync python -m gameplay_agent.preflight --profile my-4v4-profile.json
+AOE2_GAME_PROFILE=my-4v4-profile.json just agent
+
 just eval-all                                    # Run every scenario fixture
 uv run --package gameplay-agent \
     python -m gameplay_agent.scenario_runner \
     apps/agent/src/scenarios/age_up_gate_fires.yaml
 ```
+
+The profile example is [magyars_arabia_4v4.example.json](profiles/magyars_arabia_4v4.example.json)
+and is deliberately unqualified. Preflight exits nonzero until the window,
+HUD, selection, roster, hotkey, and ownership-color gates are satisfied. It
+checks geometry and screen readings without sending input; a human must verify
+hotkey effects and labeled team colors in the game before setting those flags.
+Without qualified ownership colors, non-blue units remain `unknown` and cannot
+trigger team alarms. The September 27 run was
+a four-player game, not the target 4v4 profile.
+
+The screen-controlled 4v4 profile is not yet qualified as a playable game
+agent. Current tests cover HUD replay, selection guards, catalog feasibility,
+and scripted economic/age actions. They do not validate hover feedback,
+production queues, construction previews, minimap navigation, tactical control
+groups, or live binding effects. The Windows opening, sustained-play, and
+three-match gates remain required before claiming successful team play.
 
 ## Where to read more
 

@@ -32,6 +32,7 @@ from gameplay_agent.resource_ocr import (
     calibration_for,
     read_age,
     read_resource_bar,
+    read_selected_unit,
 )
 from gameplay_agent.strategist_eval import (
     all_vision_fixtures,
@@ -133,6 +134,90 @@ def test_unreadable_worker_count_is_unknown() -> None:
     calibration.fields["food_workers"] = FieldBox(900, 300, 920, 325)
     readings = read_resource_bar(fixture.read_bytes(), calibration, backend="template")
     assert "food_workers" not in readings
+
+
+@pytest.mark.parametrize(
+    ("name", "wood", "idle_count"),
+    [
+        ("real_1672_dark_sep27_initial_hud.png", 150, 3),
+        ("real_1672_dark_sep27_hud.png", 175, 4),
+    ],
+)
+def test_recent_dark_age_capture_uses_explicit_idle_geometry(
+    name: str, wood: int, idle_count: int
+) -> None:
+    """Replay both supplied September 27 HUD states from checked-in crops."""
+    capture = Path(__file__).parents[1] / "apps/agent/src/vision_fixtures" / name
+    calibration = calibration_for(3024, 1672)
+    assert calibration is not None
+    readings = read_resource_bar(capture.read_bytes(), calibration, backend="template")
+    assert readings["villagers"] == 4
+    assert readings["idle_count"] == idle_count
+    assert readings["food_workers"] == 0
+    assert readings["population"] == "5/10"
+    assert readings["wood"] == wood
+
+
+def test_september_27_town_center_selection_reader() -> None:
+    """The saved command panel must recognize the real selected Town Center."""
+    fixture = (
+        Path(__file__).parents[1]
+        / "apps/agent/src/vision_fixtures/real_1672_dark_sep27_tc_selection.png"
+    )
+    calibration = Calibration(
+        width=340,
+        height=80,
+        fields={"selection": FieldBox(0, 0, 340, 80)},
+        template_dir=fixture.parent,
+    )
+    assert read_selected_unit(fixture.read_bytes(), calibration) == "town_center"
+
+
+def test_lossless_native_hud_crop_keeps_full_capture_calibration() -> None:
+    from gameplay_agent.providers.strategist import read_hud_readings
+
+    fixture = (
+        Path(__file__).parents[1] / "apps/agent/src/vision_fixtures/real_1672_dark_midgame.jpg"
+    )
+    with Image.open(fixture) as full:
+        crop = full.crop((0, 0, full.width, 300))
+        buffer = io.BytesIO()
+        crop.save(buffer, format="PNG")
+    readings, calibration = asyncio.run(
+        read_hud_readings(buffer.getvalue(), turn=6, full_size=(3024, 1672))
+    )
+    assert calibration is not None
+    assert readings["villagers"] == 18
+    assert readings["idle_count"] == 2
+    assert readings["population"] == "19/30"
+
+
+def test_contradictory_workforce_stays_unknown() -> None:
+    from gameplay_agent.providers.strategist import _clean_readings
+
+    readings = _clean_readings(
+        {
+            "population": "5/10",
+            "villagers": 4,
+            "idle_count": 1,
+            "food_workers": 3,
+            "wood_workers": 2,
+            "gold_workers": 0,
+            "stone_workers": 0,
+            "food": 200,
+        }
+    )
+    assert readings["villagers"] == 4
+    assert "food_workers" not in readings
+    assert "wood_workers" not in readings
+    assert readings["food"] == 200
+
+
+def test_villager_count_above_population_is_unknown() -> None:
+    from gameplay_agent.providers.strategist import _clean_readings
+
+    readings = _clean_readings({"population": "5/10", "villagers": 14, "idle_count": 3})
+    assert "villagers" not in readings
 
 
 def test_selected_builder_is_a_villager() -> None:
@@ -295,14 +380,21 @@ def test_calibration_field_rects_returns_plain_tuples():
 # ---------------------------------------------------------------------------
 
 
+def _empty_test_calibration() -> Calibration:
+    return Calibration(
+        width=20,
+        height=10,
+        fields={"food": FieldBox(0, 0, 10, 10)},
+        template_dir=Path(__file__).parent / "missing-ocr-templates",
+    )
+
+
 def test_read_hud_readings_precedence(monkeypatch):
     """Hand YAML wins; else auto-detect; both-None → {} with no per-field read.
 
     This is the per-turn HUD reader the game loop calls every tick (and the
     strategist reuses); the resolution precedence is the contract under test.
     """
-    from types import SimpleNamespace
-
     from gameplay_agent.providers import strategist as strat_mod
 
     png = _png_bytes(np.zeros((10, 20, 3), dtype=np.uint8))
@@ -314,15 +406,13 @@ def test_read_hud_readings_precedence(monkeypatch):
 
     def fake_autodetect(_bytes):
         calls["auto"] += 1
-        return SimpleNamespace(fields={"food": None}) if calls["auto"] == 1 else None
+        return _empty_test_calibration() if calls["auto"] == 1 else None
 
     monkeypatch.setattr(strat_mod, "read_resource_bar", fake_read)
     monkeypatch.setattr(strat_mod, "autodetect_calibration", fake_autodetect)
 
     # Hand YAML present → used; auto-detect never called.
-    monkeypatch.setattr(
-        strat_mod, "calibration_for", lambda w, h: SimpleNamespace(fields={"food": None})
-    )
+    monkeypatch.setattr(strat_mod, "calibration_for", lambda w, h: _empty_test_calibration())
     out, calib = asyncio.run(strat_mod.read_hud_readings(png))
     assert out["food"] == 200 and out["population"] == "4/5"
     assert calib is not None  # the calibration is returned (for the overlay)
@@ -342,14 +432,10 @@ def test_read_hud_readings_precedence(monkeypatch):
 
 def _patch_hud_seams(monkeypatch, *, backend: str, age_reads: list) -> None:
     """Wire read_hud_readings to fakes: fixed calibration/bar, recorded age reads."""
-    from types import SimpleNamespace
-
     from gameplay_agent.providers import strategist as strat_mod
 
     monkeypatch.setattr(strat_mod.config, "ocr_backend", backend)
-    monkeypatch.setattr(
-        strat_mod, "calibration_for", lambda w, h: SimpleNamespace(fields={"food": None})
-    )
+    monkeypatch.setattr(strat_mod, "calibration_for", lambda w, h: _empty_test_calibration())
     monkeypatch.setattr(
         strat_mod,
         "read_resource_bar",
@@ -391,6 +477,57 @@ def test_read_hud_readings_no_age_sampling_on_ocr_backends(monkeypatch):
 
     out, _ = asyncio.run(strat_mod.read_hud_readings(png, turn=5))
     assert age_reads == [] and "age" not in out  # bar read owns age here
+
+
+def test_runtime_uses_calibrated_templates_before_slow_ocr(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from gameplay_agent.providers import strategist as strat_mod
+
+    png = _png_bytes(np.zeros((10, 20, 3), dtype=np.uint8))
+    calls = []
+    monkeypatch.setattr(strat_mod.config, "ocr_backend", "rapidocr")
+    monkeypatch.setattr(
+        strat_mod,
+        "calibration_for",
+        lambda _w, _h: SimpleNamespace(fields={}, template_dir=tmp_path),
+    )
+
+    def fake_read(_bytes, _calib, *, backend):
+        calls.append(backend)
+        return {"food": 200, "wood": 200, "gold": 100, "stone": 200, "population": "4/5"}
+
+    monkeypatch.setattr(strat_mod, "read_resource_bar", fake_read)
+    readings, _calibration = asyncio.run(strat_mod.read_hud_readings(png, turn=6))
+    assert calls == ["template"]
+    assert readings["population"] == "4/5"
+
+
+def test_runtime_escalates_unresolved_population_only(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from gameplay_agent.providers import strategist as strat_mod
+
+    png = _png_bytes(np.zeros((10, 20, 3), dtype=np.uint8))
+    calls = []
+    monkeypatch.setattr(strat_mod.config, "ocr_backend", "rapidocr")
+    monkeypatch.setattr(
+        strat_mod,
+        "calibration_for",
+        lambda _w, _h: SimpleNamespace(fields={}, template_dir=tmp_path),
+    )
+
+    def fake_read(_bytes, _calib, *, backend):
+        calls.append(backend)
+        result = {"food": 200, "wood": 200, "gold": 100, "stone": 200}
+        if backend == "rapidocr":
+            result["population"] = "4/5"
+        return result
+
+    monkeypatch.setattr(strat_mod, "read_resource_bar", fake_read)
+    readings, _calibration = asyncio.run(strat_mod.read_hud_readings(png, turn=6))
+    assert calls == ["template", "rapidocr"]
+    assert readings["population"] == "4/5"
 
 
 # ---------------------------------------------------------------------------

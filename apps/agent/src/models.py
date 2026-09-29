@@ -142,6 +142,10 @@ class PressAction(BaseModel):
     rescan: bool = Field(
         default=False, description="Take fresh screenshot+detection after this key press"
     )
+    selection_only: bool = Field(
+        default=False,
+        description="For a rescan, verify HUD and command panel without object detection",
+    )
     intent: str = ""
 
     @field_validator("key")
