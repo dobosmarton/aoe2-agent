@@ -269,11 +269,11 @@ def test_build_llm_context_includes_known_buildings(build_gates) -> None:
 
 
 def test_fallback_actions_housed_builds_a_house():
-    """Housed → the fallback places a house (a click) to raise the pop cap."""
+    """Housed → the fallback uses the verified named build path."""
     memory = AgentMemory()
     memory.game_state.population = memory.game_state.population_cap  # 5/5 → housed
     actions = _fallback_actions(memory)
-    assert any(a["type"] == "click" for a in actions)
+    assert any(a["type"] == "build" and a["building_key"] == "q" for a in actions)
 
 
 def test_fallback_actions_not_housed_queues_villager():

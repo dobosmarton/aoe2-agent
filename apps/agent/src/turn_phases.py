@@ -28,7 +28,6 @@ from .executor import (
     CASTLE_PREREQ_COUNT,
     FEUDAL_PREREQ_CLASSES,
     blocked_actions,
-    build_steps,
     confirmed_buildings,
     execute_actions,
     get_detected_entities,
@@ -412,7 +411,13 @@ def _fallback_actions(memory: AgentMemory) -> list[dict[str, object]]:
     state = memory.game_state
     is_housed = state.population_cap > 0 and state.population >= state.population_cap
     if is_housed:
-        return build_steps("q", "Place house to raise pop cap (fallback build)")
+        return [
+            {
+                "type": "build",
+                "building_key": "q",
+                "intent": "Place house to raise pop cap (fallback build)",
+            }
+        ]
     return [
         {"type": "queue_villager", "intent": "Queue villager (fallback)"},
         {"type": "press", "key": ".", "rescan": True, "intent": "Select idle villager (fallback)"},

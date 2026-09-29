@@ -178,6 +178,22 @@ def test_resolve_target_class_missing_returns_none(fake_pyautogui: _FakePyautogu
     assert ex._resolve_target_class("gold") is None
 
 
+def test_villager_selection_uses_verified_box_not_first_detection(
+    fake_pyautogui: _FakePyautogui,
+) -> None:
+    ex._detected_entities = [
+        {"id": "false", "class": "villager", "center": (10, 20), "confidence": 0.27},
+        {
+            "id": "real",
+            "class": "villager",
+            "center": (100, 200),
+            "bbox": (90, 180, 110, 220),
+            "confidence": 0.88,
+        },
+    ]
+    assert ex._resolve_target_class("villager") == (100, 200)
+
+
 def test_resolve_coords_prefers_target_id(fake_pyautogui: _FakePyautogui) -> None:
     ex._detected_entities = [{"id": "sheep_1", "class": "sheep", "center": (200, 300)}]
     err, coords = ex._resolve_coords({"target_id": "sheep_1", "x": 0, "y": 0})
@@ -1429,7 +1445,52 @@ def test_build_steps_sequence() -> None:
 def test_build_selects_by_click_when_nothing_is_idle(fake_pyautogui: _FakePyautogui) -> None:
     """'.' is a no-op with nothing idle, so the leftover TC eats the next 'q'."""
     ex.observe_hud(10, 30, {}, idle_present=False)
-    assert ex.build_steps("w", "build mill")[0]["target_class"] == "villager"
+    steps = ex.build_steps("w", "build mill")
+    assert steps[0]["type"] == "detect"
+    assert steps[1]["target_class"] == "villager"
+
+
+def test_no_idle_build_aborts_when_fresh_detection_fails(
+    fake_pyautogui: _FakePyautogui,
+) -> None:
+    ex.observe_hud(8, 10, {"wood": 200}, idle_present=False)
+    ex.set_detected_entities(
+        [{"id": "stale", "class": "villager", "center": (100, 200), "confidence": 0.9}]
+    )
+
+    async def unavailable() -> bool:
+        return False
+
+    ex.set_rescan_full_fn(unavailable)
+    result = _run(ex.execute_action({"type": "build", "building_key": "q", "intent": "house"}))
+    assert not result.success
+    assert not fake_pyautogui.calls
+
+
+def test_no_idle_build_rejects_low_confidence_worker_without_clicking(
+    fake_pyautogui: _FakePyautogui,
+) -> None:
+    ex.observe_hud(8, 10, {"wood": 200}, idle_present=False)
+    ex.set_detected_entities([{"id": "old", "class": "villager", "center": (100, 200)}])
+
+    async def refresh() -> bool:
+        ex.set_detected_entities(
+            [
+                {
+                    "id": "weak",
+                    "class": "villager",
+                    "center": (100, 200),
+                    "bbox": (90, 180, 110, 220),
+                    "confidence": 0.27,
+                }
+            ]
+        )
+        return True
+
+    ex.set_rescan_full_fn(refresh)
+    result = _run(ex.execute_action({"type": "build", "building_key": "q", "intent": "house"}))
+    assert not result.success
+    assert not fake_pyautogui.calls
 
 
 def test_build_presses_dot_when_a_villager_is_idle(fake_pyautogui: _FakePyautogui) -> None:

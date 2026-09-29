@@ -7,6 +7,8 @@ import asyncio
 import pytest
 from gameplay_agent import executor as ex
 from gameplay_agent.memory import AgentMemory
+from gameplay_agent.policy.candidates import feasible_candidates
+from gameplay_agent.policy.controller import AgentController
 
 
 @pytest.fixture
@@ -109,6 +111,56 @@ def test_military_population_does_not_deliver_villager(ledger: ex.ActionLedger) 
     ledger.note_input()
     ex.observe_hud(5, 10, {"food": 150}, villagers=3, input_revision=ledger.input_revision)
     assert len(ledger.queued_training) == 1
+    assert pending.operation_id not in ledger.confirmed_economic_ids
+
+
+def test_population_growth_reconciles_villager_when_count_is_unreadable(
+    ledger: ex.ActionLedger,
+) -> None:
+    """A paid TC queue must not block production forever after HUD OCR drops out."""
+    ex.observe_hud(5, 10, {"food": 150}, villagers=4)
+    pending = ex._note_pending_training("villager")
+    assert pending is not None
+    ledger.note_input()
+    ex.observe_hud(5, 10, {"food": 100}, villagers=4, input_revision=ledger.input_revision)
+
+    ex.observe_hud(6, 10, {"food": 100}, villagers=None, input_revision=ledger.input_revision)
+
+    assert ex.ledger_policy_state().pending_villagers == 0
+    assert pending.operation_id in ledger.confirmed_economic_ids
+
+
+def test_reconciled_delivery_restores_actor_tc_obligation(ledger: ex.ActionLedger) -> None:
+    ex.observe_hud(5, 10, {"food": 150}, villagers=4)
+    pending = ex._note_pending_training("villager")
+    assert pending is not None
+    ledger.note_input()
+    ex.observe_hud(5, 10, {"food": 100}, villagers=4, input_revision=ledger.input_revision)
+    ex.observe_hud(6, 10, {"food": 100}, villagers=None, input_revision=ledger.input_revision)
+
+    state = ex.ledger_policy_state()
+    candidates = feasible_candidates(state)
+    controller = AgentController()
+    controller.overdue(state, candidates, None, now=state.captured_at)
+    due = controller.overdue(state, candidates, None, now=state.captured_at + 5.1)
+
+    assert due is not None
+    assert due.id == "queue_villager"
+
+
+def test_unreadable_villager_count_does_not_claim_competing_military_delivery(
+    ledger: ex.ActionLedger,
+) -> None:
+    ex.observe_hud(10, 20, {"food": 200}, villagers=9)
+    pending = ex._note_pending_training("villager")
+    assert pending is not None
+    ledger.note_input()
+    ex.observe_hud(10, 20, {"food": 150}, villagers=9, input_revision=ledger.input_revision)
+    ledger.queued_training.append(ex._QueuedTraining("militia", ledger.new_operation_id()))
+
+    ex.observe_hud(11, 20, {"food": 150}, villagers=None, input_revision=ledger.input_revision)
+
+    assert ex.ledger_policy_state().pending_villagers == 1
     assert pending.operation_id not in ledger.confirmed_economic_ids
 
 

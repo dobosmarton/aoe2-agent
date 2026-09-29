@@ -386,6 +386,7 @@ async def run_scenario_async(path: Path) -> ScenarioResult:
         executor.ensure_game_focused,
         executor.get_rescan_fn(),
         executor._selection_refresh_fn,
+        executor._rescan_full_fn,
     )
     try:
         with tempfile.TemporaryDirectory(prefix="agent-scenario-") as temporary:
@@ -411,6 +412,7 @@ async def run_scenario_async(path: Path) -> ScenarioResult:
 
             executor.set_rescan_fn(refresh)
             executor.set_selection_refresh_fn(refresh)
+            executor.set_rescan_full_fn(refresh)
             tick += 1
             await perceive_once(ctx, tick)
             for index, step in enumerate(steps, start=1):
@@ -440,6 +442,7 @@ async def run_scenario_async(path: Path) -> ScenarioResult:
         executor.ensure_game_focused = original[2]
         executor._rescan_fn = original[3]
         executor._selection_refresh_fn = original[4]
+        executor._rescan_full_fn = original[5]
         executor.clear_detected_entities()
         executor.unbind_ledger(token)
     return ScenarioResult(path.stem, not failures, failures, actions, inputs, world.age)

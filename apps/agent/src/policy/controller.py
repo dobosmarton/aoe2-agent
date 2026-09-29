@@ -42,11 +42,7 @@ def essential_intentions(
             if action_id in available:
                 due.append(action_id)
                 break
-    if (
-        state.villagers is not None
-        and state.pending_villagers == 0
-        and "queue_villager" in available
-    ):
+    if state.pending_villagers == 0 and "queue_villager" in available:
         due.append("queue_villager")
     return tuple(due)
 
@@ -75,7 +71,7 @@ class AgentController:
         ):
             observed.add(_IDLE_WORKER)
         if state.pending_villagers == 0 and (
-            state.villagers is not None or _TC_PRODUCTION in self.first_seen
+            state.population_known or _TC_PRODUCTION in self.first_seen
         ):
             observed.add(_TC_PRODUCTION)
         self.first_seen = {key: stamp for key, stamp in self.first_seen.items() if key in observed}

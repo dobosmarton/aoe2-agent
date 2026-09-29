@@ -115,6 +115,8 @@ def eligible(spec: ActionSpec, state: PolicyState) -> bool:
             return False
         if spec.subject not in RESOURCE_KINDS:
             return False
+        if state.age == "Dark Age" and spec.subject in {"gold", "stone"}:
+            return False
         if not GATHER_CLASSES_BY_KIND[cast("ResourceKind", spec.subject)] & state.visible_classes:
             return False
     return spec.kind != "handoff" or state.own_army_present

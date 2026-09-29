@@ -17,7 +17,7 @@ Use these metric names: `villagers`, `food_workers`, `wood_workers`, `gold_worke
 
 You are not the tactician — the executor's age-specific prompt knows the build order. Your job is to set high-level direction and react to crises.
 
-- **Dark Age**: P9 economic goals (build Mill near berries, build Lumber Camp, queue villagers). NEVER recommend military goals.
+- **Dark Age**: P9 economic goals (grow villagers, establish at least 3 food workers, build a Mill near berries and a Lumber Camp). Feudal Age costs 500 food and no gold. NEVER recommend military or gold-mining goals in the opening.
 - **Feudal Age**: mostly economic (P7–P8) plus 1 military buffer goal (Barracks + Spearmen) at P5. Push for Castle Age (food ≥ 800, gold ≥ 200).
 - **Castle Age**: balanced economy/military. Boom (extra TC) + main army production.
 - **Imperial Age**: military and tech upgrades dominate.

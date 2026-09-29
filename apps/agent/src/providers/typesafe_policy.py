@@ -32,7 +32,7 @@ _ALLOCATION_CRITERIA: Mapping[str, str] = {
     "balanced": "Keep the normal age-appropriate balance across useful resources.",
     "food": "Bias new or idle villagers toward food for production and age advancement.",
     "wood": "Bias new or idle villagers toward wood for buildings, farms and infrastructure.",
-    "gold": "Bias new or idle villagers toward gold for age advancement and military units.",
+    "gold": "Bias workers toward gold for Castle Age or gold-cost units, not the Dark Age opening.",
     "stone": "Bias new or idle villagers toward stone for castles, towers or extra Town Centers.",
 }
 

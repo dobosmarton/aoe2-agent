@@ -269,7 +269,7 @@ def get_default_goals(turn: int = 0) -> list[Goal]:
             name="Gather food",
             type="local",
             metric="food_workers",
-            target=2,
+            target=3,
             priority=8,
             created_turn=turn,
         ),

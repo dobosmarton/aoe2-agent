@@ -1332,6 +1332,14 @@ def _reconcile_queued_training(
         else 0
     )
     military_gain = max(population_gain - villager_gain, 0)
+    # The small-HUD villager digit can be unreadable while population remains
+    # legible. A population gain then proves delivery of a paid villager if the
+    # ledger has no competing military production to which to attribute it.
+    if villagers_now is None and not any(
+        item.unit != "villager" for item in (*ledger.queued_training, *ledger.pending_training)
+    ):
+        villager_gain = population_gain
+        military_gain = 0
     delivered: list[_QueuedTraining] = []
     remaining: list[_QueuedTraining] = []
     for item in ledger.queued_training:
@@ -1350,7 +1358,11 @@ def _reconcile_queued_training(
                 item.operation_id,
                 "queue_villager" if item.unit == "villager" else f"train_{item.unit}",
                 "confirmed",
-                "villager HUD count increased"
+                (
+                    "villager HUD count increased"
+                    if villagers_now is not None
+                    else "population increased with no competing military commitment"
+                )
                 if item.unit == "villager"
                 else "military population delivered",
             )
@@ -1729,13 +1741,55 @@ def _resolve_target_id(target_id: str) -> tuple[int, int] | None:
 
 
 def _resolve_target_class(target_class: str) -> tuple[int, int] | None:
-    """Resolve target_class to (x, y) of first matching entity."""
+    """Resolve a class target; villager clicks require a credible boxed unit."""
+    if target_class == "villager":
+        return _verified_villager_center()
     for entity in _detected_entities:
         if entity.get("class") == target_class:
             center = entity.get("center")
             if center:
                 return (int(center[0]), int(center[1]))
     return None
+
+
+_MIN_BUILDER_CONFIDENCE = 0.65
+
+
+def _verified_villager_center() -> tuple[int, int] | None:
+    target = _verified_villager_target()
+    return None if target is None else target[1]
+
+
+def _verified_villager_target() -> tuple[str, tuple[int, int]] | None:
+    """Bind the strongest boxed villager, never an unbounded class guess."""
+    candidates: list[tuple[float, str, tuple[int, int]]] = []
+    for entity in _detected_entities:
+        if entity.get("class") != "villager":
+            continue
+        identifier = entity.get("id")
+        confidence = entity.get("confidence")
+        center = entity.get("center")
+        bbox = entity.get("bbox")
+        if (
+            not isinstance(identifier, str)
+            or not identifier
+            or isinstance(confidence, bool)
+            or not isinstance(confidence, (int, float))
+            or confidence < _MIN_BUILDER_CONFIDENCE
+            or not isinstance(center, (tuple, list))
+            or len(center) != 2
+            or not isinstance(bbox, (tuple, list))
+            or len(bbox) != 4
+            or not all(isinstance(value, (int, float)) for value in (*center, *bbox))
+        ):
+            continue
+        x, y = int(center[0]), int(center[1])
+        if bbox[0] <= x <= bbox[2] and bbox[1] <= y <= bbox[3]:
+            candidates.append((float(confidence), identifier, (x, y)))
+    if not candidates:
+        return None
+    _, identifier, center = max(candidates, key=lambda item: item[0])
+    return identifier, center
 
 
 def _to_int(value: object) -> int:
@@ -2227,10 +2281,13 @@ def build_steps(
     build composite (`executor_provider.ExecutorProvider._execute_build`), and the housed
     fallback, so the steps live in exactly one place.
     """
-    return [
-        _select_villager_step(intent),
-        *build_menu_steps(building_key, intent, menu=menu),
-    ]
+    selection = _select_villager_step(intent)
+    refresh = (
+        [{"type": "detect", "intent": f"Refresh builder targets ({intent})"}]
+        if selection["type"] == "click"
+        else []
+    )
+    return [*refresh, selection, *build_menu_steps(building_key, intent, menu=menu)]
 
 
 async def _handle_click(action_dict: dict[str, object], intent: str) -> ActionResult:
@@ -2407,17 +2464,36 @@ async def _handle_build(action_dict: dict[str, object], intent: str) -> ActionRe
     rejection = build_rejection(key, intent, menu=menu)
     if rejection is not None:
         return ActionResult(False, rejection)
-    for index, step in enumerate(build_steps(key, intent, menu=menu)):
+    steps = build_steps(key, intent, menu=menu)
+    selection_index = 1 if steps[0]["type"] == "detect" else 0
+    for index, step in enumerate(steps):
         result = await execute_action(step)
         if not result.success:
-            if index == 0 and action_id:
+            if index <= selection_index and action_id:
                 current_ledger().defer_action(
                     action_id, _BUILD_REFRESH_RETRY_DELAY, "villager refresh failed"
                 )
             return ActionResult(
                 False, f"build failed at: {step.get('intent', '')}: {result.detail}"
             )
-        if index == 0:
+        if index == 0 and selection_index == 1:
+            target = _verified_villager_target()
+            if target is None:
+                if action_id:
+                    current_ledger().defer_action(
+                        action_id, _BUILD_REFRESH_RETRY_DELAY, "no verified builder target"
+                    )
+                return ActionResult(False, "no villager with verified bounds in refreshed view")
+            target_id, center = target
+            steps[selection_index] = {
+                "type": "click",
+                "target_id": target_id,
+                "expected_class": "villager",
+                "expected_coords": center,
+                "spatial_revision": current_ledger().input_revision,
+                "intent": f"Select villager ({intent})",
+            }
+        if index == selection_index:
             if step.get("type") == "click" and not await _selection_refresh():
                 if action_id:
                     current_ledger().defer_action(
@@ -2430,7 +2506,7 @@ async def _handle_build(action_dict: dict[str, object], intent: str) -> ActionRe
                         action_id, _BUILD_REFRESH_RETRY_DELAY, "villager selection unverified"
                     )
                 return ActionResult(False, rejection)
-        if index == 2 and not await _selection_refresh():
+        if index == selection_index + 2 and not await _selection_refresh():
             if action_id:
                 current_ledger().defer_action(
                     action_id, _BUILD_REFRESH_RETRY_DELAY, "pre-placement refresh failed"

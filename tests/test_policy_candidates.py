@@ -82,6 +82,36 @@ def test_unrelated_action_does_not_reset_tc_deadline() -> None:
     assert overdue.id == "queue_villager"
 
 
+def test_tc_service_survives_unreadable_villager_count() -> None:
+    controller = AgentController()
+    state = PolicyState(
+        food=100,
+        villagers=None,
+        population=6,
+        population_cap=10,
+        idle_present=False,
+        captured_at=0.0,
+    )
+    candidates = feasible_candidates(state)
+    assert controller.overdue(state, candidates, None, now=0.0) is None
+    overdue = controller.overdue(state, candidates, None, now=5.1)
+    assert overdue is not None
+    assert overdue.id == "queue_villager"
+
+
+def test_dark_age_does_not_divert_idle_workers_to_gold() -> None:
+    state = PolicyState(
+        food=120,
+        population=6,
+        population_cap=10,
+        villagers=5,
+        idle_present=True,
+        visible_classes=frozenset({"gold_mine"}),
+        villager_jobs={"food": 2, "wood": 2, "gold": 0},
+    )
+    assert "assign_gold" not in _ids(state)
+
+
 def test_house_requires_known_cap_worker_and_low_headroom() -> None:
     unknown = PolicyState(population=0, population_cap=0, wood=25, idle_present=True)
     without_worker = PolicyState(population=5, population_cap=10, wood=25)
