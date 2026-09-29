@@ -209,6 +209,8 @@ CASTLE_PREREQ_COUNT = 2
 _RESEARCH_SETTLE_SECONDS = 30.0
 _ASSIGNMENT_SETTLE_SECONDS = 12.0
 _ASSIGNMENT_RETRY_DELAY = 20.0
+_ASSIGNMENT_REFRESH_RETRY_DELAY = 5.0
+_BUILD_REFRESH_RETRY_DELAY = 5.0
 _FOOD_STALL_SECONDS = 30.0
 
 
@@ -415,6 +417,7 @@ class ActionLedger:
     failure_streak: int = 0
     failure_count: int = 0
     recent_failures: list[str] = field(default_factory=list)
+    retry_after: dict[str, float] = field(default_factory=dict)
     outcomes: list[ActionOutcome] = field(default_factory=list)
     next_operation_id: int = 1
     known_resources: frozenset[str] = frozenset()
@@ -541,6 +544,11 @@ class ActionLedger:
     def record_success(self) -> None:
         self.failure_streak = 0
 
+    def defer_action(self, action: str, seconds: float, reason: str) -> None:
+        """Avoid repeating an action before its missing evidence can change."""
+        self.retry_after[action] = _now() + seconds
+        log.info("action_retry_deferred", action=action, seconds=seconds, reason=reason)
+
     def note_input(self) -> None:
         self.input_revision += 1
 
@@ -644,6 +652,7 @@ def ledger_policy_state(ledger: ActionLedger | None = None) -> PolicyState:
                 for name, until in ledger.research_blocked_until.items()
                 if until > now
             ]
+            + [action for action, until in ledger.retry_after.items() if until > now]
         ),
         reserved_resources=ledger.reservations(),
         pending_population=len(ledger.pending_training) + len(ledger.queued_training),
@@ -1642,6 +1651,9 @@ def _rejection_reason(building_key: str, menu: str) -> str | None:
     cls = building_class(menu, building_key)
     if cls is None:
         return f"unknown building binding {menu}+{building_key}"
+    retry_at = current_ledger().retry_after.get(f"build_{cls}", 0.0)
+    if retry_at > _now():
+        return f"{cls} build deferred until a fresh verification can succeed"
     suppressed_until = current_ledger().suppressed_until.get(cls, 0.0)
     if _now() < suppressed_until:
         streak = current_ledger().missing_streaks.get(cls, 0)
@@ -2381,33 +2393,50 @@ async def _handle_wait(action_dict: dict[str, object], intent: str) -> ActionRes
 
 
 async def _handle_build(action_dict: dict[str, object], intent: str) -> ActionResult:
-    """Build a structure, auto-placed near the Town Center (coordinate-free).
+    """Issue a guarded placement near the Town Center (coordinate-free).
 
-    Runs the shared `build_steps` sequence so the fast single-shot path can build
-    too — the executor picks placement since the text-only model can't see open
-    ground. The "place" intent triggers `_handle_click`'s blocked-terrain retry.
+    A click only starts settlement; the ledger must observe the purchase and
+    completion before claiming that a building exists.
     """
     key = action_dict.get("building_key")
     if not isinstance(key, str) or not key:
         return ActionResult(False, "build: missing building_key")
     menu = str(action_dict.get("menu") or ECON_MENU)
+    building_name = building_class(menu, key)
+    action_id = f"build_{building_name}" if building_name is not None else ""
     rejection = build_rejection(key, intent, menu=menu)
     if rejection is not None:
         return ActionResult(False, rejection)
     for index, step in enumerate(build_steps(key, intent, menu=menu)):
         result = await execute_action(step)
         if not result.success:
+            if index == 0 and action_id:
+                current_ledger().defer_action(
+                    action_id, _BUILD_REFRESH_RETRY_DELAY, "villager refresh failed"
+                )
             return ActionResult(
                 False, f"build failed at: {step.get('intent', '')}: {result.detail}"
             )
         if index == 0:
             if step.get("type") == "click" and not await _selection_refresh():
+                if action_id:
+                    current_ledger().defer_action(
+                        action_id, _BUILD_REFRESH_RETRY_DELAY, "villager selection refresh failed"
+                    )
                 return ActionResult(False, "villager selection refresh unavailable")
             if rejection := _selection_rejection("villager"):
+                if action_id:
+                    current_ledger().defer_action(
+                        action_id, _BUILD_REFRESH_RETRY_DELAY, "villager selection unverified"
+                    )
                 return ActionResult(False, rejection)
         if index == 2 and not await _selection_refresh():
+            if action_id:
+                current_ledger().defer_action(
+                    action_id, _BUILD_REFRESH_RETRY_DELAY, "pre-placement refresh failed"
+                )
             return ActionResult(False, "pre-placement HUD refresh unavailable")
-    return ActionResult(True, f"built ({intent})")
+    return ActionResult(True, f"placement input issued ({intent}); awaiting evidence")
 
 
 async def _handle_research(action_dict: dict[str, object], intent: str) -> ActionResult:
@@ -2590,6 +2619,9 @@ async def _handle_assign_idle(action_dict: dict[str, object], intent: str) -> Ac
         {"type": "press", "key": ".", "rescan": True, "intent": "Select idle villager"}
     )
     if not result.success:
+        current_ledger().assignment_suppressed_until[cast("ResourceKind", resource)] = (
+            _now() + _ASSIGNMENT_REFRESH_RETRY_DELAY
+        )
         return ActionResult(False, result.detail)
     if selection_error := _selection_rejection("villager"):
         return ActionResult(False, selection_error)
@@ -2597,6 +2629,13 @@ async def _handle_assign_idle(action_dict: dict[str, object], intent: str) -> Ac
     kind = cast("ResourceKind", resource)
     target = safe_gather_target(list(_detected_entities), kind, (width / 2, height / 2))
     if target is None:
+        current_ledger().assignment_suppressed_until[kind] = _now() + _ASSIGNMENT_RETRY_DELAY
+        log.warning(
+            "assignment_target_unavailable",
+            resource=kind,
+            visible_classes=sorted({str(entity.get("class", "")) for entity in _detected_entities}),
+            retry_seconds=_ASSIGNMENT_RETRY_DELAY,
+        )
         return ActionResult(False, f"no {kind} target with verified bounds in refreshed view")
     ledger = current_ledger()
     pending = _PendingAssignment(

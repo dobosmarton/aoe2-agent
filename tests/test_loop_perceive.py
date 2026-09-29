@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from gameplay_agent import executor as ex
+from gameplay_agent.entity_snapshot import snapshot_entity
 from gameplay_agent.goal_logger import GoalLogger
 from gameplay_agent.goals import GoalManager
 from gameplay_agent.loops import perceive
@@ -22,6 +23,9 @@ from tests.loop_fakes import FakeActuator, FakeSource
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable
+    from pathlib import Path
+
+    from pytest import MonkeyPatch
 
 
 def _run(coro: Awaitable[object]) -> object:
@@ -131,6 +135,53 @@ def test_spatial_capture_includes_hud_baseline(monkeypatch) -> None:
     assert refresh.hud_readings == {"food": 200}
 
 
+def test_post_camera_refresh_replaces_old_targets_with_its_own_detection(
+    tmp_path: Path, gates: None, monkeypatch: MonkeyPatch
+) -> None:
+    source = FakeSource()
+    ctx = _context(tmp_path, source)
+    ex.set_detected_entities(
+        [
+            {
+                "id": "old_sheep",
+                "class": "sheep",
+                "center": (300, 300),
+                "bbox": (280, 280, 320, 320),
+                "confidence": 0.9,
+            },
+        ]
+    )
+
+    async def refreshed(_timings: TickTimings, *, selection_only: bool = False) -> SpatialRefresh:
+        assert not selection_only
+        return SpatialRefresh(
+            captured_at=time.monotonic(),
+            input_revision=0,
+            spatial_valid=True,
+            selected_unit="villager",
+            entities=(
+                snapshot_entity(
+                    {
+                        "id": "new_sheep",
+                        "class": "sheep",
+                        "center": (900, 700),
+                        "bbox": (880, 680, 920, 720),
+                        "confidence": 0.9,
+                    }
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(source, "capture_spatial", refreshed)
+
+    async def drive() -> None:
+        request = ctx.frames.request_spatial_refresh()
+        await perceive._refresh_spatial_once(ctx, request)
+
+    _run(drive())
+    assert [entity["id"] for entity in ex.get_detected_entities()] == ["new_sheep"]
+
+
 def test_selection_refresh_skips_object_detection(monkeypatch) -> None:
     source = GameSource()
 
@@ -155,6 +206,39 @@ def test_selection_refresh_skips_object_detection(monkeypatch) -> None:
     assert refresh.spatial_valid
     assert refresh.selected_unit == "town_center"
     assert refresh.hud_readings == {"food": 150}
+
+
+def test_selection_refresh_requests_critical_hud_mode(monkeypatch: MonkeyPatch) -> None:
+    from gameplay_agent.loops import source as source_module
+
+    source = GameSource()
+    modes: list[str] = []
+
+    async def screen(
+        _tick: int | None, _timings: TickTimings
+    ) -> tuple[bytes, bytes, int, int, float]:
+        return b"jpeg", b"native-hud", 3024, 1672, time.monotonic()
+
+    async def read_hud(
+        _bytes: bytes,
+        *,
+        turn: int | None,
+        full_size: tuple[int, int] | None,
+        mode: str,
+    ) -> tuple[dict[str, int], None]:
+        modes.append(mode)
+        return {"food": 200}, None
+
+    def selected_unit(_bytes: bytes, _calibration: object) -> str:
+        return "villager"
+
+    monkeypatch.setattr(source, "_screen", screen)
+    monkeypatch.setattr(source_module, "read_hud_readings", read_hud)
+    monkeypatch.setattr(source_module, "read_selected_unit", selected_unit)
+
+    _run(source.capture_spatial(TickTimings(), selection_only=True))
+
+    assert modes == ["critical"]
 
 
 def test_spatial_capture_rejects_input_that_changes_during_detection(monkeypatch) -> None:

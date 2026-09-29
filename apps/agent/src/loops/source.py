@@ -237,7 +237,13 @@ class GameSource:
             selection_only=selection_only,
         )
         return SpatialRefresh(
-            captured_at, revision, spatial_valid, hud_readings, selected_unit, screenshot
+            captured_at=captured_at,
+            input_revision=revision,
+            spatial_valid=spatial_valid,
+            hud_readings=hud_readings,
+            selected_unit=selected_unit,
+            screenshot=screenshot,
+            entities=tuple(entities) if not selection_only else None,
         )
 
     async def _screen(
@@ -262,7 +268,10 @@ class GameSource:
         """Read the resource bar, and show the OCR boxes it calibrated."""
         with timings.phase("ocr"):
             hud_readings, calib = await read_hud_readings(
-                native_hud, turn=tick, full_size=full_size
+                native_hud,
+                turn=tick,
+                full_size=full_size,
+                mode="critical" if tick == 0 else "routine",
             )
         if self._overlay is not None and calib is not None:
             self._overlay.set_ocr_fields(calib.field_rects())

@@ -499,6 +499,82 @@ def test_food_assignment_does_not_silently_target_wood_after_refresh(
     assert "rightClick" not in fake_pyautogui.names()
 
 
+def test_missing_post_jump_food_target_defers_repeating_that_assignment(
+    fake_pyautogui: _FakePyautogui, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ex.observe_hud(4, 5, {"food": 200, "wood": 200}, idle_present=True)
+    ex._detected_entities = [
+        {
+            "id": "sheep",
+            "class": "sheep",
+            "center": (1500, 800),
+            "bbox": (1480, 780, 1520, 820),
+            "confidence": 0.9,
+        },
+    ]
+
+    async def camera_jumped_to_trees() -> bool:
+        ex._detected_entities = [
+            {
+                "id": "tree",
+                "class": "tree",
+                "center": (1400, 800),
+                "bbox": (1380, 780, 1420, 820),
+                "confidence": 0.9,
+            },
+        ]
+        return True
+
+    ex.set_rescan_fn(camera_jumped_to_trees)
+    monkeypatch.setattr(ex, "RESCAN_SETTLE_DELAY", 0.0)
+    result = _run(ex.execute_action({"type": "assign_idle", "resource": "food"}))
+
+    assert not result.success
+    assert "rightClick" not in fake_pyautogui.names()
+    assert "assign_food" in ex.ledger_policy_state().suppressed_actions
+    assert "assign_wood" not in ex.ledger_policy_state().suppressed_actions
+    from gameplay_agent.policy.candidates import feasible_candidates
+    from gameplay_agent.policy.fallback import select_fallback
+
+    state = ex.ledger_policy_state()
+    assert select_fallback(feasible_candidates(state), state, None).id == "assign_wood"
+
+
+def test_assignment_clicks_only_a_sheep_from_the_post_jump_view(
+    fake_pyautogui: _FakePyautogui, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ex.observe_hud(4, 5, {"food": 200, "wood": 200}, idle_present=True)
+    ex._detected_entities = [
+        {
+            "id": "old_sheep",
+            "class": "sheep",
+            "center": (1500, 800),
+            "bbox": (1480, 780, 1520, 820),
+            "confidence": 0.9,
+        },
+    ]
+
+    async def camera_jump() -> bool:
+        ex._detected_entities = [
+            {
+                "id": "new_sheep",
+                "class": "sheep",
+                "center": (900, 700),
+                "bbox": (880, 680, 920, 720),
+                "confidence": 0.9,
+            },
+        ]
+        return True
+
+    ex.set_rescan_fn(camera_jump)
+    monkeypatch.setattr(ex, "RESCAN_SETTLE_DELAY", 0.0)
+    result = _run(ex.execute_action({"type": "assign_idle", "resource": "food"}))
+
+    assert result.success
+    assert ("rightClick", (900, 700), {}) in fake_pyautogui.calls
+    assert ("rightClick", (1500, 800), {}) not in fake_pyautogui.calls
+
+
 def test_intervening_input_preserves_pending_assignment_evidence(
     fake_pyautogui: _FakePyautogui, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -692,6 +768,7 @@ def test_composite_build_aborts_after_refresh_timeout(
     assert not result.success and "fresh perception" in result.detail
     assert "click" not in fake_pyautogui.names()
     assert ex._build_gates.pending_placements == []
+    assert "build_house" in ex.ledger_policy_state().suppressed_actions
 
 
 # ---------------------------------------------------------------------------

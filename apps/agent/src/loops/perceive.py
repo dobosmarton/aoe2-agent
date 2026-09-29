@@ -14,13 +14,16 @@ from typing import TYPE_CHECKING
 import structlog
 
 from ..config import config
+from ..entity_snapshot import snapshot_entities
 from ..entity_utils import extract_attrs
 from ..executor import (
     confirmed_buildings,
+    get_detected_entities,
     ledger_policy_state,
     observe_age,
     observe_hud,
     record_observed_buildings,
+    set_detected_entities,
     villagers_ordered,
 )
 from ..goals import THREAT_CLASSES
@@ -98,6 +101,12 @@ async def _refresh_spatial_once(ctx: LoopContext, request: asyncio.Future[Spatia
         refresh = await ctx.source.capture_spatial(
             timings, selection_only=ctx.frames.selection_only(request)
         )
+        if (
+            refresh.spatial_valid
+            and refresh.entities is not None
+            and snapshot_entities(get_detected_entities()) != refresh.entities
+        ):
+            set_detected_entities(refresh.entities)
         if refresh.spatial_valid and refresh.hud_readings:
             sync_world_state(
                 ctx.memory,

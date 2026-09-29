@@ -18,6 +18,7 @@ pytest.importorskip("cv2")  # template backend needs OpenCV
 import asyncio
 import io
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 from gameplay_agent.resource_ocr import (
@@ -41,6 +42,9 @@ from gameplay_agent.strategist_eval import (
     resolve_screenshot_path,
 )
 from PIL import Image
+
+if TYPE_CHECKING:
+    from pytest import MonkeyPatch
 
 # On-screen layout we synthesize: (field, value, left-x). y is shared.
 _LAYOUT = [
@@ -466,6 +470,52 @@ def test_read_hud_readings_samples_age_on_template_backend(monkeypatch):
     out, _ = asyncio.run(strat_mod.read_hud_readings(png))  # unknown turn → read
     assert out["age"] == "Feudal Age"
     assert len(age_reads) == 2
+
+
+def test_critical_hud_read_does_not_run_age_ocr(monkeypatch: MonkeyPatch) -> None:
+    """A dependent input refresh cannot spend its deadline reading age text."""
+    from gameplay_agent.providers import strategist as strat_mod
+
+    png = _png_bytes(np.zeros((10, 20, 3), dtype=np.uint8))
+    age_reads: list[bool] = []
+    _patch_hud_seams(monkeypatch, backend="template", age_reads=age_reads)
+
+    readings, _ = asyncio.run(strat_mod.read_hud_readings(png, turn=0, mode="critical"))
+
+    assert readings["food"] == 1
+    assert age_reads == []
+
+
+def test_critical_hud_read_never_escalates_to_slow_ocr(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    from types import SimpleNamespace
+
+    from gameplay_agent.providers import strategist as strat_mod
+
+    png = _png_bytes(np.zeros((10, 20, 3), dtype=np.uint8))
+    backends: list[str] = []
+    monkeypatch.setattr(strat_mod.config, "ocr_backend", "rapidocr")
+    monkeypatch.setattr(
+        strat_mod,
+        "calibration_for",
+        lambda _w, _h: SimpleNamespace(fields={}, template_dir=tmp_path),
+    )
+
+    def read_bar(_bytes: bytes, _calibration: object, *, backend: str) -> dict[str, int | str]:
+        backends.append(backend)
+        return (
+            {"food": 200}
+            if backend == "template"
+            else {"food": 200, "wood": 200, "gold": 100, "stone": 200, "population": "4/5"}
+        )
+
+    monkeypatch.setattr(strat_mod, "read_resource_bar", read_bar)
+
+    readings, _ = asyncio.run(strat_mod.read_hud_readings(png, turn=0, mode="critical"))
+
+    assert readings == {}
+    assert backends == ["template"]
 
 
 def test_read_hud_readings_no_age_sampling_on_ocr_backends(monkeypatch):

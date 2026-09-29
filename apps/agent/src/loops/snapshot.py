@@ -18,6 +18,7 @@ from ..resource_ocr import ResourceReadings
 from ..turn_timing import elapsed_ms
 
 if TYPE_CHECKING:
+    from ..entity_snapshot import EntitySnapshot
     from ..policy.state import PolicyState
 
 
@@ -73,6 +74,7 @@ class SpatialRefresh:
     hud_readings: ResourceReadings = field(default_factory=ResourceReadings)
     selected_unit: str | None = None
     screenshot: bytes = b""
+    entities: tuple[EntitySnapshot, ...] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "hud_readings", _immutable_readings(self.hud_readings))

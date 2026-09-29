@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import io
 from pathlib import Path
-from typing import ClassVar, cast
+from typing import ClassVar, Literal, cast
 
 import structlog
 from PIL import Image
@@ -175,6 +175,7 @@ async def read_hud_readings(
     *,
     turn: int | None = None,
     full_size: tuple[int, int] | None = None,
+    mode: Literal["routine", "critical"] = "routine",
 ) -> tuple[ResourceReadings, Calibration | None]:
     """Read resources/population/age off the resource bar via local OCR.
 
@@ -186,6 +187,8 @@ async def read_hud_readings(
     loop to keep ``game_state`` fresh, and by the strategist for its prompt. A
     bad/undecodable frame returns ``({}, None)`` rather than raising, so one bad
     capture can never kill the game loop (the caller keeps last-known state).
+    Critical post-input reads skip age text and slow fallback OCR; an unreadable
+    field remains unknown rather than delaying a dependent click.
     """
     try:
         with Image.open(io.BytesIO(screenshot_bytes)) as im:
@@ -204,7 +207,8 @@ async def read_hud_readings(
         ocr = await asyncio.to_thread(read_resource_bar, screenshot_bytes, calib, backend=backend)
         readings = _clean_readings(ocr)
         if (
-            template_primary
+            mode == "routine"
+            and template_primary
             and (not _is_reliable_frame(readings) or "population" not in readings)
             and config.ocr_backend != "template"
         ):
@@ -226,7 +230,7 @@ async def read_hud_readings(
         if not _is_reliable_frame(readings):
             log.warning("ocr_frame_discarded", fields=sorted(readings))
             return {}, calib
-        if _age_read_due(turn, template_primary=template_primary):
+        if mode == "routine" and _age_read_due(turn, template_primary=template_primary):
             age = await asyncio.to_thread(read_age, screenshot_bytes, calib)
             if age:
                 readings["age"] = age
