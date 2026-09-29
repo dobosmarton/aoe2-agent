@@ -77,6 +77,14 @@ def test_a_static_entity_moves_with_the_content() -> None:
     assert moved[0]["center"] == (220, 160)
 
 
+def test_a_panned_entity_moves_its_overlay_box_with_its_center() -> None:
+    moved = _translated_static(
+        [{"class": "tree", "center": (100, 100), "bbox": [90, 80, 110, 120]}],
+        (120.0, 60.0),
+    )
+    assert moved[0]["bbox"] == [210, 140, 230, 180]
+
+
 def test_a_moving_entity_is_dropped_rather_than_translated() -> None:
     """A villager that walked is worse than one the caller is not told about."""
     entities = [{"class": "villager", "center": (1, 1)}, {"class": "sheep", "center": (2, 2)}]
@@ -304,6 +312,18 @@ def test_an_unchanged_frame_costs_no_detection(_cache) -> None:
     detector = _Detector(tracker=_Tracker(confidence=0.9))
     _run_ladder(detector, _settled_differ(frame), frame)
     assert detector.detections == 0
+
+
+def test_repeated_unchanged_frames_eventually_redetect(_cache) -> None:
+    """A static camera must not preserve mobile-unit boxes for minutes."""
+    frame = _jpg(_noise_frame(1))
+    detector = _Detector(entities=[{"class": "villager", "center": (50, 50)}])
+    differ = _settled_differ(frame)
+
+    for _ in range(12):
+        _run_ladder(detector, differ, frame)
+
+    assert detector.detections >= 1
 
 
 def test_an_unchanged_frame_with_a_lost_tracker_keeps_the_last_entities(_cache) -> None:

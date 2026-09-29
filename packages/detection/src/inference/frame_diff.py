@@ -70,6 +70,7 @@ class FrameDiffer:
         # back to screen pixels. Learned from the first screenshot seen.
         self._x_scale = 1.0
         self._y_scale = 1.0
+        self.frames_since_detection = 0
 
     def _to_compare_array(self, screenshot: bytes) -> np.ndarray:
         """The downscaled grayscale play area, and the scale it was reduced by.
@@ -101,6 +102,7 @@ class FrameDiffer:
         the same step, so two calls would race over it.
         """
         current = self._to_compare_array(screenshot)
+        self.frames_since_detection += 1
         previous = self._prev_frame
         self._prev_frame = current
         if previous is None:
@@ -133,7 +135,13 @@ class FrameDiffer:
     def update(self, screenshot: bytes) -> None:
         """Force-update the stored frame (call after successful detection)."""
         self._prev_frame = self._to_compare_array(screenshot)
+        self.mark_detected()
+
+    def mark_detected(self) -> None:
+        """Start a new cache lifetime after a real detector invocation."""
+        self.frames_since_detection = 0
 
     def reset(self) -> None:
         """Clear stored frame (e.g., on camera movement)."""
         self._prev_frame = None
+        self.frames_since_detection = 0

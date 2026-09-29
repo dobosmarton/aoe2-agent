@@ -73,6 +73,7 @@ RESCAN_SCREENSHOT_QUALITY = 50
 TRACKER_CONFIDENCE_THRESHOLD = 0.8
 ENTITY_DROP_RATIO = 0.5
 FRAME_DIFFER_THRESHOLD = 0.03
+MAX_CACHED_FRAMES = 5
 
 
 async def _invoke_detector(
@@ -200,6 +201,14 @@ def _translated_static(entities: list[dict], shift: tuple[float, float]) -> list
         cx, cy = entity.get("center", (0, 0))
         shifted = dict(entity)
         shifted["center"] = (int(cx + dx), int(cy + dy))
+        bbox = entity.get("bbox")
+        if (
+            isinstance(bbox, (tuple, list))
+            and len(bbox) == 4
+            and all(isinstance(value, (int, float)) for value in bbox)
+        ):
+            x0, y0, x1, y1 = bbox
+            shifted["bbox"] = [x0 + dx, y0 + dy, x1 + dx, y1 + dy]
         moved.append(shifted)
     return moved
 
@@ -264,14 +273,20 @@ async def detect_frame(
     detector. Every rung publishes to the entity cache `target_class` reads.
     """
     change = differ.compare(screenshot) if differ else None
-    if change is None:
+    refresh_due = differ is not None and differ.frames_since_detection >= MAX_CACHED_FRAMES
+    detected = False
+    if change is None or refresh_due:
         entities = await _detected_frame(detector, screenshot)
+        detected = True
     elif not change.changed:
         entities = _unchanged_frame(detector)
     elif config.rescan_cache and (translated := _panned_frame(change)) is not None:
         entities = translated
     else:
         entities = await _detected_frame(detector, screenshot)
+        detected = True
+    if detected and differ is not None:
+        differ.mark_detected()
     return snapshot_entities(entities)
 
 
