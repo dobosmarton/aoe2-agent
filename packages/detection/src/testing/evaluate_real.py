@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Score a detection model on REAL held-out screenshots against ground truth.
+"""Score a detection model on labeled real validation screenshots.
 
 Unlike ``test_real_detection.py`` (which only counts detections), this computes
 per-class precision / recall / F1 by greedy IoU matching against the YOLO label
@@ -7,7 +7,10 @@ files in a ``training_data_vN/val/`` split — and reports REAL images separatel
 from SYNTHETIC ones, because a blended mAP over a ~95%-synthetic val set hides
 real-world performance.
 
-The real metric of record. Run it after every retrain.
+Use this for uniform-threshold model diagnostics after retraining. For the
+served ONNX operating point, use ``detection_server.evaluate`` instead. The
+image-level split can contain frames from the same training capture sessions;
+neither command is an independent game/session-held-out benchmark.
 
 Usage:
     # real-only, single-pass at the model's training resolution (the realistic number)
