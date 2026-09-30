@@ -1,0 +1,588 @@
+{
+  "class_schema_sha256": "5365dcf538d16f9b237070a5e9c7609028314794dd8e544233eecb76a09de717",
+  "dataset_manifest_sha256": "3a21b93f150f155d0538a45c0fa6da8fed0ec4466703cf21560badfb38d2bfd0",
+  "evaluation_kind": "in-distribution_real_frame_validation",
+  "evaluator_sha256": "2fb48f40e750d4e5f0c74cd37eb07a3eccc2d19dcedca62addad2936f618d80e",
+  "ground_truth_boxes": 1212,
+  "images": 32,
+  "independent_test_set": false,
+  "inference": {
+    "backend": "onnx_cpu",
+    "input_size": 1280,
+    "matching_iou": 0.5,
+    "path": "detection_server.app._detect_single + remote-client NMS",
+    "thresholds": {
+      "building_false_positive_floors": {
+        "mill": 0.55
+      },
+      "class": {
+        "berry_bush": 0.25,
+        "deer": 0.2,
+        "relic": 0.2,
+        "sheep": 0.2,
+        "villager": 0.25
+      },
+      "default": 0.35
+    },
+    "tracking": false
+  },
+  "micro": {
+    "f1": 0.6878923766816144,
+    "false_negative": 445,
+    "false_positive": 251,
+    "ground_truth": 1212,
+    "precision": 0.7534381139489195,
+    "recall": 0.6328382838283828,
+    "true_positive": 767
+  },
+  "model_sha256": "515a018bc2190fdf5427a01ff21e294331324929c8603d870c18255626cee8fd",
+  "per_class": {
+    "archer_line": {
+      "f1": 0.0,
+      "false_negative": 2,
+      "false_positive": 0,
+      "ground_truth": 2,
+      "precision": 0.0,
+      "recall": 0.0,
+      "true_positive": 0
+    },
+    "archery_range": {
+      "f1": 0.8666666666666666,
+      "false_negative": 3,
+      "false_positive": 1,
+      "ground_truth": 16,
+      "precision": 0.9285714285714286,
+      "recall": 0.8125,
+      "true_positive": 13
+    },
+    "barracks": {
+      "f1": 0.8387096774193548,
+      "false_negative": 5,
+      "false_positive": 0,
+      "ground_truth": 18,
+      "precision": 1.0,
+      "recall": 0.7222222222222222,
+      "true_positive": 13
+    },
+    "battle_elephant": {
+      "f1": 0.0,
+      "false_negative": 0,
+      "false_positive": 0,
+      "ground_truth": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "true_positive": 0
+    },
+    "berry_bush": {
+      "f1": 0.6666666666666666,
+      "false_negative": 2,
+      "false_positive": 2,
+      "ground_truth": 6,
+      "precision": 0.6666666666666666,
+      "recall": 0.6666666666666666,
+      "true_positive": 4
+    },
+    "blacksmith": {
+      "f1": 0.42857142857142855,
+      "false_negative": 10,
+      "false_positive": 6,
+      "ground_truth": 16,
+      "precision": 0.5,
+      "recall": 0.375,
+      "true_positive": 6
+    },
+    "boar": {
+      "f1": 0.6666666666666665,
+      "false_negative": 1,
+      "false_positive": 2,
+      "ground_truth": 4,
+      "precision": 0.6,
+      "recall": 0.75,
+      "true_positive": 3
+    },
+    "camel_line": {
+      "f1": 0.0,
+      "false_negative": 0,
+      "false_positive": 0,
+      "ground_truth": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "true_positive": 0
+    },
+    "castle": {
+      "f1": 0.6666666666666666,
+      "false_negative": 1,
+      "false_positive": 0,
+      "ground_truth": 2,
+      "precision": 1.0,
+      "recall": 0.5,
+      "true_positive": 1
+    },
+    "cavalry_archer": {
+      "f1": 0.5679012345679013,
+      "false_negative": 24,
+      "false_positive": 11,
+      "ground_truth": 47,
+      "precision": 0.6764705882352942,
+      "recall": 0.48936170212765956,
+      "true_positive": 23
+    },
+    "deer": {
+      "f1": 0.5185185185185185,
+      "false_negative": 9,
+      "false_positive": 4,
+      "ground_truth": 16,
+      "precision": 0.6363636363636364,
+      "recall": 0.4375,
+      "true_positive": 7
+    },
+    "dock": {
+      "f1": 0.25,
+      "false_negative": 2,
+      "false_positive": 4,
+      "ground_truth": 3,
+      "precision": 0.2,
+      "recall": 0.3333333333333333,
+      "true_positive": 1
+    },
+    "eagle_line": {
+      "f1": 0.0,
+      "false_negative": 0,
+      "false_positive": 0,
+      "ground_truth": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "true_positive": 0
+    },
+    "farm": {
+      "f1": 0.540983606557377,
+      "false_negative": 47,
+      "false_positive": 9,
+      "ground_truth": 80,
+      "precision": 0.7857142857142857,
+      "recall": 0.4125,
+      "true_positive": 33
+    },
+    "fire_galley": {
+      "f1": 0.0,
+      "false_negative": 0,
+      "false_positive": 0,
+      "ground_truth": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "true_positive": 0
+    },
+    "fish": {
+      "f1": 0.5714285714285715,
+      "false_negative": 3,
+      "false_positive": 0,
+      "ground_truth": 5,
+      "precision": 1.0,
+      "recall": 0.4,
+      "true_positive": 2
+    },
+    "fishing_ship": {
+      "f1": 0.8,
+      "false_negative": 1,
+      "false_positive": 0,
+      "ground_truth": 3,
+      "precision": 1.0,
+      "recall": 0.6666666666666666,
+      "true_positive": 2
+    },
+    "galley": {
+      "f1": 0.0,
+      "false_negative": 0,
+      "false_positive": 0,
+      "ground_truth": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "true_positive": 0
+    },
+    "gate": {
+      "f1": 0.0,
+      "false_negative": 0,
+      "false_positive": 0,
+      "ground_truth": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "true_positive": 0
+    },
+    "gold_mine": {
+      "f1": 0.7586206896551724,
+      "false_negative": 18,
+      "false_positive": 10,
+      "ground_truth": 62,
+      "precision": 0.8148148148148148,
+      "recall": 0.7096774193548387,
+      "true_positive": 44
+    },
+    "goose": {
+      "f1": 1.0,
+      "false_negative": 0,
+      "false_positive": 0,
+      "ground_truth": 3,
+      "precision": 1.0,
+      "recall": 1.0,
+      "true_positive": 3
+    },
+    "hand_cannoneer": {
+      "f1": 0.0,
+      "false_negative": 0,
+      "false_positive": 0,
+      "ground_truth": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "true_positive": 0
+    },
+    "house": {
+      "f1": 0.7311827956989247,
+      "false_negative": 42,
+      "false_positive": 8,
+      "ground_truth": 110,
+      "precision": 0.8947368421052632,
+      "recall": 0.6181818181818182,
+      "true_positive": 68
+    },
+    "king": {
+      "f1": 0.0,
+      "false_negative": 0,
+      "false_positive": 0,
+      "ground_truth": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "true_positive": 0
+    },
+    "knight_line": {
+      "f1": 0.3548387096774193,
+      "false_negative": 18,
+      "false_positive": 22,
+      "ground_truth": 29,
+      "precision": 0.3333333333333333,
+      "recall": 0.3793103448275862,
+      "true_positive": 11
+    },
+    "krepost": {
+      "f1": 0.0,
+      "false_negative": 0,
+      "false_positive": 0,
+      "ground_truth": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "true_positive": 0
+    },
+    "lumber_camp": {
+      "f1": 0.7727272727272727,
+      "false_negative": 3,
+      "false_positive": 7,
+      "ground_truth": 20,
+      "precision": 0.7083333333333334,
+      "recall": 0.85,
+      "true_positive": 17
+    },
+    "mangonel_line": {
+      "f1": 0.0,
+      "false_negative": 0,
+      "false_positive": 0,
+      "ground_truth": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "true_positive": 0
+    },
+    "market": {
+      "f1": 0.5555555555555556,
+      "false_negative": 4,
+      "false_positive": 4,
+      "ground_truth": 9,
+      "precision": 0.5555555555555556,
+      "recall": 0.5555555555555556,
+      "true_positive": 5
+    },
+    "militia_line": {
+      "f1": 0.5818181818181819,
+      "false_negative": 23,
+      "false_positive": 0,
+      "ground_truth": 39,
+      "precision": 1.0,
+      "recall": 0.41025641025641024,
+      "true_positive": 16
+    },
+    "mill": {
+      "f1": 1.0,
+      "false_negative": 0,
+      "false_positive": 0,
+      "ground_truth": 7,
+      "precision": 1.0,
+      "recall": 1.0,
+      "true_positive": 7
+    },
+    "mining_camp": {
+      "f1": 0.8333333333333333,
+      "false_negative": 5,
+      "false_positive": 3,
+      "ground_truth": 25,
+      "precision": 0.8695652173913043,
+      "recall": 0.8,
+      "true_positive": 20
+    },
+    "monastery": {
+      "f1": 0.5,
+      "false_negative": 2,
+      "false_positive": 0,
+      "ground_truth": 3,
+      "precision": 1.0,
+      "recall": 0.3333333333333333,
+      "true_positive": 1
+    },
+    "monk": {
+      "f1": 0.0,
+      "false_negative": 0,
+      "false_positive": 0,
+      "ground_truth": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "true_positive": 0
+    },
+    "ram": {
+      "f1": 0.0,
+      "false_negative": 0,
+      "false_positive": 0,
+      "ground_truth": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "true_positive": 0
+    },
+    "relic": {
+      "f1": 0.0,
+      "false_negative": 0,
+      "false_positive": 0,
+      "ground_truth": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "true_positive": 0
+    },
+    "scorpion": {
+      "f1": 0.0,
+      "false_negative": 0,
+      "false_positive": 0,
+      "ground_truth": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "true_positive": 0
+    },
+    "scout_line": {
+      "f1": 0.608695652173913,
+      "false_negative": 12,
+      "false_positive": 6,
+      "ground_truth": 26,
+      "precision": 0.7,
+      "recall": 0.5384615384615384,
+      "true_positive": 14
+    },
+    "sheep": {
+      "f1": 0.6,
+      "false_negative": 3,
+      "false_positive": 1,
+      "ground_truth": 6,
+      "precision": 0.75,
+      "recall": 0.5,
+      "true_positive": 3
+    },
+    "siege_tower": {
+      "f1": 0.0,
+      "false_negative": 1,
+      "false_positive": 0,
+      "ground_truth": 1,
+      "precision": 0.0,
+      "recall": 0.0,
+      "true_positive": 0
+    },
+    "siege_workshop": {
+      "f1": 1.0,
+      "false_negative": 0,
+      "false_positive": 0,
+      "ground_truth": 1,
+      "precision": 1.0,
+      "recall": 1.0,
+      "true_positive": 1
+    },
+    "skirmisher_line": {
+      "f1": 0.0,
+      "false_negative": 2,
+      "false_positive": 0,
+      "ground_truth": 2,
+      "precision": 0.0,
+      "recall": 0.0,
+      "true_positive": 0
+    },
+    "spearman_line": {
+      "f1": 0.13333333333333333,
+      "false_negative": 21,
+      "false_positive": 5,
+      "ground_truth": 23,
+      "precision": 0.2857142857142857,
+      "recall": 0.08695652173913043,
+      "true_positive": 2
+    },
+    "stable": {
+      "f1": 0.7368421052631577,
+      "false_negative": 2,
+      "false_positive": 3,
+      "ground_truth": 9,
+      "precision": 0.7,
+      "recall": 0.7777777777777778,
+      "true_positive": 7
+    },
+    "stone_mine": {
+      "f1": 0.46428571428571425,
+      "false_negative": 11,
+      "false_positive": 19,
+      "ground_truth": 24,
+      "precision": 0.40625,
+      "recall": 0.5416666666666666,
+      "true_positive": 13
+    },
+    "tower": {
+      "f1": 0.9361702127659574,
+      "false_negative": 1,
+      "false_positive": 2,
+      "ground_truth": 23,
+      "precision": 0.9166666666666666,
+      "recall": 0.9565217391304348,
+      "true_positive": 22
+    },
+    "town_center": {
+      "f1": 0.823529411764706,
+      "false_negative": 4,
+      "false_positive": 2,
+      "ground_truth": 18,
+      "precision": 0.875,
+      "recall": 0.7777777777777778,
+      "true_positive": 14
+    },
+    "trade_cart": {
+      "f1": 0.0,
+      "false_negative": 0,
+      "false_positive": 0,
+      "ground_truth": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "true_positive": 0
+    },
+    "trebuchet": {
+      "f1": 0.0,
+      "false_negative": 0,
+      "false_positive": 0,
+      "ground_truth": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "true_positive": 0
+    },
+    "tree": {
+      "f1": 0.7613636363636365,
+      "false_negative": 74,
+      "false_positive": 52,
+      "ground_truth": 275,
+      "precision": 0.7944664031620553,
+      "recall": 0.730909090909091,
+      "true_positive": 201
+    },
+    "unique_archer": {
+      "f1": 0.723404255319149,
+      "false_negative": 10,
+      "false_positive": 3,
+      "ground_truth": 27,
+      "precision": 0.85,
+      "recall": 0.6296296296296297,
+      "true_positive": 17
+    },
+    "unique_cavalry": {
+      "f1": 0.34285714285714286,
+      "false_negative": 22,
+      "false_positive": 1,
+      "ground_truth": 28,
+      "precision": 0.8571428571428571,
+      "recall": 0.21428571428571427,
+      "true_positive": 6
+    },
+    "unique_infantry": {
+      "f1": 0.0,
+      "false_negative": 0,
+      "false_positive": 0,
+      "ground_truth": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "true_positive": 0
+    },
+    "unique_ship": {
+      "f1": 0.0,
+      "false_negative": 0,
+      "false_positive": 0,
+      "ground_truth": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "true_positive": 0
+    },
+    "unique_siege": {
+      "f1": 0.0,
+      "false_negative": 0,
+      "false_positive": 0,
+      "ground_truth": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "true_positive": 0
+    },
+    "university": {
+      "f1": 0.0,
+      "false_negative": 0,
+      "false_positive": 0,
+      "ground_truth": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "true_positive": 0
+    },
+    "villager": {
+      "f1": 0.7382550335570469,
+      "false_negative": 53,
+      "false_positive": 64,
+      "ground_truth": 218,
+      "precision": 0.7205240174672489,
+      "recall": 0.7568807339449541,
+      "true_positive": 165
+    },
+    "wall": {
+      "f1": 1.0,
+      "false_negative": 0,
+      "false_positive": 0,
+      "ground_truth": 2,
+      "precision": 1.0,
+      "recall": 1.0,
+      "true_positive": 2
+    },
+    "wolf": {
+      "f1": 0.0,
+      "false_negative": 4,
+      "false_positive": 0,
+      "ground_truth": 4,
+      "precision": 0.0,
+      "recall": 0.0,
+      "true_positive": 0
+    },
+    "wonder": {
+      "f1": 0.0,
+      "false_negative": 0,
+      "false_positive": 0,
+      "ground_truth": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "true_positive": 0
+    }
+  },
+  "runtime": {
+    "onnxruntime": "1.26.0",
+    "pillow": "12.2.0",
+    "python": "3.11.9"
+  },
+  "server_source_sha256": "e2b13a712cd0964591f1c599c4ab0980d7f67405ae2c92a70490af852e1efa01",
+  "thresholds_source_sha256": "2257a09e901f14364d3e7156e90bf41f0a6e780e51d6993a7a91d72c3933929e"
+}

@@ -13,7 +13,7 @@ Screenshot → YOLO Model → Detected Entities (class, bbox, confidence)
 **Key Features:**
 - 60 entity classes (units, buildings, resources, animals)
 - Real-time inference: **single-pass at 1280px** (the deployed mode)
-- Current model **v9** (YOLO26n, NMS-free): cleaned synthetic + real CVAT labels @1280; real-frame F1 ≈ 0.67 (see Model Performance). The served version is configured in `apps/agent/src/config.py` (`detection_model` / `AOE2_DETECTION_MODEL`) — that file is the single source of truth.
+- Current model **v9** (YOLO26n, NMS-free): cleaned synthetic + real CVAT labels @1280; real-frame validation F1 0.688 through the deployed detector thresholds (see Model Performance). The served version is configured in `apps/agent/src/config.py` (`detection_model` / `AOE2_DETECTION_MODEL`) — that file is the single source of truth.
 - **Adaptive SAHI** — smart tiling that only runs SAHI on regions with entities (~3-8 tiles vs ~18); *available in code but currently disabled* — single-pass at the training resolution wins because SAHI's tile scale doesn't match the training scale
 - **Kalman filter object tracking** — 6D state vector with Hungarian algorithm assignment for persistent entity IDs
 - **Tracker prediction mode** — extrapolate entity positions without inference (~0ms) when confidence is high
@@ -194,17 +194,9 @@ python -m detection.extraction.capture_replay --count 200 --interval 5
 
 The served model is **`aoe2_yolo_v9`** (YOLO26n, NMS-free), trained on cleaned synthetic + real CVAT labels at imgsz=1280 and run **single-pass at 1280** (`adaptive_sahi=False`). SAHI tiling is disabled: it presents objects at a different scale than training, which *lowers* real-frame accuracy (the scale-match rule). The served version is set in `apps/agent/src/config.py` (`detection_model`); the detection server takes its model via `--model` at launch — keep the two in sync.
 
-The metric of record is **real-frame** detection (via `evaluate_real.py`, single-pass at the training resolution) — not synthetic-validation mAP, which is optimistic because the validation set is synthetic-heavy:
+The [release evaluation](registry/aoe2-entity-detector/EVALUATION.md) scores the exact v9 ONNX checkpoint with the detection server's preprocessing, deployed class thresholds, and remote-client NMS. On 32 labeled real validation screenshots (1,212 boxes), it yields **micro precision 0.753, recall 0.633, F1 0.688** at matching IoU 0.50. The full per-class counts and input hashes are in [`evaluation.json`](registry/aoe2-entity-detector/evaluation.json).
 
-| Metric (real frames) | v9 (@1280) | v7 (@640) | v6 (@640) |
-|---|-----|-----|-----|
-| F1 | **~0.67** | ~0.54 | ~0.41 |
-| Recall | ~0.665 | ~0.45 | ~0.30 |
-| Precision | ~0.676 | ~0.69 | ~0.67 |
-
-v6 was 100% synthetic (≈0 real recall on animals/berries); v7 added real CVAT labels, which lifted real recall; v9 retrained on a cleaned synthetic set at imgsz=1280, enlarging small objects (berries/sheep) for another recall step. Known blind spot: military-unit recall on real frames is still near zero (knight/cavalry-archer/militia lines) — see `IMPROVEMENT-PLAN.md` P1.
-
-> **Measure through the deployment path.** `evaluate_real.py` loaded via ultralytics *mismeasures* dynamic-axes ONNX exports (v9 read 0.21 that way); the raw-onnxruntime path — what the detection server runs — gives the true ~0.67.
+This is **not an independent test score**: training and validation frames were split by image from the same capture sessions, and some confidence thresholds came from the project's validation workflow. The validation JPEGs also include the Mac desktop rather than only the live game capture. Sheep and berry bush have only six labels each; farm recall is 33/80 and knight-line recall is 11/29. These limitations matter more to gameplay than the aggregate F1. Older v6/v7 figures used different models, resolutions, and evaluation settings, so they are not a controlled comparison with the release score.
 
 ## Object Tracking
 

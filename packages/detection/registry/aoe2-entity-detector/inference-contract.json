@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "model_file": "model.onnx",
+  "model_sha256": "515a018bc2190fdf5427a01ff21e294331324929c8603d870c18255626cee8fd",
+  "classes_file": "classes.yaml",
+  "classes_sha256": "5365dcf538d16f9b237070a5e9c7609028314794dd8e544233eecb76a09de717",
+  "class_count": 60,
+  "detector_source_revision": "ca4b06310a49d46381c043bec3a35618c0e5dee2",
+  "input": {
+    "name": "images",
+    "shape": [1, 3, 1280, 1280],
+    "dtype": "float32",
+    "color_space": "RGB",
+    "layout": "NCHW",
+    "normalization": "pixel_value / 255.0",
+    "resize": "aspect-preserving letterbox to 1280 x 1280, centered",
+    "padding_rgb": [114, 114, 114]
+  },
+  "output": {
+    "name": "output0",
+    "shape": [1, 300, 6],
+    "dtype": "float32",
+    "row": ["x1", "y1", "x2", "y2", "confidence", "class_id"],
+    "box_coordinates": "xyxy in model-input pixels; map through inverse letterbox to screenshot pixels"
+  },
+  "postprocessing": {
+    "default_confidence": 0.35,
+    "class_confidence": {
+      "berry_bush": 0.25,
+      "deer": 0.2,
+      "relic": 0.2,
+      "sheep": 0.2,
+      "villager": 0.25,
+      "mill": 0.55
+    },
+    "client_nms_iou": 0.5,
+    "tracking": "VM-side Kalman tracker, not part of the ONNX graph"
+  }
+}
