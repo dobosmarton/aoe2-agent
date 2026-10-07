@@ -41,13 +41,15 @@ _ROOT = (
 
 
 def capture_game_window() -> Image.Image:
-    rect = get_game_window_rect()
-    if rect is None:
-        raise RuntimeError("AoE2 game window not found; capture will not use the whole monitor")
-    left, top, width, height = rect
-    if width <= 0 or height <= 0:
-        raise RuntimeError(f"Invalid AoE2 window rectangle: {rect}")
-    with mss.mss() as screen:
+    # MSS makes the process DPI-aware on Windows. Read the window rectangle only
+    # after that happens, so its coordinates match the physical capture pixels.
+    with mss.MSS() as screen:
+        rect = get_game_window_rect()
+        if rect is None:
+            raise RuntimeError("AoE2 game window not found; capture will not use the whole monitor")
+        left, top, width, height = rect
+        if width <= 0 or height <= 0:
+            raise RuntimeError(f"Invalid AoE2 window rectangle: {rect}")
         screenshot = screen.grab({"left": left, "top": top, "width": width, "height": height})
     return Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -234,7 +235,44 @@ def test_explicit_final_test_uses_the_frozen_scorer(
     assert report["images"] == 1
 
 
+def test_capture_initializes_dpi_before_reading_the_window(monkeypatch: pytest.MonkeyPatch) -> None:
+    initialized = False
+
+    class FakeScreen:
+        def __enter__(self) -> FakeScreen:
+            nonlocal initialized
+            initialized = True
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def grab(self, region: dict[str, int]) -> SimpleNamespace:
+            assert region == {"left": 10, "top": 20, "width": 2, "height": 2}
+            return SimpleNamespace(size=(2, 2), bgra=bytes((0, 0, 255, 255)) * 4)
+
+    def game_window_rect() -> tuple[int, int, int, int]:
+        assert initialized
+        return (10, 20, 2, 2)
+
+    monkeypatch.setattr("gameplay_agent.capture_dataset.mss.MSS", FakeScreen)
+    monkeypatch.setattr("gameplay_agent.capture_dataset.get_game_window_rect", game_window_rect)
+
+    image = capture_game_window()
+
+    assert image.size == (2, 2)
+    assert image.getpixel((0, 0)) == (255, 0, 0)
+
+
 def test_capture_requires_the_game_window(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeScreen:
+        def __enter__(self) -> FakeScreen:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    monkeypatch.setattr("gameplay_agent.capture_dataset.mss.MSS", FakeScreen)
     monkeypatch.setattr("gameplay_agent.capture_dataset.get_game_window_rect", lambda: None)
 
     with pytest.raises(RuntimeError, match="game window not found"):
