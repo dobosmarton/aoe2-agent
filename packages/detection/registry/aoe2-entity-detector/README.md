@@ -1,4 +1,5 @@
 ---
+license: agpl-3.0
 pipeline_tag: object-detection
 library_name: ultralytics
 tags:
@@ -22,10 +23,21 @@ model was trained on synthetic scenes generated from game sprites and annotated
 real-game screenshots. Neither the training images nor extracted sprites are
 included in this artifact release.
 
-The model is exported from Ultralytics YOLO26n. Its ONNX metadata identifies the
-Ultralytics AGPL-3.0 license. Rights to distribute game-derived artifacts and
-any additional license obligations must be reviewed before making this
-repository public.
+The model is fine-tuned from the Ultralytics YOLO26n base model and exported to
+ONNX. Its metadata identifies the Ultralytics AGPL-3.0 license.
+
+## License and terms
+
+The model weights are available under the [GNU Affero General Public License
+v3.0 (AGPL-3.0)](LICENSE). You may use, modify, and redistribute them,
+including commercially, subject to that license. This project imposes no
+additional noncommercial-use restriction or fee.
+
+Users integrating the model into an application or service must meet applicable
+AGPL-3.0 obligations, including corresponding-source requirements. For
+different terms covering Ultralytics technology, contact Ultralytics about its
+Enterprise license. This is an independent fine-tune, not an official
+Ultralytics release. The model is provided as-is, without warranty.
 
 ## Inference contract
 
@@ -46,27 +58,18 @@ single-pass 1280-pixel preprocessing, its deployed per-class confidence
 thresholds, and the client's classwise NMS. The evaluation used ONNX Runtime's
 CPU provider and excludes temporal tracking, cached detections, and gameplay.
 
-| Class | Labeled boxes | Precision | Recall | F1 |
-| --- | ---: | ---: | ---: | ---: |
-| Villager | 218 | 0.721 | 0.757 | 0.738 |
-| Town center | 18 | 0.875 | 0.778 | 0.824 |
-| Sheep | 6 | 0.750 | 0.500 | 0.600 |
-| Berry bush | 6 | 0.667 | 0.667 | 0.667 |
-| Farm | 80 | 0.786 | 0.413 | 0.541 |
-| Knight line | 29 | 0.333 | 0.379 | 0.355 |
-
 **This is validation, not an independent test benchmark.** Training and
 validation images came from the same January 2026 capture sessions and can
 contain nearby frames; the split was by image rather than game/session. The
 existing confidence thresholds were also developed using the project's
 validation workflow. The labels and screenshots are not released with the
-model. The small support for
-food targets makes those class estimates unstable, and the full-screen
-1280 × 831 validation images do not establish performance on other game
+model. This overall score is dominated by common classes and does not establish
+reliable detection of rare objects. The full-screen 1280 × 831 validation
+images also do not establish performance on other game
 captures, UI scales, maps, or versions. The model's ability to support
 reliable gathering or combat has **not** been validated by this score.
 
-See [the complete evaluation protocol](EVALUATION.md) and
+See [the complete evaluation protocol and per-class results](EVALUATION.md) and
 [machine-readable counts and hashes](evaluation.json). A future independent,
 session-held-out test should be reported separately rather than replacing this
 validation result.

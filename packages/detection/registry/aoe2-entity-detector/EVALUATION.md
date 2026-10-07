@@ -52,6 +52,23 @@ metrics are in [`evaluation.json`](evaluation.json).
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | 32 | 1,212 | 767 | 251 | 445 | 0.753 | 0.633 | 0.688 |
 
+### Selected per-class results
+
+The support column counts labeled boxes in the **real validation screenshots
+only**, not examples in the synthetic or real training data.
+
+| Class | Real validation boxes | Precision | Recall | F1 |
+| --- | ---: | ---: | ---: | ---: |
+| Villager | 218 | 0.721 | 0.757 | 0.738 |
+| Town center | 18 | 0.875 | 0.778 | 0.824 |
+| Sheep | 6 | 0.750 | 0.500 | 0.600 |
+| Berry bush | 6 | 0.667 | 0.667 | 0.667 |
+| Farm | 80 | 0.786 | 0.413 | 0.541 |
+| Knight line | 29 | 0.333 | 0.379 | 0.355 |
+
+The full 60-class breakdown is in [`evaluation.json`](evaluation.json).
+Results for classes with only a few labeled boxes are unstable.
+
 The model misses 47 of 80 labeled farms and 3 of 6 labeled sheep. It also
 finds only 11 of 29 knight-line units, with 22 false knight-line detections.
 The 7 labeled mills are all detected with no false positives **in this split**,
