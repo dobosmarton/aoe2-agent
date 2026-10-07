@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import pytest
 from detection.testing.evaluate_real import GroundTruth, Prediction
 from detection_server.app import DetectionResult, ModelState
+from detection_server.benchmark_latency import percentile
 from detection_server.evaluate import (
     Case,
     build_report,
@@ -104,3 +105,14 @@ def test_report_includes_false_positives_and_model_hash(tmp_path: Path) -> None:
     assert report["micro"]["false_positive"] == 1
     assert report["micro"]["f1"] == pytest.approx(2 / 3)
     assert len(report["model_sha256"]) == 64
+
+
+def test_latency_percentiles_interpolate_between_samples() -> None:
+    assert percentile([40.0, 10.0, 30.0, 20.0], 0.5) == 25.0
+    assert percentile([40.0, 10.0, 30.0, 20.0], 0.95) == 38.5
+
+
+@pytest.mark.parametrize("samples, fraction", [([], 0.5), ([1.0], -0.1), ([1.0], 1.1)])
+def test_latency_percentile_rejects_invalid_input(samples: list[float], fraction: float) -> None:
+    with pytest.raises(ValueError):
+        percentile(samples, fraction)
