@@ -18,6 +18,7 @@ import structlog
 from pydantic import BaseModel
 
 from .config import config
+from .entity_snapshot import MAX_SPATIAL_AGE_SECONDS
 from .entity_utils import (
     CLASSES_BY_KIND,
     RESOURCE_KINDS,
@@ -413,6 +414,10 @@ class ActionLedger:
     current_age: str = "Dark Age"
     age_known: bool = False
     input_revision: int = 0
+    camera_revision: int = 0
+    camera_command_revision: int = 0
+    selection_revision: int = 0
+    economic_revision: int = 0
     hud_revision: int = -1
     failure_streak: int = 0
     failure_count: int = 0
@@ -552,6 +557,19 @@ class ActionLedger:
     def note_input(self) -> None:
         self.input_revision += 1
 
+    def note_camera_input(self) -> None:
+        self.note_input()
+        self.camera_revision += 1
+        self.camera_command_revision += 1
+
+    def note_selection_input(self) -> None:
+        self.note_input()
+        self.selection_revision += 1
+
+    def note_economic_input(self) -> None:
+        self.note_input()
+        self.economic_revision += 1
+
     def record_interrupted_purchase(
         self,
         operation_id: int,
@@ -602,7 +620,9 @@ def unbind_ledger(token: Token[ActionLedger | None]) -> None:
     _active_ledger.reset(token)
 
 
-def ledger_policy_state(ledger: ActionLedger | None = None) -> PolicyState:
+def ledger_policy_state(
+    ledger: ActionLedger | None = None, *, captured_at: float | None = None
+) -> PolicyState:
     """The latest observed facts plus unsettled commitments for input preflight."""
     ledger = ledger or current_ledger()
     population, cap = ledger.population or (0, 0)
@@ -674,6 +694,7 @@ def ledger_policy_state(ledger: ActionLedger | None = None) -> PolicyState:
         idle_count=ledger.idle_count,
         visible_classes=frozenset(str(entity.get("class", "")) for entity in _detected_entities),
         spatial_valid=ledger.spatial_valid,
+        captured_at=now if captured_at is None else captured_at,
     )
 
 
@@ -1755,6 +1776,21 @@ def _resolve_target_class(target_class: str) -> tuple[int, int] | None:
 _MIN_BUILDER_CONFIDENCE = 0.65
 
 
+def _fresh_spatial_cache() -> bool:
+    """Tracked boxes are click evidence only briefly after native capture."""
+    now = time.monotonic()
+    for entity in _detected_entities:
+        capture_id = entity.get("capture_id")
+        if not isinstance(capture_id, int) or capture_id < 0:
+            continue  # Scripted scenarios and legacy test values have no capture clock.
+        captured_at = entity.get("captured_at")
+        if not isinstance(captured_at, (int, float)):
+            return False
+        if now - captured_at > MAX_SPATIAL_AGE_SECONDS or captured_at > now + 0.1:
+            return False
+    return True
+
+
 def _verified_villager_center() -> tuple[int, int] | None:
     target = _verified_villager_target()
     return None if target is None else target[1]
@@ -1762,6 +1798,8 @@ def _verified_villager_center() -> tuple[int, int] | None:
 
 def _verified_villager_target() -> tuple[str, tuple[int, int]] | None:
     """Bind the strongest boxed villager, never an unbounded class guess."""
+    if not _fresh_spatial_cache():
+        return None
     candidates: list[tuple[float, str, tuple[int, int]]] = []
     for entity in _detected_entities:
         if entity.get("class") != "villager":
@@ -1771,7 +1809,10 @@ def _verified_villager_target() -> tuple[str, tuple[int, int]] | None:
         center = entity.get("center")
         bbox = entity.get("bbox")
         if (
-            not isinstance(identifier, str)
+            entity.get("raw_class_name", "villager") != "villager"
+            or entity.get("camera_revision", current_ledger().camera_revision)
+            != current_ledger().camera_revision
+            or not isinstance(identifier, str)
             or not identifier
             or isinstance(confidence, bool)
             or not isinstance(confidence, (int, float))
@@ -1813,6 +1854,8 @@ def _resolve_coords(action_dict: dict[str, object]) -> tuple[str, tuple[int, int
     """
     if not current_ledger().spatial_valid:
         return ("spatial observation invalid after camera movement; refresh required", None)
+    if not _fresh_spatial_cache():
+        return ("spatial observation is too old for a dependent click", None)
     if action_dict.get("auto_placement"):
         key = str(action_dict.get("building_key", ""))
         menu = str(action_dict.get("menu") or ECON_MENU)
@@ -1832,13 +1875,28 @@ def _resolve_coords(action_dict: dict[str, object]) -> tuple[str, tuple[int, int
         bound_revision = action_dict.get("spatial_revision")
         if bound_revision is not None and bound_revision != current_ledger().input_revision:
             return ("target observation crossed another input", None)
+        bound_camera = action_dict.get("target_camera_revision")
+        if bound_camera is not None and bound_camera != current_ledger().camera_revision:
+            return ("target observation crossed a camera change", None)
+        bound_capture = action_dict.get("target_capture_id")
         expected_class = action_dict.get("expected_class")
         expected_coords = action_dict.get("expected_coords")
         for entity in _detected_entities:
             if entity.get("id") != target_id:
                 continue
+            if bound_capture is not None and entity.get("capture_id") != bound_capture:
+                return ("target was replaced by a newer capture; prepare again", None)
+            if bound_camera is not None and entity.get("camera_revision") != bound_camera:
+                return ("target camera revision no longer matches", None)
             if expected_class is not None and entity.get("class") != expected_class:
                 return ("target class changed after selection", None)
+            if expected_class is not None and entity.get("raw_class_name") not in (
+                None,
+                expected_class,
+            ):
+                return ("target class is supported only by visual history", None)
+            if entity.get("bbox") is None:
+                return ("target has no fresh detected bounding box", None)
             center = entity.get("center")
             if not isinstance(center, (list, tuple)) or len(center) != 2:
                 return ("target no longer has a valid center", None)
@@ -1849,11 +1907,8 @@ def _resolve_coords(action_dict: dict[str, object]) -> tuple[str, tuple[int, int
                 if (int(expected_coords[0]), int(expected_coords[1])) != coords:
                     return ("target moved after binding", None)
             return ("", coords)
-        coords = _resolve_target_id(str(target_id))
-        if coords is None:
-            log.warning("target_id_not_found", target_id=target_id)
-            return (f"target_id '{target_id}' not found in detected entities", None)
-        return ("", coords)
+        log.warning("target_id_not_found", target_id=target_id)
+        return (f"target_id '{target_id}' not found in detected entities", None)
 
     target_class = action_dict.get("target_class")
     if target_class:
@@ -2282,7 +2337,7 @@ def build_steps(
     fallback, so the steps live in exactly one place.
     """
     selection = _select_villager_step(intent)
-    refresh = (
+    refresh: list[dict[str, object]] = (
         [{"type": "detect", "intent": f"Refresh builder targets ({intent})"}]
         if selection["type"] == "click"
         else []
@@ -2313,7 +2368,10 @@ async def _handle_click(action_dict: dict[str, object], intent: str) -> ActionRe
         return ActionResult(False, "fresh wood HUD baseline unavailable before placement")
     before_revision = current_ledger().input_revision
     try:
-        current_ledger().note_input()
+        if pending is not None:
+            current_ledger().note_economic_input()
+        else:
+            current_ledger().note_selection_input()
         pyautogui.click(screen_x, screen_y)
         log.info(
             "click",
@@ -2379,9 +2437,13 @@ async def _handle_press(action_dict: dict[str, object], intent: str) -> ActionRe
     key = str(action_dict["key"])
     raw_modifiers = action_dict.get("modifiers", [])
     modifiers: list[str] = list(raw_modifiers) if isinstance(raw_modifiers, list) else []
-    current_ledger().note_input()
     if key.lower() in CAMERA_KEYS or action_dict.get("rescan"):
+        current_ledger().note_camera_input()
         current_ledger().spatial_valid = False
+    elif action_dict.get("economic_input") is True:
+        current_ledger().note_economic_input()
+    else:
+        current_ledger().note_input()
     if modifiers:
         pyautogui.hotkey(*modifiers, key)
         log.info("press", key=key, modifiers=modifiers, intent=intent)
@@ -2412,7 +2474,8 @@ async def _handle_drag(action_dict: dict[str, object], intent: str) -> ActionRes
     ey = _to_int(action_dict["end_y"])
     screen_sx, screen_sy = _translate(sx, sy)
     screen_ex, screen_ey = _translate(ex, ey)
-    current_ledger().note_input()
+    current_ledger().note_camera_input()
+    current_ledger().spatial_valid = False
     pyautogui.moveTo(screen_sx, screen_sy)
     pyautogui.drag(screen_ex - screen_sx, screen_ey - screen_sy, duration=0.2)
     log.info("drag", start_x=sx, start_y=sy, end_x=ex, end_y=ey, intent=intent)
@@ -2422,7 +2485,8 @@ async def _handle_drag(action_dict: dict[str, object], intent: str) -> ActionRes
 async def _handle_scroll(action_dict: dict[str, object], intent: str) -> ActionResult:
     clicks = _to_int(action_dict["clicks"])
     x, y = action_dict.get("x"), action_dict.get("y")
-    current_ledger().note_input()
+    current_ledger().note_camera_input()
+    current_ledger().spatial_valid = False
     if x is not None and y is not None:
         screen_x, screen_y = _translate(_to_int(x), _to_int(y))
         pyautogui.scroll(clicks, x=screen_x, y=screen_y)
@@ -2491,6 +2555,15 @@ async def _handle_build(action_dict: dict[str, object], intent: str) -> ActionRe
                 "expected_class": "villager",
                 "expected_coords": center,
                 "spatial_revision": current_ledger().input_revision,
+                "target_camera_revision": current_ledger().camera_revision,
+                "target_capture_id": next(
+                    (
+                        entry.get("capture_id")
+                        for entry in _detected_entities
+                        if entry.get("id") == target_id
+                    ),
+                    None,
+                ),
                 "intent": f"Select villager ({intent})",
             }
         if index == selection_index:
@@ -2546,7 +2619,7 @@ async def _handle_research(action_dict: dict[str, object], intent: str) -> Actio
         return ActionResult(False, "research unavailable: no resource baseline")
     before_revision = current_ledger().input_revision
     try:
-        result = await execute_action(steps[-1])
+        result = await execute_action({**steps[-1], "economic_input": True})
     except asyncio.CancelledError:
         current_ledger().record_interrupted_purchase(
             pending.operation_id,
@@ -2607,7 +2680,12 @@ async def _handle_queue_villager(action_dict: dict[str, object], intent: str) ->
     before_revision = current_ledger().input_revision
     try:
         result = await execute_action(
-            {"type": "press", "key": "q", "intent": f"Queue villager ({intent})"}
+            {
+                "type": "press",
+                "key": "q",
+                "economic_input": True,
+                "intent": f"Queue villager ({intent})",
+            }
         )
     except asyncio.CancelledError:
         current_ledger().record_interrupted_purchase(
@@ -2660,7 +2738,12 @@ async def _handle_train_unit(action_dict: dict[str, object], intent: str) -> Act
     before_revision = current_ledger().input_revision
     try:
         result = await execute_action(
-            {"type": "press", "key": spec.key, "intent": f"Train {unit} ({intent})"}
+            {
+                "type": "press",
+                "key": spec.key,
+                "economic_input": True,
+                "intent": f"Train {unit} ({intent})",
+            }
         )
     except asyncio.CancelledError:
         current_ledger().record_interrupted_purchase(
@@ -2745,6 +2828,15 @@ async def _handle_assign_idle(action_dict: dict[str, object], intent: str) -> Ac
                 "expected_class": target.class_name,
                 "expected_coords": (int(target.center[0]), int(target.center[1])),
                 "spatial_revision": ledger.input_revision,
+                "target_camera_revision": ledger.camera_revision,
+                "target_capture_id": next(
+                    (
+                        entry.get("capture_id")
+                        for entry in _detected_entities
+                        if entry.get("id") == target.entity_id
+                    ),
+                    None,
+                ),
                 "intent": f"Assign idle villager to {kind} ({intent})",
             },
             intent,

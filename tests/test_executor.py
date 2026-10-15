@@ -39,6 +39,23 @@ def _run(coro: Awaitable[object]) -> object:
     return asyncio.run(coro)
 
 
+def _publishing_refresh(
+    callback: Callable[[], Awaitable[bool]],
+) -> Callable[[], Awaitable[bool]]:
+    """A successful fake rescan publishes boxes for the new camera revision."""
+
+    async def refresh() -> bool:
+        if not await callback():
+            return False
+        revision = ex.current_ledger().camera_revision
+        ex.set_detected_entities(
+            [{**entity, "camera_revision": revision} for entity in ex._detected_entities]
+        )
+        return True
+
+    return refresh
+
+
 class _FakePyautogui:
     """Records every call so tests can assert what would have happened."""
 
@@ -195,7 +212,9 @@ def test_villager_selection_uses_verified_box_not_first_detection(
 
 
 def test_resolve_coords_prefers_target_id(fake_pyautogui: _FakePyautogui) -> None:
-    ex._detected_entities = [{"id": "sheep_1", "class": "sheep", "center": (200, 300)}]
+    ex._detected_entities = [
+        {"id": "sheep_1", "class": "sheep", "center": (200, 300), "bbox": (180, 280, 220, 320)}
+    ]
     err, coords = ex._resolve_coords({"target_id": "sheep_1", "x": 0, "y": 0})
     assert err == ""
     assert coords == (200, 300)
@@ -324,7 +343,9 @@ def test_handle_click_build_binding_issues_only_one_placement_click(
 
 def test_handle_right_click_translates_and_calls(fake_pyautogui: _FakePyautogui) -> None:
     # Coords must sit on the map (not the HUD margins) or the play-area guard drops them.
-    ex._detected_entities = [{"id": "s1", "class": "sheep", "center": (500, 600)}]
+    ex._detected_entities = [
+        {"id": "s1", "class": "sheep", "center": (500, 600), "bbox": (480, 580, 520, 620)}
+    ]
     result = _run(ex._handle_right_click({"target_id": "s1"}, "gather wood"))
     assert result.success is True
     assert ("rightClick", (500, 600), {}) in fake_pyautogui.calls
@@ -370,7 +391,7 @@ def test_idle_food_assignment_avoids_sheep_box_overlapping_a_villager(
     async def fresh_view() -> bool:
         return True
 
-    ex.set_rescan_fn(fresh_view)
+    ex.set_rescan_fn(_publishing_refresh(fresh_view))
     monkeypatch.setattr(ex, "RESCAN_SETTLE_DELAY", 0.0)
     result = _run(ex.execute_action({"type": "assign_idle", "resource": "food"}))
 
@@ -387,7 +408,7 @@ def test_idle_assignment_without_target_bounds_issues_no_right_click(
     async def fresh_view() -> bool:
         return True
 
-    ex.set_rescan_fn(fresh_view)
+    ex.set_rescan_fn(_publishing_refresh(fresh_view))
     monkeypatch.setattr(ex, "RESCAN_SETTLE_DELAY", 0.0)
     result = _run(ex.execute_action({"type": "assign_idle", "resource": "food"}))
     assert not result.success
@@ -412,7 +433,7 @@ def test_idle_assignment_fails_when_the_worker_remains_idle(
     async def fresh_view() -> bool:
         return True
 
-    ex.set_rescan_fn(fresh_view)
+    ex.set_rescan_fn(_publishing_refresh(fresh_view))
     monkeypatch.setattr(ex, "RESCAN_SETTLE_DELAY", 0.0)
     result = _run(ex.execute_action({"type": "assign_idle", "resource": "food"}))
 
@@ -446,7 +467,7 @@ def test_idle_assignment_confirms_only_after_idle_badge_clears(
     async def fresh_view() -> bool:
         return True
 
-    ex.set_rescan_fn(fresh_view)
+    ex.set_rescan_fn(_publishing_refresh(fresh_view))
     monkeypatch.setattr(ex, "RESCAN_SETTLE_DELAY", 0.0)
     _run(ex.execute_action({"type": "assign_idle", "resource": "food"}))
 
@@ -476,7 +497,7 @@ def test_idle_assignment_confirms_when_count_falls_but_badge_remains_lit(
     async def fresh_view() -> bool:
         return True
 
-    ex.set_rescan_fn(fresh_view)
+    ex.set_rescan_fn(_publishing_refresh(fresh_view))
     monkeypatch.setattr(ex, "RESCAN_SETTLE_DELAY", 0.0)
     _run(ex.execute_action({"type": "assign_idle", "resource": "food"}))
 
@@ -506,7 +527,7 @@ def test_food_assignment_does_not_silently_target_wood_after_refresh(
         ex._detected_entities = [{"id": "tree", "class": "tree", "center": (1400, 800)}]
         return True
 
-    ex.set_rescan_fn(refreshed_without_food)
+    ex.set_rescan_fn(_publishing_refresh(refreshed_without_food))
     monkeypatch.setattr(ex, "RESCAN_SETTLE_DELAY", 0.0)
     result = _run(ex.execute_action({"type": "assign_idle", "resource": "food"}))
 
@@ -541,7 +562,7 @@ def test_missing_post_jump_food_target_defers_repeating_that_assignment(
         ]
         return True
 
-    ex.set_rescan_fn(camera_jumped_to_trees)
+    ex.set_rescan_fn(_publishing_refresh(camera_jumped_to_trees))
     monkeypatch.setattr(ex, "RESCAN_SETTLE_DELAY", 0.0)
     result = _run(ex.execute_action({"type": "assign_idle", "resource": "food"}))
 
@@ -582,7 +603,7 @@ def test_assignment_clicks_only_a_sheep_from_the_post_jump_view(
         ]
         return True
 
-    ex.set_rescan_fn(camera_jump)
+    ex.set_rescan_fn(_publishing_refresh(camera_jump))
     monkeypatch.setattr(ex, "RESCAN_SETTLE_DELAY", 0.0)
     result = _run(ex.execute_action({"type": "assign_idle", "resource": "food"}))
 
@@ -608,7 +629,7 @@ def test_intervening_input_preserves_pending_assignment_evidence(
     async def fresh_view() -> bool:
         return True
 
-    ex.set_rescan_fn(fresh_view)
+    ex.set_rescan_fn(_publishing_refresh(fresh_view))
     monkeypatch.setattr(ex, "RESCAN_SETTLE_DELAY", 0.0)
     _run(ex.execute_action({"type": "assign_idle", "resource": "food"}))
     ex.current_ledger().note_input()
@@ -636,7 +657,7 @@ def test_pre_click_observation_cannot_settle_idle_assignment(
     async def fresh_view() -> bool:
         return True
 
-    ex.set_rescan_fn(fresh_view)
+    ex.set_rescan_fn(_publishing_refresh(fresh_view))
     monkeypatch.setattr(ex, "RESCAN_SETTLE_DELAY", 0.0)
     _run(ex.execute_action({"type": "assign_idle", "resource": "food"}))
     click_revision = ex.current_ledger().input_revision

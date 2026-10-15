@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from ..entity_snapshot import MAX_SPATIAL_AGE_SECONDS
 from ..entity_utils import extract_attrs
 from ..executor import pending_placement_counts
 from .advice import PolicyGoal, PolicyRequest
@@ -67,11 +69,18 @@ def state_for_frame(ctx: LoopContext, frame: Perception) -> PolicyState:
     """Create the actor and advisor's common state from one perception."""
     entities = list(frame.entities)
     visible_classes = frozenset(extract_attrs(entity).class_name for entity in entities)
+    spatial_valid = frame.spatial_valid and (
+        frame.capture_id < 0
+        or (
+            frame.spatial_captured_at is not None
+            and time.monotonic() - frame.spatial_captured_at <= MAX_SPATIAL_AGE_SECONDS
+        )
+    )
     if frame.world is not None:
         return replace(
             frame.world,
             visible_classes=visible_classes,
-            spatial_valid=frame.spatial_valid,
+            spatial_valid=spatial_valid,
         )
     state = from_game_state(
         ctx.memory.game_state,
@@ -84,7 +93,7 @@ def state_for_frame(ctx: LoopContext, frame: Perception) -> PolicyState:
         state,
         population_known=ctx.goal_manager.observed_population,
         visible_classes=visible_classes,
-        spatial_valid=frame.spatial_valid,
+        spatial_valid=spatial_valid,
     )
 
 

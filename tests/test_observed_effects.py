@@ -289,7 +289,9 @@ def test_intent_text_cannot_retarget_coordinates(
 
 
 def test_bound_target_movement_aborts_click(ledger: ex.ActionLedger) -> None:
-    ex.set_detected_entities([{"id": "sheep", "class": "sheep", "center": (905, 600)}])
+    ex.set_detected_entities(
+        [{"id": "sheep", "class": "sheep", "center": (905, 600), "bbox": (885, 580, 925, 620)}]
+    )
     error, point = ex._resolve_coords(
         {
             "target_id": "sheep",

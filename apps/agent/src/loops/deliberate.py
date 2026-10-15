@@ -59,17 +59,19 @@ async def deliberate_loop(
     provider: ExecutorProvider,
 ) -> None:
     """Own the background strategist and any in-flight recovery on shutdown."""
-    seen, tick = 0.0, 0
+    seen_version, tick = 0, 0
     strategist_task: asyncio.Task[None] | None = None
     last_recovery = 0.0
     recovery_budget = RecoveryBudget()
     try:
         while not ctx.stopping:
             try:
-                frame = await asyncio.wait_for(ctx.frames.after(seen), timeout=_STOP_POLL)
+                frame = await asyncio.wait_for(
+                    ctx.frames.after_version(seen_version), timeout=_STOP_POLL
+                )
             except TimeoutError:
                 continue
-            seen = frame.captured_at
+            seen_version = frame.publication_version
             tick += 1
             if ctx.ledger is not None:
                 recovery_budget.observe(ctx.ledger.food_progress_at, ctx.ledger.tc_progress_at)

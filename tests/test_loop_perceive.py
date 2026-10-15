@@ -14,8 +14,15 @@ from gameplay_agent.goals import GoalManager
 from gameplay_agent.loops import perceive
 from gameplay_agent.loops.context import LoopContext
 from gameplay_agent.loops.snapshot import Perception, SpatialRefresh
-from gameplay_agent.loops.source import GameSource, Sighting, frame_refresh
+from gameplay_agent.loops.source import (
+    GameSource,
+    RawSpatial,
+    Sighting,
+    StreamCapture,
+    frame_refresh,
+)
 from gameplay_agent.memory import AgentMemory
+from gameplay_agent.screen import NativeCapture
 from gameplay_agent.turn_timing import PERCEIVE_LOOP, TickTimings
 
 from tests.factories import make_entity as _ent
@@ -31,6 +38,35 @@ if TYPE_CHECKING:
 def _run(coro: Awaitable[object]) -> object:
     """Drive a coroutine to completion in a fresh event loop."""
     return asyncio.run(coro)
+
+
+def _install_stream_capture(
+    monkeypatch: MonkeyPatch, source: GameSource, width: int, height: int
+) -> None:
+    async def capture() -> StreamCapture:
+        ledger = source._ledger
+        pixels = NativeCapture(
+            rgb=bytes(width * height * 3),
+            width=width,
+            height=height,
+            captured_at=time.monotonic(),
+            window_rect=(0, 0, width, height),
+        )
+        return StreamCapture(
+            pixels,
+            1,
+            ledger.input_revision if ledger else 0,
+            ledger.camera_revision if ledger else 0,
+            ledger.camera_command_revision if ledger else 0,
+            ledger.economic_revision if ledger else 0,
+            ledger.selection_revision if ledger else 0,
+        )
+
+    monkeypatch.setattr(source, "capture_stream", capture)
+
+
+def _raw(capture: StreamCapture) -> RawSpatial:
+    return RawSpatial(capture, b"jpeg", (), bytes(320 * 180 * 4), {})
 
 
 @pytest.fixture
@@ -110,29 +146,53 @@ def test_a_pass_records_its_own_latency(tmp_path, gates) -> None:
 
 def test_spatial_capture_includes_hud_baseline(monkeypatch) -> None:
     game_source = GameSource()
-    detected: list[bytes] = []
+    detected: list[int] = []
 
-    async def screen(tick, timings):
-        assert tick is None
-        return b"jpeg", b"native-hud", 800, 600, time.monotonic()
-
-    async def detect(screenshot, *, fresh=False):
-        detected.append(screenshot)
-        assert fresh
-        return []
+    async def detect(capture: StreamCapture, tick: int) -> RawSpatial:
+        del tick
+        detected.append(capture.capture_id)
+        return _raw(capture)
 
     async def hud(*_args):
         return {"food": 200}
 
-    monkeypatch.setattr(game_source, "_screen", screen)
-    monkeypatch.setattr(game_source, "_detect_entities", detect)
+    _install_stream_capture(monkeypatch, game_source, 800, 600)
+    monkeypatch.setattr(game_source, "detect_stream", detect)
     monkeypatch.setattr(game_source, "_hud", hud)
 
     refresh = _run(game_source.capture_spatial(TickTimings()))
 
     assert refresh.spatial_valid is True
-    assert detected == [b"jpeg"]
+    assert detected == [1]
     assert refresh.hud_readings == {"food": 200}
+
+
+def test_requested_refresh_publishes_its_spatial_and_hud_capture(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    source = GameSource()
+    ctx = _context(tmp_path, source)
+
+    async def detect(capture: StreamCapture, _tick: int) -> RawSpatial:
+        return _raw(capture)
+
+    async def hud(*_args):
+        return {"food": 200}
+
+    _install_stream_capture(monkeypatch, source, 800, 600)
+    monkeypatch.setattr(source, "detect_stream", detect)
+    monkeypatch.setattr(source, "_hud", hud)
+
+    async def drive() -> None:
+        request = ctx.frames.request_spatial_refresh()
+        await perceive._refresh_spatial_once(ctx, request)
+
+    asyncio.run(drive())
+    frame = ctx.frames.latest()
+    assert frame is not None
+    assert frame.hud_readings["food"] == 200
+    assert frame.spatial_capture_id == frame.hud_capture_id == 1
+    assert frame.spatial_version == frame.hud_version == 1
 
 
 def test_post_camera_refresh_replaces_old_targets_with_its_own_detection(
@@ -185,17 +245,14 @@ def test_post_camera_refresh_replaces_old_targets_with_its_own_detection(
 def test_selection_refresh_skips_object_detection(monkeypatch) -> None:
     source = GameSource()
 
-    async def screen(_tick, _timings):
-        return b"jpeg", b"native-hud", 3024, 1672, time.monotonic()
-
-    async def detect(_screenshot, *, fresh=False):
+    async def detect(_capture: StreamCapture, _tick: int) -> RawSpatial:
         pytest.fail("selection/HUD verification must not wait for object detection")
 
     async def hud(*_args):
         return {"food": 150}
 
-    monkeypatch.setattr(source, "_screen", screen)
-    monkeypatch.setattr(source, "_detect_entities", detect)
+    _install_stream_capture(monkeypatch, source, 3024, 1672)
+    monkeypatch.setattr(source, "detect_stream", detect)
     monkeypatch.setattr(source, "_hud", hud)
     monkeypatch.setattr(
         "gameplay_agent.loops.source.read_selected_unit",
@@ -214,11 +271,6 @@ def test_selection_refresh_requests_critical_hud_mode(monkeypatch: MonkeyPatch) 
     source = GameSource()
     modes: list[str] = []
 
-    async def screen(
-        _tick: int | None, _timings: TickTimings
-    ) -> tuple[bytes, bytes, int, int, float]:
-        return b"jpeg", b"native-hud", 3024, 1672, time.monotonic()
-
     async def read_hud(
         _bytes: bytes,
         *,
@@ -232,7 +284,7 @@ def test_selection_refresh_requests_critical_hud_mode(monkeypatch: MonkeyPatch) 
     def selected_unit(_bytes: bytes, _calibration: object) -> str:
         return "villager"
 
-    monkeypatch.setattr(source, "_screen", screen)
+    _install_stream_capture(monkeypatch, source, 3024, 1672)
     monkeypatch.setattr(source_module, "read_hud_readings", read_hud)
     monkeypatch.setattr(source_module, "read_selected_unit", selected_unit)
 
@@ -245,16 +297,13 @@ def test_spatial_capture_rejects_input_that_changes_during_detection(monkeypatch
     ledger = ex.ActionLedger()
     game_source = GameSource(ledger=ledger)
 
-    async def screen(_tick, _timings):
-        return b"jpeg", b"native-hud", 800, 600, time.monotonic()
+    async def detect(capture: StreamCapture, tick: int) -> RawSpatial:
+        del tick
+        ledger.note_camera_input()
+        return _raw(capture)
 
-    async def detect(_screenshot, *, fresh=False):
-        assert fresh
-        ledger.note_input()
-        return []
-
-    monkeypatch.setattr(game_source, "_screen", screen)
-    monkeypatch.setattr(game_source, "_detect_entities", detect)
+    _install_stream_capture(monkeypatch, game_source, 800, 600)
+    monkeypatch.setattr(game_source, "detect_stream", detect)
 
     refresh = _run(game_source.capture_spatial(TickTimings()))
 
@@ -268,26 +317,23 @@ def test_requested_refresh_runs_hud_and_detection_on_same_capture_concurrently(
     hud_started = asyncio.Event()
     detect_started = asyncio.Event()
 
-    async def screen(_tick, _timings):
-        return b"captured-frame", b"native-hud", 800, 600, time.monotonic()
-
     async def hud(screenshot, _tick, _timings, full_size):
-        assert screenshot == b"native-hud"
+        assert screenshot.startswith(b"\x89PNG")
         assert full_size == (800, 600)
         hud_started.set()
         await detect_started.wait()
         return {"food": 200}
 
-    async def detect(screenshot, *, fresh=False):
-        assert screenshot == b"captured-frame"
-        assert fresh
+    async def detect(capture: StreamCapture, tick: int) -> RawSpatial:
+        del tick
+        assert capture.capture_id == 1
         detect_started.set()
         await hud_started.wait()
-        return []
+        return _raw(capture)
 
-    monkeypatch.setattr(source, "_screen", screen)
+    _install_stream_capture(monkeypatch, source, 800, 600)
     monkeypatch.setattr(source, "_hud", hud)
-    monkeypatch.setattr(source, "_detect_entities", detect)
+    monkeypatch.setattr(source, "detect_stream", detect)
     refresh = _run(asyncio.wait_for(source.capture_spatial(TickTimings()), timeout=0.5))
     assert refresh.hud_readings == {"food": 200}
 
@@ -392,6 +438,128 @@ def test_fast_hud_observation_publishes_before_full_detection(tmp_path, gates) -
     assert frame is not None and frame.hud_only
     assert frame.world is not None and frame.world.villagers == 3
     assert frame.world.spatial_valid is False
+
+
+def test_stream_spatial_publications_continue_while_hud_is_slow(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    source = GameSource()
+    ctx = _context(tmp_path, source)
+    hud_started = asyncio.Event()
+    release_hud = asyncio.Event()
+    captures = 0
+
+    async def capture() -> StreamCapture:
+        nonlocal captures
+        captures += 1
+        pixels = NativeCapture(bytes(64 * 36 * 3), 64, 36, time.monotonic(), (0, 0, 64, 36))
+        return StreamCapture(pixels, captures, 0, 0, 0, 0, 0)
+
+    async def hud(frame: StreamCapture, tick: int) -> Sighting:
+        hud_started.set()
+        await release_hud.wait()
+        return Sighting(
+            Perception(
+                tick=tick,
+                capture_id=frame.capture_id,
+                captured_at=frame.pixels.captured_at,
+                hud_readings={"food": 200},
+                hud_captured_at=frame.pixels.captured_at,
+                spatial_valid=False,
+                hud_only=True,
+            )
+        )
+
+    async def detect(frame: StreamCapture, _tick: int) -> RawSpatial:
+        return RawSpatial(frame, b"jpeg", (), bytes(320 * 180 * 4), {})
+
+    async def integrate(raw: RawSpatial) -> Sighting:
+        return Sighting(
+            Perception(
+                tick=raw.capture.capture_id,
+                capture_id=raw.capture.capture_id,
+                captured_at=raw.capture.pixels.captured_at,
+                spatial_captured_at=raw.capture.pixels.captured_at,
+            )
+        )
+
+    async def playable(_ctx: LoopContext) -> bool:
+        return True
+
+    monkeypatch.setattr(source, "capture_stream", capture)
+    monkeypatch.setattr(source, "read_stream_hud", hud)
+    monkeypatch.setattr(source, "detect_stream", detect)
+    monkeypatch.setattr(source, "integrate_spatial", integrate)
+    monkeypatch.setattr(perceive, "_wait_until_playable", playable)
+
+    async def drive() -> None:
+        loop = asyncio.create_task(perceive.perceive_loop(ctx))
+        await asyncio.wait_for(hud_started.wait(), timeout=1.0)
+        while (latest := ctx.frames.latest()) is None or latest.spatial_version < 2:
+            await asyncio.sleep(0.01)
+        assert latest.hud_version == 0
+        assert captures >= 3
+        release_hud.set()
+        while (latest := ctx.frames.latest()) is None or latest.hud_version == 0:
+            await asyncio.sleep(0.01)
+        ctx.request_stop("test_complete")
+        await asyncio.wait_for(loop, timeout=1.0)
+
+    asyncio.run(asyncio.wait_for(drive(), timeout=2.0))
+
+
+def test_stream_shutdown_drains_started_inference(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    source = GameSource()
+    ctx = _context(tmp_path, source)
+    started = asyncio.Event()
+    release = asyncio.Event()
+    captures = 0
+
+    async def capture() -> StreamCapture:
+        nonlocal captures
+        captures += 1
+        pixels = NativeCapture(bytes(64 * 36 * 3), 64, 36, time.monotonic(), (0, 0, 64, 36))
+        return StreamCapture(pixels, captures, 0, 0, 0, 0, 0)
+
+    async def detect(frame: StreamCapture, _tick: int) -> RawSpatial:
+        started.set()
+        await release.wait()
+        return _raw(frame)
+
+    async def hud(_frame: StreamCapture, _tick: int) -> None:
+        return None
+
+    async def playable(_ctx: LoopContext) -> bool:
+        return True
+
+    monkeypatch.setattr(source, "capture_stream", capture)
+    monkeypatch.setattr(source, "detect_stream", detect)
+    monkeypatch.setattr(source, "read_stream_hud", hud)
+    monkeypatch.setattr(perceive, "_wait_until_playable", playable)
+
+    async def drive() -> None:
+        loop = asyncio.create_task(perceive.perceive_loop(ctx))
+        await asyncio.wait_for(started.wait(), timeout=1.0)
+        ctx.request_stop("test_complete")
+        await asyncio.sleep(0.02)
+        assert not loop.done()
+        release.set()
+        await asyncio.wait_for(loop, timeout=1.0)
+
+    asyncio.run(drive())
+
+
+def test_game_source_closes_remote_detector_client() -> None:
+    import httpx
+    from detection.inference.remote_detector import RemoteDetector
+
+    async def drive() -> None:
+        client = httpx.AsyncClient()
+        source = GameSource(detector=RemoteDetector("http://localhost:8420", client=client))
+        await source.aclose()
+        assert client.is_closed
+
+    asyncio.run(drive())
 
 
 def _read_hud(tmp_path) -> LoopContext:

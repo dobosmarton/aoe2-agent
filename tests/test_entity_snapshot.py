@@ -49,3 +49,14 @@ def test_malformed_values_degrade_to_non_renderable_unknowns() -> None:
         None,
         (0.0, 0.0),
     )
+
+
+def test_nonfinite_or_inverted_boxes_cannot_become_click_targets() -> None:
+    nonfinite = snapshot_entity(
+        {"id": "x", "class": "sheep", "bbox": [1, 2, float("nan"), 4], "center": [2, 3]}
+    )
+    inverted = snapshot_entity(
+        {"id": "y", "class": "sheep", "bbox": [3, 2, 1, 4], "center": [2, 3]}
+    )
+    assert nonfinite.bbox is None
+    assert inverted.bbox is None

@@ -59,8 +59,9 @@ def test_latest_returns_the_newest_frame() -> None:
     pipe = FramePipe()
     first, second = Perception(tick=1), Perception(tick=2)
     pipe.put(first)
-    pipe.put(second)
-    assert pipe.latest() is second
+    published = pipe.put(second)
+    assert pipe.latest() is published
+    assert published.publication_version == 2
 
 
 def test_evidence_uses_the_newest_spatial_or_full_capture() -> None:

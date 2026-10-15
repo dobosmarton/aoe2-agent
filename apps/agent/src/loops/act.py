@@ -28,20 +28,32 @@ if TYPE_CHECKING:
 
 log = structlog.stdlib.get_logger()
 _STOP_POLL = 0.5
+_POLICY_START_INTERVAL = 0.5
+_POLICY_PREEMPT_POLL = 0.1
 
 
 async def act_loop(ctx: LoopContext, advisor: PolicyAdvisor) -> None:
     """Consume the execution frame, not merely the frame that started the ask."""
-    consumed_at = 0.0
+    consumed_version = 0
+    last_started_at = -_POLICY_START_INTERVAL
     tick = 0
     try:
         while not ctx.stopping:
             try:
-                frame = await asyncio.wait_for(ctx.frames.after(consumed_at), timeout=_STOP_POLL)
+                frame = await asyncio.wait_for(
+                    ctx.frames.after_version(consumed_version), timeout=_STOP_POLL
+                )
             except TimeoutError:
                 continue
+            remaining = last_started_at + _POLICY_START_INTERVAL - time.monotonic()
+            if remaining > 0 and not frame.alarm:
+                await asyncio.sleep(remaining)
+                frame = ctx.frames.latest() or frame
+            if ctx.stopping:
+                return
+            last_started_at = time.monotonic()
             tick += 1
-            consumed_at = max(consumed_at, await act_once(ctx, advisor, frame, tick))
+            consumed_version = max(consumed_version, await act_once(ctx, advisor, frame, tick))
     finally:
         await advisor.aclose()
 
@@ -51,13 +63,15 @@ async def act_once(
     advisor: PolicyAdvisor,
     frame: Perception,
     tick: int,
-) -> float:
+) -> int:
     """One bounded judgment, with the latest observation checked under input ownership."""
+    if ctx.stopping:
+        return frame.publication_version
     if frame.alarm or ctx.input_lock.locked():
         log.debug(
             "act_skipped", reason="alarm" if frame.alarm else "input_locked", frame_tick=frame.tick
         )
-        return frame.captured_at
+        return frame.publication_version
 
     request = policy_request(ctx, frame)
     started_at = time.monotonic()
@@ -68,35 +82,31 @@ async def act_once(
     with ctx.latency.tick(ACT_LOOP, tick) as timings:
         with timings.phase("policy"):
             if failure is None:
-                try:
-                    async with asyncio.timeout(config.policy_timeout):
-                        advice = await advisor.advise(request)
-                except TimeoutError:
-                    failure = "provider_timeout"
-                except PolicyAdvisorError as exc:
-                    failure = f"provider_error:{type(exc).__name__}"
-                except Exception as exc:
-                    failure = f"provider_error:{type(exc).__name__}"
-                    log.warning("policy_provider_failed", error=repr(exc))
+                advice, failure = await _await_advice(ctx, advisor, request, frame)
+
+        if failure == "shutdown":
+            latest = ctx.frames.latest() or frame
+            _log_outcome(frame, latest, started_at, "superseded", "shutdown")
+            return latest.publication_version
 
         if ctx.input_lock.locked():
             latest = ctx.frames.latest() or frame
             _log_outcome(frame, latest, started_at, "superseded", "input_locked")
-            return latest.captured_at
+            return latest.publication_version
 
         with timings.phase("execute"):
             async with ctx.input_lock:
                 latest = ctx.frames.latest() or frame
                 if latest.alarm:
                     _log_outcome(frame, latest, started_at, "superseded", "alarm")
-                    return latest.captured_at
+                    return latest.publication_version
                 if (not latest.spatial_valid and not latest.hud_only) or (
                     ctx.ledger is not None and latest.input_revision != ctx.ledger.input_revision
                 ):
                     _log_outcome(
                         frame, latest, started_at, "superseded", "observation_crossed_input"
                     )
-                    return latest.captured_at
+                    return latest.publication_version
 
                 current_state = state_for_frame(ctx, latest)
                 candidates = feasible_candidates(current_state)
@@ -114,10 +124,10 @@ async def act_once(
                 )
                 if selected.id == "tactical_handoff":
                     ctx.tactical_requested.set()
-                    return latest.captured_at
+                    return latest.publication_version
                 commands = selected.render()
                 if not commands:
-                    return latest.captured_at
+                    return latest.publication_version
                 actions = validate_actions(commands)
                 if len(actions) != len(commands):
                     log.error("catalog_render_invalid", action=selected.id)
@@ -130,8 +140,8 @@ async def act_once(
                                 "invalid catalog render",
                             )
                         )
-                        save_action_evidence(ctx.ledger, ctx.frames.evidence_screenshot())
-                    return latest.captured_at
+                        save_action_evidence(ctx, ctx.frames.evidence_screenshot())
+                    return latest.publication_version
 
                 log.info(
                     "act_decided",
@@ -162,7 +172,7 @@ async def act_once(
                         ActionOutcome(ctx.ledger.new_operation_id(), selected.id, "failed", detail)
                     )
                 if ctx.ledger is not None:
-                    save_action_evidence(ctx.ledger, ctx.frames.evidence_screenshot())
+                    save_action_evidence(ctx, ctx.frames.evidence_screenshot())
                 log.info(
                     "act_execution_outcome",
                     action=selected.id,
@@ -174,7 +184,62 @@ async def act_once(
                     ),
                     details=[result.detail for result in results],
                 )
-                return latest.captured_at
+                return latest.publication_version
+
+
+async def _await_advice(
+    ctx: LoopContext,
+    advisor: PolicyAdvisor,
+    request: PolicyRequest,
+    source: Perception,
+) -> tuple[PolicyAdvice | None, str | None]:
+    """Await one model call while observations may make it unsafe or overdue."""
+    advice_task = asyncio.create_task(advisor.advise(request))
+    stop_task = asyncio.create_task(ctx.stop.wait())
+    seen_version = source.publication_version
+    deadline = time.monotonic() + config.policy_timeout
+    try:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None, "provider_timeout"
+            frame_task = asyncio.create_task(ctx.frames.after_version(seen_version))
+            try:
+                done, _ = await asyncio.wait(
+                    {advice_task, stop_task, frame_task},
+                    timeout=min(remaining, _POLICY_PREEMPT_POLL),
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if stop_task in done:
+                    return None, "shutdown"
+                latest = ctx.frames.latest() or source
+                if latest.alarm:
+                    return None, "alarm"
+                if ctx.ledger is not None and latest.input_revision != ctx.ledger.input_revision:
+                    return None, "intervening_execution"
+                if latest.input_revision != request.source_input_revision:
+                    return None, "intervening_execution"
+                state = state_for_frame(ctx, latest)
+                candidates = feasible_candidates(state)
+                if ctx.controller.overdue(state, candidates, ctx.goal_manager.allocation):
+                    return None, "obligation_overdue"
+                if advice_task in done:
+                    try:
+                        return advice_task.result(), None
+                    except PolicyAdvisorError as exc:
+                        return None, f"provider_error:{type(exc).__name__}"
+                    except Exception as exc:
+                        log.warning("policy_provider_failed", error=repr(exc))
+                        return None, f"provider_error:{type(exc).__name__}"
+                if frame_task in done:
+                    seen_version = frame_task.result().publication_version
+            finally:
+                frame_task.cancel()
+                await asyncio.gather(frame_task, return_exceptions=True)
+    finally:
+        advice_task.cancel()
+        stop_task.cancel()
+        await asyncio.gather(advice_task, stop_task, return_exceptions=True)
 
 
 def _choose_action(

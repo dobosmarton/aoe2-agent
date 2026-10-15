@@ -471,7 +471,7 @@ def test_the_loop_decides_once_per_frame(tmp_path, gates) -> None:
     assert len(actuator.batches) == 1
 
 
-def test_the_loop_decides_again_on_the_next_frame(tmp_path, gates) -> None:
+def test_the_loop_consumes_a_newer_revalidated_frame_once(tmp_path, gates) -> None:
     actuator = FakeActuator()
     ctx = _context(tmp_path, actuator)
 
@@ -485,7 +485,7 @@ def test_the_loop_decides_again_on_the_next_frame(tmp_path, gates) -> None:
         await asyncio.wait_for(task, timeout=2.0)
 
     _run(drive())
-    assert len(actuator.batches) == 2
+    assert len(actuator.batches) == 1
 
 
 def test_the_loop_leaves_when_the_game_ends(tmp_path, gates) -> None:

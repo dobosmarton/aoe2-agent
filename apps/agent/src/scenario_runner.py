@@ -12,7 +12,7 @@ import argparse
 import asyncio
 import tempfile
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -36,6 +36,7 @@ from .policy.controller import AgentController
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
+    from .entity_snapshot import EntitySnapshot
     from .policy.advice import PolicyRequest
     from .resource_ocr import ResourceReadings
     from .turn_timing import TickTimings
@@ -168,13 +169,27 @@ class _ScriptedSource:
     def __init__(self, world: _ScriptedWorld, ledger: executor.ActionLedger) -> None:
         self.world = world
         self.ledger = ledger
+        self.capture_id = 0
+
+    def _fresh_entities(self, captured_at: float) -> tuple[EntitySnapshot, ...]:
+        self.capture_id += 1
+        return tuple(
+            replace(
+                entity,
+                capture_id=self.capture_id,
+                camera_revision=self.ledger.camera_revision,
+                captured_at=captured_at,
+            )
+            for entity in snapshot_entities(self.world.entities)
+        )
 
     async def capture_hud(self, tick: int, timings: TickTimings) -> None:
         """Scenarios drive explicit full observations, not a second HUD clock."""
 
     async def capture(self, tick: int, timings: TickTimings) -> Sighting:
         with timings.phase("capture"):
-            entities = snapshot_entities(self.world.entities)
+            captured_at = time.monotonic()
+            entities = self._fresh_entities(captured_at)
             executor.set_detected_entities(entities)
             frame = Perception(
                 width=1920,
@@ -182,9 +197,13 @@ class _ScriptedSource:
                 entities=entities,
                 hud_readings=cast("ResourceReadings", self.world.readings()),
                 input_revision=self.ledger.input_revision,
+                camera_revision=self.ledger.camera_revision,
+                economic_revision=self.ledger.economic_revision,
+                capture_id=self.capture_id,
+                spatial_captured_at=captured_at,
                 spatial_valid=True,
                 tick=tick,
-                captured_at=time.monotonic(),
+                captured_at=captured_at,
             )
         # The scripted world contains controlled-player entities only. Its
         # ownership fact is explicit, unlike an unlabeled live detector box.
@@ -194,8 +213,9 @@ class _ScriptedSource:
         self, timings: TickTimings, *, selection_only: bool = False
     ) -> SpatialRefresh:
         with timings.phase("capture"):
-            executor.set_detected_entities(snapshot_entities(self.world.entities))
-            return SpatialRefresh(time.monotonic(), self.ledger.input_revision, True)
+            captured_at = time.monotonic()
+            executor.set_detected_entities(self._fresh_entities(captured_at))
+            return SpatialRefresh(captured_at, self.ledger.input_revision, True)
 
     def close(self) -> None:
         pass

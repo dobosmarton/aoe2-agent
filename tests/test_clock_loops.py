@@ -36,7 +36,6 @@ def loop_seams(monkeypatch, tmp_path):
     monkeypatch.setattr(gl, "GameSource", lambda **_kwargs: source)
     monkeypatch.setattr(gl, "GameActuator", lambda: actuator)
     monkeypatch.setattr(gl, "init_detector", lambda: None)
-    monkeypatch.setattr(gl, "init_frame_differ", lambda: None)
     monkeypatch.setattr(gl, "warm_up_ocr", lambda: None)
     monkeypatch.setattr(perceive, "is_game_running", lambda: True)
     monkeypatch.setattr(perceive, "ensure_game_focused", lambda: True)

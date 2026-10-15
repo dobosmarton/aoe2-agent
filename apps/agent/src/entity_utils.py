@@ -155,7 +155,12 @@ def safe_gather_target(
     snapshots = snapshot_entities(entities)
     classes = GATHER_CLASSES_BY_KIND[kind]
     candidates = sorted(
-        (entity for entity in snapshots if entity.class_name in classes),
+        (
+            entity
+            for entity in snapshots
+            if entity.class_name in classes
+            and (entity.raw_class_name is None or entity.raw_class_name in classes)
+        ),
         key=lambda entity: dist(entity.center, origin),
     )
     for target in candidates:

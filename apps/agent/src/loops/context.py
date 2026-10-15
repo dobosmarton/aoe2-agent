@@ -17,6 +17,7 @@ from ..turn_timing import LatencyRecorder
 from .snapshot import FramePipe
 
 if TYPE_CHECKING:
+    from ..diagnostic_writer import DiagnosticWriter
     from ..executor import ActionLedger
     from ..goal_logger import GoalLogger
     from ..goals import GoalManager
@@ -36,6 +37,7 @@ class LoopContext:
     source: FrameSource
     actuator: Actuator
     ledger: ActionLedger | None = None
+    writer: DiagnosticWriter | None = None
     controller: AgentController = field(default_factory=AgentController)
 
     # Perceive publishes; act and deliberate read. See `FramePipe`.

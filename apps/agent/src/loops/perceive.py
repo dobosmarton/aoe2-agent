@@ -7,6 +7,7 @@ reading" has one answer. Input-triggered spatial refreshes also read the HUD.
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -33,12 +34,12 @@ from ..turn_timing import PERCEIVE_LOOP, TickTimings
 from ..window import ensure_game_focused, is_game_running
 
 if TYPE_CHECKING:
-    from ..executor import ActionLedger
     from ..goals import GoalManager
     from ..memory import AgentMemory
     from ..resource_ocr import ResourceReadings
     from .context import LoopContext
     from .snapshot import SpatialRefresh
+    from .source import GameSource, RawSpatial, Sighting, StreamCapture
 
 log = structlog.stdlib.get_logger()
 
@@ -46,11 +47,19 @@ log = structlog.stdlib.get_logger()
 # 12 of 30 iterations on an unfocusable window with no end-reason label (F-1).
 _MAX_FOCUS_FAILURES = 15
 _FOCUS_RETRY_DELAY = 1.0
+_DETECTION_INTERVAL = 0.2
+_HUD_INTERVAL = 0.5
+_DETECT_DRAIN_TIMEOUT = 12.0
 
 
 async def perceive_loop(ctx: LoopContext) -> None:
     """Gate, perceive, pace — until something ends the game. `max_iterations`
     bounds frames: this is the loop that always runs, so it is what to count."""
+    from .source import GameSource
+
+    if isinstance(ctx.source, GameSource):
+        await _stream_perceive_loop(ctx, ctx.source)
+        return
     tick = 0
     while not ctx.stopping:
         if not await _wait_until_playable(ctx):
@@ -94,6 +103,105 @@ async def perceive_loop(ctx: LoopContext) -> None:
             await ctx.frames.wait_for_due(config.perceive_interval)
 
 
+async def _stream_perceive_loop(ctx: LoopContext, source: GameSource) -> None:
+    """Latest-frame lanes: capture never waits for OCR or detector inference."""
+    tick = 0
+    next_capture = time.monotonic()
+    next_detection = next_capture
+    next_hud = next_capture
+    capture_task: asyncio.Task[StreamCapture] | None = None
+    detect_task: asyncio.Task[RawSpatial | None] | None = None
+    hud_task: asyncio.Task[Sighting | None] | None = None
+    pending_detection: StreamCapture | None = None
+    pending_hud: StreamCapture | None = None
+    refresh_task: asyncio.Task[asyncio.Future[SpatialRefresh]] | None = None
+    stop_task = asyncio.create_task(ctx.stop.wait())
+    try:
+        if not await _wait_until_playable(ctx):
+            return
+        while not ctx.stopping:
+            now = time.monotonic()
+            if capture_task is None and now >= next_capture:
+                capture_task = asyncio.create_task(source.capture_stream())
+                next_capture = max(
+                    next_capture + config.perceive_interval, now + config.perceive_interval
+                )
+            if refresh_task is None:
+                refresh_task = asyncio.create_task(ctx.frames.wait_for_spatial_request())
+            active: set[asyncio.Task[object]] = {stop_task, refresh_task}
+            for task in (capture_task, detect_task, hud_task):
+                if task is not None:
+                    active.add(task)
+            done, _ = await asyncio.wait(
+                active,
+                timeout=(
+                    None if capture_task is not None else max(0.0, next_capture - time.monotonic())
+                ),
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if stop_task in done:
+                return
+            if refresh_task in done:
+                request = refresh_task.result()
+                refresh_task = None
+                await _refresh_spatial_once(ctx, request)
+                continue
+            if detect_task is not None and detect_task in done:
+                raw = detect_task.result()
+                detect_task = None
+                if raw is not None:
+                    sighting = await source.integrate_spatial(raw)
+                    if sighting is not None:
+                        _publish_spatial(ctx, sighting.frame.tick, sighting)
+            if hud_task is not None and hud_task in done:
+                sighting = hud_task.result()
+                hud_task = None
+                if sighting is not None:
+                    _publish_hud(ctx, sighting.frame.tick, sighting)
+            if capture_task is not None and capture_task in done:
+                capture = capture_task.result()
+                capture_task = None
+                tick += 1
+                if ctx.max_iterations is not None and tick >= ctx.max_iterations:
+                    ctx.request_stop("iterations_exhausted")
+                if capture.pixels.captured_at >= next_detection:
+                    pending_detection = capture
+                    next_detection = capture.pixels.captured_at + _DETECTION_INTERVAL
+                if capture.pixels.captured_at >= next_hud:
+                    pending_hud = capture
+                    next_hud = capture.pixels.captured_at + _HUD_INTERVAL
+            if ctx.frames.pending_spatial_refresh() is None:
+                if detect_task is None and pending_detection is not None:
+                    detect_task = asyncio.create_task(
+                        source.detect_stream(pending_detection, pending_detection.capture_id)
+                    )
+                    pending_detection = None
+                if hud_task is None and pending_hud is not None:
+                    hud_task = asyncio.create_task(
+                        source.read_stream_hud(pending_hud, pending_hud.capture_id)
+                    )
+                    pending_hud = None
+    finally:
+        tasks: list[asyncio.Task[object]] = []
+        for task in (capture_task, hud_task, refresh_task, stop_task):
+            if task is not None:
+                task.cancel()
+                tasks.append(task)
+        for task in tasks:
+            await asyncio.gather(task, return_exceptions=True)
+        # Detector work may be running inside a thread. Cancelling its coroutine
+        # would release our capacity while that inference kept running unseen.
+        if detect_task is not None:
+            try:
+                await asyncio.wait_for(asyncio.shield(detect_task), timeout=_DETECT_DRAIN_TIMEOUT)
+            except TimeoutError:
+                log.error("detector_shutdown_drain_timed_out", seconds=_DETECT_DRAIN_TIMEOUT)
+                detect_task.cancel()
+                await asyncio.gather(detect_task, return_exceptions=True)
+            except Exception as exc:
+                log.warning("detector_shutdown_failed", error=repr(exc))
+
+
 async def _refresh_spatial_once(ctx: LoopContext, request: asyncio.Future[SpatialRefresh]) -> None:
     """Service an input-triggered capture before starting another full OCR pass."""
     timings = TickTimings()
@@ -101,13 +209,15 @@ async def _refresh_spatial_once(ctx: LoopContext, request: asyncio.Future[Spatia
         refresh = await ctx.source.capture_spatial(
             timings, selection_only=ctx.frames.selection_only(request)
         )
-        if (
+        if refresh.spatial_valid and refresh.sighting is not None:
+            _publish_spatial(ctx, refresh.sighting.frame.tick, refresh.sighting)
+        elif (
             refresh.spatial_valid
             and refresh.entities is not None
             and snapshot_entities(get_detected_entities()) != refresh.entities
         ):
             set_detected_entities(refresh.entities)
-        if refresh.spatial_valid and refresh.hud_readings:
+        if refresh.spatial_valid and refresh.hud_readings and refresh.sighting is None:
             sync_world_state(
                 ctx.memory,
                 ctx.goal_manager,
@@ -115,7 +225,7 @@ async def _refresh_spatial_once(ctx: LoopContext, request: asyncio.Future[Spatia
                 input_revision=refresh.input_revision,
             )
             if ctx.ledger is not None:
-                save_action_evidence(ctx.ledger, refresh.screenshot)
+                save_action_evidence(ctx, refresh.screenshot)
         if ctx.ledger is not None:
             ctx.ledger.selected_unit = refresh.selected_unit
             ctx.ledger.selected_at_revision = refresh.input_revision
@@ -134,8 +244,12 @@ async def perceive_hud_once(ctx: LoopContext, tick: int) -> None:
     sighting = await ctx.source.capture_hud(tick, timings)
     if sighting is None:
         return
+    _publish_hud(ctx, tick, sighting)
+
+
+def _publish_hud(ctx: LoopContext, tick: int, sighting: Sighting) -> None:
     frame = sighting.frame
-    if ctx.ledger is not None and frame.input_revision != ctx.ledger.input_revision:
+    if ctx.ledger is not None and frame.economic_revision != ctx.ledger.economic_revision:
         return
     if not frame.hud_readings:
         return
@@ -148,7 +262,7 @@ async def perceive_hud_once(ctx: LoopContext, tick: int) -> None:
     ctx.goal_manager.evaluate_progress(ctx.memory.game_state, tick, frozenset(frame.hud_readings))
     ledger = ctx.ledger
     world = (
-        ledger_policy_state(ledger)
+        ledger_policy_state(ledger, captured_at=frame.captured_at)
         if ledger is not None
         else from_game_state(
             ctx.memory.game_state,
@@ -156,14 +270,14 @@ async def perceive_hud_once(ctx: LoopContext, tick: int) -> None:
             known_resources=ctx.goal_manager.observed_resource_fields,
         )
     )
-    ctx.frames.put(
+    ctx.frames.put_hud(
         replace(
             frame,
             world=replace(world, captured_at=frame.captured_at, spatial_valid=False),
             alarm=ctx.memory.game_state.under_attack,
         )
     )
-    log.info("hud_observation_published", frame_tick=tick, latency_ms=round(timings.total_ms))
+    log.info("hud_observation_published", frame_tick=tick, age_ms=round(frame.age_ms))
 
 
 async def _wait_until_playable(ctx: LoopContext) -> bool:
@@ -193,82 +307,82 @@ async def perceive_once(ctx: LoopContext, tick: int) -> None:
     """One pass: capture, sync the state it feeds, publish the frame."""
     with ctx.latency.tick(PERCEIVE_LOOP, tick) as timings:
         sighting = await ctx.source.capture(tick, timings)
-        frame = sighting.frame
-        if not frame.spatial_valid or (
-            ctx.ledger is not None and frame.input_revision != ctx.ledger.input_revision
-        ):
-            log.info(
-                "perception_discarded",
-                frame_tick=frame.tick,
-                frame_revision=frame.input_revision,
-                current_revision=ctx.ledger.input_revision if ctx.ledger is not None else None,
-            )
-            ctx.frames.request_now()
-            return
+        _publish_spatial(ctx, tick, sighting)
+
+
+def _publish_spatial(ctx: LoopContext, tick: int, sighting: Sighting) -> None:
+    frame = sighting.frame
+    ledger = ctx.ledger
+    if not frame.spatial_valid or (
+        ledger is not None and frame.camera_revision != ledger.camera_revision
+    ):
+        log.info(
+            "perception_discarded",
+            frame_tick=frame.tick,
+            camera_revision=frame.camera_revision,
+            current_camera_revision=ledger.camera_revision if ledger is not None else None,
+        )
+        ctx.frames.request_now()
+        return
+    latest_hud = ctx.frames.latest()
+    if frame.hud_readings and (
+        latest_hud is None
+        or latest_hud.hud_captured_at is None
+        or (frame.hud_captured_at or frame.captured_at) >= latest_hud.hud_captured_at
+    ):
         sync_world_state(
             ctx.memory,
             ctx.goal_manager,
             frame.hud_readings,
             input_revision=frame.input_revision,
         )
-        if ctx.ledger is not None:
-            save_action_evidence(ctx.ledger, frame.screenshot)
         ctx.goal_manager.evaluate_progress(
             ctx.memory.game_state, tick, frozenset(frame.hud_readings)
         )
-        entities = list(frame.entities)
-        alarm = ctx.goal_manager.check_alarm(entities, sighting.ownership) if entities else False
-        ctx.memory.game_state.under_attack = alarm
-        ledger = ctx.ledger
-        if (
-            ledger is not None
-            and frame.spatial_valid
-            and ledger.input_revision == frame.input_revision
-        ):
-            ledger.spatial_valid = True
-        visible_classes = frozenset(extract_attrs(entity).class_name for entity in entities)
-        owned_entities = frozenset(
-            (attrs.entity_id, attrs.class_name)
-            for entity in entities
-            if (attrs := extract_attrs(entity)).entity_id in sighting.ownership
-            and sighting.ownership[attrs.entity_id][0].value == "own"
+    if ledger is not None:
+        save_action_evidence(ctx, frame.screenshot)
+        ledger.spatial_valid = True
+    entities = list(frame.entities)
+    alarm = ctx.goal_manager.check_alarm(entities, sighting.ownership) if entities else False
+    ctx.memory.game_state.under_attack = alarm
+    visible_classes = frozenset(extract_attrs(entity).class_name for entity in entities)
+    owned_entities = frozenset(
+        (attrs.entity_id, attrs.class_name)
+        for entity in entities
+        if (attrs := extract_attrs(entity)).entity_id in sighting.ownership
+        and sighting.ownership[attrs.entity_id][0].value == "own"
+    )
+    record_observed_buildings(owned_entities)
+    ctx.memory.game_state.buildings_seen = confirmed_buildings()
+    latest = ctx.frames.latest()
+    world = (
+        ledger_policy_state(
+            ledger,
+            captured_at=(latest.hud_captured_at or frame.captured_at)
+            if latest is not None
+            else frame.captured_at,
         )
-        building_evidence = frozenset(
-            (attrs.entity_id, attrs.class_name)
-            for entity in entities
-            if (attrs := extract_attrs(entity)).entity_id in sighting.ownership
-            and sighting.ownership[attrs.entity_id][0].value == "own"
-        )
-        if frame.spatial_valid and (
-            ledger is None or ledger.input_revision == frame.input_revision
-        ):
-            record_observed_buildings(building_evidence)
-        ctx.memory.game_state.buildings_seen = confirmed_buildings()
-        owned_classes = frozenset(cls for _, cls in owned_entities)
-        own_army_present = bool(owned_classes & THREAT_CLASSES)
-        world = (
-            ledger_policy_state(ledger)
-            if ledger is not None
-            else from_game_state(
-                ctx.memory.game_state,
-                captured_at=frame.captured_at,
-                known_resources=ctx.goal_manager.observed_resource_fields,
-            )
-        )
-        world = replace(
-            world,
-            idle_count=ctx.memory.game_state.idle_count,
-            idle_streak=ctx.memory.game_state.idle_streak,
+        if ledger is not None
+        else from_game_state(
+            ctx.memory.game_state,
             captured_at=frame.captured_at,
-            visible_classes=visible_classes,
-            own_army_present=own_army_present,
-            spatial_valid=frame.spatial_valid,
+            known_resources=ctx.goal_manager.observed_resource_fields,
         )
-        ownership = tuple(
-            (entity_id, str(owner), confidence)
-            for entity_id, (owner, confidence) in sighting.ownership.items()
-        )
-        ctx.frames.put(replace(frame, alarm=alarm, world=world, ownership=ownership))
+    )
+    world = replace(
+        world,
+        idle_count=ctx.memory.game_state.idle_count,
+        idle_streak=ctx.memory.game_state.idle_streak,
+        visible_classes=visible_classes,
+        own_army_present=bool(frozenset(cls for _, cls in owned_entities) & THREAT_CLASSES),
+        spatial_valid=True,
+    )
+    ownership = tuple(
+        (entity_id, str(owner), confidence)
+        for entity_id, (owner, confidence) in sighting.ownership.items()
+    )
+    set_detected_entities(frame.entities)
+    ctx.frames.put_spatial(replace(frame, alarm=alarm, world=world, ownership=ownership))
 
 
 def sync_world_state(
@@ -310,22 +424,30 @@ def sync_world_state(
     game_state.villagers_ordered = villagers_ordered()
 
 
-def save_action_evidence(ledger: ActionLedger, screenshot: bytes) -> None:
+def save_action_evidence(ctx: LoopContext, screenshot: bytes) -> None:
     """Keep the observation behind a failure/uncertainty with its operation ID."""
-    if not screenshot:
+    ledger = ctx.ledger
+    if not screenshot or ledger is None:
         return
     for outcome in ledger.outcomes:
         if outcome.status not in {"failed", "uncertain"}:
             continue
         if outcome.operation_id in ledger.outcome_screenshots:
             continue
-        directory = Path(config.log_dir) / "action_screenshots"
-        directory.mkdir(parents=True, exist_ok=True)
-        path = directory / f"action_{outcome.operation_id}_{outcome.status}.jpg"
-        save_screenshot(screenshot, str(path))
+        path = (
+            Path(config.log_dir)
+            / "action_screenshots"
+            / (f"action_{outcome.operation_id}_{outcome.status}.jpg")
+        )
+        if ctx.writer is not None:
+            if not ctx.writer.submit(path, screenshot, operation_evidence=True):
+                continue
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            save_screenshot(screenshot, str(path))
         ledger.outcome_screenshots[outcome.operation_id] = str(path)
-        log.warning(
-            "action_evidence_saved",
+        log.info(
+            "action_evidence_queued" if ctx.writer is not None else "action_evidence_saved",
             action_id=outcome.operation_id,
             status=outcome.status,
             screenshot=str(path),

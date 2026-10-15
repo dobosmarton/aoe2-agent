@@ -131,7 +131,7 @@ class Config(BaseModel):
     # recall (villagers, sheep, mills). NOTE: the ONNX must be a *static* 1280
     # export (export_onnx.py --no-dynamic) — the CoreML/ANE provider cannot build
     # a plan for a dynamic graph at 1280. A static graph accepts only this one
-    # size, so every /detect request uses it (see remote_detector.detect_fast_multi).
+    # size, so every /detect request uses it (see remote_detector.detect_fast).
     # History: v6 was trained @640; upscaling it to 1280 tanked F1 (0.42→0.21) —
     # that penalty is a train/inference scale mismatch, not a property of 1280.
     detection_imgsz: int = 1280
@@ -142,16 +142,13 @@ class Config(BaseModel):
     # model's training resolution (v9 trained @1280).
     detection_model: str = "aoe2_yolo_v9"  # AOE2_DETECTION_MODEL
     detection_host: str = ""  # Remote CoreML server URL (e.g., "http://192.168.64.1:8420")
-    # Serve a mid-turn rescan from the cached static map when the camera only
-    # panned, instead of re-detecting. AOE2_RESCAN_CACHE=false to A/B it.
-    rescan_cache: bool = True
 
     # Timing settings
     action_delay: float = 0.05  # Seconds between actions
 
     # The actor and deliberate loop consume published frames; only perception
     # has a time-based cadence.
-    perceive_interval: float = 0.5  # AOE2_PERCEIVE_INTERVAL — seconds between frames
+    perceive_interval: float = 0.1  # AOE2_PERCEIVE_INTERVAL — capture cadence
 
     # Logging
     log_dir: Path = Path("logs")
@@ -180,10 +177,9 @@ class Config(BaseModel):
             game_profile_path=(
                 Path(path) if (path := os.environ.get("AOE2_GAME_PROFILE")) else None
             ),
-            perceive_interval=float(os.environ.get("AOE2_PERCEIVE_INTERVAL", "0.5")),
+            perceive_interval=float(os.environ.get("AOE2_PERCEIVE_INTERVAL", "0.1")),
             save_screenshots=os.environ.get("AOE2_SAVE_SCREENSHOTS", "true").lower() == "true",
             detection_host=os.environ.get("AOE2_DETECTION_HOST", ""),
-            rescan_cache=os.environ.get("AOE2_RESCAN_CACHE", "true").lower() == "true",
             detection_model=os.environ.get("AOE2_DETECTION_MODEL", "aoe2_yolo_v9"),
             temperature=_parse_optional_float(os.environ.get("AOE2_TEMPERATURE")),
             seed=_parse_optional_int(os.environ.get("AOE2_SEED")),

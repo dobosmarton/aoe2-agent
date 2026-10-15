@@ -1,6 +1,8 @@
 """Screen capture module for AoE2 LLM Agent."""
 
 import io
+import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import mss
@@ -13,10 +15,35 @@ RESOURCE_BAR_HEIGHT = 60
 RESOURCE_BAR_JPEG_QUALITY = 80
 
 
-def _capture_image(monitor: int) -> Image.Image:
+@dataclass(frozen=True, slots=True)
+class NativeCapture:
+    """One uncompressed window capture; encodings derive from these pixels."""
+
+    rgb: bytes
+    width: int
+    height: int
+    captured_at: float
+    window_rect: tuple[int, int, int, int] | None
+    cursor: tuple[int, int] | None = None  # Window-relative, sampled near capture.
+
+    def image(self) -> Image.Image:
+        return Image.frombytes("RGB", (self.width, self.height), self.rgb)
+
+    def jpeg(self, quality: int | None = None) -> bytes:
+        return _jpeg(self.image(), config.screenshot_quality if quality is None else quality)
+
+    def native_hud(self) -> bytes:
+        image = self.image().crop((0, 0, self.width, min(self.height, 300)))
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        return buffer.getvalue()
+
+
+def _capture_image(monitor: int, rect: tuple[int, int, int, int] | None = None) -> Image.Image:
     """Read native game-window pixels once, before either encoding path."""
     with mss.mss() as sct:
-        rect = get_game_window_rect()
+        if rect is None:
+            rect = get_game_window_rect()
         if rect:
             left, top, width, height = rect
             region = {"left": left, "top": top, "width": width, "height": height}
@@ -24,6 +51,25 @@ def _capture_image(monitor: int) -> Image.Image:
         else:
             screenshot = sct.grab(sct.monitors[monitor])
         return Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
+
+
+def capture_native(monitor: int = 1) -> NativeCapture:
+    """Keep native pixels so detection, HUD and camera estimation share a view."""
+    stamped = time.monotonic()
+    rect = get_game_window_rect()
+    image = _capture_image(monitor, rect)
+    cursor: tuple[int, int] | None = None
+    if rect is not None:
+        try:
+            import pyautogui
+
+            position = pyautogui.position()
+            cursor = (int(position.x) - rect[0], int(position.y) - rect[1])
+        except Exception:
+            # Cursor masking is diagnostic enrichment, never a reason to lose
+            # the native frame if a desktop automation backend is unavailable.
+            pass
+    return NativeCapture(image.tobytes(), image.width, image.height, stamped, rect, cursor)
 
 
 def _jpeg(image: Image.Image, quality: int) -> bytes:

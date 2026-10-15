@@ -28,8 +28,8 @@ from .detection_phase import (
     DetectionUnavailableError,
     DetectorFactory,
     init_detector,
-    init_frame_differ,
 )
+from .diagnostic_writer import DiagnosticWriter
 from .entity_utils import build_entity_summary
 from .executor import (
     ActionLedger,
@@ -63,6 +63,11 @@ log = structlog.stdlib.get_logger()
 @runtime_checkable
 class _SerializableEntity(Protocol):
     def to_dict(self) -> object: ...
+
+
+@runtime_checkable
+class _AsyncClose(Protocol):
+    async def aclose(self) -> None: ...
 
 
 def _serialize_entity(entity: object) -> object:
@@ -129,6 +134,7 @@ def _build_context(
     from .game_profile import load_profile
 
     profile = load_profile(config.game_profile_path) if config.game_profile_path else None
+    writer = DiagnosticWriter()
     return LoopContext(
         memory=memory,
         goal_manager=goal_manager,
@@ -136,13 +142,14 @@ def _build_context(
         source=GameSource(
             detector=(detector_factory or init_detector)() if use_detection else None,
             overlay=overlay,
-            frame_differ=init_frame_differ(),
             screenshots_dir=screenshots_dir,
             ledger=ledger,
             profile=profile,
+            writer=writer,
         ),
         actuator=GameActuator(),
         ledger=ledger,
+        writer=writer,
         time_budget=time_budget,
         max_iterations=max_iterations,
     )
@@ -287,7 +294,10 @@ async def _close_out(
 ) -> None:
     """Stop the warm-ups, release the source, and label the end."""
     await _stop_warm_ups(warm_ups)
-    ctx.source.close()
+    if isinstance(ctx.source, _AsyncClose):
+        await ctx.source.aclose()
+    else:
+        ctx.source.close()
     # Exits that bypass both except clauses (CancelledError is a BaseException)
     # reach here unlabelled — run 13 logged an empty game_end_reason on a manual
     # stop (T-543). This is the one choke point.
@@ -295,7 +305,9 @@ async def _close_out(
         memory.game_end_reason = "interrupted"
     if ctx.ledger is not None:
         ctx.ledger.finalize_unverified()
-        save_action_evidence(ctx.ledger, ctx.frames.evidence_screenshot())
+        save_action_evidence(ctx, ctx.frames.evidence_screenshot())
+    if ctx.writer is not None:
+        await ctx.writer.close()
     log.info("game_metrics_final", **memory.get_metrics_snapshot())
     ctx.goal_logger.log_game_end(
         memory.turn_count,
