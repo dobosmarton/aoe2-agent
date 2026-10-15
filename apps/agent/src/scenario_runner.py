@@ -2,8 +2,7 @@
 
 Fixtures in ``scenarios/production`` declare an initial observed state and
 named action steps. A step's ``after`` observation is applied only when the
-expected spending input actually fires. Older prompt-only fixtures belong to
-``provider_scenario_runner`` and do not measure gameplay feasibility.
+expected spending input actually fires.
 """
 
 from __future__ import annotations

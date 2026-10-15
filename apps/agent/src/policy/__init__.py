@@ -1,4 +1,3 @@
-"""Rule-driven policy tier — the registry, its engine, and idle dispatch."""
+"""Catalog-backed gameplay decisions and observed policy state."""
 
-from .engine import decide as decide
 from .state import PolicyState as PolicyState

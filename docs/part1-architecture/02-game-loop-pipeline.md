@@ -62,4 +62,4 @@ On shutdown, the game loop cancels and awaits its child tasks, closes the policy
 
 ## 2.6 Verification
 
-The production scenario runner (`python -m gameplay_agent.scenario_runner --all`) injects scripted perception, model choices, and low-level input while retaining real candidate filtering, reservations, execution guards, and outcomes. Fixture consequences advance only after the expected spending input. The earlier provider-only fixtures are in `gameplay_agent.provider_scenario_runner`; they are useful for prompt/provider evaluation but do not establish gameplay feasibility. Neither offline runner validates real-game hotkeys or win rate.
+The production scenario runner (`python -m gameplay_agent.scenario_runner --all`) injects scripted perception, model choices, and low-level input while retaining real candidate filtering, reservations, execution guards, and outcomes. Fixture consequences advance only after the expected spending input. This offline runner does not validate real-game hotkeys or win rate.

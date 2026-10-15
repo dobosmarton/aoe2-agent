@@ -3,7 +3,7 @@ export function SidebarHeader(props: {
   readonly icon: React.ReactNode;
   readonly title: string;
   readonly subtitle: string;
-  /** Rendered flush right — a nav button in the Arena shell, absent in Training. */
+  /** Optional action rendered flush right. */
   readonly action?: React.ReactNode;
 }): React.ReactElement {
   return (

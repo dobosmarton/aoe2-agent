@@ -71,15 +71,6 @@ class ToolExecutionGate:
 # Load system prompt from file
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
-# Optional game knowledge database for dynamic context injection
-try:
-    from data.game_knowledge import GameKnowledge, get_db
-
-    GAME_KNOWLEDGE_AVAILABLE = True
-except ImportError:
-    GAME_KNOWLEDGE_AVAILABLE = False
-    log.debug("game_knowledge_not_available", message="Running without dynamic context injection")
-
 
 class _CallPath(Protocol):
     """One way of asking the model for a turn: single-shot, or the tool loop."""
@@ -94,7 +85,6 @@ class ExecutorProvider:
         self,
         api_key: str | None = None,
         model: str | None = None,
-        use_dynamic_context: bool = True,
         wire: ChatWire | None = None,
     ) -> None:
         """
@@ -103,7 +93,6 @@ class ExecutorProvider:
         Args:
             api_key: Credential for the default wire (defaults to config)
             model: Model to use (defaults to config)
-            use_dynamic_context: Whether to use dynamic context injection from game database
             wire: Transport to talk to the model over. Defaults to whatever
                 `AOE2_LLM_WIRE` selects. Pass one explicitly to run the same
                 game logic against another vendor.
@@ -122,17 +111,7 @@ class ExecutorProvider:
         # Populated in _load_prompts() so game_loop can propagate them onto
         # AgentMemory.memories_loaded for per-turn attribution tracking.
         self.loaded_memory_titles: list[str] = []
-        self.use_dynamic_context = use_dynamic_context and GAME_KNOWLEDGE_AVAILABLE
-        self._game_db: GameKnowledge | None = None
         self._usage = TokenUsage()
-
-        if self.use_dynamic_context:
-            try:
-                self._game_db = get_db()
-                log.info("game_knowledge_initialized")
-            except Exception as e:
-                log.warning("game_knowledge_init_failed", error=str(e))
-                self.use_dynamic_context = False
 
     async def aclose(self) -> None:
         """Release this provider's transport when a game finishes."""
@@ -218,63 +197,6 @@ class ExecutorProvider:
         match = re.search(r"(Dark|Feudal|Castle|Imperial)\s*Age", context, re.IGNORECASE)
         return f"{match.group(1)} Age" if match else "Dark Age"
 
-    def _get_dynamic_context(self, context: str) -> str:
-        """Extract game state from context and generate dynamic knowledge context.
-
-        Args:
-            context: Memory context string containing game state
-
-        Returns:
-            Enhanced context with dynamic game knowledge
-        """
-        if not self.use_dynamic_context or not self._game_db:
-            return context
-
-        # Parse resources and age from context
-        resources: dict[str, object] = {
-            "food": 200,
-            "wood": 200,
-            "gold": 100,
-            "stone": 200,
-        }  # Defaults
-        age = "dark"
-
-        try:
-            # Try to extract resources from context
-            food_match = re.search(r"Food[=:]?\s*(\d+)", context, re.IGNORECASE)
-            wood_match = re.search(r"Wood[=:]?\s*(\d+)", context, re.IGNORECASE)
-            gold_match = re.search(r"Gold[=:]?\s*(\d+)", context, re.IGNORECASE)
-            stone_match = re.search(r"Stone[=:]?\s*(\d+)", context, re.IGNORECASE)
-
-            if food_match:
-                resources["food"] = int(food_match.group(1))
-            if wood_match:
-                resources["wood"] = int(wood_match.group(1))
-            if gold_match:
-                resources["gold"] = int(gold_match.group(1))
-            if stone_match:
-                resources["stone"] = int(stone_match.group(1))
-
-            # Extract age
-            age_match = re.search(r"(Dark|Feudal|Castle|Imperial)\s*Age", context, re.IGNORECASE)
-            if age_match:
-                age = age_match.group(1).lower()
-
-        except Exception as e:
-            log.debug("context_parse_error", error=str(e))
-
-        # Get dynamic context from database
-        try:
-            dynamic_context = self._game_db.get_context_for_state(age, resources)
-            early_game_tips = self._game_db.get_early_game_priorities()
-
-            # Combine: dynamic context first, then original context
-            return f"{dynamic_context}\n{early_game_tips}\n{context}"
-
-        except Exception as e:
-            log.warning("dynamic_context_error", error=str(e))
-            return context
-
     def _build_content(self, context: str, width: int, height: int) -> list[dict[str, object]]:
         """Build the message content for Claude.
 
@@ -282,15 +204,12 @@ class ExecutorProvider:
         and game state. No images — all visual info comes from YOLO detection
         and strategist resource readings.
         """
-        # Enhance context with dynamic game knowledge
-        enhanced_context = self._get_dynamic_context(context)
-
         # Build text with dimensions info
         center_x = width // 2
         center_y = height // 2
         dimensions_info = f"Game window: {width}x{height} pixels. Center=({center_x},{center_y}). Valid x=0-{width}, y=0-{height}."
 
-        text = f"{dimensions_info}\n\n{enhanced_context}\n\nBased on the detected entities, goals, and resource status above, decide what to do next."
+        text = f"{dimensions_info}\n\n{context}\n\nBased on the detected entities, goals, and resource status above, decide what to do next."
 
         return [
             {

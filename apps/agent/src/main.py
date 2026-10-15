@@ -8,7 +8,7 @@ from typing import get_args
 import structlog
 
 from .config import KEY_ENV, TYPESAFE_KEY_ENV, WireName, config
-from .game_loop import game_loop, run_single_iteration
+from .game_loop import game_loop
 from .providers import ExecutorProvider
 from .providers.policy import PolicyAdvisor
 from .providers.wire_factory import make_wire
@@ -33,7 +33,6 @@ log = structlog.stdlib.get_logger()
 
 class _AgentArgs(argparse.Namespace):
     wire: WireName | None
-    test: bool
     iterations: int | None
     overlay: bool
 
@@ -69,29 +68,17 @@ async def main_async(args: _AgentArgs) -> None:
     )
     log.info("provider_created", wire=wire_name, model=config.model)
 
-    if args.test:
-        # Run single iteration for testing
-        log.info("running_test_iteration")
-        result = await run_single_iteration(provider)
-        log.info(
-            "test_result",
-            screenshot=result["screenshot_path"],
-            reasoning=result["reasoning"],
-            actions=result["actions"],
-        )
-    else:
-        # Run main game loop
-        log.info(
-            "starting_game_loop",
-            perceive_interval=config.perceive_interval,
-            policy_timeout=config.policy_timeout,
-        )
-        await game_loop(
-            provider,
-            max_iterations=args.iterations,
-            use_overlay=args.overlay,
-            policy_advisor=_make_policy_advisor(),
-        )
+    log.info(
+        "starting_game_loop",
+        perceive_interval=config.perceive_interval,
+        policy_timeout=config.policy_timeout,
+    )
+    await game_loop(
+        provider,
+        max_iterations=args.iterations,
+        use_overlay=args.overlay,
+        policy_advisor=_make_policy_advisor(),
+    )
 
 
 def main() -> None:
@@ -108,11 +95,6 @@ def main() -> None:
             "Adapter serving the model (default: AOE2_LLM_WIRE, else openai). "
             "Adapter only — the models still follow AOE2_LLM_WIRE."
         ),
-    )
-    parser.add_argument(
-        "--test",
-        action="store_true",
-        help="Run a single test iteration (capture + analyze)",
     )
     parser.add_argument(
         "--iterations",

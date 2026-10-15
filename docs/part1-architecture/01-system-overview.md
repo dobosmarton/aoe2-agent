@@ -44,12 +44,11 @@ agent/
 │   │   ├── remote_detector.py # HTTP client for detection server
 │   │   ├── ownership.py       # Blue-dominance ownership classifier
 │   │   ├── thresholds.py      # Per-class confidence thresholds
-│   │   ├── frame_diff.py      # Frame differencing for rescan optimization
 │   │   └── models/            # YOLO26 (v9) model weights (.pt/.onnx)
 │   ├── training/              # Synthetic data gen + YOLO training
 │   ├── labeling/              # CVAT integration + class definitions
 │   └── extraction/            # SLD sprite extraction from game files
-├── data/                      # Game knowledge (optional)
+├── data/                      # Standalone game-data reference library (not in live agent)
 │   ├── game_knowledge.py      # SQLite database wrapper
 │   └── knowledge_base/        # Static game data files
 ├── prompts/
@@ -67,33 +66,11 @@ agent/
 
 The agent won't crash without optional subsystems, but YOLO detection is practically required for meaningful gameplay.
 
-**Detection** — imported inside a try/except at module level in `apps/agent/src/game_loop.py`:
-
-```python
-try:
-    from detection.inference.detector import EntityDetector, get_detector
-    DETECTION_AVAILABLE = True
-except ImportError:
-    DETECTION_AVAILABLE = False
-```
-
-Without detection, the executor has no entity list — it cannot target units, buildings, or resources by class or ID. The strategist can still read the resource bar (local OCR) and set goals, but the executor is limited to hotkeys and hardcoded coordinates. In practice, this makes the agent nearly non-functional: it can't gather resources, train units, or build at specific locations. Detection is technically optional (the agent starts and runs) but practically required for any useful gameplay.
-
-**Game Knowledge** — imported inside a try/except in `apps/agent/src/providers/executor_provider.py`:
-
-```python
-try:
-    from data.game_knowledge import GameKnowledge, get_db
-    GAME_KNOWLEDGE_AVAILABLE = True
-except ImportError:
-    GAME_KNOWLEDGE_AVAILABLE = False
-```
-
-Without the knowledge database, no dynamic context injection occurs. The executor still receives the system prompt and memory context. This is a minor degradation — the agent plays reasonably without it.
+**Detection** — `apps/agent/src/detection_phase.py` provides explicit interactive and recorded-run detector factories. Interactive execution can fall back to local inference when the remote server is unavailable. A recorded experiment fails instead of silently changing detector implementations. Without valid spatial evidence, dependent economic clicks are not authorized.
 
 **Window Management** — pygetwindow is optional at `apps/agent/src/window.py`. When unavailable, functions return `True` by default — the agent assumes the game is running and focused. Screenshot capture falls back to the full primary monitor.
 
-> **Key Insight**: Detection is the critical optional dependency. Without YOLO, the executor is essentially blind — the experience is very poor. Game knowledge and window management are truly additive enhancements that degrade gracefully.
+> **Key Insight**: Detection is critical for safe resource and unit targeting. Window management degrades gracefully; the separate game-data library is not in the live decision path.
 
 ## 1.4 Configuration
 

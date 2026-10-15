@@ -18,11 +18,19 @@
 #     uv run --package detection-server aoe2-server     # apps/detection-server/
 
 [tool.uv.workspace]
-members = ["apps/*", "packages/*"]
-# JS-only apps live alongside Python ones under apps/ — exclude them so uv
-# doesn't expect a pyproject.toml in each. The bun workspace (root
-# package.json) owns these instead.
-exclude = ["apps/dashboard", "apps/landing"]
+# List Python members explicitly. The Bun-only apps and locally generated
+# directories are not Python workspace members.
+members = [
+    "apps/agent",
+    "apps/api",
+    "apps/arena",
+    "apps/autoresearch",
+    "apps/detection-server",
+    "packages/core",
+    "packages/data",
+    "packages/detection",
+    "packages/evaluation",
+]
 
 # Wire every workspace member to its sibling source. Without these `[tool.uv.sources]`
 # entries, uv would try to resolve the package names from PyPI.
@@ -34,7 +42,6 @@ gameplay-agent   = { workspace = true }
 arena            = { workspace = true }
 arena-web        = { workspace = true }
 detection-server = { workspace = true }
-training-api     = { workspace = true }
 autoresearch     = { workspace = true }
 data             = { workspace = true }
 

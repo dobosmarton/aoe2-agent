@@ -13,9 +13,8 @@ if TYPE_CHECKING:
 
     from .state import PolicyState
 
-# Seeded per-age targets, converted from the reactive tier's gather patterns
-# (knowledge/seed/rules/allocation.yaml). Used until the strategist answers —
-# on turn 1, and for the whole game when the LLM is down.
+# Default per-age targets used until the strategist answers, including when
+# the model is unavailable.
 _SEED_BY_AGE: dict[str, dict[ResourceKind, int]] = {
     "Dark Age": {"food": 3, "wood": 2, "gold": 0, "stone": 0},
     "Feudal Age": {"food": 2, "wood": 2, "gold": 1, "stone": 0},

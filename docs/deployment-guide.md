@@ -222,8 +222,6 @@ Or with options:
 :: Run limited iterations
 python -m gameplay_agent --iterations 50
 
-:: Single test iteration (no action execution)
-python -m gameplay_agent --test
 ```
 
 You should see logs like:
@@ -315,12 +313,11 @@ python -m detection_server --model PATH --host HOST --port PORT
 ### Agent CLI Flags
 
 ```
-python -m gameplay_agent [--test] [--iterations N] [--overlay]
+python -m gameplay_agent [--iterations N] [--overlay]
 ```
 
 | Flag | Purpose |
 |------|---------|
-| `--test` | Single iteration, no action execution |
 | `--iterations N` | Stop after N iterations |
 | `--overlay` | Show live overlay on the game window: entity detection boxes (colored by class) **and** the resource-bar OCR reading regions (gold boxes over wood/food/gold/stone/population) for verifying calibration |
 

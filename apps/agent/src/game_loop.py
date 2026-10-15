@@ -7,15 +7,12 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import structlog
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from .overlay import DetectionOverlay
     from .providers.base import ChatWire
     from .providers.executor_provider import ExecutorProvider
@@ -23,21 +20,15 @@ if TYPE_CHECKING:
 
 from .config import config
 from .detection_phase import (
-    DETECTION_AVAILABLE,
-    ENTITY_DISPLAY_LIMIT,
     DetectionUnavailableError,
     DetectorFactory,
     init_detector,
 )
 from .diagnostic_writer import DiagnosticWriter
-from .entity_utils import build_entity_summary
 from .executor import (
     ActionLedger,
     bind_ledger,
-    clear_detected_entities,
     clear_refresh_callbacks,
-    execute_actions,
-    set_detected_entities,
     set_rescan_fn,
     set_rescan_full_fn,
     set_selection_refresh_fn,
@@ -54,25 +45,14 @@ from .memory import AgentMemory
 from .models import validate_actions
 from .providers.strategist import StrategistProvider, get_default_goals
 from .resource_ocr import warm_up_ocr
-from .screen import capture_screenshot, save_screenshot
 from .turn_phases import get_ground_commands
 
 log = structlog.stdlib.get_logger()
 
 
 @runtime_checkable
-class _SerializableEntity(Protocol):
-    def to_dict(self) -> object: ...
-
-
-@runtime_checkable
 class _AsyncClose(Protocol):
     async def aclose(self) -> None: ...
-
-
-def _serialize_entity(entity: object) -> object:
-    """Cross the optional detector serialization boundary without using Any."""
-    return entity.to_dict() if isinstance(entity, _SerializableEntity) else entity
 
 
 def _warm_up_wire(wire: ChatWire) -> None:
@@ -327,70 +307,3 @@ def _request_stop(ctx: LoopContext | None, memory: AgentMemory, reason: str) -> 
         memory.game_end_reason = reason
         return
     ctx.request_stop(reason)
-
-
-# ---------------------------------------------------------------------------
-# Single iteration (testing / debugging)
-# ---------------------------------------------------------------------------
-
-
-async def run_single_iteration(
-    provider: ExecutorProvider,
-    memory: AgentMemory | None = None,
-    execute: bool = False,
-    use_detection: bool = True,
-) -> dict:
-    """Run a single iteration of the game loop for testing."""
-    if memory is None:
-        memory = AgentMemory()
-
-    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-    screenshot, width, height = capture_screenshot()
-
-    log_dir = Path(config.log_dir)
-    log_dir.mkdir(parents=True, exist_ok=True)
-    screenshot_path = log_dir / f"test_{timestamp}.jpg"
-    save_screenshot(screenshot, str(screenshot_path))
-
-    detected_entities: Sequence[object] = []
-    if use_detection and DETECTION_AVAILABLE:
-        try:
-            from detection.inference.detector import get_detector
-
-            detector = get_detector(use_mock=False, model_name=config.detection_model)
-            detected_entities = detector.detect(screenshot)
-            set_detected_entities(detected_entities)
-        except Exception as e:
-            log.warning("detection_failed", error=str(e))
-
-    context = memory.get_context_for_llm()
-    if detected_entities:
-        summary = build_entity_summary(list(detected_entities), max_count=ENTITY_DISPLAY_LIMIT)
-        entity_context = (
-            "\n## Detected Entities (from YOLO)\n"
-            "Use target_class or target_id to interact with these:\n" + summary + "\n"
-        )
-        context = entity_context + "\n" + context
-
-    response = await provider.get_actions(context, width, height)
-
-    memory.create_turn(
-        reasoning=response.get("reasoning", ""),
-        actions=response.get("actions", []),
-        observations=response.get("observations", {}),
-    )
-
-    actions = response.get("actions") or []
-    if execute and actions:
-        await execute_actions(actions)
-
-    clear_detected_entities()
-
-    return {
-        "screenshot_path": str(screenshot_path),
-        "reasoning": response.get("reasoning", ""),
-        "observations": response.get("observations", {}),
-        "actions": response.get("actions", []),
-        "memory_context": context,
-        "detected_entities": [_serialize_entity(entity) for entity in detected_entities],
-    }

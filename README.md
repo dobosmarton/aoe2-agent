@@ -55,7 +55,7 @@ Three concurrent loops share immutable observations:
 The repo is a polyglot monorepo:
 
 - **Python (`uv workspace`)** — 10 workspace members. Deployable units live in `apps/`
-  (agent, api, arena, autoresearch, detection-server, training-api); reusable libraries
+  (agent, api, arena, autoresearch, detection-server); reusable libraries
   live in `packages/` (core, data, detection, evaluation). One `uv sync` installs every
   member editable into a shared `.venv/`, plus the dev dependency-group (ruff,
   basedpyright, pytest, fakeredis, hypothesis, pre-commit).
@@ -73,7 +73,7 @@ uv run --package arena aoe2-arena race
 uv run --package detection-server aoe2-server --model <path>
 ```
 
-For an offline production-path replay, run `uv run --no-sync python -m gameplay_agent.scenario_runner --all`. Its fixtures under `apps/agent/src/scenarios/production/` drive the real perception, candidate, actor, and executor paths with scripted low-level input; an `after` observation advances only after the expected spending input. The older model-only fixtures remain available through `gameplay_agent.provider_scenario_runner` and do not establish action feasibility. These replays do not verify the shipped hotkeys in the Windows game; new bindings still need a controlled in-game smoke test.
+For an offline production-path replay, run `uv run --no-sync python -m gameplay_agent.scenario_runner --all`. Its fixtures under `apps/agent/src/scenarios/production/` drive the real perception, candidate, actor, and executor paths with scripted low-level input; an `after` observation advances only after the expected spending input. These replays do not verify the shipped hotkeys in the Windows game; new bindings still need a controlled in-game smoke test.
 
 Per-package optional extras (e.g. `.mlpackage` CoreML builds need CoreML,
 detection training needs ultralytics) are declared on each package's own
@@ -267,9 +267,6 @@ just agent
 # Run N iterations
 just agent --iterations 20
 
-# Single test iteration (no action execution)
-just agent --test
-
 # Run the detection server (macOS host)
 just server --model packages/detection/src/inference/models/aoe2_yolo_v9.onnx
 
@@ -277,10 +274,6 @@ just server --model packages/detection/src/inference/models/aoe2_yolo_v9.onnx
 bun install
 just arena-ui-dev          # apps/dashboard (Vite + React, dashboard SPA)
 just landing-dev           # apps/landing (Astro docs site)
-
-# Detection training tracker (dataset coverage + prelabel review, :8100)
-just training-seed         # populate logs/training/tracker.db from disk (idempotent)
-just training-api-dev      # then browse http://localhost:5173/training
 
 # Autoresearch: timed experiment with metrics
 uv run --package autoresearch python -m autoresearch.game_runner --time-budget 600 --description "test run"
@@ -301,10 +294,9 @@ agent/                                     # monorepo root (uv + bun workspaces)
 │   ├── api/                               # Python — FastAPI + SSE backend for replay/fork (was packages/arena-web)
 │   ├── arena/                             # Python — synthetic arena CLI (race / smoke / rank)
 │   ├── autoresearch/                      # Python — prompt-optimization loop
-│   ├── dashboard/                         # TypeScript — Vite + React arena replay UI + training tracker (was ui/)
+│   ├── dashboard/                         # TypeScript — Vite + React arena replay UI (was ui/)
 │   ├── detection-server/                  # Python — macOS-hosted YOLO inference endpoint
-│   ├── landing/                           # TypeScript — Astro docs site (was web/)
-│   └── training-api/                      # Python — FastAPI + SQLite detection dataset tracker
+│   └── landing/                           # TypeScript — Astro docs site (was web/)
 ├── packages/                              # Reusable libraries (imported by apps)
 │   ├── core/                              # Pure types: Event, Payload, WorldState, DetectedEntity
 │   ├── data/                              # AoE2 game-knowledge SQLite DB

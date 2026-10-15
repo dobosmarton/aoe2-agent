@@ -766,13 +766,3 @@ def _resolve_or_substitute(model_name: str | None) -> str:
     # a version — never hardcode a served version here (config.py owns that).
     missing = model_name or "aoe2_yolo_missing"
     return str(Path(__file__).parent / "models" / f"{missing}.onnx")
-
-
-def current_detector() -> EntityDetector | None:
-    """Return the existing singleton detector, or None — never creating one.
-
-    Unlike `get_detector()`, this only peeks at an already-initialized detector, so
-    callers that merely want to read live tracker state (e.g. entity velocities) can
-    do so without accidentally loading a model on the remote/mock paths.
-    """
-    return _instance

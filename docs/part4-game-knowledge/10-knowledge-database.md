@@ -1,10 +1,10 @@
 # Chapter 10: Knowledge Database
 
-The game knowledge system provides structured AoE2 data to the agent. A SQLite database stores unit stats, building costs, technologies, and counter relationships. At runtime, it answers queries like "what units can I afford with 300 food and 200 gold in Feudal Age?"
+The separate `packages/data` library stores AoE2 unit stats, building costs, technologies, and counter relationships. It remains useful as an offline reference. The live agent no longer injects its SQLite query results into model prompts; runtime feasibility comes from the agent's action catalog and observed state.
 
 <aside class="prereqs">
 
-Basic SQL (SELECT / WHERE / JOIN). [Chapter 6 — Context Injection](../part2-llm-integration/06-context-injection.md) for how the LLM consumes the queries this database powers.
+Basic SQL (SELECT / WHERE / JOIN). [Chapter 6 — Decision Context](../part2-llm-integration/06-context-injection.md) describes the live context path, which does not query this library.
 
 </aside>
 
@@ -13,9 +13,9 @@ Basic SQL (SELECT / WHERE / JOIN). [Chapter 6 — Context Injection](../part2-ll
 Two layers:
 
 1. **Static knowledge base** (`packages/data/src/knowledge_base/`) -- JSON files fetched from external APIs, stored on disk.
-2. **Runtime database** (`packages/data/src/game_knowledge.py`) -- SQLite wrapper that loads the JSON data and provides query methods for dynamic context injection.
+2. **Query library** (`packages/data/src/game_knowledge.py`) -- SQLite wrapper that loads the JSON data and provides reference queries.
 
-The static files are fetched once by `packages/data/src/fetch_aoe2_data.py` and committed to the repo. The runtime database is populated from these files (or directly from APIs) at agent startup.
+The static files are fetched by `packages/data/src/fetch_aoe2_data.py` and committed to the repo. Consumers of this standalone library populate its database explicitly; the gameplay agent does not initialize it at startup.
 
 ## 10.2 Data Sources
 
@@ -196,7 +196,7 @@ python -m data.fetch_aoe2_data
 - Multi-signal building detection heuristics for classifying raw API data
 - Hardcoded essential data as API-failure fallback
 - Runtime queries: affordable units/buildings, counters, early game priorities
-- Dynamic context injection generates 200-500 token strings tailored to current game state
+- The query methods can generate state-filtered reference text, but no live agent prompt uses it
 
 ## Related Topics
 

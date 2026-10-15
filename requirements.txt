@@ -10,7 +10,6 @@
     # via arena-web
 -e ./apps/autoresearch
 -e ./apps/detection-server
--e ./apps/training-api
 -e ./packages/core
     # via
     #   arena
@@ -21,12 +20,10 @@
     #   evaluation
     #   gameplay-agent
 -e ./packages/data
-    # via gameplay-agent
 -e ./packages/detection
     # via
     #   detection-server
     #   gameplay-agent
-    #   training-api
 -e ./packages/evaluation
     # via
     #   arena
@@ -70,7 +67,6 @@ fastapi==0.136.3
     # via
     #   arena-web
     #   detection-server
-    #   training-api
 flatbuffers==25.12.19
     # via onnxruntime
 h11==0.16.0
@@ -87,7 +83,9 @@ httpx==0.28.1
     #   anthropic
     #   detection
 httpx2==2.10.0
-    # via openai
+    # via
+    #   openai
+    #   typesafe-sdk
 httpx2-jsfetch==1.0 ; python_full_version >= '3.12' and sys_platform == 'emscripten'
     # via httpx2
 idna==3.18
@@ -131,7 +129,6 @@ pillow==12.2.0
     #   gameplay-agent
     #   pyscreeze
     #   rapidocr-onnxruntime
-    #   training-api
 protobuf==7.35.0
     # via onnxruntime
 pyautogui==0.9.54
@@ -144,13 +141,16 @@ pydantic==2.13.4
     #   arena
     #   arena-web
     #   core
+    #   detection
     #   evaluation
     #   fastapi
     #   gameplay-agent
     #   openai
-    #   training-api
+    #   typesafe-sdk
 pydantic-core==2.46.4
-    # via pydantic
+    # via
+    #   pydantic
+    #   typesafe-sdk
 pygetwindow==0.0.9
     # via
     #   gameplay-agent
@@ -209,6 +209,8 @@ structlog==25.5.0
     #   detection
     #   evaluation
     #   gameplay-agent
+tenacity==9.1.4
+    # via typesafe-sdk
 tqdm==4.67.3
     # via
     #   openai
@@ -217,6 +219,8 @@ truststore==0.10.4 ; sys_platform != 'emscripten'
     # via
     #   httpcore2
     #   httpx2
+typesafe-sdk==0.7.0
+    # via gameplay-agent
 typing-extensions==4.15.0
     # via
     #   anthropic
@@ -227,6 +231,7 @@ typing-extensions==4.15.0
     #   pydantic
     #   pydantic-core
     #   starlette
+    #   typesafe-sdk
     #   typing-inspection
 typing-inspection==0.4.2
     # via
@@ -236,4 +241,3 @@ uvicorn==0.48.0
     # via
     #   arena-web
     #   detection-server
-    #   training-api

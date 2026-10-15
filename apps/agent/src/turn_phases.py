@@ -1,48 +1,37 @@
-"""Per-turn decisions: context build, response parsing, action execution.
+"""Per-turn context and response bookkeeping for deliberate model turns.
 
 Owns the four pieces the game loop runs once per iteration:
 
   - `get_ground_commands`: hardcoded actions that run alongside the LLM call
     (zoom on turn 1). Pure function of the iteration number.
-  - `build_llm_context`: stitches memory + goals + entities into the prompt
-    string the executor sees. Mirrors `evaluation.context_builder._build_context`.
+  - `build_llm_context`: stitches memory + goals + entities into the prompt.
   - `record_llm_turn`: parses the LLM's response, strips the
     `[applied: ...]` memory-attribution prefix, snapshots state for reward
     computation, and returns `(actions, game_end_reason | None)`.
-  - `execute_turn_actions`: runs the validated actions through the executor
-    and records success/failure feedback into memory, with a hardcoded
-    fallback when the LLM returns no actions.
 """
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 import structlog
 
 from .entity_utils import extract_attrs
 from .executor import (
-    CAMERA_KEYS,
     CASTLE_PREREQ_COUNT,
     FEUDAL_PREREQ_CLASSES,
     blocked_actions,
     confirmed_buildings,
-    execute_actions,
-    get_detected_entities,
-    get_rescan_fn,
     pending_placement_counts,
     sighted_buildings,
 )
 from .memory import GameState
-from .models import validate_actions
 from .villager_roles import infer_jobs, job_counts
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from .executor import ActionResult
     from .goal_logger import GoalLogger
     from .goals import GoalManager
     from .memory import AgentMemory
@@ -104,8 +93,6 @@ def get_ground_commands(iteration: int) -> list[dict]:
     ]
 
 
-# Age-dependent population thresholds for maintenance villager queuing.
-# Beyond these caps, stop queuing to save food for age-up research.
 def build_llm_context(
     memory: AgentMemory,
     goal_manager: GoalManager,
@@ -185,6 +172,15 @@ def castle_gate_line(age: str) -> str:
         f"the Castle Age needs {CASTLE_PREREQ_COUNT} of "
         f"{', '.join(sorted(FEUDAL_PREREQ_CLASSES))}\n"
     )
+
+
+def _class_counts(entities: Sequence[object]) -> dict[str, int]:
+    """Count visible entities by class for the known-building context."""
+    counts: dict[str, int] = {}
+    for entity in entities:
+        class_name = extract_attrs(entity).class_name
+        counts[class_name] = counts.get(class_name, 0) + 1
+    return counts
 
 
 def known_buildings_line(detected_entities: list[object] | None) -> str:
@@ -289,191 +285,11 @@ def record_llm_turn(
     return actions
 
 
-# ---------------------------------------------------------------------------
-# Action-effect verification (R1)
-# ---------------------------------------------------------------------------
-
-# Building classes whose appearance confirms a successful build/place action.
-_BUILDING_CLASSES: frozenset[str] = frozenset(
-    {
-        "town_center",
-        "house",
-        "lumber_camp",
-        "mining_camp",
-        "mill",
-        "market",
-        "dock",
-        "farm",
-        "barracks",
-        "archery_range",
-        "stable",
-        "blacksmith",
-        "siege_workshop",
-        "monastery",
-        "castle",
-        "university",
-        "gate",
-        "wall",
-        "tower",
-        "wonder",
-        "krepost",
-    }
-)
-
-
-@dataclass(frozen=True, slots=True)
-class _Expectation:
-    """The observable effect an action should produce, if any."""
-
-    kind: Literal["new_building", "selection_change", "none"]
-    detail: str
-
-
-def _expectation_for(action: dict) -> _Expectation:
-    """Map an action to its verifiable effect (bounded and honest)."""
-    a_type = str(action.get("type", ""))
-    intent = str(action.get("intent", "")).lower()
-    if a_type == "build" or (
-        a_type in ("click", "right_click") and ("build" in intent or "place" in intent)
-    ):
-        return _Expectation("new_building", "build/place should add a building")
-    if a_type == "press":
-        key = str(action.get("key", "")).lower()
-        if action.get("rescan") or key in CAMERA_KEYS:
-            return _Expectation("selection_change", f"press {key} should change the view")
-    return _Expectation("none", "")
-
-
-def _any_entity_expectation(actions: list) -> bool:
-    """True if any action expects an entity/view change worth a rescan."""
-    return any(_expectation_for(a).kind != "none" for a in actions if isinstance(a, dict))
-
-
-def _class_counts(entities: Sequence[object]) -> dict[str, int]:
-    """Count detected entities by class (robust to bbox jitter)."""
-    counts: dict[str, int] = {}
-    for e in entities:
-        cls = extract_attrs(e).class_name
-        counts[cls] = counts.get(cls, 0) + 1
-    return counts
-
-
-def _new_buildings(before: list[dict], after: list[dict]) -> list[str]:
-    """Building classes whose count increased from before → after."""
-    bc, ac = _class_counts(before), _class_counts(after)
-    return sorted(cls for cls in _BUILDING_CLASSES if ac.get(cls, 0) > bc.get(cls, 0))
-
-
-def _failed_lines(actions: list, results: list[ActionResult]) -> list[str]:
-    """Verification lines for actions the executor reported as failed."""
-    lines: list[str] = []
-    for action, result in zip(actions, results, strict=True):
-        if not result.success:
-            a_intent = action.get("intent", "") if isinstance(action, dict) else ""
-            a_type = action.get("type", "") if isinstance(action, dict) else ""
-            lines.append(f"- FAILED {a_type}: {a_intent} — {result.detail}")
-    return lines
-
-
-def _build_verification(
-    actions: list,
-    results: list[ActionResult],
-    before_entities: list[dict],
-    after_entities: list[dict],
-) -> str:
-    """Combine executor failures with positive/negative effect checks.
-
-    Emits the exact phrase "no visible change" on unmet expectations so the
-    stuck-loop detector in AgentMemory.get_context_for_llm picks it up.
-    """
-    lines = _failed_lines(actions, results)
-    kinds = {_expectation_for(a).kind for a in actions if isinstance(a, dict)}
-    if "new_building" in kinds:
-        built = _new_buildings(before_entities, after_entities)
-        if built:
-            lines.append(f"- CONFIRMED built: {', '.join(built)}")
-        else:
-            lines.append("- no visible change: build produced no new building")
-    counts_unchanged = _class_counts(before_entities) == _class_counts(after_entities)
-    if "selection_change" in kinds and counts_unchanged:
-        lines.append("- no visible change: view unchanged after camera action")
-    return "\n".join(lines)
-
-
-def _fallback_actions(memory: AgentMemory) -> list[dict[str, object]]:
-    """Pick the actions to run on a turn where the LLM returned none.
-
-    While housed, queuing a villager fails (no population room), so build a house
-    to unfreeze growth — the executor chooses the placement, since the text-only
-    model can't see open ground. Otherwise nudge production: go to the Town
-    Center, queue a villager, and select an idle one.
-    """
-    state = memory.game_state
-    is_housed = state.population_cap > 0 and state.population >= state.population_cap
-    if is_housed:
-        return [
-            {
-                "type": "build",
-                "building_key": "q",
-                "intent": "Place house to raise pop cap (fallback build)",
-            }
-        ]
-    return [
-        {"type": "queue_villager", "intent": "Queue villager (fallback)"},
-        {"type": "press", "key": ".", "rescan": True, "intent": "Select idle villager (fallback)"},
-    ]
-
-
-async def execute_turn_actions(
-    actions: list,
-    iteration: int,
-    memory: AgentMemory,
-    reasoning: str,
-) -> None:
-    """Execute LLM actions or fallback actions.
-
-    Ground commands (zoom, scout) are handled separately in the main loop
-    to ensure they always run, even in agentic tool loop mode. After
-    entity-affecting actions, re-detect and record positive/negative
-    verification (R1).
-    """
-    if actions:
-        verify = _any_entity_expectation(actions)
-        before_entities = list(get_detected_entities()) if verify else []
-
-        results = await execute_actions(actions)
-        success_count = sum(1 for r in results if r.success)
-        memory.record_action_results(success_count, len(actions))
-        log.info(
-            "actions_executed", iteration=iteration, total=len(actions), successful=success_count
-        )
-
-        if verify:
-            rescan = get_rescan_fn()
-            if rescan is not None:
-                await rescan()
-            verification = _build_verification(
-                actions, results, before_entities, list(get_detected_entities())
-            )
-        else:
-            verification = "\n".join(_failed_lines(actions, results))
-        if verification:
-            memory.set_last_verification(verification)
-    else:
-        log.warning("no_actions_fallback", iteration=iteration, reasoning=reasoning[:200])
-        fallback_actions = validate_actions(_fallback_actions(memory))
-        if fallback_actions:
-            fb_results = await execute_actions(fallback_actions)
-            fb_success = sum(1 for r in fb_results if r.success)
-            memory.record_action_results(fb_success, len(fallback_actions))
-
-
 __all__ = [
     "INITIAL_ZOOM_CLICKS",
     "blocked_actions_line",
     "build_llm_context",
     "castle_gate_line",
-    "execute_turn_actions",
     "get_ground_commands",
     "known_buildings_line",
     "record_llm_turn",

@@ -11,10 +11,6 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ArenaRouteImport } from './routes/_arena'
-import { Route as TrainingRouteImport } from './routes/training'
-import { Route as TrainingIndexRouteImport } from './routes/training.index'
-import { Route as TrainingCoverageRouteImport } from './routes/training.coverage'
-import { Route as TrainingImagesRouteImport } from './routes/training.images'
 import { Route as ArenaExperimentsKeyRouteImport } from './routes/_arena.experiments.$key'
 import { Route as ArenaRunsIndexRouteImport } from './routes/_arena.runs.index'
 import { Route as ArenaRunsRunIdRouteImport } from './routes/_arena.runs.$runId'
@@ -27,26 +23,6 @@ const IndexRoute = IndexRouteImport.update({
 const ArenaRoute = ArenaRouteImport.update({
   id: '/_arena',
   getParentRoute: () => rootRouteImport,
-} as any)
-const TrainingRoute = TrainingRouteImport.update({
-  id: '/training',
-  path: '/training',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const TrainingIndexRoute = TrainingIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => TrainingRoute,
-} as any)
-const TrainingCoverageRoute = TrainingCoverageRouteImport.update({
-  id: '/coverage',
-  path: '/coverage',
-  getParentRoute: () => TrainingRoute,
-} as any)
-const TrainingImagesRoute = TrainingImagesRouteImport.update({
-  id: '/images',
-  path: '/images',
-  getParentRoute: () => TrainingRoute,
 } as any)
 const ArenaExperimentsKeyRoute = ArenaExperimentsKeyRouteImport.update({
   id: '/experiments/$key',
@@ -66,19 +42,12 @@ const ArenaRunsRunIdRoute = ArenaRunsRunIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/training': typeof TrainingRouteWithChildren
-  '/training/coverage': typeof TrainingCoverageRoute
-  '/training/images': typeof TrainingImagesRoute
-  '/training/': typeof TrainingIndexRoute
   '/experiments/$key': typeof ArenaExperimentsKeyRoute
   '/runs/$runId': typeof ArenaRunsRunIdRoute
   '/runs/': typeof ArenaRunsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/training/coverage': typeof TrainingCoverageRoute
-  '/training/images': typeof TrainingImagesRoute
-  '/training': typeof TrainingIndexRoute
   '/experiments/$key': typeof ArenaExperimentsKeyRoute
   '/runs/$runId': typeof ArenaRunsRunIdRoute
   '/runs': typeof ArenaRunsIndexRoute
@@ -87,42 +56,19 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_arena': typeof ArenaRouteWithChildren
-  '/training': typeof TrainingRouteWithChildren
-  '/training/coverage': typeof TrainingCoverageRoute
-  '/training/images': typeof TrainingImagesRoute
-  '/training/': typeof TrainingIndexRoute
   '/_arena/experiments/$key': typeof ArenaExperimentsKeyRoute
   '/_arena/runs/$runId': typeof ArenaRunsRunIdRoute
   '/_arena/runs/': typeof ArenaRunsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths:
-    | '/'
-    | '/training'
-    | '/training/coverage'
-    | '/training/images'
-    | '/training/'
-    | '/experiments/$key'
-    | '/runs/$runId'
-    | '/runs/'
+  fullPaths: '/' | '/experiments/$key' | '/runs/$runId' | '/runs/'
   fileRoutesByTo: FileRoutesByTo
-  to:
-    | '/'
-    | '/training/coverage'
-    | '/training/images'
-    | '/training'
-    | '/experiments/$key'
-    | '/runs/$runId'
-    | '/runs'
+  to: '/' | '/experiments/$key' | '/runs/$runId' | '/runs'
   id:
     | '__root__'
     | '/'
     | '/_arena'
-    | '/training'
-    | '/training/coverage'
-    | '/training/images'
-    | '/training/'
     | '/_arena/experiments/$key'
     | '/_arena/runs/$runId'
     | '/_arena/runs/'
@@ -131,7 +77,6 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ArenaRoute: typeof ArenaRouteWithChildren
-  TrainingRoute: typeof TrainingRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
@@ -149,34 +94,6 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof ArenaRouteImport
       parentRoute: typeof rootRouteImport
-    }
-    '/training': {
-      id: '/training'
-      path: '/training'
-      fullPath: '/training'
-      preLoaderRoute: typeof TrainingRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/training/': {
-      id: '/training/'
-      path: '/'
-      fullPath: '/training/'
-      preLoaderRoute: typeof TrainingIndexRouteImport
-      parentRoute: typeof TrainingRoute
-    }
-    '/training/coverage': {
-      id: '/training/coverage'
-      path: '/coverage'
-      fullPath: '/training/coverage'
-      preLoaderRoute: typeof TrainingCoverageRouteImport
-      parentRoute: typeof TrainingRoute
-    }
-    '/training/images': {
-      id: '/training/images'
-      path: '/images'
-      fullPath: '/training/images'
-      preLoaderRoute: typeof TrainingImagesRouteImport
-      parentRoute: typeof TrainingRoute
     }
     '/_arena/experiments/$key': {
       id: '/_arena/experiments/$key'
@@ -216,26 +133,9 @@ const ArenaRouteChildren: ArenaRouteChildren = {
 
 const ArenaRouteWithChildren = ArenaRoute._addFileChildren(ArenaRouteChildren)
 
-interface TrainingRouteChildren {
-  TrainingCoverageRoute: typeof TrainingCoverageRoute
-  TrainingImagesRoute: typeof TrainingImagesRoute
-  TrainingIndexRoute: typeof TrainingIndexRoute
-}
-
-const TrainingRouteChildren: TrainingRouteChildren = {
-  TrainingCoverageRoute: TrainingCoverageRoute,
-  TrainingImagesRoute: TrainingImagesRoute,
-  TrainingIndexRoute: TrainingIndexRoute,
-}
-
-const TrainingRouteWithChildren = TrainingRoute._addFileChildren(
-  TrainingRouteChildren,
-)
-
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ArenaRoute: ArenaRouteWithChildren,
-  TrainingRoute: TrainingRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

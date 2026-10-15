@@ -2,7 +2,7 @@
 
 **Status:** Accepted (2026-07). Shipped in the routing/tracker migration.
 **Supersedes:** two sub-decisions of [ADR 0005](./0005-vite-react-tailwind-for-arena-ui.md) — "Radix UI primitives" and "no data-fetching library". The rest of 0005 (Vite, React 19, Tailwind v4, Bun) is unchanged.
-**Context:** [Chapter 19 — Arena Web Architecture](../part7-arena-web/19-web-architecture.md), [Chapter 24 — Detection Training Tracker](../part3-entity-detection/24-training-tracker.md).
+**Context:** [Chapter 19 — Arena Web Architecture](../part7-arena-web/19-web-architecture.md). The training tracker discussed below was later retired; this ADR records the original decision.
 
 ## Decision
 
@@ -12,7 +12,7 @@ Adopt **TanStack Router** (file-based routes, typed search params) for navigatio
 
 0005 was written when the dashboard was one screen: pick a run, scrub it, fork it. Two things broke its assumptions.
 
-1. **A second surface arrived.** The detection training tracker (Chapter 24) added `/training/coverage` and `/training/images` — a different backend, a different data model, and *write* operations (approve / reclassify / re-box an annotation). The app went from one view to two independent sections.
+1. **A second surface arrived.** The now-retired detection training tracker added `/training/coverage` and `/training/images` — a different backend, a different data model, and *write* operations (approve / reclassify / re-box an annotation). The app temporarily had two independent sections.
 2. **State stopped fitting in one component.** With a run detail view, an experiment overview, an image table, and a lightbox, "which thing is selected" became something users wanted to link to and reload into.
 
 ## What we considered
@@ -66,5 +66,4 @@ Panels are re-rendered on every SSE message. Rather than hand-placing `useMemo`/
 
 - [Chapter 19](../part7-arena-web/19-web-architecture.md) — the route table and the three-way state split.
 - [Chapter 20](../part7-arena-web/20-fork-and-diff-ui.md) — the tabs and panels.
-- [Chapter 24](../part3-entity-detection/24-training-tracker.md) — the surface that forced the change.
 - [ADR 0005](./0005-vite-react-tailwind-for-arena-ui.md) — the scaffold this amends.

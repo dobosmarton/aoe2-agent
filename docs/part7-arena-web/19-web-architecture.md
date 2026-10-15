@@ -7,7 +7,6 @@
 
 Both are optional. They sit on top of the broker and the DuckDB log — the agent and arena CLIs work without them.
 
-The dashboard also hosts a **second, unrelated backend**: the detection training tracker (`apps/training-api`, port 8100), mounted under `/training/*` routes. It shares nothing with the arena API but the SPA shell — see [Chapter 24](../part3-entity-detection/24-training-tracker.md).
 
 <aside class="concept" data-title="SSE vs WebSocket vs long-polling (why SSE was the right call)">
 
@@ -131,10 +130,6 @@ Routes are file-based under `src/routes/`. The `@tanstack/router-plugin` Vite pl
 | `_arena.runs.index.tsx` | `/runs` | "No run selected" empty state. |
 | `_arena.runs.$runId.tsx` | `/runs/<id>` | Run detail: header, sibling strip, four tabs, Timeline. |
 | `_arena.experiments.$key.tsx` | `/experiments/<key>` | Experiment overview for one run group. |
-| `training.tsx` | — | `TrainingLayout` — the tracker's own nav shell. |
-| `training.index.tsx` | `/training` | `redirect` to `/training/coverage`. |
-| `training.coverage.tsx` | `/training/coverage` | Per-class coverage matrix ([Chapter 24](../part3-entity-detection/24-training-tracker.md)). |
-| `training.images.tsx` | `/training/images` | Paginated image table + annotation lightbox. |
 
 The `_arena` prefix is TanStack Router's **pathless layout** convention: the segment groups children under a shared component without appearing in the URL. That's what lets `/runs/<id>` and `/experiments/<key>` share one sidebar instance — switching between them doesn't remount it.
 
@@ -143,7 +138,7 @@ The `_arena` prefix is TanStack Router's **pathless layout** convention: the seg
 State is split three ways, and the split is the main thing to understand about this frontend:
 
 - **URL search params** own view state. `/runs/$runId` validates `?turn=<n>&tab=<world|trace|diff|operator>` in `validateSearch`. Both keys are optional, and defaults are applied at *read* time rather than written into the URL, so a bare `/runs/<id>` stays clean. An absent `turn` means "pinned to the newest turn" — `selectedTurn = turn ?? maxTurn` — which is why the scrubber auto-advances with the stream and stops advancing the moment the user drags it. That single expression replaced the two effects the old `App.tsx` needed (pin-to-latest, reset-on-run-change), and switching runs resets the turn for free because the param lives in a URL that changed. Scrubber writes use `replace: true` so dragging doesn't bury the Back button under one history entry per turn.
-- **TanStack Query** owns server reads. Every fetch is a query-option factory in `lib/queries.ts` (`runsQueryOptions`, `runSummariesQueryOptions`, `runSeriesQueryOptions`, plus the `tracker*` family). Keys are hierarchical — invalidating `["runs"]` also sweeps `["runs","summaries"]` and `["runs","series"]`. Route `loader`s call `context.queryClient.ensureQueryData(...)` so data is in flight before the component renders; the component then reads the same key with `useQuery` and gets the cached result. `runSeriesQueryOptions("")` is `enabled: false` rather than firing a request that would 404 — a live operation has no finalized DuckDB file yet.
+- **TanStack Query** owns server reads. Every fetch is a query-option factory in `lib/queries.ts` (`runsQueryOptions`, `runSummariesQueryOptions`, `runSeriesQueryOptions`). Keys are hierarchical — invalidating `["runs"]` also sweeps `["runs","summaries"]` and `["runs","series"]`. Route `loader`s call `context.queryClient.ensureQueryData(...)` so data is in flight before the component renders; the component then reads the same key with `useQuery` and gets the cached result. `runSeriesQueryOptions("")` is `enabled: false` rather than firing a request that would 404 — a live operation has no finalized DuckDB file yet.
 - **`useEvents(runId)`** (`hooks/use-events.ts`) stays a hand-written hook, not a query. It opens an `EventSource` against `/events?run_id=...`, accumulates events, and exposes the SSE status union (`idle | connecting | open | closed | error`). A stream that's appended to over minutes and reconnects on a custom overflow signal is not what a request-cache models, so it was deliberately left outside Query.
 
 `main.tsx` sets `defaultPreloadStaleTime: 0` on the router: Query owns caching, and without this the router would layer its own preload staleness on top and the two would disagree about when data is fresh.
@@ -172,7 +167,7 @@ Three wiring modes are supported:
 
 | Mode | When | What you set |
 |---|---|---|
-| Vite dev proxy | Local dev — UI on :5173, FastAPI on :8000 | Nothing. `vite.config.ts` proxies `/runs`, `/events`, `/forks`, `/health` to `http://localhost:8000`, and the tracker's `/classes`, `/images`, `/annotations`, `/datasets`, `/stats`, `/thumbs`, `/raw` to `http://localhost:8100`. |
+| Vite dev proxy | Local dev — UI on :5173, FastAPI on :8000 | Nothing. `vite.config.ts` proxies `/runs`, `/events`, `/forks`, `/health` to `http://localhost:8000`. |
 | Cross-origin dev | UI local, backend on a VM | `VITE_API_BASE_URL=http://vm:8000` in `apps/dashboard/.env.local`, plus `ARENA_WEB_CORS_ORIGINS` on the backend to allow the SPA origin. |
 | Prod build | SPA served from the API origin | Build with `bun run build`, mount `dist/` behind FastAPI (not wired by default — the contract above is enough to do it). |
 
@@ -193,6 +188,5 @@ See [Chapter 21 — Running the UI Locally](./21-running-the-ui-locally.md) for 
 - [Chapter 16 — DuckDB Persister and Replay](../part6-evaluation-arena/16-duckdb-persister-and-replay.md) — the source of the cold-path fallback and the fork primitive.
 - [Chapter 20 — Fork and Diff UI](./20-fork-and-diff-ui.md) — the four tabs in detail.
 - [Chapter 21 — Running the UI Locally](./21-running-the-ui-locally.md) — dev workflow.
-- [Chapter 24 — Detection Training Tracker](../part3-entity-detection/24-training-tracker.md) — the other backend behind this SPA.
 - [ADR 0005 — Vite / React / Tailwind for arena UI](../adr/0005-vite-react-tailwind-for-arena-ui.md) — the original scaffold decision.
 - [ADR 0006 — TanStack Router + Query and React Aria](../adr/0006-tanstack-router-query-react-aria.md) — what replaced the hand-rolled state and Radix.

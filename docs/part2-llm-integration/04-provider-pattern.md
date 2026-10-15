@@ -82,16 +82,14 @@ Per-model pricing lives in one table, `providers/pricing.py`, shared by the agen
 
 ```python
 class ExecutorProvider:
-    def __init__(self, api_key=None, model=None, use_dynamic_context=True, wire=None):
+    def __init__(self, api_key=None, model=None, wire=None):
         self.model = model or config.model
         # Defaults to whatever AOE2_LLM_WIRE selects; inject one to override.
         self.wire: ChatWire = wire or make_wire(config.llm_wire, model=self.model, ...)
-        self.use_dynamic_context = use_dynamic_context and GAME_KNOWLEDGE_AVAILABLE
 ```
 
 - Delegates every API call to its `ChatWire`; the SDK client lives there
 - Lazily loads the system prompt on first access
-- Optionally initializes the game knowledge database for dynamic context injection
 
 ### System Prompt Loading (`executor_provider.py`)
 
@@ -101,8 +99,8 @@ Loads and concatenates `prompts/core.md` + `prompts/hotkeys.md`, then layers the
 
 The executor is **text-only** — no screenshot — so all visual information arrives as the YOLO entity list plus the strategist's cached resource readings. (The strategist itself is also text-only: it produces those readings by OCR-ing the resource bar locally — `resource_ocr.py`, RapidOCR — not via a Claude vision call.) `_build_content()` assembles a single text content block:
 
-1. Enhances the context with dynamic game knowledge (affordable units/buildings) when the knowledge DB is available
-2. Prepends a dimensions line: `"Game window: 1920x1080 pixels. Center=(960,540). ..."`
+1. Prepends a dimensions line: `"Game window: 1920x1080 pixels. Center=(960,540). ..."`
+2. Appends the observed context and a decision request.
 3. Returns `[{"type": "text", "text": ...}]`
 
 ### The two executor paths
@@ -202,5 +200,5 @@ The game loop, memory system, executor, and detection pipeline never see a vendo
 ## Related Topics
 
 - [Chapter 5: Prompt Engineering](./05-prompt-engineering.md) -- the system prompt content
-- [Chapter 6: Context Injection](./06-context-injection.md) -- how dynamic context enhances the prompt
+- [Chapter 6: Decision Context](./06-context-injection.md) -- how observations and goals reach the prompt
 - [Chapter 1: System Overview](../part1-architecture/01-system-overview.md) -- graceful degradation for optional dependencies

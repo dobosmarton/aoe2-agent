@@ -7,7 +7,6 @@ dependencies = [
     "core",
     "detection",
     "evaluation",
-    "data",
     "anthropic>=0.84.0",
     "openai>=1.60.0",
     "mss>=9.0.0",

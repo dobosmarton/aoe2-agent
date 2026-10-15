@@ -80,9 +80,7 @@ def provider() -> ExecutorProvider:
     """A ExecutorProvider with stubbed prompts and no game-knowledge DB."""
     # Pin the wire: these tests patch Anthropic-shaped fakes onto it, so the
     # fixture must not ride whatever the global default happens to be.
-    p = ExecutorProvider(
-        use_dynamic_context=False, wire=AnthropicWire(model="test-model", api_key="test")
-    )
+    p = ExecutorProvider(wire=AnthropicWire(model="test-model", api_key="test"))
     # Non-None _core_prompt short-circuits _load_prompts() → no I/O.
     p._core_prompt = "SYSTEM"
     p._age_prompts = {"dark": "DARK", "feudal": "FEUDAL"}

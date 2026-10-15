@@ -25,7 +25,7 @@ class DetectedEntity:
     area: float = 0                  # bbox area in pixels
 ```
 
-`to_dict()` converts to a flat dict for the LLM context and executor cache. The `id` field follows the pattern `{class_name}_{counter}`, where counters are globally unique and persist across frames via Kalman filter tracking (see §7.9).
+`to_dict()` converts a single-frame detection to a flat dict. The per-game temporal component assigns persistent track IDs separately (see §7.9).
 
 ## 7.2 The 60-Class Taxonomy
 
@@ -63,7 +63,6 @@ Defined at `packages/detection/src/inference/detector.py`. Key initialization pa
 | `use_mock` | `False` | Use mock detections for testing |
 | `imgsz` | `1280` | Constructor default. The agent runs at **`1280`** via `config.detection_imgsz` — matches v9's training resolution |
 | `use_sahi` | `True` | Constructor default. The agent pins **`False`** — single-pass, no tiling |
-| `tracker` | auto-init | Kalman filter tracker for persistent IDs (see §7.9) |
 
 ### Model Loading
 
@@ -196,94 +195,9 @@ def detect(self, screenshot):
 
 The `_nms()` method sorts entities by confidence (highest first) and removes lower-confidence boxes that overlap >50% IoU with a higher-confidence box of the same class.
 
-## 7.9 Historical entity tracking design (not deployed)
+## 7.9 Camera-aware temporal association
 
-The old Kalman/prediction implementation remains in `tracker.py` for reference,
-but no live detector or agent path uses it. The following description is
-historical. Current association is in `apps/agent/src/temporal_entities.py`:
-it uses fresh boxes only, camera-aligned geometry, and at most one second of
-history. No predicted position can authorize a click.
-
-Entity IDs persist across detection frames so the LLM can consistently reference the same entity across turns (e.g., `sheep_0` remains `sheep_0`). The detector uses a two-tier tracking system: a **Kalman filter tracker** (primary) with a **greedy IoU matcher** (fallback).
-
-### Kalman Filter Tracker (Primary)
-
-Implemented in `packages/detection/src/inference/tracker.py`. The `EntityTracker` maintains a list of `TrackedEntity` objects, each with a Kalman filter state that estimates position and velocity.
-
-**State Vector** (6D):
-
-```
-state = [x_center, y_center, vx, vy, width, height]
-```
-
-- Position `(x, y)`: bounding box center in pixel coordinates
-- Velocity `(vx, vy)`: estimated motion per frame (used for prediction)
-- Size `(w, h)`: bounding box dimensions
-
-**Kalman Filter Matrices**:
-
-| Matrix | Dimensions | Purpose |
-|--------|-----------|---------|
-| `F` (transition) | 6×6 | Constant velocity model: `x += vx`, `y += vy` |
-| `H` (measurement) | 4×6 | Observes `[x, y, w, h]` from YOLO detections |
-| `Q` (process noise) | 6×6 | `diag([10, 10, 5, 5, 2, 2])²` — tuned for AoE2 unit speeds (~5-20 px/frame) |
-| `R` (measurement noise) | 4×4 | `diag([5, 5, 3, 3])²` — tuned for YOLO bbox jitter (~3-5 px) |
-| `P₀` (initial covariance) | 6×6 | `diag([10, 10, 100, 100, 10, 10])²` — high velocity uncertainty initially |
-
-**Per-frame cycle:**
-
-1. **Predict**: For each existing track, advance state using the constant velocity model: `state = F @ state`, `P = F @ P @ Fᵀ + Q`. This projects where each entity should be *before* seeing new detections.
-
-2. **Match**: Build a cost matrix `(num_tracks × num_detections)` using `1 - IoU` between predicted track bounding boxes and new YOLO detections. Same-class constraint: cost is set to 1.0 (maximum) for class mismatches, ensuring a sheep track never matches a villager detection.
-
-3. **Assign**: Solve the assignment problem using the **Hungarian algorithm** (`scipy.optimize.linear_sum_assignment`) for globally optimal matching. Falls back to greedy matching if scipy is not installed. A match is accepted only if the cost is below `1 - iou_threshold` (default: IoU > 0.3).
-
-4. **Update**: For matched tracks, apply the Kalman update step: compute innovation `y = z - H @ state`, Kalman gain `K`, and correct the state estimate. Reset `misses = 0`, increment `hits`.
-
-5. **Handle unmatched**: Unmatched tracks get `misses += 1`. Unmatched detections spawn new tracks with zero initial velocity and high covariance. Tracks with `misses > max_misses` (default 3) are pruned.
-
-6. **Output**: Return `DetectedEntity` list from all active tracks (misses = 0), with stable IDs that persist across frames.
-
-**Track Lifecycle**:
-
-```
-Detection → New Track (id="sheep_0", velocity=0)
-     ↓ (matched next frame)
-Active Track (Kalman update, velocity estimated)
-     ↓ (matched next frame)
-Active Track (velocity refined, position predicted)
-     ↓ (unmatched — entity temporarily occluded)
-Missing Track (misses=1, still predicting position)
-     ↓ (unmatched again)
-Missing Track (misses=2)
-     ↓ (unmatched again)
-Dead Track (misses=3, pruned from tracker)
-```
-
-### Prediction Mode
-
-`tracker.predict()` extrapolates entity positions using the Kalman predict step *without* new detections. This is used in the rescan callback: when the frame differ reports no visual change *and* tracker confidence exceeds 80%, the rescan skips YOLO inference and uses predicted positions instead (~0ms vs ~100ms). The screenshot is still captured — the frame differ needs an image to compare against — so it is only inference that is avoided.
-
-```python
-# In detection_phase.py rescan callback:
-if frame_differ and not frame_differ.has_changed(screenshot):
-    if detector.tracker and detector.tracker.prediction_confidence() > 0.8:
-        predicted = detector.tracker.predict()  # Instant — no inference
-        set_detected_entities(predicted)
-        return
-```
-
-Confidence is the fraction of tracks that both matched last cycle (`misses == 0`) and have been confirmed by 3 consecutive detections (`hits >= 3`). The confirmation term is what keeps a tracker repopulated right after a camera reset from reading 100%: every brand-new track is matched by construction, so match rate alone peaks exactly when no identity has been established yet.
-
-### Greedy IoU Fallback
-
-If the Kalman tracker is unavailable (e.g., scipy not installed), the detector falls back to `_assign_persistent_ids()`, a simpler greedy IoU matcher:
-
-- For each new detection, find the best IoU match among previous same-class entities
-- If IoU > 0.4, reuse the old entity's ID
-- Otherwise, assign a new globally unique ID (counter never resets)
-
-This provides basic ID persistence but lacks velocity estimation and optimal assignment.
+The live detector returns stateless single-frame boxes. `apps/agent/src/temporal_entities.py` associates fresh detections across captures for up to one second using camera-aligned geometry and short-term class evidence. It rejects ambiguous identity matches; predicted positions never become new sightings or click targets. See [streaming perception](../streaming-perception.md) for the full observation contract.
 
 ## 7.10 Singleton Access
 
@@ -340,7 +254,7 @@ Phase 1: Fast Scan        Phase 2: Targeted SAHI
    - SAHI entities from **inside** ROI regions → kept (more accurate at native 640)
    - NMS deduplicates at ROI boundaries
 
-5. **Post-processing**: Apply NMS and Kalman tracker (or greedy IoU fallback) to assign persistent IDs.
+5. **Post-processing**: Apply NMS to the single-frame detections. The agent's temporal component handles association separately.
 
 ### Force-Full Triggers
 
@@ -371,29 +285,9 @@ detected_entities = detector.detect_adaptive(screenshot, force_full=force_full)
 | Adaptive SAHI | ~3-8 | moderate |
 | Single pass (deployed) | 1 | cheapest |
 
-## 7.12 Frame Differencing
+## 7.12 Fresh spatial publications
 
-`packages/detection/src/inference/frame_diff.py` contains the old `FrameDiffer`, which compared screenshots to skip rescans. No live path uses it: every published spatial observation now comes from a fresh detector invocation.
-
-### How It Works
-
-1. **Downscale**: Convert screenshot to 320×180 grayscale
-2. **Crop**: Remove top 4% (resource bar — changes frequently with resource counts but doesn't indicate game state changes)
-3. **Compare**: Compute Mean Absolute Difference (MAD) against the previous frame
-4. **Threshold**: If MAD < 0.03 (3% average pixel change), the frame is considered unchanged
-
-```python
-differ = FrameDiffer(threshold=0.03)
-
-# In the rescan callback:
-if not differ.has_changed(screenshot):
-    return  # Skip detection, reuse previous entities
-entities = detector.detect_fast(screenshot)
-differ.update(screenshot)
-```
-
-Used in the game loop's rescan callback, after the tracker prediction check and before `detect_fast()`. Skips a redundant inference pass when nothing moved.
-
+The old unchanged-frame cache has been removed. Every published spatial result comes from a fresh detector invocation. Camera motion is estimated from native pixels to align short-term history, not to skip inference or authorize predicted clicks.
 ## 7.13 Measuring real performance & per-class thresholds
 
 The metric of record is **real** F1, not synthetic mAP. A blended mAP over a ~95%-synthetic validation set hides real-world behaviour, so `packages/detection/src/testing/evaluate_real.py` scores **per-class precision/recall/F1 by IoU-matching** against the ground-truth labels in a `training_data_vN/val/` split, and reports real images **separately** from synthetic. It runs at the model's training resolution single-pass (`--mode detect_fast --imgsz 1280` for v9) — the realistic number. The current served model is **v9** (trained @1280): real micro-F1 ≈ **0.67** (precision 0.676, recall 0.665), up from v7's ≈ 0.54 @640 and v6's ≈ 0.42, thanks to a cleaned synthetic set plus the higher training resolution that enlarges small objects (berry 4/6, sheep 3/6 on real frames, vs v7's 2/6 and 1/6). The per-class breakdown (in `eval_real_summary.json`) still exposes a rare-class tail — several cavalry and unique-unit lines sit near zero recall on real frames.
@@ -421,12 +315,9 @@ See [Chapter 8 — Training Pipeline](./08-training-pipeline.md) for the sim-to-
 - **Deployed path: single forward pass at `imgsz=1280`** (`detect_fast`, no tiling) — matches v9's training resolution; beats off-scale inference and SAHI on real F1
 - **SAHI (full + adaptive)**: implemented and tested but **disabled** — scale mismatch lowers real accuracy; parked for a future SAHI-native retrain
 - **ONNX batched SAHI**: all tiles in one inference call (~3-5x faster than sequential) — only relevant when SAHI is re-enabled
-- **Kalman filter tracking**: 6D state with Hungarian algorithm matching for stable entity IDs
-- **Tracker prediction**: skip rescans entirely when confidence > 80% (~0ms)
-- **Frame differencing**: skip rescans when screenshot hasn't changed (MAD threshold 3%)
+- **Camera-aware short-term association**: fresh boxes are matched by the per-game temporal component; predictions never authorize clicks
 - **Real-eval harness + per-class thresholds**: `evaluate_real.py` (real F1 is the metric of record), thresholds synced into `thresholds.py`
 - NMS applied to all backends and detection modes
-- Greedy IoU ID assignment as tracker fallback
 
 ## Related Topics
 

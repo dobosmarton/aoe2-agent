@@ -211,7 +211,7 @@ def test_executor_runs_its_tool_loop_through_the_openai_wire(
     wire: OpenAIWire, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The whole point of the seam: same game logic, different vendor."""
-    provider = ExecutorProvider(api_key="test", use_dynamic_context=False, wire=wire)
+    provider = ExecutorProvider(api_key="test", wire=wire)
     provider._core_prompt = "SYSTEM"
     provider._age_prompts = {"dark": "DARK"}
 

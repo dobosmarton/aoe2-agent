@@ -34,14 +34,9 @@ apps/agent/src/            # importable as `gameplay_agent`
 ├── config.py              # Pydantic config from env vars
 ├── providers/             # ExecutorProvider (executor) + StrategistProvider (text + local OCR)
 ├── prompts/               # System prompts (core.md, hotkeys.md, strategist.md, ages/*.md)
-├── scenario_runner.py     # `python -m gameplay_agent.scenario_runner ...` (multi-turn harness)
-├── assertions.py          # Assertion DSL used by scenario fixtures
-├── context_builder.py     # Builds executor context from a scenario fixture
-├── test_isolation.py      # _isolate_memories_dir, _mock_executor, _seed_detected_entities
-├── fixture_builder.py     # Real-game log → scenario fixture (`python -m gameplay_agent.fixture_builder`)
-├── log_to_scenario.py     # structlog game.txt → scenario YAML (`python -m gameplay_agent.log_to_scenario`)
+├── scenario_runner.py     # Production-path input-driven replay harness
 ├── strategist_eval.py     # Standalone strategist evaluation harness
-└── scenarios/             # *.yaml fixtures consumed by scenario_runner
+└── scenarios/production/  # Input-driven replay fixtures
 ```
 
 ## Common entry points
@@ -49,7 +44,6 @@ apps/agent/src/            # importable as `gameplay_agent`
 ```bash
 just agent                                       # Real game on Windows VM
 just agent --iterations 50
-just agent --test                                # One iteration, no clicks
 
 # Copy the Arabia or Highland example, fill the actual eight-player lobby
 # roster and exported hotkey/game-build details, then validate Windows.
@@ -59,7 +53,7 @@ AOE2_GAME_PROFILE=my-4v4-profile.json just agent
 just eval-all                                    # Run every scenario fixture
 uv run --package gameplay-agent \
     python -m gameplay_agent.scenario_runner \
-    apps/agent/src/scenarios/age_up_gate_fires.yaml
+    apps/agent/src/scenarios/production/castle_imperial_army.yaml
 ```
 
 The [Arabia](profiles/magyars_arabia_4v4.example.json) and
@@ -98,6 +92,6 @@ navigation or naval play; its first gate is the same land-opening economy.
 
 ## Conventions
 
-- **Pure leaves only inside `core`.** Anything here can import from `core`, `detection`, `evaluation`, `data` — never the reverse.
+- **Pure leaves only inside `core`.** Anything here can import from `core`, `detection`, or `evaluation` — never the reverse.
 - **Prompt files ship inside the wheel** via `package-data = ["prompts/**/*.md"]`. `PROMPTS_DIR = Path(__file__).parent.parent / "prompts"` resolves correctly in both editable and installed modes.
-- **Scenario fixtures live with their consumer.** `scenarios/*.yaml` ship inside this package; the scenario runner finds them via `Path(__file__).resolve().parent / "scenarios"`.
+- **Scenario fixtures live with their consumer.** `scenarios/production/*.yaml` ship inside this package; the scenario runner finds them via `Path(__file__).resolve().parent / "scenarios"`.

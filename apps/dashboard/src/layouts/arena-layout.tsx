@@ -1,9 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { Outlet, useNavigate, useParams } from "@tanstack/react-router";
-import { ScanEye, Swords } from "lucide-react";
+import { Swords } from "lucide-react";
 
 import { RunList } from "@/components/run-list";
-import { Button } from "@/components/ui/button";
 import { AppShell } from "@/layouts/app-shell";
 import { SidebarHeader } from "@/layouts/sidebar-header";
 import { errorMessage, toLoadStatus } from "@/lib/load-status";
@@ -31,19 +30,6 @@ export function ArenaLayout(): React.ReactElement {
             icon={<Swords className="text-primary size-4 shrink-0" />}
             title="AoE2 Arena"
             subtitle="Event log replay"
-            action={
-              <Button
-                variant="ghost"
-                size="sm"
-                className="shrink-0"
-                onClick={() => {
-                  void navigate({ to: "/training" });
-                }}
-              >
-                <ScanEye className="size-4" />
-                Training
-              </Button>
-            }
           />
           <div className="min-h-0 flex-1">
             <RunList

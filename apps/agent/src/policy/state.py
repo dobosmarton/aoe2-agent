@@ -1,4 +1,4 @@
-"""The single state view every rule is evaluated against."""
+"""Immutable observed state used by the action catalog and policy."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ def _no_jobs() -> Mapping[str, int]:
 
 @dataclass(frozen=True, slots=True)
 class PolicyState:
-    """Everything a rule may read, from either the real game or the simulator.
+    """Everything a decision may read, from either the real game or simulator.
 
     Genuinely immutable: the actor shares one snapshot across policy paths, so
     `villager_jobs` is a read-only view, not a dict a caller could mutate.

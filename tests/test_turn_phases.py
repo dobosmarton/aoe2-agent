@@ -1,11 +1,7 @@
 """Unit tests for `gameplay_agent.turn_phases`.
 
 These cover the pure (or near-pure) helpers that drive a single iteration:
-applied-memory parsing, hardcoded ground/maintenance commands, LLM context
-assembly. The async/state-mutating pieces (`record_llm_turn`,
-`execute_turn_actions`) are exercised indirectly via the evaluation runner;
-direct tests for them would need extensive AgentMemory + GoalManager mocking
-without much marginal coverage gain.
+applied-memory parsing, hardcoded ground commands, and LLM context assembly.
 """
 
 from __future__ import annotations
@@ -19,7 +15,6 @@ from gameplay_agent.turn_phases import (
     _EXECUTOR_OUTAGE_STREAK,
     INITIAL_ZOOM_CLICKS,
     _extract_applied_memories,
-    _fallback_actions,
     blocked_actions_line,
     build_llm_context,
     castle_gate_line,
@@ -261,27 +256,6 @@ def test_build_llm_context_includes_known_buildings(build_gates) -> None:
     gm = _FakeGoalManager()
     context = build_llm_context(memory, gm, entity_summary="mill_0: mill at (100,100)")
     assert "Known buildings: mill=1" in context
-
-
-# ---------------------------------------------------------------------------
-# _fallback_actions
-# ---------------------------------------------------------------------------
-
-
-def test_fallback_actions_housed_builds_a_house():
-    """Housed → the fallback uses the verified named build path."""
-    memory = AgentMemory()
-    memory.game_state.population = memory.game_state.population_cap  # 5/5 → housed
-    actions = _fallback_actions(memory)
-    assert any(a["type"] == "build" and a["building_key"] == "q" for a in actions)
-
-
-def test_fallback_actions_not_housed_queues_villager():
-    """Room to grow → nudge production (order a villager), never a build placement."""
-    memory = AgentMemory()  # defaults to 4/5 → not housed
-    actions = _fallback_actions(memory)
-    assert not any(a["type"] == "click" for a in actions)
-    assert actions[0] == {"type": "queue_villager", "intent": "Queue villager (fallback)"}
 
 
 # ---------------------------------------------------------------------------

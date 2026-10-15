@@ -8,8 +8,6 @@ Real screenshots are labeled in CVAT, exported in COCO format, converted to YOLO
 
 </aside>
 
-> **Also see [Chapter 24 — Detection Training Tracker](./24-training-tracker.md).** The CVAT loop described here is still how bulk annotation gets done, but the in-repo tracker now owns *dataset visibility* (per-class coverage) and *incremental review* (approve/correct model predictions in the browser). Reach for CVAT when labeling a fresh batch from scratch; reach for the tracker to see what's missing, and to review model-proposed boxes one at a time.
-
 ## 9.1 The Labeling Workflow
 
 ```
@@ -180,7 +178,7 @@ We take (2) because it's zero-code and framework-agnostic. The important detail 
 
 </aside>
 
-Live per-class coverage — including which classes have *zero* real examples — is served by the training tracker's `/stats` endpoint and its `/training/coverage` page ([Chapter 24](./24-training-tracker.md)), which is more current than any table checked into a document.
+Per-class coverage should be recomputed from the current dataset manifest before training; the table above describes only the historical v9 build.
 
 ---
 
@@ -190,11 +188,10 @@ Live per-class coverage — including which classes have *zero* real examples �
 - Automatic COCO-to-YOLO conversion with name-based class mapping
 - All data sources use classes.yaml IDs directly (no remapping needed for v5+ synthetic data)
 - Active learning scores unlabeled images by model uncertainty
-- Coverage and incremental review now live in the [training tracker](./24-training-tracker.md); CVAT remains the bulk-annotation tool
+- CVAT remains the bulk-annotation and review tool
 
 ## Related Topics
 
 - [Chapter 8: Training Pipeline](./08-training-pipeline.md) -- synthetic data generation and YOLO training
 - [Chapter 13: Class Schema Evolution](../part5-operations/13-class-schema-evolution.md) -- schema history and unified class IDs
 - [Chapter 7: Detector Architecture](./07-detector-architecture.md) -- how the trained model runs at inference time
-- [Chapter 24: Detection Training Tracker](./24-training-tracker.md) -- coverage stats and in-browser prelabel review
