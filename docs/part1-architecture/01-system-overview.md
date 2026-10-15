@@ -116,7 +116,7 @@ Configuration uses a Pydantic `BaseModel` with environment variable overrides (`
 | `detection_imgsz` | — | `1280` | YOLO inference resolution (matches v9's training resolution) |
 | `screenshot_quality` | — | `85` | JPEG quality (1-100) |
 | `ocr_backend` | `AOE2_OCR_BACKEND` | `rapidocr` | Resource-bar OCR backend (`rapidocr`/`template`/`tesseract`) |
-| `perceive_interval` | `AOE2_PERCEIVE_INTERVAL` | `0.5` | Seconds between perception frames |
+| `perceive_interval` | `AOE2_PERCEIVE_INTERVAL` | `0.1` | Target seconds between native captures; detection/HUD use separate bounded lanes |
 | `action_delay` | — | `0.05` | Seconds between individual actions |
 | `save_screenshots` | `AOE2_SAVE_SCREENSHOTS` | `true` | Log screenshots to disk |
 | `log_dir` | — | `logs` | Screenshot and log output directory |

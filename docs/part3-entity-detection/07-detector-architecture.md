@@ -1,6 +1,6 @@
 # Chapter 7: Detector Architecture
 
-The entity detection system runs YOLO inference on game screenshots, producing labeled bounding boxes with semantic IDs like `sheep_0` or `town_center_0`. It supports three backends (PyTorch, ONNX, Mock), a 60-class taxonomy, Kalman filter-based object tracking, and (optional, currently disabled) SAHI tiling.
+The entity detection system runs YOLO inference on game screenshots, producing labeled bounding boxes. It supports three backends (PyTorch, ONNX, Mock), a 60-class taxonomy, and optional SAHI tiling. Detector IDs are frame-local; the live agent performs separate, camera-aware temporal association. Sections 7.9, 7.11, and 7.12 below describe older approaches retained only as historical context. See [streaming perception](../streaming-perception.md) for the live pipeline.
 
 > **What the agent actually runs (v9).** A **single forward pass at `imgsz=1280`** — the model's training resolution. `config.detection_imgsz=1280`, and `init_detector` in `apps/agent/src/detection_phase.py` pins `use_sahi=False`. Every frame calls `detect_fast` through the one ladder in `detect_frame` (`detect_fast_multi` measured worse at native resolution — see §7.3). There is no `adaptive_sahi` config flag: a flag cannot fix a scale mismatch, so re-enabling SAHI means a code change plus a SAHI-aware retrain. SAHI tiling (§7.4, §7.11) is still implemented in the detection package, but the agent never calls it, because on real screenshots it *lowers* accuracy (§7.4 — Why single-pass at training res). The SAHI sections below document a path the agent keeps for a future model retrained at SAHI-native scale, not the deployed one.
 
@@ -80,16 +80,15 @@ If `model_path` is not specified, `resolve_model_path()` globs `models/aoe2_yolo
 
 ### Detection Modes
 
-The detector provides four detection methods:
+The detector provides three detection methods:
 
 | Method | Tiles | Relative cost | When Used |
 |--------|-------|---------------|-----------|
 | `detect_fast()` | 1 (no SAHI) | cheapest — one forward pass | **The deployed path**, every frame |
 | `detect_fast_multi()` | 2 (full + centre crop) | ~2x `detect_fast` | Unused — loses to single-pass at native resolution |
-| `detect_adaptive()` | ~3-8 (ROI only) | moderate | Not called by the agent — library capability only |
 | `detect()` | ~18 (full SAHI) | most expensive (an order of magnitude slower) | Not called by the agent — library capability only |
 
-All four methods apply NMS and persistent ID assignment (Kalman tracker or greedy IoU fallback) before returning results. Exact latency is hardware- and backend-dependent (ONNX on the deploy VM vs. PyTorch on a dev Mac differ by an order of magnitude), so the table ranks the modes rather than pinning millisecond figures. `detect_fast_multi()` adds a center-crop second pass to recover small objects without paying for full tiling, but it is **no longer used by any deployed path**. Scored on 32 real screenshots at the native 3024x1964 the agent actually captures (rebuild the split with `testing/build_native_val.py`), it loses to single-pass: F1 0.622 (P 0.583 / R 0.666) against 0.693 (P 0.735 / R 0.655). Halving the frame through the same network input shows objects at 2x the training scale, so the crop pass trades 13 extra true positives for 291 extra false ones — the SAHI scale mismatch (§7.4) in miniature.
+All four methods return stateless, single-frame boxes after NMS. The gameplay agent owns short-lived camera-aware association separately; see [streaming perception](../streaming-perception.md). Exact latency is hardware- and backend-dependent (ONNX on the deploy VM vs. PyTorch on a dev Mac differ by an order of magnitude), so the table ranks the modes rather than pinning millisecond figures. `detect_fast_multi()` adds a center-crop second pass to recover small objects without paying for full tiling, but it is **no longer used by any deployed path**. Scored on 32 real screenshots at the native 3024x1964 the agent actually captures (rebuild the split with `testing/build_native_val.py`), it loses to single-pass: F1 0.622 (P 0.583 / R 0.666) against 0.693 (P 0.735 / R 0.655). Halving the frame through the same network input shows objects at 2x the training scale, so the crop pass trades 13 extra true positives for 291 extra false ones — the SAHI scale mismatch (§7.4) in miniature.
 
 ## 7.4 Why single-pass at training resolution (and why SAHI is off)
 
@@ -187,22 +186,23 @@ These are available for any code that needs to query detection results beyond th
 
 ## 7.8 NMS for All Backends
 
-Non-maximum suppression is applied in all detection methods (`detect()`, `detect_fast()`, `detect_adaptive()`) after backend-specific inference, ensuring consistent duplicate removal regardless of whether PyTorch, ONNX, or Mock is used:
+Non-maximum suppression is applied in the three current detection methods (`detect()`, `detect_fast()`, `detect_fast_multi()`) after backend-specific inference:
 
 ```python
 def detect(self, screenshot):
     # ... backend dispatch ...
-    entities = self._nms(entities, iou_threshold=0.5)
-    if self.tracker:
-        entities = self.tracker.update(entities)
-    else:
-        entities = self._assign_persistent_ids(entities)
-    return entities
+    return nms(entities, iou_threshold=0.5)
 ```
 
 The `_nms()` method sorts entities by confidence (highest first) and removes lower-confidence boxes that overlap >50% IoU with a higher-confidence box of the same class.
 
-## 7.9 Entity Tracking & ID Persistence
+## 7.9 Historical entity tracking design (not deployed)
+
+The old Kalman/prediction implementation remains in `tracker.py` for reference,
+but no live detector or agent path uses it. The following description is
+historical. Current association is in `apps/agent/src/temporal_entities.py`:
+it uses fresh boxes only, camera-aligned geometry, and at most one second of
+history. No predicted position can authorize a click.
 
 Entity IDs persist across detection frames so the LLM can consistently reference the same entity across turns (e.g., `sheep_0` remains `sheep_0`). The detector uses a two-tier tracking system: a **Kalman filter tracker** (primary) with a **greedy IoU matcher** (fallback).
 
@@ -300,11 +300,11 @@ def get_detector(model_path=None, use_mock=False, imgsz=1280) -> EntityDetector:
     return _instance
 ```
 
-The per-turn detection phase (`apps/agent/src/detection_phase.py`) calls `get_detector(use_mock=False, imgsz=config.detection_imgsz, use_sahi=False)` once — i.e. `imgsz=1280`, no tiling. The same instance is reused for all subsequent detection calls, preserving the Kalman tracker state across frames.
+The streaming detection phase calls `get_detector(use_mock=False, imgsz=config.detection_imgsz, use_sahi=False)` once — i.e. `imgsz=1280`, no tiling. The same stateless detector instance serves subsequent frames; the per-game agent component owns visual history.
 
 ## 7.11 Adaptive SAHI (Smart Tiling) — disabled by default
 
-> **Off in v9.** The agent never calls `detect_adaptive` (see §7.4 for why); nothing in this section runs; this documents the parked path for a future model retrained at SAHI-native scale.
+> **Historical design only.** `detect_adaptive` was removed from the detector. This section records the earlier proposal, not a callable current API.
 
 Full SAHI tiles the entire screenshot (~18 tiles for 3024×1672). Most tiles cover static terrain with no entities. Adaptive SAHI reduces this to ~3-8 tiles by running SAHI only on regions of interest around detected entities.
 
@@ -373,7 +373,7 @@ detected_entities = detector.detect_adaptive(screenshot, force_full=force_full)
 
 ## 7.12 Frame Differencing
 
-`packages/detection/src/inference/frame_diff.py` provides `FrameDiffer`, which compares consecutive screenshots to skip redundant mid-turn rescans.
+`packages/detection/src/inference/frame_diff.py` contains the old `FrameDiffer`, which compared screenshots to skip rescans. No live path uses it: every published spatial observation now comes from a fresh detector invocation.
 
 ### How It Works
 
