@@ -6,9 +6,8 @@ screenshot dimensions always produce the same detections. This lets us
 exercise the public surface without YOLO weights or the `ultralytics`
 dependency.
 
-These are smoke tests — coverage gate before refactoring detector.py into
-postprocess/mock/sahi sub-modules. They guard call shape and ID semantics,
-not numerical accuracy of inference.
+These are smoke tests for the stateless single-frame adapter, not numerical
+accuracy of inference or cross-frame identity.
 """
 
 from __future__ import annotations
@@ -40,14 +39,8 @@ def _make_image(width: int = 1920, height: int = 1080) -> Image.Image:
 
 @pytest.fixture
 def det() -> EntityDetector:
-    """Detector in mock mode with the Kalman tracker disabled.
-
-    Disabling the tracker forces ID assignment through
-    `_assign_persistent_ids`, which has stable, predictable semantics.
-    """
-    d = EntityDetector(use_mock=True)
-    d.tracker = None
-    return d
+    """Detector in deterministic mock mode."""
+    return EntityDetector(use_mock=True)
 
 
 @pytest.fixture(autouse=True)
@@ -133,18 +126,6 @@ def test_detect_fast_multi_returns_entities(det: EntityDetector):
     assert len(entities) > 0
 
 
-def test_detect_adaptive_force_full_falls_back_to_detect(det: EntityDetector):
-    forced = det.detect_adaptive(_make_screenshot(), force_full=True)
-    assert len(forced) > 0
-
-
-def test_detect_adaptive_no_prior_state_falls_back_to_detect(det: EntityDetector):
-    # _previous_entities is empty on a fresh detector → adaptive path defers to detect()
-    assert det._previous_entities == []
-    entities = det.detect_adaptive(_make_screenshot())
-    assert len(entities) > 0
-
-
 def test_detect_to_dict_list_shape(det: EntityDetector):
     rows = det.detect_to_dict_list(_make_screenshot())
     assert len(rows) > 0
@@ -174,79 +155,11 @@ def test_detect_ids_are_strings(det: EntityDetector):
     assert all(isinstance(e.id, str) and e.id for e in entities)
 
 
-def test_persistent_ids_carry_forward_overlapping_bboxes(det: EntityDetector):
-    """Same-class overlapping bboxes preserve the previous-frame ID."""
-    first = [
-        DetectedEntity(
-            id="placeholder",
-            class_name="sheep",
-            bbox=(100, 100, 140, 130),
-            center=(120, 115),
-            confidence=0.9,
-        )
-    ]
-    second = [
-        DetectedEntity(
-            id="placeholder",
-            class_name="sheep",
-            bbox=(102, 101, 142, 132),  # >40% IoU with first
-            center=(122, 116),
-            confidence=0.92,
-        )
-    ]
-    det._assign_persistent_ids(first)
-    first_id = first[0].id
-    det._assign_persistent_ids(second)
-    assert second[0].id == first_id
-
-
-def test_persistent_ids_assign_fresh_id_when_no_overlap(det: EntityDetector):
-    first = [
-        DetectedEntity(
-            id="placeholder",
-            class_name="sheep",
-            bbox=(100, 100, 140, 130),
-            center=(120, 115),
-            confidence=0.9,
-        )
-    ]
-    second = [
-        DetectedEntity(
-            id="placeholder",
-            class_name="sheep",
-            bbox=(800, 800, 840, 830),  # no overlap with first
-            center=(820, 815),
-            confidence=0.85,
-        )
-    ]
-    det._assign_persistent_ids(first)
-    det._assign_persistent_ids(second)
-    assert second[0].id != first[0].id
-
-
-def test_persistent_ids_do_not_share_across_classes(det: EntityDetector):
-    """A villager that overlaps a previous sheep should get a fresh ID, not the sheep's."""
-    first = [
-        DetectedEntity(
-            id="placeholder",
-            class_name="sheep",
-            bbox=(100, 100, 140, 130),
-            center=(120, 115),
-            confidence=0.9,
-        )
-    ]
-    second = [
-        DetectedEntity(
-            id="placeholder",
-            class_name="villager",
-            bbox=(102, 101, 142, 132),
-            center=(122, 116),
-            confidence=0.9,
-        )
-    ]
-    det._assign_persistent_ids(first)
-    det._assign_persistent_ids(second)
-    assert second[0].id.startswith("villager_")
+def test_adapter_does_not_keep_cross_frame_identity(det: EntityDetector):
+    first = det.detect_fast(_make_screenshot())
+    second = det.detect_fast(_make_screenshot())
+    assert [(item.id, item.bbox) for item in first] == [(item.id, item.bbox) for item in second]
+    assert not hasattr(det, "tracker")
 
 
 # ---------------------------------------------------------------------------

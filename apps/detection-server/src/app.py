@@ -11,13 +11,16 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import io
 import logging
+import threading
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, Protocol, TypeAlias, cast
+from typing import TYPE_CHECKING, Literal, Protocol, TypeAlias, TypeVar, cast
 
 import numpy as np
 from detection.inference.preprocess import PAD_COLOR, letterbox
@@ -28,10 +31,11 @@ from detection.inference.thresholds import (
     get_threshold as _get_threshold,
 )
 from fastapi import FastAPI, File, Query, UploadFile
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Callable
 
     from detection._classes_schema import ClassesYaml
     from PIL import Image
@@ -66,6 +70,13 @@ class DetectionResponse(BaseModel):
     inference_ms: float
     tile_count: int
     image_size: tuple[int, int]  # (width, height)
+
+
+class BusyResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    reason: Literal["detector_busy"] = "detector_busy"
+    retry_after_ms: int = 200
 
 
 class HealthResponse(BaseModel):
@@ -522,10 +533,33 @@ def _detect_sahi(
 # ---------------------------------------------------------------------------
 
 _model_state: ModelState | None = None
+_InferenceResult = TypeVar("_InferenceResult")
+
+
+def _run_if_free(
+    lock: threading.Lock,
+    inference: Callable[[], _InferenceResult],
+) -> _InferenceResult | None:
+    """The worker releases capacity even after its HTTP client disconnects."""
+    if not lock.acquire(blocking=False):
+        return None
+    try:
+        return inference()
+    finally:
+        lock.release()
+
+
+def _busy() -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content=BusyResponse().model_dump(),
+        headers={"Retry-After": "1"},
+    )
 
 
 def create_app(model_path: str) -> FastAPI:
     """Create FastAPI app with model loaded at startup."""
+    inference_lock = threading.Lock()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -556,19 +590,24 @@ def create_app(model_path: str) -> FastAPI:
     async def detect(
         file: UploadFile = File(...),
         imgsz: int = Query(default=640, ge=320, le=1920),
-    ) -> DetectionResponse:
+    ) -> DetectionResponse | JSONResponse:
         """Single-image detection (no SAHI tiling)."""
-        import asyncio
-
         from PIL import Image as PILImage
 
         assert _model_state is not None
+        state = _model_state
         data = await file.read()
         image = PILImage.open(io.BytesIO(data)).convert("RGB")
         width, height = image.size
 
         t0 = time.monotonic()
-        detections = await asyncio.to_thread(_detect_single, _model_state, image, imgsz)
+        detections = await asyncio.to_thread(
+            _run_if_free,
+            inference_lock,
+            partial(_detect_single, state, image, imgsz),
+        )
+        if detections is None:
+            return _busy()
         elapsed_ms = (time.monotonic() - t0) * 1000
 
         return DetectionResponse(
@@ -583,25 +622,25 @@ def create_app(model_path: str) -> FastAPI:
         file: UploadFile = File(...),
         tile_size: int = Query(default=640, ge=320, le=1280),
         overlap: int = Query(default=32, ge=0, le=128),
-    ) -> DetectionResponse:
+    ) -> DetectionResponse | JSONResponse:
         """SAHI tiled detection for full-accuracy scans."""
-        import asyncio
-
         from PIL import Image as PILImage
 
         assert _model_state is not None
+        state = _model_state
         data = await file.read()
         image = PILImage.open(io.BytesIO(data)).convert("RGB")
         width, height = image.size
 
         t0 = time.monotonic()
-        detections, tile_count = await asyncio.to_thread(
-            _detect_sahi,
-            _model_state,
-            image,
-            tile_size,
-            overlap,
+        result = await asyncio.to_thread(
+            _run_if_free,
+            inference_lock,
+            partial(_detect_sahi, state, image, tile_size, overlap),
         )
+        if result is None:
+            return _busy()
+        detections, tile_count = result
         elapsed_ms = (time.monotonic() - t0) * 1000
 
         return DetectionResponse(

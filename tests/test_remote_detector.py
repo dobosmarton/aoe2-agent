@@ -9,6 +9,7 @@ import httpx
 import pytest
 from core import DetectedEntity
 from detection.inference.remote_detector import (
+    DetectionBusyError,
     DetectionUnavailableError,
     RemoteDetector,
     RequiredRemoteDetector,
@@ -85,3 +86,57 @@ def test_interactive_remote_only_detector_degrades_to_an_empty_result() -> None:
             await detector.close()
 
     assert asyncio.run(detect()) == []
+
+
+def test_busy_server_does_not_trigger_local_fallback() -> None:
+    class _Fallback:
+        calls = 0
+
+        def detect_fast(self, _screenshot: bytes) -> list[DetectedEntity]:
+            self.calls += 1
+            return []
+
+    fallback = _Fallback()
+    detector = RemoteDetector(
+        "http://detector.invalid",
+        fallback_detector=fallback,  # pyright: ignore[reportArgumentType]
+        client=httpx.AsyncClient(
+            transport=httpx.MockTransport(
+                lambda _request: httpx.Response(
+                    503, json={"reason": "detector_busy", "retry_after_ms": 200}
+                )
+            )
+        ),
+    )
+
+    async def detect() -> None:
+        try:
+            with pytest.raises(DetectionBusyError):
+                await detector.detect_fast(b"jpeg")
+        finally:
+            await detector.close()
+
+    asyncio.run(detect())
+    assert fallback.calls == 0
+    assert detector._server_available is True
+
+
+def test_invalid_remote_payload_is_not_used_as_detection() -> None:
+    detector = RequiredRemoteDetector(
+        "http://detector.invalid",
+        fallback_detector=None,
+        client=httpx.AsyncClient(
+            transport=httpx.MockTransport(
+                lambda _request: httpx.Response(200, json={"detections": "bad"})
+            )
+        ),
+    )
+
+    async def detect() -> None:
+        try:
+            with pytest.raises(DetectionUnavailableError):
+                await detector.detect_fast(b"jpeg")
+        finally:
+            await detector.close()
+
+    asyncio.run(detect())

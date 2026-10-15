@@ -22,14 +22,11 @@ from core import DetectedEntity
 from ._ultralytics_results import yolo_boxes_to_lists
 from .mock import mock_detect
 from .onnx_layout import UnknownOnnxLayoutError, decode_example
-from .postprocess import iou, nms
+from .postprocess import nms
 from .preprocess import letterbox
 from .sahi import (
-    compute_sahi_rois,
-    merge_detections,
     onnx_sahi_detect,
     sahi_detect,
-    sahi_detect_rois,
 )
 
 logger = logging.getLogger(__name__)
@@ -168,18 +165,6 @@ class EntityDetector:
         self.onnx_batch_dynamic = True
         self.onnx_input_hw: int | None = None
         self._class_counters: dict[str, int] = {}
-        # Persistent entity tracking across frames (fallback when tracker is None)
-        self._previous_entities: list[DetectedEntity] = []
-        self._global_id_counter: int = 0
-
-        # Kalman filter tracker (replaces greedy IoU ID assignment)
-        self.tracker = None
-        try:
-            from .tracker import EntityTracker
-
-            self.tracker = EntityTracker()
-        except Exception:
-            logger.debug("Tracker not available, using greedy IoU ID assignment")
 
         if model_path and not use_mock:
             self._load_model(model_path)
@@ -300,46 +285,6 @@ class EntityDetector:
         """Get confidence threshold for a class (lower for small entities)."""
         return self.class_thresholds.get(class_name, self.confidence_threshold)
 
-    def _assign_persistent_ids(self, new_entities: list[DetectedEntity]) -> list[DetectedEntity]:
-        """Match new detections to previous frame by IoU, preserving entity IDs.
-
-        Entities that overlap >40% with a previous same-class entity keep the old ID.
-        New entities get a globally unique ID that never repeats.
-        """
-        if not self._previous_entities:
-            # First frame — assign fresh global IDs
-            for entity in new_entities:
-                entity.id = f"{entity.class_name}_{self._global_id_counter}"
-                self._global_id_counter += 1
-            self._previous_entities = new_entities
-            return new_entities
-
-        used_prev_indices: set[int] = set()
-
-        for entity in new_entities:
-            best_iou = 0.0
-            best_idx = -1
-
-            for i, prev in enumerate(self._previous_entities):
-                if i in used_prev_indices or prev.class_name != entity.class_name:
-                    continue
-                cur_iou = iou(entity.bbox, prev.bbox)
-                if cur_iou > best_iou:
-                    best_iou = cur_iou
-                    best_idx = i
-
-            if best_idx >= 0 and best_iou > 0.4:
-                # Same entity — carry forward old ID
-                entity.id = self._previous_entities[best_idx].id
-                used_prev_indices.add(best_idx)
-            else:
-                # New entity — assign fresh global ID
-                entity.id = f"{entity.class_name}_{self._global_id_counter}"
-                self._global_id_counter += 1
-
-        self._previous_entities = new_entities
-        return new_entities
-
     def detect(self, screenshot: bytes | Image.Image) -> list[DetectedEntity]:
         """Detect entities in screenshot (full SAHI for accuracy).
 
@@ -375,12 +320,6 @@ class EntityDetector:
 
         # Apply NMS to remove duplicate overlapping detections
         entities = nms(entities, iou_threshold=0.5)
-
-        # Assign persistent IDs: Kalman tracker or greedy IoU fallback
-        if self.tracker:
-            entities = self.tracker.update(entities)
-        else:
-            entities = self._assign_persistent_ids(entities)
 
         elapsed = time.monotonic() - t0
         logger.info(
@@ -424,12 +363,6 @@ class EntityDetector:
             entities = self._parse_yolo_results(results)
 
         entities = nms(entities, iou_threshold=0.5)
-
-        # Assign persistent IDs: Kalman tracker or greedy IoU fallback
-        if self.tracker:
-            entities = self.tracker.update(entities)
-        else:
-            entities = self._assign_persistent_ids(entities)
 
         elapsed = time.monotonic() - t0
         logger.info("detect_fast elapsed=%.2fs entities=%d", elapsed, len(entities))
@@ -522,115 +455,10 @@ class EntityDetector:
         # NMS merges duplicates from both passes
         entities = nms(entities, iou_threshold=0.5)
 
-        if self.tracker:
-            entities = self.tracker.update(entities)
-        else:
-            entities = self._assign_persistent_ids(entities)
-
         elapsed = time.monotonic() - t0
         logger.info("detect_fast_multi elapsed=%.2fs entities=%d", elapsed, len(entities))
 
         return entities
-
-    def detect_adaptive(
-        self, screenshot: bytes | Image.Image, force_full: bool = False
-    ) -> list[DetectedEntity]:
-        """Adaptive detection: fast scan + targeted SAHI on entity clusters only.
-
-        Reduces tile count from ~18 (full SAHI) to ~3-8 by running SAHI only
-        on ROI regions around detected entities. Falls back to full SAHI on
-        first turn, periodically, or when force_full=True.
-
-        Args:
-            screenshot: JPEG bytes or PIL Image
-            force_full: If True, run full SAHI scan (e.g., first turn, alarm)
-        """
-        import time
-
-        t0 = time.monotonic()
-        self._reset_counters()
-
-        # Fall back to full SAHI when we have no prior context
-        if force_full or not self._previous_entities:
-            return self.detect(screenshot)
-
-        from PIL import Image as PILImage
-
-        if isinstance(screenshot, bytes):
-            image = PILImage.open(io.BytesIO(screenshot))
-        else:
-            image = screenshot
-
-        # 1. Fast single-pass scan (raw detections, no NMS/IDs yet)
-        if self.use_mock:
-            fast_entities = mock_detect(screenshot, self._generate_id)
-        elif self.backend == "onnx":
-            fast_entities = self._onnx_detect(screenshot)
-        else:
-            if self.model is None:
-                raise RuntimeError("Model not loaded; call _load_model() first")
-            results = self.model(
-                image, conf=self.confidence_threshold, imgsz=self.input_size, verbose=False
-            )
-            fast_entities = self._parse_yolo_results(results)
-
-        # 2. Compute ROI regions around entity clusters
-        rois = compute_sahi_rois(fast_entities, self._previous_entities, image.size)
-
-        if not rois:
-            # No ROIs needed — fast scan is sufficient
-            entities = nms(fast_entities, iou_threshold=0.5)
-            if self.tracker:
-                entities = self.tracker.update(entities)
-            else:
-                entities = self._assign_persistent_ids(entities)
-            elapsed = time.monotonic() - t0
-            logger.info(
-                "detect_adaptive elapsed=%.2fs entities=%d rois=0 mode=fast_only",
-                elapsed,
-                len(entities),
-            )
-            return entities
-
-        # 3. Check if adaptive is worth it — count ROI tiles vs full SAHI tiles
-        tile_size = 640
-        overlap = 32
-        stride = tile_size - overlap
-        roi_tile_count = 0
-        for roi in rois:
-            rx1, ry1, rx2, ry2 = [int(v) for v in roi]
-            cols = max(1, -(-int(rx2 - rx1) // stride))
-            rows = max(1, -(-int(ry2 - ry1) // stride))
-            roi_tile_count += cols * rows
-        w, h = image.size
-        full_tile_count = max(1, -(-w // stride)) * max(1, -(-h // stride))
-        if roi_tile_count >= full_tile_count * 0.7:
-            logger.info(
-                "adaptive_fallback roi_tiles=%d >= 70%% of full=%d", roi_tile_count, full_tile_count
-            )
-            return self.detect(screenshot)
-
-        # Run SAHI only on ROI tiles
-        sahi_entities = sahi_detect_rois(self, image, rois)
-
-        # 4. Merge: keep fast entities outside ROIs, use SAHI inside ROIs
-        merged = merge_detections(fast_entities, sahi_entities, rois)
-
-        # 5. Final NMS + persistent IDs
-        merged = nms(merged, iou_threshold=0.5)
-        if self.tracker:
-            merged = self.tracker.update(merged)
-        else:
-            merged = self._assign_persistent_ids(merged)
-
-        elapsed = time.monotonic() - t0
-        logger.info(
-            "detect_adaptive elapsed=%.2fs entities=%d rois=%d mode=adaptive",
-            elapsed,
-            len(merged),
-            len(rois),
-        )
-        return merged
 
     def _pytorch_detect(self, screenshot: bytes | Image.Image) -> list[DetectedEntity]:
         """Run detection using PyTorch/ultralytics backend.

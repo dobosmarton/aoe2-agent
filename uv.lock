@@ -648,6 +648,7 @@ dependencies = [
     { name = "numpy" },
     { name = "onnxruntime" },
     { name = "pillow" },
+    { name = "pydantic" },
     { name = "pyyaml" },
     { name = "scipy" },
     { name = "structlog" },
@@ -655,7 +656,6 @@ dependencies = [
 
 [package.optional-dependencies]
 autolabel = [
-    { name = "pydantic" },
     { name = "ultralytics" },
 ]
 coreml = [
@@ -677,7 +677,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.24.0" },
     { name = "onnxruntime", specifier = ">=1.17.0" },
     { name = "pillow", specifier = ">=10.0.0" },
-    { name = "pydantic", marker = "extra == 'autolabel'", specifier = ">=2.7" },
+    { name = "pydantic", specifier = ">=2.7" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "sahi", marker = "extra == 'labeling'", specifier = ">=0.11" },
     { name = "scipy", specifier = ">=1.11.0" },

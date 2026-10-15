@@ -1,13 +1,4 @@
-"""Remote detector client that offloads inference to a CoreML/ONNX server.
-
-Drop-in async replacement for EntityDetector. Sends JPEG screenshots to a
-FastAPI server (coreml_server.py) running on the macOS host, receives JSON
-detections, and applies NMS + Kalman tracking locally.
-
-Usage:
-    detector = get_remote_detector("http://192.168.64.1:8420")
-    entities = await detector.detect(screenshot_bytes)
-"""
+"""Stateless single-frame HTTP inference on the macOS detector server."""
 
 from __future__ import annotations
 
@@ -17,7 +8,10 @@ import logging
 import time
 from typing import TYPE_CHECKING, cast
 
-from .detector import DetectedEntity, EntityDetector, get_detector, resolve_model_path
+from core import DetectedEntity
+from pydantic import BaseModel, ConfigDict, ValidationError
+
+from .detector import EntityDetector, get_detector, resolve_model_path
 from .postprocess import nms as _apply_nms
 
 if TYPE_CHECKING:
@@ -36,11 +30,40 @@ class DetectionUnavailableError(RuntimeError):
     """The required detector cannot produce observations."""
 
 
+class DetectionBusyError(RuntimeError):
+    """The server is already inferencing; this frame may be discarded."""
+
+
+class _RemoteDetection(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    class_name: str
+    bbox: tuple[float, float, float, float]
+    center: tuple[float, float]
+    confidence: float
+    area: float = 0.0
+
+
+class _RemoteResponse(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    detections: tuple[_RemoteDetection, ...]
+    inference_ms: float
+    tile_count: int
+    image_size: tuple[int, int]
+
+
+class _BusyResponse(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    reason: str
+    retry_after_ms: int
+
+
 class RemoteDetector:
     """Async detector that delegates inference to a remote CoreML/ONNX server.
 
-    NMS and Kalman tracking run locally. On connection failure, falls back
-    to a local ONNX EntityDetector if available.
+    On connection failure, interactive execution may use a local ONNX fallback.
     """
 
     def __init__(
@@ -60,18 +83,6 @@ class RemoteDetector:
         self._client = client if client is not None else httpx.AsyncClient(timeout=10.0)
         self._server_available = True
         self._last_health_check: float = 0.0
-
-        # Local Kalman tracker
-        self.tracker = None
-        try:
-            from .tracker import EntityTracker
-
-            self.tracker = EntityTracker()
-        except Exception:
-            logger.debug("Tracker not available for RemoteDetector")
-
-        # For adaptive detection compatibility
-        self._previous_entities: list[DetectedEntity] = []
 
     async def close(self) -> None:
         """Close the HTTP client."""
@@ -93,10 +104,6 @@ class RemoteDetector:
         entities = self._to_entities(detections)
         entities = _apply_nms(entities, iou_threshold=0.5)
 
-        if self.tracker:
-            entities = self.tracker.update(entities)
-
-        self._previous_entities = entities
         elapsed = time.monotonic() - t0
         logger.info("remote_detect elapsed=%.2fs entities=%d", elapsed, len(entities))
         return entities
@@ -113,10 +120,6 @@ class RemoteDetector:
         entities = self._to_entities(detections)
         entities = _apply_nms(entities, iou_threshold=0.5)
 
-        if self.tracker:
-            entities = self.tracker.update(entities)
-
-        self._previous_entities = entities
         elapsed = time.monotonic() - t0
         logger.info("remote_detect_fast elapsed=%.2fs entities=%d", elapsed, len(entities))
         return entities
@@ -165,10 +168,6 @@ class RemoteDetector:
         entities = full_entities + crop_entities
         entities = _apply_nms(entities, iou_threshold=0.5)
 
-        if self.tracker:
-            entities = self.tracker.update(entities)
-
-        self._previous_entities = entities
         elapsed = time.monotonic() - t0
         logger.info(
             "remote_detect_fast_multi elapsed=%.2fs entities=%d (full=%d crop=%d)",
@@ -179,18 +178,6 @@ class RemoteDetector:
         )
         return entities
 
-    async def detect_adaptive(
-        self,
-        screenshot: bytes | Image.Image,
-        force_full: bool = False,
-    ) -> list[DetectedEntity]:
-        """Adaptive detection. With CoreML's speed, full SAHI is fast enough (~300ms).
-
-        Always delegates to full SAHI detect() since tiling overhead is negligible
-        on the Neural Engine.
-        """
-        return await self.detect(screenshot)
-
     # ------------------------------------------------------------------
     # HTTP helpers
     # ------------------------------------------------------------------
@@ -200,7 +187,7 @@ class RemoteDetector:
         endpoint: str,
         image_bytes: bytes,
         **params: int,
-    ) -> list[dict] | None:
+    ) -> tuple[_RemoteDetection, ...] | None:
         """POST image to server, return detections list or None on failure."""
         import httpx
 
@@ -224,11 +211,31 @@ class RemoteDetector:
                 params=params if params else None,
                 timeout=10.0,
             )
+            if response.status_code == 503:
+                # An overloaded server is healthy. Never replay this stale frame
+                # through the local fallback or mark the server unavailable.
+                busy = _BusyResponse.model_validate(cast("object", response.json()))
+                if busy.reason == "detector_busy":
+                    raise DetectionBusyError(f"{self.server_url}{endpoint} is busy")
             response.raise_for_status()
-            data = cast("dict[str, object]", response.json())
-            detections = data.get("detections", [])
-            return cast("list[dict]", detections) if isinstance(detections, list) else []
-        except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError) as e:
+            # httpx JSON is untyped; validate the external response before use.
+            data = _RemoteResponse.model_validate(cast("object", response.json()))
+            roundtrip_ms = (time.monotonic() - started_at) * 1000
+            logger.info(
+                "remote_detection_latency endpoint=%s roundtrip_ms=%.1f "
+                "server_ms=%.1f transport_overhead_ms=%.1f",
+                endpoint,
+                roundtrip_ms,
+                data.inference_ms,
+                max(0.0, roundtrip_ms - data.inference_ms),
+            )
+            return data.detections
+        except (
+            httpx.RequestError,
+            httpx.HTTPStatusError,
+            ValidationError,
+            ValueError,
+        ) as e:
             logger.warning(
                 "remote_detection_failed server=%s endpoint=%s error_type=%s "
                 "error=%r elapsed=%.2fs fallback=%s",
@@ -250,7 +257,7 @@ class RemoteDetector:
         try:
             resp = await self._client.get(f"{self.server_url}/health", timeout=3.0)
             return resp.status_code == 200
-        except (httpx.ConnectError, httpx.TimeoutException):
+        except httpx.RequestError:
             return False
 
     # ------------------------------------------------------------------
@@ -267,13 +274,13 @@ class RemoteDetector:
         return buf.getvalue()
 
     @staticmethod
-    def _to_entities(detections: list[dict]) -> list[DetectedEntity]:
+    def _to_entities(detections: tuple[_RemoteDetection, ...]) -> list[DetectedEntity]:
         """Convert server detection dicts to DetectedEntity list (no IDs yet)."""
         entities: list[DetectedEntity] = []
         counters: dict[str, int] = {}
 
         for det in detections:
-            cls = det["class_name"]
+            cls = det.class_name
             idx = counters.get(cls, 0)
             counters[cls] = idx + 1
 
@@ -281,10 +288,10 @@ class RemoteDetector:
                 DetectedEntity(
                     id=f"{cls}_{idx}",
                     class_name=cls,
-                    bbox=tuple(det["bbox"]),
-                    center=tuple(det["center"]),
-                    confidence=det["confidence"],
-                    area=det.get("area", 0.0),
+                    bbox=det.bbox,
+                    center=det.center,
+                    confidence=det.confidence,
+                    area=det.area,
                 )
             )
 
