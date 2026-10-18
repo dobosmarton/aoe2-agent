@@ -8,14 +8,15 @@ only a later human-review seal makes them eligible for evaluation.
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import math
 from collections import Counter, defaultdict
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
-from detection.labeling.class_mapping import load_classes_yaml
+from detection.labeling.class_mapping import load_classes_yaml, model_classes_match_schema_prefix
 from detection.labeling.session_dataset import (
     REVIEWED_MANIFEST,
     CaptureSession,
@@ -29,6 +30,9 @@ from detection.labeling.session_dataset import (
 from PIL import Image, ImageDraw
 
 from .evaluate import load_cpu_model, predict
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 _CRITICAL_CLASSES = (
     "sheep",
@@ -81,15 +85,59 @@ def prelabel_session(root: Path, session_id: str, model: Path) -> Path:
     output = directory / "prelabels.coco.json"
     if output.exists():
         raise FileExistsError(output)
+    image_paths = [directory / frame.image for frame in session.frames]
+    coco = _coco_suggestions(model, image_paths, {"session_id": session_id})
+    output.write_text(json.dumps(coco, indent=2) + "\n", encoding="utf-8")
+    return output
+
+
+def prelabel_batch(manifest: Path, model: Path, output: Path) -> Path:
+    """Prelabel a curated development batch while verifying its image hashes."""
+    if output.exists():
+        raise FileExistsError(output)
+    with manifest.open(newline="", encoding="utf-8") as stream:
+        reader = csv.DictReader(stream)
+        if reader.fieldnames is None or not {"image", "split", "sha256"}.issubset(
+            reader.fieldnames
+        ):
+            raise ValueError("Batch manifest needs image, split, and sha256 columns")
+        rows = list(reader)
+    if not rows:
+        raise ValueError("Batch manifest has no images")
+
+    batch_root = manifest.parent.resolve()
+    image_paths: list[Path] = []
+    seen_names: set[str] = set()
+    for row in rows:
+        if row["split"] != "development":
+            raise ValueError("Final-test images must be annotated blind, without model prelabels")
+        relative = Path(row["image"])
+        path = (batch_root / relative).resolve()
+        if not path.is_relative_to(batch_root) or not path.is_file():
+            raise ValueError(f"Batch image is missing or outside the batch: {relative}")
+        if path.name in seen_names:
+            raise ValueError(f"Duplicate image filename in batch: {path.name}")
+        if sha256_file(path) != row["sha256"]:
+            raise ValueError(f"Batch image bytes changed: {relative}")
+        image_paths.append(path)
+        seen_names.add(path.name)
+
+    coco = _coco_suggestions(model, image_paths, {"batch_manifest": manifest.name})
+    output.write_text(json.dumps(coco, indent=2) + "\n", encoding="utf-8")
+    return output
+
+
+def _coco_suggestions(
+    model: Path, image_paths: Sequence[Path], provenance: dict[str, object]
+) -> dict[str, object]:
+    """Run the served ONNX path and emit review-only COCO rectangles."""
     state = load_cpu_model(model)
-    classes = load_classes_yaml()
-    if tuple(classes[index] for index in sorted(classes)) != state.class_names:
+    if not model_classes_match_schema_prefix(state.class_names):
         raise ValueError("Model and annotation class schemas differ")
 
     images: list[dict[str, object]] = []
     annotations: list[dict[str, object]] = []
-    for image_id, frame in enumerate(session.frames, start=1):
-        path = directory / frame.image
+    for image_id, path in enumerate(image_paths, start=1):
         with Image.open(path) as source:
             image = source.convert("RGB")
         images.append(
@@ -122,21 +170,19 @@ def prelabel_session(root: Path, session_id: str, model: Path) -> Path:
                     "score": prediction.confidence,
                 }
             )
-    coco = {
+    return {
         "info": {
             "description": "Model suggestions only; every visible object needs human review",
-            "session_id": session_id,
             "model_sha256": sha256_file(model),
+            **provenance,
         },
         "images": images,
         "annotations": annotations,
         "categories": [
             {"id": class_id + 1, "name": name, "supercategory": ""}
-            for class_id, name in sorted(classes.items())
+            for class_id, name in enumerate(state.class_names)
         ],
     }
-    output.write_text(json.dumps(coco, indent=2) + "\n", encoding="utf-8")
-    return output
 
 
 def import_corrected_coco(
@@ -363,6 +409,7 @@ class _Args(argparse.Namespace):
     command: str
     root: Path
     session_id: str
+    manifest: Path
     model: Path
     coco: Path
     reviewer: str
@@ -373,11 +420,19 @@ class _Args(argparse.Namespace):
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=Path("packages/detection/src/real_screenshots/quality_sessions"),
+    )
     commands = parser.add_subparsers(dest="command", required=True)
     prelabel = commands.add_parser("prelabel")
     prelabel.add_argument("--session-id", required=True)
     prelabel.add_argument("--model", type=Path, required=True)
+    batch = commands.add_parser("prelabel-batch")
+    batch.add_argument("--manifest", type=Path, required=True)
+    batch.add_argument("--model", type=Path, required=True)
+    batch.add_argument("--output", type=Path, required=True)
     imported = commands.add_parser("import-coco")
     imported.add_argument("--session-id", required=True)
     imported.add_argument("--coco", type=Path, required=True)
@@ -393,6 +448,8 @@ def main() -> int:
 
     if args.command == "prelabel":
         print(prelabel_session(args.root, args.session_id, args.model))
+    elif args.command == "prelabel-batch":
+        print(prelabel_batch(args.manifest, args.model, args.output))
     elif args.command == "import-coco":
         count = import_corrected_coco(
             args.root, args.session_id, args.coco, replace_unsealed=args.replace_unsealed

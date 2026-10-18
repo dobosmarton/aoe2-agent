@@ -1,6 +1,6 @@
-# AoE2 Detection Classes — Bundled copy for standalone server deployment.
-# Canonical source: detection/training/config/classes.yaml
-# Sync with: just sync-classes
+# AoE2 Detection Classes — mapping pinned to the deployed 60-class checkpoint.
+# IDs 0-59 match the training schema. Update this file when deploying a model
+# trained with the appended classes; do not advertise classes it cannot predict.
 
 classes:
   # Resources & Nature (9)

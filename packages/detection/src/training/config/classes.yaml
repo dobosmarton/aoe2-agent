@@ -1,5 +1,5 @@
-# AoE2 Detection Classes - Single Source of Truth
-# Used by: YOLO training, CVAT import, detector inference
+# AoE2 Detection Classes - training and annotation schema
+# The deployed server keeps its checkpoint's 60-class mapping until retraining.
 #
 # Guidelines:
 # - Use "_line" suffix for unit upgrade paths (militia_line = militia → champion)
@@ -160,8 +160,18 @@ classes:
   - id: 58
     name: siege_tower
 
-  # Animals (1)
+  # Animals (6)
   - id: 59
     name: goose
+  - id: 60
+    name: goat
+  - id: 61
+    name: cow
+  - id: 62
+    name: buffalo
+  - id: 63
+    name: horse
+  - id: 64
+    name: rhinoceros
 
-# Total: 60 classes
+# Total: 65 classes. IDs 0-59 retain the deployed model's mapping.

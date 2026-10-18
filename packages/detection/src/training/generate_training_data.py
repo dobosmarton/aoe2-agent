@@ -133,7 +133,7 @@ BIOME_PALETTES = {
 }
 
 
-# Sprite configurations using classes.yaml IDs directly (60 classes)
+# Sprite configurations use stable classes.yaml IDs directly.
 # Organized by category with appropriate z-order and spawn rates.
 # `SPRITE_CONFIGS` below applies the D2 rebalancing policy to these base configs.
 _BASE_SPRITE_CONFIGS = [
@@ -1422,7 +1422,7 @@ class TrainingDataGenerator:
 
     def _create_yaml(self) -> Path:
         """Create YOLO dataset configuration file."""
-        # Names MUST cover the full classes.yaml taxonomy (all 60, contiguous ids) —
+        # Names MUST cover the full classes.yaml taxonomy (contiguous IDs) —
         # not just the synthesized classes. Dropping an unsynthesized id (e.g.
         # farm=16, which has no sprite) leaves a gap in the names dict that makes
         # ultralytics reject labels (class id >= nc) or mismap every later class.

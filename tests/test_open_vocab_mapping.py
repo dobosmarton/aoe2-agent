@@ -5,16 +5,37 @@ These run against the real bundled `classes.yaml` (no model, no network).
 
 from __future__ import annotations
 
+from detection.labeling.class_mapping import load_classes_yaml, model_classes_match_schema_prefix
 from detection.labeling.open_vocab_mapping import (
     build_class_prompts,
     map_open_vocab_label,
 )
 
 
-def test_prompts_cover_all_60_classes() -> None:
+def test_prompts_cover_all_65_classes() -> None:
     prompts = build_class_prompts()
-    assert len(prompts) == 60
+    assert len(prompts) == 65
     assert all(len(phrases) >= 1 for phrases in prompts.values())
+
+
+def test_new_animal_labels_have_stable_ids() -> None:
+    assert {
+        name: map_open_vocab_label(name)
+        for name in ("goat", "cow", "buffalo", "horse", "rhinoceros")
+    } == {
+        "goat": 60,
+        "cow": 61,
+        "buffalo": 62,
+        "horse": 63,
+        "rhinoceros": 64,
+    }
+
+
+def test_deployed_model_keeps_the_stable_60_class_prefix() -> None:
+    names = tuple(load_classes_yaml().values())
+    assert model_classes_match_schema_prefix(names[:60])
+    assert model_classes_match_schema_prefix(names)
+    assert not model_classes_match_schema_prefix((*names[:59], "goat"))
 
 
 def test_unique_class_prompts_include_civ_examples() -> None:

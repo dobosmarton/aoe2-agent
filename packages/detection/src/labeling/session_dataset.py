@@ -26,6 +26,9 @@ CAPTURE_MANIFEST = "capture.json"
 REVIEWED_MANIFEST = "reviewed_annotations.json"
 _SESSION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{2,63}\Z")
 _CLASS_SCHEMA = Path(__file__).resolve().parents[1] / "training/config/classes.yaml"
+# Captures made with the deployed 60-class schema. Existing IDs are unchanged.
+_LEGACY_SCHEMA_LF_SHA256 = "5365dcf538d16f9b237070a5e9c7609028314794dd8e544233eecb76a09de717"
+_LEGACY_SCHEMA_CRLF_SHA256 = "7d72d1039493e8aa63eaa8c81141671867285192b346915cc02d6711115e8e71"
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,7 +87,23 @@ def sha256_file(path: Path) -> str:
 
 
 def class_schema_sha256() -> str:
-    return sha256_file(_CLASS_SCHEMA)
+    """Hash the class schema independently of the checkout's line endings."""
+    return hashlib.sha256(_class_schema_bytes()).hexdigest()
+
+
+def _class_schema_bytes() -> bytes:
+    return _CLASS_SCHEMA.read_bytes().replace(b"\r\n", b"\n")
+
+
+def _normalized_class_schema_hash(digest: str) -> str | None:
+    """Accept the current schema and the recorded 60-class capture schema."""
+    schema = _class_schema_bytes()
+    current = hashlib.sha256(schema).hexdigest()
+    if digest in {current, hashlib.sha256(schema.replace(b"\n", b"\r\n")).hexdigest()}:
+        return current
+    if digest in {_LEGACY_SCHEMA_LF_SHA256, _LEGACY_SCHEMA_CRLF_SHA256}:
+        return _LEGACY_SCHEMA_LF_SHA256
+    return None
 
 
 def _mapping(value: object) -> dict[str, object]:
@@ -204,6 +223,7 @@ def write_session(directory: Path, session: CaptureSession) -> None:
 
 def load_session(directory: Path) -> CaptureSession:
     data = _read_json(directory / CAPTURE_MANIFEST)
+    schema_hash = _normalized_class_schema_hash(_digest(_string(data, "class_schema_sha256")))
     frames = tuple(
         CaptureFrame(
             image=_string(frame, "image"),
@@ -236,7 +256,7 @@ def load_session(directory: Path) -> CaptureSession:
     )
     if (
         _integer(data, "schema_version") != SCHEMA_VERSION
-        or _digest(_string(data, "class_schema_sha256")) != session.class_schema_sha256
+        or schema_hash is None
         or directory.name != session.session_id
     ):
         raise ValueError(f"Session schema, class mapping, or path changed: {directory}")
@@ -257,7 +277,7 @@ def load_session(directory: Path) -> CaptureSession:
         ui_scale=session.ui_scale,
         width=session.width,
         height=session.height,
-        class_schema_sha256=session.class_schema_sha256,
+        class_schema_sha256=schema_hash,
         frames=frames,
     )
 
@@ -348,7 +368,7 @@ def seal_reviewed_labels(directory: Path, reviewer: str) -> ReviewedAnnotations:
     reviewed = ReviewedAnnotations(
         SCHEMA_VERSION,
         session.session_id,
-        session.class_schema_sha256,
+        class_schema_sha256(),
         reviewer,
         utc_now(),
         tuple(labels),
@@ -359,6 +379,7 @@ def seal_reviewed_labels(directory: Path, reviewer: str) -> ReviewedAnnotations:
 
 def load_reviewed_labels(directory: Path, session: CaptureSession) -> ReviewedAnnotations:
     data = _read_json(directory / REVIEWED_MANIFEST)
+    schema_hash = _normalized_class_schema_hash(_digest(_string(data, "class_schema_sha256")))
     labels = tuple(
         ReviewedLabel(
             image=_string(label, "image"),
@@ -370,7 +391,7 @@ def load_reviewed_labels(directory: Path, session: CaptureSession) -> ReviewedAn
     if (
         _integer(data, "schema_version") != SCHEMA_VERSION
         or _string(data, "session_id") != session.session_id
-        or _digest(_string(data, "class_schema_sha256")) != session.class_schema_sha256
+        or schema_hash is None
     ):
         raise ValueError(f"Reviewed label manifest does not match capture session: {directory}")
     if len(labels) != len(session.frames) or {item.image for item in labels} != {
@@ -389,7 +410,7 @@ def load_reviewed_labels(directory: Path, session: CaptureSession) -> ReviewedAn
     return ReviewedAnnotations(
         SCHEMA_VERSION,
         session.session_id,
-        session.class_schema_sha256,
+        schema_hash,
         _string(data, "reviewer"),
         _utc_timestamp(data, "reviewed_at"),
         labels,

@@ -30,7 +30,7 @@ from detection.inference.thresholds import (
     CLASS_THRESHOLDS,
     DEFAULT_CONFIDENCE,
 )
-from detection.labeling.class_mapping import load_classes_yaml
+from detection.labeling.class_mapping import model_classes_match_schema_prefix
 from detection.testing.evaluate_real import (
     GroundTruth,
     Prediction,
@@ -191,7 +191,7 @@ def build_report(
     model: Path, cases: list[Case], state: ModelState, samples: list[Sample]
 ) -> dict[str, object]:
     repo = Path(__file__).resolve().parents[3]
-    class_schema = repo / "packages/detection/src/training/config/classes.yaml"
+    class_schema = Path(__file__).with_name("classes.yaml")
     thresholds_source = repo / "packages/detection/src/inference/thresholds.py"
     server_source = Path(__file__).with_name("app.py")
     by_class = _score(samples, conf=0.0, iou_thr=MATCH_IOU)
@@ -253,8 +253,7 @@ def main() -> int:
         raise ValueError(f"Expected an ONNX model: {model}")
     cases = discover_cases(data)
     state = load_cpu_model(model)
-    schema = load_classes_yaml()
-    if tuple(schema[index] for index in sorted(schema)) != state.class_names:
+    if not model_classes_match_schema_prefix(state.class_names):
         raise ValueError("Detector server and training class schemas disagree")
     samples = collect_samples(state, cases)
     report = build_report(model, cases, state, samples)

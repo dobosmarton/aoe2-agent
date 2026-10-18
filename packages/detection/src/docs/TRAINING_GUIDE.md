@@ -168,7 +168,7 @@ Extracts curated game sprites organized by gameplay-relevant categories.
 | Monks & Special | monk, king |
 | Unique Units | unique_archer, unique_cavalry, unique_infantry, unique_siege, unique_ship |
 | Naval | fish, galley, fire_galley |
-| Animals | goose |
+| Animals | goose, goat, cow, buffalo, horse, rhinoceros |
 
 ### Usage
 ```bash
@@ -320,6 +320,11 @@ names:
   57: fire_galley
   58: siege_tower
   59: goose
+  60: goat
+  61: cow
+  62: buffalo
+  63: horse
+  64: rhinoceros
 EOF
 ```
 
@@ -403,7 +408,7 @@ from ultralytics import YOLO
 class EntityDetector:
     def __init__(self, model_path="detection/inference/models/aoe2_yolo_v9.pt"):
         self.model = YOLO(model_path)
-        # Class names loaded from classes.yaml (60 classes)
+        # Class names come from the model's training schema.
         # See detection/training/config/classes.yaml for the full list
         self.class_names = DEFAULT_CLASSES  # from detector.py
 
@@ -494,7 +499,7 @@ detection/
 │   ├── train_yolo.py            # YOLO training script (yolo26n.pt base; pass --name aoe2_yolo_vN)
 │   ├── generate_training_data.py # Synthetic data generator (canonical)
 │   └── config/
-│       └── classes.yaml         # Class definitions (60 classes)
+│       └── classes.yaml         # Class definitions (65 classes)
 ├── labeling/                    # Prelabeling & active learning
 │   ├── prelabel.py              # Model + open-vocab (yoloe/dinox) prelabeling
 │   ├── hard_negatives.py        # Surfaces low-confidence cavalry confusions

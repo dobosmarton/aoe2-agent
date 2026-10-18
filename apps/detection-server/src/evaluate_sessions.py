@@ -11,7 +11,7 @@ import argparse
 import json
 from pathlib import Path
 
-from detection.labeling.class_mapping import load_classes_yaml
+from detection.labeling.class_mapping import model_classes_match_schema_prefix
 from detection.labeling.session_dataset import (
     CAPTURE_MANIFEST,
     REVIEWED_MANIFEST,
@@ -53,8 +53,7 @@ def evaluate_sessions(
         label_hashes[session.session_id] = sha256_file(directory / REVIEWED_MANIFEST)
 
     state = load_cpu_model(model)
-    classes = load_classes_yaml()
-    if tuple(classes[index] for index in sorted(classes)) != state.class_names:
+    if not model_classes_match_schema_prefix(state.class_names):
         raise ValueError("Model/server classes do not match the dataset schema")
     samples = collect_samples(state, cases)
     report = build_report(model, cases, state, samples)

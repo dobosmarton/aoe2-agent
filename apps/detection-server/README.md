@@ -11,7 +11,7 @@ capture + click execution.
 ```
 packages/detection-server/src/
 ├── app.py            # FastAPI app: POST /detect, POST /detect/sahi, GET /health
-└── classes.yaml      # Bundled class list (synced from packages/detection/src/training/config/classes.yaml)
+└── classes.yaml      # Class mapping for the deployed checkpoint
 ```
 
 ## Common entry points
@@ -37,9 +37,10 @@ curl http://192.168.64.1:8420/health
 
 ## Conventions
 
-- `classes.yaml` is bundled inside the wheel via `package-data`. Keep it
-  synced with `packages/detection/src/training/config/classes.yaml` via
-  `just sync-classes` after any class-list change in training.
+- `classes.yaml` is bundled inside the wheel via `package-data`. It must match
+  the checkpoint being served. The training schema now has 65 classes, while
+  the deployed checkpoint still has 60; append the five new classes here when
+  deploying a model trained with them.
 - CoreML inference is opt-in via the `coreml` extra on `detection`
   (`coremltools` is macOS-only, so it's not in the default deps).
 

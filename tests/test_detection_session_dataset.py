@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -10,10 +11,13 @@ import pytest
 from detection.labeling.class_mapping import load_classes_yaml
 from detection.labeling.session_dataset import (
     Split,
+    class_schema_sha256,
     label_path,
     list_sessions,
     load_reviewed_labels,
+    load_session,
     seal_reviewed_labels,
+    sha256_file,
 )
 from detection.testing.evaluate_real import Prediction
 from detection_server.app import ModelState
@@ -21,6 +25,7 @@ from detection_server.evaluate_sessions import evaluate_sessions
 from detection_server.session_tools import (
     audit_dataset,
     import_corrected_coco,
+    prelabel_batch,
     prelabel_session,
     render_qa_gallery,
 )
@@ -127,6 +132,51 @@ def test_identical_images_cannot_cross_splits(tmp_path: Path) -> None:
         list_sessions(tmp_path)
 
 
+def test_capture_schema_hash_accepts_windows_line_endings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    schema = tmp_path / "classes.yaml"
+    schema.write_bytes(b"names:\n  0: tree\n")
+    monkeypatch.setattr("detection.labeling.session_dataset._CLASS_SCHEMA", schema)
+    canonical_hash = class_schema_sha256()
+    windows_hash = hashlib.sha256(b"names:\r\n  0: tree\r\n").hexdigest()
+    assert canonical_hash != windows_hash
+
+    _capture(tmp_path, "match_dev", "development", "green")
+    directory = tmp_path / "match_dev"
+    manifest_path = directory / "capture.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["class_schema_sha256"] = windows_hash
+    manifest_path.write_text(json.dumps(manifest))
+    assert load_session(directory).class_schema_sha256 == canonical_hash
+
+    schema.write_bytes(b"names:\r\n  0: tree\r\n")
+    assert class_schema_sha256() == canonical_hash
+    assert load_session(directory).class_schema_sha256 == canonical_hash
+
+
+def test_previous_capture_schema_accepts_new_animal_labels(tmp_path: Path) -> None:
+    _capture(tmp_path, "match_dev", "development", "green")
+    directory = tmp_path / "match_dev"
+    manifest_path = directory / "capture.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["class_schema_sha256"] = (
+        "7d72d1039493e8aa63eaa8c81141671867285192b346915cc02d6711115e8e71"
+    )
+    manifest_path.write_text(json.dumps(manifest))
+    session = load_session(directory)
+    assert session.class_schema_sha256 != class_schema_sha256()
+
+    coco_path = _coco(directory, ["frame_00000.png"])
+    coco = json.loads(coco_path.read_text())
+    coco["categories"][0]["name"] = "goat"
+    coco_path.write_text(json.dumps(coco))
+    assert import_corrected_coco(tmp_path, "match_dev", coco_path) == 1
+    reviewed = seal_reviewed_labels(directory, "human-reviewer")
+    assert reviewed.class_schema_sha256 == class_schema_sha256()
+    assert label_path(directory, session.frames[0]).read_text().startswith("60 ")
+
+
 def test_final_test_cannot_be_prelabelled_or_scored_early(tmp_path: Path) -> None:
     _capture(tmp_path, "match_test", "final_test", "red")
     model = tmp_path / "model.onnx"
@@ -192,7 +242,7 @@ def test_prelabels_use_current_predictor_without_marking_reviewed(
     _capture(tmp_path, "match_dev", "development", "green")
     model = tmp_path / "model.onnx"
     model.write_bytes(b"model")
-    class_names = tuple(load_classes_yaml().values())
+    class_names = tuple(list(load_classes_yaml().values())[:60])
     monkeypatch.setattr(
         "detection_server.session_tools.load_cpu_model",
         lambda _: ModelState("onnx_cpu", object(), class_names, str(model)),
@@ -207,7 +257,45 @@ def test_prelabels_use_current_predictor_without_marking_reviewed(
     assert prelabels["annotations"][0]["category_id"] == 9
     assert prelabels["annotations"][0]["bbox"] == [0.0, 10, 20.0, 10]
     assert prelabels["info"]["model_sha256"]
+    assert len(prelabels["categories"]) == 60
     assert audit_dataset(tmp_path)["unreviewed_sessions"] == ["match_dev"]
+
+
+def test_curated_batch_prelabels_verify_images_and_reject_test_split(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    images = tmp_path / "images"
+    images.mkdir()
+    image = images / "scene.png"
+    Image.new("RGB", (64, 48), "green").save(image)
+    digest = sha256_file(image)
+    manifest = tmp_path / "manifest.csv"
+    manifest.write_text(f"image,split,sha256\nimages/scene.png,development,{digest}\n")
+    model = tmp_path / "model.onnx"
+    model.write_bytes(b"model")
+    class_names = tuple(load_classes_yaml().values())
+    monkeypatch.setattr(
+        "detection_server.session_tools.load_cpu_model",
+        lambda _: ModelState("onnx_cpu", object(), class_names, str(model)),
+    )
+    monkeypatch.setattr(
+        "detection_server.session_tools.predict",
+        lambda *_: [Prediction(8, (10, 10, 20, 20), 0.9)],
+    )
+
+    output = tmp_path / "prelabels.coco.json"
+    assert prelabel_batch(manifest, model, output) == output
+    coco = json.loads(output.read_text())
+    assert coco["images"][0]["file_name"] == "scene.png"
+    assert coco["annotations"][0]["category_id"] == 9
+    assert coco["annotations"][0]["score"] == 0.9
+
+    manifest.write_text(f"image,split,sha256\nimages/scene.png,final_test,{digest}\n")
+    with pytest.raises(ValueError, match="annotated blind"):
+        prelabel_batch(manifest, model, tmp_path / "test.json")
+    manifest.write_text("image,split,sha256\nimages/scene.png,development,bad\n")
+    with pytest.raises(ValueError, match="bytes changed"):
+        prelabel_batch(manifest, model, tmp_path / "changed.json")
 
 
 def test_explicit_final_test_uses_the_frozen_scorer(

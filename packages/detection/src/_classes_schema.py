@@ -1,9 +1,8 @@
 """Typed schema for `classes.yaml` (the canonical detection class list).
 
-A single `classes.yaml` is bundled both with the inference server
-(`server/classes.yaml`) and the training config
-(`detection/training/config/classes.yaml`). All three loaders
-(server, detector, class_mapping) parse the same shape:
+The training schema can grow before a matching detector is trained.
+The inference server bundles the class mapping for its deployed checkpoint.
+Both YAML files use the same shape:
 
 ```yaml
 classes:

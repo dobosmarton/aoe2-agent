@@ -113,9 +113,6 @@ export-coreml model="detection/inference/models/aoe2_yolo_v5.pt":
 train model="yolo11n.pt" *ARGS:
     uv run --package detection python -m detection.training.train_yolo --model {{model}} {{ARGS}}
 
-sync-classes:
-    cp packages/detection/src/training/config/classes.yaml apps/detection-server/src/classes.yaml
-
 # ── Synthetic arena infrastructure ────────────────────────────────────────
 
 arena-infra-up:

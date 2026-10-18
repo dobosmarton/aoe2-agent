@@ -1,11 +1,12 @@
 """
 Class ID mapping utilities for AoE2 detection class scheme.
 
-The canonical class scheme is defined in classes.yaml (60 classes).
+The canonical class scheme is defined in classes.yaml.
 This module provides utilities for loading class definitions
 and generating CVAT-compatible class lists.
 """
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -19,7 +20,7 @@ _CONFIG_DIR = Path(__file__).parent.parent / "training" / "config"
 
 
 def load_classes_yaml(path: Path | None = None) -> dict[int, str]:
-    """Load the 60-class schema from classes.yaml.
+    """Load the current class schema from classes.yaml.
 
     Returns:
         Dict mapping class ID -> class name.
@@ -40,6 +41,14 @@ def get_classes_for_cvat() -> list[str]:
     classes = load_classes_yaml()
     max_id = max(classes.keys())
     return [classes.get(i, f"unknown_{i}") for i in range(max_id + 1)]
+
+
+def model_classes_match_schema_prefix(model_classes: Sequence[str]) -> bool:
+    """A checkpoint may support the unchanged prefix of a newer training schema."""
+    classes = load_classes_yaml()
+    return bool(model_classes) and all(
+        classes.get(index) == name for index, name in enumerate(model_classes)
+    )
 
 
 def write_classes_txt(output_path: Path) -> None:

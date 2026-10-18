@@ -6,15 +6,17 @@ tags:
   - age-of-empires-ii
   - yolo26
   - onnx
+  - pytorch
 ---
 
 # AoE2 entity detector
 
 This model detects 60 entity classes in Age of Empires II: Definitive Edition
 screenshots. `model.onnx` contains the weights used by this project's Mac-hosted
-detector server. The model repository is an artifact registry, not a hosted
-inference API. Future versions replace `model.onnx` in a new commit;
-consumers must pin a commit or release tag.
+detector server; `model.pt` is the matching Ultralytics checkpoint for further
+training. The model repository is an artifact registry, not a hosted inference
+API. Future versions replace the weights in a new commit; consumers must pin a
+commit or release tag.
 
 ## Intended use
 
@@ -25,6 +27,24 @@ included in this artifact release.
 
 The model is fine-tuned from the Ultralytics YOLO26n base model and exported to
 ONNX. Its metadata identifies the Ultralytics AGPL-3.0 license.
+
+## Continue training
+
+Download the PyTorch checkpoint and load it with Ultralytics to fine-tune on a
+YOLO-format dataset:
+
+```python
+from huggingface_hub import hf_hub_download
+from ultralytics import YOLO
+
+checkpoint = hf_hub_download("martondobos/aoe2-entity-detector", "model.pt")
+model = YOLO(checkpoint)
+model.train(data="your_dataset.yaml", imgsz=1280)
+```
+
+Pin a repository revision for reproducible work. PyTorch checkpoints use pickle;
+load them only from sources you trust. The dataset and extracted game sprites
+used for this checkpoint are not included in this repository.
 
 ## License and terms
 
@@ -77,10 +97,12 @@ validation result.
 ## Provenance
 
 - Served registry artifact: `model.onnx`
-- Model SHA-256: `515a018bc2190fdf5427a01ff21e294331324929c8603d870c18255626cee8fd`
+- ONNX SHA-256: `515a018bc2190fdf5427a01ff21e294331324929c8603d870c18255626cee8fd`
+- Fine-tuning artifact: `model.pt`
+- PyTorch SHA-256: `3ce9e0ef7735a4a865f1c40e543b815ec934d10ea95a9de6b698a7a5190c9f3a`
 - Class schema SHA-256: `5365dcf538d16f9b237070a5e9c7609028314794dd8e544233eecb76a09de717`
 - Detector source revision: `ca4b06310a49d46381c043bec3a35618c0e5dee2`
 
 For reproducible game runs, download a full-commit-pinned revision and verify
-both checksums before starting the detector server. Do not download weights in
-the agent's frame-processing loop.
+the ONNX and class-schema checksums before starting the detector server. Do not
+download weights in the agent's frame-processing loop.
