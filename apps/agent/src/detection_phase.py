@@ -10,6 +10,7 @@ import structlog
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    import numpy as np
     from core import DetectedEntity
     from detection.inference.detector import EntityDetector
     from detection.inference.ownership import Owner
@@ -178,6 +179,7 @@ async def summarize_frame(
     screenshot: bytes,
     *,
     profile: GameProfile | None = None,
+    rgb_pixels: np.ndarray | None = None,
 ) -> tuple[str, dict[str, tuple[Owner, float]]]:
     """The frame as the LLM reads it: a summary line, plus who owns each unit.
 
@@ -189,7 +191,7 @@ async def summarize_frame(
         return "", ownership_results
 
     try:
-        from detection.inference.ownership import Owner
+        from detection.inference.ownership import Owner, classify_entities_pixels
         from detection.inference.ownership import classify_entities as classify_ownership
 
         from .goals import THREAT_CLASSES
@@ -199,13 +201,22 @@ async def summarize_frame(
             if profile is not None and profile.roster_verified and profile.ownership_verified
             else None
         )
-        ownership_results = await asyncio.to_thread(
-            classify_ownership,
-            screenshot,
-            list(detected_entities),
-            THREAT_CLASSES | GATE_BUILDING_CLASSES,
-            color_owners,
-        )
+        if rgb_pixels is None:
+            ownership_results = await asyncio.to_thread(
+                classify_ownership,
+                screenshot,
+                list(detected_entities),
+                THREAT_CLASSES | GATE_BUILDING_CLASSES,
+                color_owners,
+            )
+        else:
+            ownership_results = await asyncio.to_thread(
+                classify_entities_pixels,
+                rgb_pixels,
+                list(detected_entities),
+                THREAT_CLASSES | GATE_BUILDING_CLASSES,
+                color_owners,
+            )
     except Exception as e:
         # Ownership is an enrichment: the summary is still worth returning.
         log.debug("ownership_classification_failed", error=str(e))

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import mss
+import numpy as np
 from PIL import Image
 
 from .config import config
@@ -29,14 +30,15 @@ class NativeCapture:
     def image(self) -> Image.Image:
         return Image.frombytes("RGB", (self.width, self.height), self.rgb)
 
+    def pixels(self) -> np.ndarray:
+        """Read-only RGB view backed by this capture's immutable bytes."""
+        return np.frombuffer(self.rgb, dtype=np.uint8).reshape((self.height, self.width, 3))
+
+    def hud_pixels(self) -> np.ndarray:
+        return self.pixels()[: min(self.height, 300)]
+
     def jpeg(self, quality: int | None = None) -> bytes:
         return _jpeg(self.image(), config.screenshot_quality if quality is None else quality)
-
-    def native_hud(self) -> bytes:
-        image = self.image().crop((0, 0, self.width, min(self.height, 300)))
-        buffer = io.BytesIO()
-        image.save(buffer, format="PNG")
-        return buffer.getvalue()
 
 
 def _capture_image(monitor: int, rect: tuple[int, int, int, int] | None = None) -> Image.Image:
@@ -97,22 +99,6 @@ def capture_screenshot(monitor: int = 1, quality: int | None = None) -> tuple[by
 
     image = _capture_image(monitor)
     return _jpeg(image, quality), image.width, image.height
-
-
-def capture_screenshot_with_native_hud(
-    monitor: int = 1, quality: int | None = None
-) -> tuple[bytes, bytes, int, int]:
-    """Return full JPEG plus lossless top-HUD pixels from the same capture."""
-    image = _capture_image(monitor)
-    hud = image.crop((0, 0, image.width, min(image.height, 300)))
-    hud_buffer = io.BytesIO()
-    hud.save(hud_buffer, format="PNG")
-    return (
-        _jpeg(image, config.screenshot_quality if quality is None else quality),
-        hud_buffer.getvalue(),
-        image.width,
-        image.height,
-    )
 
 
 def save_screenshot(data: bytes, path: str) -> None:

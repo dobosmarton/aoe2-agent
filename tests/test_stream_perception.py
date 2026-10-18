@@ -19,7 +19,7 @@ from gameplay_agent.executor import ActionLedger
 from gameplay_agent.loops.snapshot import FramePipe, Perception
 from gameplay_agent.loops.source import GameSource, RawSpatial, StreamCapture
 from gameplay_agent.screen import NativeCapture
-from gameplay_agent.temporal_entities import TemporalEntities
+from gameplay_agent.temporal_entities import TemporalEntities, prepare_detections
 
 _SIZE = (640, 360)
 
@@ -44,13 +44,11 @@ def _observe(
 ) -> tuple[EntitySnapshot, ...]:
     frame = _pixels() if pixels is None else pixels
     return tracks.observe(
-        entities,
+        prepare_detections(entities, frame),
         capture_id=capture_id,
         captured_at=at,
         camera_revision=0,
         motion=motion,
-        rgb=frame.tobytes(),
-        size=_SIZE,
     )
 
 
@@ -228,7 +226,13 @@ def test_uncommanded_pan_is_discovered_when_spatial_result_is_published() -> Non
             0,
         )
         analysis = analysis_pixels(pixels.tobytes(), *_SIZE, limits)
-        return RawSpatial(capture, b"jpeg", (_entity("tree", box),), analysis.tobytes(), {})
+        return RawSpatial(
+            capture,
+            b"jpeg",
+            prepare_detections((_entity("tree", box),), pixels),
+            analysis.tobytes(),
+            {},
+        )
 
     async def drive() -> tuple[EntitySnapshot, EntitySnapshot]:
         first = await source.integrate_spatial(raw(1, 1.0, first_pixels, (100, 100, 120, 140)))

@@ -168,9 +168,18 @@ def classify_entities(
     Returns:
         Dict mapping entity_id -> (Owner, blue_ratio).
     """
-    # Open image once
+    # File and server callers keep the encoded adapter; live capture supplies RGB.
     img = Image.open(io.BytesIO(screenshot_bytes)).convert("RGB")
-    img_array = np.array(img)
+    return classify_entities_pixels(np.asarray(img), entities, threat_classes, color_owners)
+
+
+def classify_entities_pixels(
+    img_array: np.ndarray,
+    entities: list,
+    threat_classes: frozenset[str],
+    color_owners: Mapping[str, Owner] | None = None,
+) -> dict[str, tuple[Owner, float]]:
+    """Classify current detections from the capture's native RGB pixels."""
 
     results: dict[str, tuple[Owner, float]] = {}
 

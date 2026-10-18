@@ -408,12 +408,13 @@ def test_read_hud_readings_precedence(monkeypatch):
         calls["read"] += 1
         return {"food": 200, "wood": 200, "gold": 100, "stone": 200, "population": "4/5"}
 
-    def fake_autodetect(_bytes):
+    def fake_autodetect(_pixels, *, full_size):
+        assert full_size == (20, 10)
         calls["auto"] += 1
         return _empty_test_calibration() if calls["auto"] == 1 else None
 
-    monkeypatch.setattr(strat_mod, "read_resource_bar", fake_read)
-    monkeypatch.setattr(strat_mod, "autodetect_calibration", fake_autodetect)
+    monkeypatch.setattr(strat_mod, "read_resource_bar_pixels", fake_read)
+    monkeypatch.setattr(strat_mod, "autodetect_calibration_pixels", fake_autodetect)
 
     # Hand YAML present → used; auto-detect never called.
     monkeypatch.setattr(strat_mod, "calibration_for", lambda w, h: _empty_test_calibration())
@@ -442,7 +443,7 @@ def _patch_hud_seams(monkeypatch, *, backend: str, age_reads: list) -> None:
     monkeypatch.setattr(strat_mod, "calibration_for", lambda w, h: _empty_test_calibration())
     monkeypatch.setattr(
         strat_mod,
-        "read_resource_bar",
+        "read_resource_bar_pixels",
         lambda *_a, **_k: {"food": 1, "wood": 2, "gold": 3, "stone": 4, "age": ""},
     )
 
@@ -450,7 +451,7 @@ def _patch_hud_seams(monkeypatch, *, backend: str, age_reads: list) -> None:
         age_reads.append(True)
         return "Feudal Age"
 
-    monkeypatch.setattr(strat_mod, "read_age", fake_read_age)
+    monkeypatch.setattr(strat_mod, "read_age_pixels", fake_read_age)
 
 
 def test_read_hud_readings_samples_age_on_template_backend(monkeypatch):
@@ -510,7 +511,7 @@ def test_critical_hud_read_never_escalates_to_slow_ocr(
             else {"food": 200, "wood": 200, "gold": 100, "stone": 200, "population": "4/5"}
         )
 
-    monkeypatch.setattr(strat_mod, "read_resource_bar", read_bar)
+    monkeypatch.setattr(strat_mod, "read_resource_bar_pixels", read_bar)
 
     readings, _ = asyncio.run(strat_mod.read_hud_readings(png, turn=0, mode="critical"))
 
@@ -547,7 +548,7 @@ def test_runtime_uses_calibrated_templates_before_slow_ocr(monkeypatch, tmp_path
         calls.append(backend)
         return {"food": 200, "wood": 200, "gold": 100, "stone": 200, "population": "4/5"}
 
-    monkeypatch.setattr(strat_mod, "read_resource_bar", fake_read)
+    monkeypatch.setattr(strat_mod, "read_resource_bar_pixels", fake_read)
     readings, _calibration = asyncio.run(strat_mod.read_hud_readings(png, turn=6))
     assert calls == ["template"]
     assert readings["population"] == "4/5"
@@ -574,7 +575,7 @@ def test_runtime_escalates_unresolved_population_only(monkeypatch, tmp_path):
             result["population"] = "4/5"
         return result
 
-    monkeypatch.setattr(strat_mod, "read_resource_bar", fake_read)
+    monkeypatch.setattr(strat_mod, "read_resource_bar_pixels", fake_read)
     readings, _calibration = asyncio.run(strat_mod.read_hud_readings(png, turn=6))
     assert calls == ["template", "rapidocr"]
     assert readings["population"] == "4/5"

@@ -28,15 +28,10 @@ from ..detection_phase import DetectionBusyError, detect_frame, summarize_frame
 from ..entity_snapshot import snapshot_entities
 from ..entity_utils import build_entity_summary
 from ..executor import execute_actions
-from ..providers.strategist import read_hud_readings
-from ..resource_ocr import calibration_for, read_selected_unit
-from ..screen import (
-    NativeCapture,
-    capture_native,
-    capture_screenshot_with_native_hud,
-    save_screenshot,
-)
-from ..temporal_entities import TemporalEntities
+from ..providers.strategist import read_hud_pixels
+from ..resource_ocr import calibration_for, read_selected_unit_pixels
+from ..screen import NativeCapture, capture_native
+from ..temporal_entities import PreparedDetection, TemporalEntities, prepare_detections
 from ..turn_timing import TickTimings
 from ..window import get_game_window_rect
 from .snapshot import FramePipe, Perception, SpatialRefresh
@@ -130,12 +125,16 @@ class RawSpatial:
 
     capture: StreamCapture
     screenshot: bytes
-    entities: tuple[EntitySnapshot, ...]
+    prepared: tuple[PreparedDetection, ...]
     analysis: bytes
     ownership: Mapping[str, tuple[Owner, float]]
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "ownership", MappingProxyType(dict(self.ownership)))
+
+    @property
+    def entities(self) -> tuple[EntitySnapshot, ...]:
+        return tuple(item.entity for item in self.prepared)
 
 
 class FrameSource(Protocol):
@@ -168,12 +167,21 @@ class Actuator(Protocol):
         ...
 
 
-def _grab() -> tuple[bytes, bytes, int, int, float]:
-    """Screenshot plus its capture instant, off the event loop. The stamp comes
-    first, so a frame reads older than it is — staleness then errs to skipping."""
-    stamped = time.monotonic()
-    screenshot, native_hud, width, height = capture_screenshot_with_native_hud()
-    return screenshot, native_hud, width, height, stamped
+def _prepare_spatial(
+    capture: NativeCapture, entities: tuple[EntitySnapshot, ...]
+) -> tuple[bytes, tuple[PreparedDetection, ...], float, float]:
+    """Prepare camera and appearance evidence off the event loop."""
+    pixels = capture.pixels()
+    analysis_started = time.perf_counter()
+    analysis = analysis_pixels(capture.rgb, capture.width, capture.height, MotionLimits())
+    appearance_started = time.perf_counter()
+    prepared = prepare_detections(entities, pixels)
+    return (
+        analysis.tobytes(),
+        prepared,
+        (appearance_started - analysis_started) * 1000,
+        (time.perf_counter() - appearance_started) * 1000,
+    )
 
 
 class GameSource:
@@ -222,15 +230,6 @@ class GameSource:
             captured_at=pixels.captured_at,
         )
         self._capture_id += 1
-        if (
-            self._writer is not None
-            and config.save_screenshots
-            and self._screenshots_dir is not None
-            and self._capture_id % _SCREENSHOT_SAMPLE == 0
-        ):
-            screenshot = await asyncio.to_thread(pixels.jpeg)
-            path = self._screenshots_dir / f"capture_{self._capture_id:06d}.jpg"
-            self._writer.submit(path, screenshot)
         ledger = self._ledger
         return StreamCapture(
             pixels,
@@ -244,10 +243,7 @@ class GameSource:
 
     async def read_stream_hud(self, capture: StreamCapture, tick: int) -> Sighting | None:
         timings = TickTimings()
-        hud = await asyncio.to_thread(capture.pixels.native_hud)
-        readings = await self._hud(
-            hud, tick, timings, (capture.pixels.width, capture.pixels.height)
-        )
+        readings = await self._hud(capture.pixels, tick, timings)
         ledger = self._ledger
         if ledger is not None and capture.economic_revision != ledger.economic_revision:
             log.info("hud_result_discarded", capture_id=capture.capture_id, reason="economic_input")
@@ -271,6 +267,13 @@ class GameSource:
 
     async def detect_stream(self, capture: StreamCapture, tick: int) -> RawSpatial | None:
         """Run one detector call without touching published camera or track state."""
+        raw, _screenshot = await self._detect_with_screenshot(capture, tick)
+        return raw
+
+    async def _detect_with_screenshot(
+        self, capture: StreamCapture, tick: int
+    ) -> tuple[RawSpatial | None, bytes]:
+        """Retain the request JPEG even when the detector is temporarily busy."""
         del tick
         async with self._inference_lock:
             started_at = time.monotonic()
@@ -281,23 +284,26 @@ class GameSource:
             except DetectionBusyError:
                 self._discarded_busy += 1
                 log.info("spatial_result_discarded", capture_id=capture.capture_id, reason="busy")
-                return None
+                return None, screenshot
             detected_at = time.monotonic()
             pixels = capture.pixels
-            analysis = await asyncio.to_thread(
-                analysis_pixels, pixels.rgb, pixels.width, pixels.height, MotionLimits()
+            analysis, prepared, analysis_ms, appearance_ms = await asyncio.to_thread(
+                _prepare_spatial, pixels, entities
             )
             analyzed_at = time.monotonic()
-            _summary, ownership = await summarize_frame(entities, screenshot, profile=self._profile)
+            _summary, ownership = await summarize_frame(
+                entities, screenshot, profile=self._profile, rgb_pixels=pixels.pixels()
+            )
             log.info(
                 "spatial_worker_latency",
                 capture_id=capture.capture_id,
                 encode_ms=round((encoded_at - started_at) * 1000, 1),
                 detector_ms=round((detected_at - encoded_at) * 1000, 1),
-                analysis_ms=round((analyzed_at - detected_at) * 1000, 1),
+                analysis_ms=round(analysis_ms, 1),
+                appearance_ms=round(appearance_ms, 1),
                 ownership_ms=round((time.monotonic() - analyzed_at) * 1000, 1),
             )
-            return RawSpatial(capture, screenshot, entities, analysis.tobytes(), ownership)
+            return RawSpatial(capture, screenshot, prepared, analysis, ownership), screenshot
 
     async def integrate_spatial(self, raw: RawSpatial) -> Sighting | None:
         """Publish a worker result only if its capture still matches this view."""
@@ -358,13 +364,11 @@ class GameSource:
             revision = ledger.camera_revision if ledger else capture.camera_revision
             association_started = time.monotonic()
             aligned = self._history.observe(
-                raw.entities,
+                raw.prepared,
                 capture_id=capture.capture_id,
                 captured_at=pixels.captured_at,
                 camera_revision=revision,
                 motion=motion,
-                rgb=pixels.rgb,
-                size=(pixels.width, pixels.height),
             )
             association_ms = (time.monotonic() - association_started) * 1000
             self._last_analysis = analysis
@@ -382,6 +386,8 @@ class GameSource:
             if self._overlay:
                 self._overlay.show(aligned, get_game_window_rect())
             self._published_spatial += 1
+            if self._published_spatial % _SCREENSHOT_SAMPLE == 0:
+                self._save_sample(raw.screenshot, capture.capture_id)
             log.info(
                 "fresh_detection_published",
                 capture_id=capture.capture_id,
@@ -390,6 +396,8 @@ class GameSource:
                 age_ms=round((time.monotonic() - pixels.captured_at) * 1000),
                 camera_ms=round(camera_ms, 1),
                 association_ms=round(association_ms, 1),
+                candidate_ms=round(self._history.last_candidate_ms, 1),
+                matching_ms=round(self._history.last_matching_ms, 1),
             )
             return Sighting(
                 Perception(
@@ -418,19 +426,20 @@ class GameSource:
         revision = ledger.input_revision if ledger is not None else 0
         camera_revision = ledger.camera_revision if ledger is not None else 0
         economic_revision = ledger.economic_revision if ledger is not None else 0
-        screenshot, native_hud, width, height, captured_at = await self._screen(None, timings)
-        hud_readings = await self._hud(native_hud, tick, timings, (width, height))
+        pixels = await self._screen(timings)
+        screenshot = await asyncio.to_thread(pixels.jpeg)
+        hud_readings = await self._hud(pixels, tick, timings)
         valid = ledger is None or ledger.economic_revision == economic_revision
         if not valid:
             return None
         return Sighting(
             Perception(
                 screenshot=screenshot,
-                width=width,
-                height=height,
+                width=pixels.width,
+                height=pixels.height,
                 hud_readings=hud_readings,
                 tick=tick,
-                captured_at=captured_at,
+                captured_at=pixels.captured_at,
                 input_revision=revision,
                 camera_revision=camera_revision,
                 economic_revision=economic_revision,
@@ -444,23 +453,24 @@ class GameSource:
         revision = ledger.input_revision if ledger is not None else 0
         camera_revision = ledger.camera_revision if ledger is not None else 0
         economic_revision = ledger.economic_revision if ledger is not None else 0
-        screenshot, native_hud, width, height, captured_at = await self._screen(tick, timings)
+        pixels = await self._screen(timings)
+        screenshot = await asyncio.to_thread(pixels.jpeg)
         hud_readings, entity_result = await asyncio.gather(
-            self._hud(native_hud, tick, timings, (width, height)),
-            self._entities(screenshot, timings),
+            self._hud(pixels, tick, timings),
+            self._entities(screenshot, timings, pixels.pixels()),
         )
         entities, entity_summary, ownership = entity_result
         spatial_valid = ledger is None or ledger.camera_revision == camera_revision
         return Sighting(
             frame=Perception(
                 screenshot=screenshot,
-                width=width,
-                height=height,
+                width=pixels.width,
+                height=pixels.height,
                 entities=tuple(entities),
                 entity_summary=entity_summary,
                 hud_readings=hud_readings,
                 tick=tick,
-                captured_at=captured_at,
+                captured_at=pixels.captured_at,
                 input_revision=revision,
                 camera_revision=camera_revision,
                 economic_revision=economic_revision,
@@ -475,28 +485,27 @@ class GameSource:
         """One native post-input capture; a requested detector refresh has priority."""
         capture = await self.capture_stream()
         pixels = capture.pixels
-        screenshot = await asyncio.to_thread(pixels.jpeg)
-        native_hud = await asyncio.to_thread(pixels.native_hud)
         calibration = calibration_for(pixels.width, pixels.height)
 
         async def selected() -> str | None:
             if calibration is None:
                 return None
-            return await asyncio.to_thread(read_selected_unit, screenshot, calibration)
+            return await asyncio.to_thread(read_selected_unit_pixels, pixels.pixels(), calibration)
 
         if selection_only:
-            hud_readings, selected_unit = await asyncio.gather(
-                self._hud(native_hud, 0, timings, (pixels.width, pixels.height)), selected()
+            hud_readings, selected_unit, screenshot = await asyncio.gather(
+                self._hud(pixels, 0, timings), selected(), asyncio.to_thread(pixels.jpeg)
             )
             entities: tuple[EntitySnapshot, ...] | None = None
             sighting: Sighting | None = None
             observed_camera_revision = capture.camera_revision
         else:
-            hud_readings, selected_unit, raw = await asyncio.gather(
-                self._hud(native_hud, 0, timings, (pixels.width, pixels.height)),
+            hud_readings, selected_unit, detected = await asyncio.gather(
+                self._hud(pixels, 0, timings),
                 selected(),
-                self.detect_stream(capture, 0),
+                self._detect_with_screenshot(capture, 0),
             )
+            raw, screenshot = detected
             sighting = await self.integrate_spatial(raw) if raw is not None else None
             entities = snapshot_entities(sighting.frame.entities) if sighting is not None else None
             if sighting is not None:
@@ -536,31 +545,25 @@ class GameSource:
             sighting=sighting,
         )
 
-    async def _screen(
-        self, tick: int | None, timings: TickTimings
-    ) -> tuple[bytes, bytes, int, int, float]:
+    async def _screen(self, timings: TickTimings) -> NativeCapture:
         """Grab the frame. The overlay hides first, so it stays out of the shot."""
         with timings.phase("capture"):
             if self._overlay:
                 self._overlay.hide()
-            screenshot, native_hud, width, height, captured_at = await asyncio.to_thread(_grab)
-            if tick is not None:
-                self._save_sample(screenshot, tick)
-        return screenshot, native_hud, width, height, captured_at
+            return await asyncio.to_thread(capture_native)
 
     async def _hud(
         self,
-        native_hud: bytes,
+        pixels: NativeCapture,
         tick: int,
         timings: TickTimings,
-        full_size: tuple[int, int],
     ) -> ResourceReadings:
         """Read the resource bar, and show the OCR boxes it calibrated."""
         with timings.phase("ocr"):
-            hud_readings, calib = await read_hud_readings(
-                native_hud,
+            hud_readings, calib = await read_hud_pixels(
+                pixels.pixels(),
                 turn=tick,
-                full_size=full_size,
+                full_size=(pixels.width, pixels.height),
                 mode="critical" if tick == 0 else "routine",
             )
         if self._overlay is not None and calib is not None:
@@ -568,13 +571,13 @@ class GameSource:
         return hud_readings
 
     async def _entities(
-        self, screenshot: bytes, timings: TickTimings
+        self, screenshot: bytes, timings: TickTimings, pixels: np.ndarray
     ) -> tuple[list[EntitySnapshot], str, Mapping[str, tuple[Owner, float]]]:
         """Detect, then tag ownership. Empty without a detector."""
         with timings.phase("detect"):
             entities = await self._detect_entities(screenshot)
             entity_summary, ownership = await summarize_frame(
-                entities, screenshot, profile=self._profile
+                entities, screenshot, profile=self._profile, rgb_pixels=pixels
             )
         return entities, entity_summary, ownership
 
@@ -592,17 +595,15 @@ class GameSource:
         return entities
 
     def _save_sample(self, screenshot: bytes, tick: int) -> None:
-        """Keep one frame in `_SCREENSHOT_SAMPLE`, for the run's image trail."""
+        """Write a sampled published detection using its existing JPEG."""
         if not (config.save_screenshots and self._screenshots_dir):
-            return
-        if tick % _SCREENSHOT_SAMPLE:
             return
         stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         path = self._screenshots_dir / f"{stamp}_{tick:05d}.jpg"
-        if self._writer is not None:
-            self._writer.submit(path, screenshot)
-        else:
-            save_screenshot(screenshot, str(path))
+        if self._writer is None:
+            log.warning("diagnostic_write_dropped", kind="sample", reason="writer_unavailable")
+            return
+        self._writer.submit(path, screenshot)
 
     def close(self) -> None:
         log.info(

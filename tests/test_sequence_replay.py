@@ -66,6 +66,16 @@ def test_replay_scores_cached_detections_and_tracks_identity(tmp_path: Path) -> 
     assert report["temporal"]["micro"]["f1"] == 1.0
     assert report["raw"]["identity_switches"] is None
     assert report["temporal"]["identity_switches"] == 0
+    for stage in (
+        "camera",
+        "preparation",
+        "candidate",
+        "matching",
+        "association",
+        "temporal_total",
+    ):
+        assert report[f"{stage}_ms_p50"] is not None
+        assert report[f"{stage}_ms_p95"] is not None
 
     attempts = tmp_path / "attempts.jsonl"
     attempts.write_text(

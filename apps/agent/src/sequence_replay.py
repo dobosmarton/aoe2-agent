@@ -11,11 +11,13 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import statistics
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, TypeVar
 
+import numpy as np
 from PIL import Image
 from pydantic import BaseModel, ConfigDict
 
@@ -27,12 +29,11 @@ from .camera_motion import (
     estimate_motion,
 )
 from .entity_snapshot import EntitySnapshot
-from .temporal_entities import TemporalEntities
+from .temporal_entities import TemporalEntities, prepare_detections
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    import numpy as np
     from core import DetectedEntity
 
 
@@ -236,6 +237,10 @@ def _p95(values: list[float]) -> float | None:
     return round(ordered[math.ceil(len(ordered) * 0.95) - 1], 2)
 
 
+def _p50(values: list[float]) -> float | None:
+    return round(statistics.median(values), 2) if values else None
+
+
 def replay_sequence(
     directory: Path,
     detections_path: Path,
@@ -253,7 +258,11 @@ def replay_sequence(
     previous_boxes: tuple[tuple[float, float, float, float], ...] = ()
     previous_cursor: tuple[int, int] | None = None
     camera_times: list[float] = []
+    preparation_times: list[float] = []
     association_times: list[float] = []
+    candidate_times: list[float] = []
+    matching_times: list[float] = []
+    temporal_times: list[float] = []
     ambiguous = resets = pans = 0
     for frame in frames:
         if frame.capture_id not in detections or frame.capture_id not in labels:
@@ -294,17 +303,23 @@ def replay_sequence(
         camera_times.append((time.monotonic() - camera_started) * 1000)
         resets += motion.kind == "reset"
         pans += motion.kind == "pan"
+        preparation_started = time.monotonic()
+        prepared = prepare_detections(raw, np.asarray(image))
+        prepared_ms = (time.monotonic() - preparation_started) * 1000
+        preparation_times.append(prepared_ms)
         association_started = time.monotonic()
         temporal = tracks.observe(
-            raw,
+            prepared,
             capture_id=frame.capture_id,
             captured_at=frame.captured_at_monotonic,
             camera_revision=resets + pans,
             motion=motion,
-            rgb=rgb,
-            size=image.size,
         )
-        association_times.append((time.monotonic() - association_started) * 1000)
+        association_ms = (time.monotonic() - association_started) * 1000
+        association_times.append(association_ms)
+        candidate_times.append(tracks.last_candidate_ms)
+        matching_times.append(tracks.last_matching_ms)
+        temporal_times.append(prepared_ms + association_ms)
         ambiguous += tracks.last_ambiguous_count
         truth = labels[frame.capture_id].objects
         raw_scores.score(frame.capture_id, raw, truth)
@@ -336,8 +351,18 @@ def replay_sequence(
         "ambiguous_associations": ambiguous,
         "camera_resets": resets,
         "camera_pans": pans,
+        "camera_ms_p50": _p50(camera_times),
         "camera_ms_p95": _p95(camera_times),
+        "preparation_ms_p50": _p50(preparation_times),
+        "preparation_ms_p95": _p95(preparation_times),
+        "candidate_ms_p50": _p50(candidate_times),
+        "candidate_ms_p95": _p95(candidate_times),
+        "matching_ms_p50": _p50(matching_times),
+        "matching_ms_p95": _p95(matching_times),
+        "association_ms_p50": _p50(association_times),
         "association_ms_p95": _p95(association_times),
+        "temporal_total_ms_p50": _p50(temporal_times),
+        "temporal_total_ms_p95": _p95(temporal_times),
         "wrong_target_attempts": wrong_targets,
     }
 

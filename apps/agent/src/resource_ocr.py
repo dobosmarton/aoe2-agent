@@ -214,16 +214,32 @@ def calibration_for(width: int, height: int) -> Calibration | None:
 # ---------------------------------------------------------------------------
 
 
-def _decode_gray(screenshot_bytes: bytes) -> np.ndarray:
-    """Decode JPEG/PNG bytes to a grayscale uint8 array."""
-    img = Image.open(io.BytesIO(screenshot_bytes)).convert("L")
-    return np.asarray(img, dtype=np.uint8)
-
-
-def _decode_rgb(screenshot_bytes: bytes) -> np.ndarray:
+def decode_rgb_pixels(screenshot_bytes: bytes) -> np.ndarray:
     """Decode JPEG/PNG bytes to an RGB uint8 array (RapidOCR detection input)."""
     img = Image.open(io.BytesIO(screenshot_bytes)).convert("RGB")
     return np.asarray(img, dtype=np.uint8)
+
+
+@dataclass(frozen=True, slots=True)
+class HudPixels:
+    """One prepared HUD crop with the original capture's geometry."""
+
+    rgb: np.ndarray
+    gray: np.ndarray
+    width: int
+    height: int
+
+
+def prepare_hud_pixels(rgb: np.ndarray, full_size: tuple[int, int]) -> HudPixels:
+    """Convert the small top band to grayscale once per reading pass."""
+    import cv2
+
+    width, height = full_size
+    band = rgb[: min(rgb.shape[0], 300), :width].view()
+    band.setflags(write=False)
+    gray = cast("np.ndarray", cv2.cvtColor(band, cv2.COLOR_RGB2GRAY))
+    gray.setflags(write=False)
+    return HudPixels(band, gray, width, height)
 
 
 def _binarize_digits(gray: np.ndarray) -> np.ndarray:
@@ -816,10 +832,22 @@ def autodetect_calibration(
     is simply skipped (the ``rapidocr`` backend needs no templates).
     """
     try:
-        rgb = _decode_rgb(screenshot_bytes)
+        rgb = decode_rgb_pixels(screenshot_bytes)
     except Exception:  # any decode failure (truncated/empty bytes) → caller falls back
         return None
     h, w = cast("tuple[int, int]", rgb.shape[:2])
+    return autodetect_calibration_pixels(rgb, full_size=(w, h), top_frac=top_frac, pad=pad)
+
+
+def autodetect_calibration_pixels(
+    rgb: np.ndarray,
+    *,
+    full_size: tuple[int, int],
+    top_frac: float = 0.15,
+    pad: int = 4,
+) -> Calibration | None:
+    """Localize the HUD from native pixels while retaining full capture geometry."""
+    w, h = full_size
     dets = _detect(_band_engine(), rgb, top_frac)
     main, pop, age = _extract(dets)
     centers = _column_centers([b.x0 for b in main])
@@ -854,7 +882,21 @@ def read_resource_bar(
     are omitted or left at a sentinel so the scorer reports a clear failure rather
     than a crash.
     """
-    gray = _decode_gray(screenshot_bytes)
+    rgb = decode_rgb_pixels(screenshot_bytes)
+    height, width = cast("tuple[int, int]", rgb.shape[:2])
+    return read_resource_bar_pixels(
+        prepare_hud_pixels(rgb, (width, height)), calibration, backend=backend
+    )
+
+
+def read_resource_bar_pixels(
+    hud: HudPixels,
+    calibration: Calibration,
+    *,
+    backend: Backend = "template",
+) -> dict[str, object]:
+    """Read the resource bar without image encoding or another full-frame decode."""
+    gray = hud.gray
     # Load templates when available. Required for the template backend; also used
     # as a per-field fallback for the tesseract backend, which structurally can't
     # read a lone isolated digit (e.g. a single "1") that template matching gets.
@@ -900,13 +942,11 @@ def read_resource_bar(
             out[name] = int(digits)
 
     pop_box = calibration.fields.get(POP_FIELD)
-    rgb: np.ndarray | None = None
+    rgb = hud.rgb
     for name in (*WORKER_FIELDS, "villagers"):
         box = calibration.fields.get(name)
         if box is None:
             continue
-        if rgb is None:
-            rgb = _decode_rgb(screenshot_bytes)
         value = read_hud_count(rgb, box)
         if value is not None:
             out[name] = value
@@ -919,8 +959,6 @@ def read_resource_bar(
         # template NCC — the count refines how many idles to dispatch, presence
         # stays the gate. Both omitted when population isn't calibrated (no
         # anchor → unknown, caller skips).
-        if rgb is None:
-            rgb = _decode_rgb(screenshot_bytes)
         idle_present = detect_idle_present(rgb, pop_box)
         out["idle_present"] = idle_present
         # The badge colour is the gate, the digit only sizes the batch. A dark
@@ -953,22 +991,35 @@ def read_age(screenshot_bytes: bytes, calibration: Calibration) -> str:
     read keeps the last-known age downstream. "" when the field isn't
     calibrated or unreadable.
     """
+    rgb = decode_rgb_pixels(screenshot_bytes)
+    height, width = cast("tuple[int, int]", rgb.shape[:2])
+    return read_age_pixels(prepare_hud_pixels(rgb, (width, height)), calibration)
+
+
+def read_age_pixels(hud: HudPixels, calibration: Calibration) -> str:
+    """Read the age text from the already prepared HUD grayscale band."""
     age_box = calibration.fields.get("age")
     if age_box is None:
         return ""
-    crop = age_box.crop(_decode_gray(screenshot_bytes))
+    crop = age_box.crop(hud.gray)
     # Age is large text — OCR the raw crop (binarize corrupts the bigger letters).
     return _map_age(_read_field_rapidocr(crop, whitelist=_LETTERS, binarize=False))
 
 
 def read_selected_unit(screenshot_bytes: bytes, calibration: Calibration) -> str | None:
     """Read the command-panel selection; unknown labels never authorize input."""
+    return read_selected_unit_pixels(decode_rgb_pixels(screenshot_bytes), calibration)
+
+
+def read_selected_unit_pixels(rgb: np.ndarray, calibration: Calibration) -> str | None:
+    """Read selection from native capture pixels, converting only its small crop."""
     box = calibration.fields.get("selection")
     if box is None:
         return None
-    text = _read_field_rapidocr(
-        box.crop(_decode_gray(screenshot_bytes)), whitelist=_LETTERS, binarize=False
-    )
+    import cv2
+
+    gray = cast("np.ndarray", cv2.cvtColor(box.crop(rgb), cv2.COLOR_RGB2GRAY))
+    text = _read_field_rapidocr(gray, whitelist=_LETTERS, binarize=False)
     label = text.strip().lower().replace(" ", "_")
     if label in {
         "villager",

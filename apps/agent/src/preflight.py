@@ -12,11 +12,17 @@ import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+import numpy as np
 from PIL import Image
 
 from .game_profile import GameProfile, load_profile
-from .resource_ocr import calibration_for, read_resource_bar, read_selected_unit
-from .screen import capture_screenshot
+from .resource_ocr import (
+    calibration_for,
+    prepare_hud_pixels,
+    read_resource_bar_pixels,
+    read_selected_unit_pixels,
+)
+from .screen import NativeCapture, capture_native
 from .window import get_game_window_rect
 
 
@@ -38,9 +44,19 @@ def inspect_capture(profile: GameProfile, screenshot: bytes) -> tuple[PreflightC
 
     try:
         with Image.open(io.BytesIO(screenshot)) as image:
-            size = image.size
+            rgb = np.asarray(image.convert("RGB"))
     except (OSError, ValueError) as exc:
         return (PreflightCheck("capture", False, f"unreadable image: {type(exc).__name__}"),)
+    return _inspect_pixels(profile, rgb)
+
+
+def inspect_pixels(profile: GameProfile, capture: NativeCapture) -> tuple[PreflightCheck, ...]:
+    """Inspect the live frame before any lossy screenshot encoding."""
+    return _inspect_pixels(profile, capture.pixels())
+
+
+def _inspect_pixels(profile: GameProfile, rgb: np.ndarray) -> tuple[PreflightCheck, ...]:
+    size = (int(rgb.shape[1]), int(rgb.shape[0]))
     correct_size = size == (profile.capture_width, profile.capture_height)
     checks = [
         PreflightCheck(
@@ -54,7 +70,9 @@ def inspect_capture(profile: GameProfile, screenshot: bytes) -> tuple[PreflightC
         checks.append(PreflightCheck("hud_calibration", False, "no matching qualified crop set"))
         return tuple(checks)
     try:
-        readings = read_resource_bar(screenshot, calibration, backend="template")
+        readings = read_resource_bar_pixels(
+            prepare_hud_pixels(rgb, size), calibration, backend="template"
+        )
     except (OSError, ValueError, RuntimeError) as exc:
         checks.append(PreflightCheck("hud_reading", False, f"reader error: {type(exc).__name__}"))
         return tuple(checks)
@@ -66,7 +84,7 @@ def inspect_capture(profile: GameProfile, screenshot: bytes) -> tuple[PreflightC
         PreflightCheck("hud_reading", required, f"decoded fields: {', '.join(sorted(readings))}")
     )
     try:
-        selected = read_selected_unit(screenshot, calibration)
+        selected = read_selected_unit_pixels(rgb, calibration)
     except (OSError, ValueError, RuntimeError):
         selected = None
     checks.append(
@@ -113,8 +131,9 @@ def run_preflight(
     if screenshot is None:
         if rect is None:
             return tuple(checks)
-        screenshot, _width, _height = capture_screenshot()
-    checks.extend(inspect_capture(profile, screenshot))
+        checks.extend(inspect_pixels(profile, capture_native()))
+    else:
+        checks.extend(inspect_capture(profile, screenshot))
     checks.append(
         PreflightCheck(
             "capture_to_input_geometry",

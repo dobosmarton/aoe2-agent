@@ -2,12 +2,11 @@
 
 import asyncio
 import contextlib
-import io
 from pathlib import Path
 from typing import ClassVar, Literal, cast
 
+import numpy as np
 import structlog
-from PIL import Image
 from pydantic import BaseModel, Field
 
 from ..config import config
@@ -19,10 +18,12 @@ from ..resource_ocr import (
     Backend,
     Calibration,
     ResourceReadings,
-    autodetect_calibration,
+    autodetect_calibration_pixels,
     calibration_for,
-    read_age,
-    read_resource_bar,
+    decode_rgb_pixels,
+    prepare_hud_pixels,
+    read_age_pixels,
+    read_resource_bar_pixels,
 )
 from .base import ChatRequest, ChatWire, SystemBlock, UserTurn, text_of_blocks
 from .pricing import cost_usd
@@ -177,6 +178,28 @@ async def read_hud_readings(
     full_size: tuple[int, int] | None = None,
     mode: Literal["routine", "critical"] = "routine",
 ) -> tuple[ResourceReadings, Calibration | None]:
+    """Decode an image once for file and evaluation callers."""
+    try:
+        rgb = await asyncio.to_thread(decode_rgb_pixels, screenshot_bytes)
+    except (OSError, ValueError) as exc:
+        log.warning("hud_read_failed", error=repr(exc))
+        return {}, None
+    height, width = rgb.shape[:2]
+    return await read_hud_pixels(
+        rgb,
+        turn=turn,
+        full_size=full_size or (width, height),
+        mode=mode,
+    )
+
+
+async def read_hud_pixels(
+    rgb: np.ndarray,
+    *,
+    full_size: tuple[int, int],
+    turn: int | None = None,
+    mode: Literal["routine", "critical"] = "routine",
+) -> tuple[ResourceReadings, Calibration | None]:
     """Read resources/population/age off the resource bar via local OCR.
 
     Resolution precedence: a hand-tuned ``calibration.<W>x<H>.yaml`` wins; else
@@ -191,12 +214,12 @@ async def read_hud_readings(
     field remains unknown rather than delaying a dependent click.
     """
     try:
-        with Image.open(io.BytesIO(screenshot_bytes)) as im:
-            width, height = full_size or im.size
+        width, height = full_size
+        hud = await asyncio.to_thread(prepare_hud_pixels, rgb, full_size)
         calib = calibration_for(width, height)
         if calib is None:
             # Detection runs RapidOCR over the top band — CPU-bound, off the loop.
-            calib = await asyncio.to_thread(autodetect_calibration, screenshot_bytes)
+            calib = await asyncio.to_thread(autodetect_calibration_pixels, rgb, full_size=full_size)
             if calib is not None:
                 log.info("ocr_autodetect", width=width, height=height, fields=sorted(calib.fields))
         if calib is None:
@@ -204,7 +227,7 @@ async def read_hud_readings(
             return {}, None
         template_primary = config.ocr_backend == "template" or _has_fast_templates(calib)
         backend: Backend = "template" if template_primary else cast("Backend", config.ocr_backend)
-        ocr = await asyncio.to_thread(read_resource_bar, screenshot_bytes, calib, backend=backend)
+        ocr = await asyncio.to_thread(read_resource_bar_pixels, hud, calib, backend=backend)
         readings = _clean_readings(ocr)
         if (
             mode == "routine"
@@ -217,8 +240,8 @@ async def read_hud_readings(
             # OCR backend does not read this small HUD font reliably.
             slow = _clean_readings(
                 await asyncio.to_thread(
-                    read_resource_bar,
-                    screenshot_bytes,
+                    read_resource_bar_pixels,
+                    hud,
                     calib,
                     backend=cast("Backend", config.ocr_backend),
                 )
@@ -231,7 +254,7 @@ async def read_hud_readings(
             log.warning("ocr_frame_discarded", fields=sorted(readings))
             return {}, calib
         if mode == "routine" and _age_read_due(turn, template_primary=template_primary):
-            age = await asyncio.to_thread(read_age, screenshot_bytes, calib)
+            age = await asyncio.to_thread(read_age_pixels, hud, calib)
             if age:
                 readings["age"] = age
         log.info("ocr_readings", **readings)
