@@ -31,3 +31,36 @@ The agent's production path captures game pixels on Windows and sends selected J
 The current model is trained for single-pass inference at `imgsz=1280`. SAHI inference remains available in the library for model experiments, but it is not the deployed mode because tiling changes object scale relative to this checkpoint's training distribution.
 
 For dataset preparation and retraining, start with [the training pipeline](../../docs/part3-entity-detection/08-training-pipeline.md), [labeling workflow](../../docs/part3-entity-detection/09-labeling-and-active-learning.md), and [detector quality runbook](../../docs/runbooks/detector-quality-retraining.md).
+
+## Preparing reviewed images
+
+`detection.labeling.prepare_training` requires reviewed images, their COCO or
+YOLO annotation export, and source-session CSV manifests. It verifies image
+hashes, class IDs, dimensions, and boxes before writing a new dataset. The
+main validation split contains whole real-game sessions; synthetic validation
+images are kept in `synthetic_val/` for separate diagnostics. Its output
+directory must not already exist.
+
+For the reviewed October 2026 batch, run this from the repository root:
+
+```bash
+uv run --no-sync python -m detection.labeling.prepare_training \
+  --cvat-export packages/detection/src/real_screenshots/labeling_batch_20261011_xanylabeling_review \
+  --images-dir packages/detection/src/real_screenshots/labeling_batch_20261011_xanylabeling_review/images \
+  --manifest packages/detection/src/real_screenshots/labeling_batch_20261011_development/manifest.csv \
+  --manifest packages/detection/src/real_screenshots/labeling_batch_20261011_scenario_addendum/manifest.csv \
+  --historical-real packages/detection/src/training_data_v9_slim \
+  --synthetic packages/detection/src/training_data_v9_synth \
+  --output packages/detection/src/training_data_reviewed_20261018 \
+  --oversample-real 4 \
+  --dry-run
+```
+
+Remove `--dry-run` to write the dataset. The 53 new reviewed images are
+development data. `--historical-real` imports the 219 distinct v9 real images
+from both old splits as **training only**: the old validation images share
+near-duplicate views with old training images, so they cannot provide a new
+validation score. The eight new validation images are grouped by capture
+session but remain development data. See the [historical-data audit](../../docs/runbooks/detector-historical-data-audit.md)
+for provenance and limitations. An independent final-test set is still needed
+before making a release-quality claim.
