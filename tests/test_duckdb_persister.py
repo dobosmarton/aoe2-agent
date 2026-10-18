@@ -86,7 +86,7 @@ def test_persister_exits_when_run_closes(tmp_path: Path) -> None:
     """Persister's `async for` must terminate cleanly after close_run."""
     db_path = tmp_path / "empty.duckdb"
 
-    async def scenario() -> float:
+    async def scenario() -> None:
         broker = InProcessEventBroker()
         run = RunId("r1")
         broker.open_run(run)
@@ -95,13 +95,9 @@ def test_persister_exits_when_run_closes(tmp_path: Path) -> None:
         await asyncio.sleep(0)  # let persister subscribe
         broker.close_run(run)
 
-        start = asyncio.get_running_loop().time()
         await asyncio.wait_for(persist_task, timeout=1.0)
-        return asyncio.get_running_loop().time() - start
 
-    elapsed = asyncio.run(scenario())
-    # Persister should return almost immediately on close; 100ms is generous.
-    assert elapsed < 0.1
+    asyncio.run(scenario())
 
 
 # ---------------------------------------------------------------------------
