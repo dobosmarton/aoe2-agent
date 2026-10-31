@@ -47,7 +47,7 @@ class PreparedDetection:
 def _appearance(pixels: np.ndarray, box: tuple[float, ...]) -> tuple[float, ...]:
     height, width = cast("tuple[int, int]", pixels.shape[:2])
     x0, y0, x1, y1 = (int(value) for value in box)
-    crop = pixels[max(0, y0) : min(height, y1), max(0, x0) : min(width, x1)]
+    crop = pixels[max(0, y0) : max(0, min(height, y1)), max(0, x0) : max(0, min(width, x1))]
     if crop.size == 0:
         return (0.0,) * 6
     # NumPy's installed stubs expose aggregate arrays as Any; narrow here.
@@ -177,13 +177,15 @@ def _label(evidence: tuple[_Evidence, ...], current: str) -> tuple[str, float | 
         weight = item.confidence * 2 ** (-(now - item.captured_at) / _HALF_LIFE_SECONDS)
         scores[item.label] = scores.get(item.label, 0.0) + weight
     total = sum(scores.values())
+    if not total:
+        return current, 0.0
     winner = max(scores, key=scores.__getitem__)
-    agreement = scores[winner] / total if total else 0.0
+    agreement = scores[winner] / total
     if winner != current:
         runner_up = max((score for label, score in scores.items() if label != winner), default=0.0)
         supporting = sum(item.label == winner for item in evidence)
         if supporting < 2 or (scores[winner] - runner_up) / total < _MIN_CLASS_MARGIN:
-            return current, scores.get(current, 0.0) / total if total else 0.0
+            return current, scores.get(current, 0.0) / total
     return winner, agreement
 
 

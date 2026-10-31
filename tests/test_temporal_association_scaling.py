@@ -176,3 +176,21 @@ def test_ambiguity_detection_walks_candidates_once() -> None:
     candidates = CountedCandidates()
     temporal._ambiguous_candidates(candidates)
     assert candidates.iterations == 1
+
+
+def test_box_fully_outside_the_top_left_has_an_empty_appearance() -> None:
+    pixels = np.full((100, 200, 3), 255, dtype=np.uint8)
+    for box in ((-30.0, 10.0, -10.0, 20.0), (10.0, -30.0, 20.0, -10.0)):
+        x0, y0, x1, y1 = box
+        entity = EntitySnapshot("0", "villager", box, ((x0 + x1) / 2, (y0 + y1) / 2), 0.8)
+        assert temporal.prepare_detections((entity,), pixels)[0].appearance == (0.0,) * 6
+
+
+def test_label_vote_keeps_the_raw_label_when_all_confidence_is_zero() -> None:
+    evidence = (
+        temporal._Evidence("sheep", 0.0, 1.0),
+        temporal._Evidence("sheep", 0.0, 1.1),
+        temporal._Evidence("villager", 0.0, 1.2),
+    )
+    assert temporal._label(evidence, "villager") == ("villager", 0.0)
+    assert temporal._label(evidence[:2], "sheep") == ("sheep", 0.0)
