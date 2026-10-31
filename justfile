@@ -72,6 +72,10 @@ coverage:
 
 check: lint typecheck test
 
+# Compare trackers on AoE2 frames. Set AOE2_DATA to the checkout holding frames and weights.
+tracker-compare *ARGS:
+    uv run --with-editable ${SCREENTRACK:-../screentrack} python scripts/tracker_benchmark --data-root ${AOE2_DATA:-.} {{ARGS}}
+
 # ── Scenarios + evaluation ────────────────────────────────────────────────
 
 eval *ARGS:
