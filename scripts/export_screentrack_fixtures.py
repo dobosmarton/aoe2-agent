@@ -444,7 +444,20 @@ def _export_signatures(output: Path) -> None:
 
 def _export_hypot(output: Path) -> None:
     rng = random.Random(2)
-    fixed = [(0.0, 0.0), (3.0, 4.0), (80.0, 0.0), (0.0, -215.0), (-5.0, 12.0), (1e-3, 1e3)]
+    fixed = [
+        (0.0, 0.0),
+        (3.0, 4.0),
+        (80.0, 0.0),
+        (0.0, -215.0),
+        (-5.0, 12.0),
+        (1e-3, 1e3),
+        (5e-324, 5e-324),
+        (1e-310, 3e-311),
+        (2.0**-1023, 2.0**-1024),
+        (2.0**-1024, 1e-320),
+        (1e308, 1e308),
+        (1.7e308, 0.0),
+    ]
     drawn: list[tuple[float, float]] = []
     while len(drawn) + len(fixed) < _HYPOT_CASES:
         grid = rng.random() < 0.3
