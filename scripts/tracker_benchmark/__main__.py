@@ -215,6 +215,33 @@ async def _loop_lag(
     return scorecard.percentile(lags, 0.99)
 
 
+async def _idle_lag() -> float:
+    """The scheduler's own jitter, as a floor for reading the other lag figures."""
+    lags: list[float] = []
+    deadline = time.perf_counter() + LAG_ROUNDS * sequences.FRAME_SECONDS
+    while time.perf_counter() < deadline:
+        started = time.perf_counter()
+        await asyncio.sleep(LAG_SLEEP_SECONDS)
+        lags.append((time.perf_counter() - started - LAG_SLEEP_SECONDS) * 1000)
+    return scorecard.percentile(lags, 0.99)
+
+
+def _event_loop(
+    entities: tuple[EntitySnapshot, ...], capture: NativeCapture, repetitions: int
+) -> dict[str, float]:
+    """Paired like the timing runs, alternating order to cancel warm-up effects."""
+    lags: dict[str, list[float]] = {"python": [], "screentrack": []}
+    for repetition in range(repetitions):
+        names = ("python", "screentrack") if repetition % 2 == 0 else ("screentrack", "python")
+        for name in names:
+            lags[name].append(asyncio.run(_loop_lag(name, entities, capture)))
+    return {
+        "loop_lag_python": float(np.median(lags["python"])),
+        "loop_lag_screentrack": float(np.median(lags["screentrack"])),
+        "loop_lag_idle": asyncio.run(_idle_lag()),
+    }
+
+
 def _stability(directory: Path, frames: int) -> dict[str, float]:
     """Run a long game on one scene, watching for latency drift and memory growth."""
     entities, capture = _load_entities(directory)
@@ -348,7 +375,8 @@ def _gates(rules: dict[str, dict[str, object]], evidence: dict[str, object]) -> 
     add(
         "event_loop",
         system["loop_lag_screentrack"] <= system["loop_lag_python"],
-        f"p99 lag {system['loop_lag_screentrack']:.2f} ms against {system['loop_lag_python']:.2f} ms",
+        f"p99 lag {system['loop_lag_screentrack']:.2f} ms against "
+        f"{system['loop_lag_python']:.2f} ms; idle loop {system['loop_lag_idle']:.2f} ms",
     )
     drift = system["late_p95_ms"] / system["early_p95_ms"] - 1.0
     add(
@@ -535,10 +563,7 @@ def main() -> int:
 
     densest = scenes[-1]
     entities, capture = _load_entities(densest)
-    system = {
-        "loop_lag_python": asyncio.run(_loop_lag("python", entities, capture)),
-        "loop_lag_screentrack": asyncio.run(_loop_lag("screentrack", entities, capture)),
-    }
+    system = _event_loop(entities, capture, repetitions)
     print("measuring stability", flush=True)
     frames_to_run = 1500 if args.quick else cast("int", rules["stability"]["frames"])
     system |= _stability(densest, frames_to_run)

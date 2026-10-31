@@ -1,0 +1,243 @@
+{
+  "versions": {
+    "commit": "8185584",
+    "machine": "arm64",
+    "system": "macOS-26.6.2-arm64-arm-64bit",
+    "python": "3.11.9",
+    "screentrack": "0.1.0"
+  },
+  "gates": [
+    {
+      "name": "parity",
+      "question": "Same decisions as Python?",
+      "group": "faster",
+      "blocking": true,
+      "passed": true,
+      "detail": "0 differing frames (first: none)"
+    },
+    {
+      "name": "overhead",
+      "question": "Inside the perception budget?",
+      "group": "faster",
+      "blocking": true,
+      "passed": true,
+      "detail": "camera 13.7 + tracker 3.11 = 16.8 ms; Python 108.7 ms; limit 20 ms"
+    },
+    {
+      "name": "speed",
+      "question": "Faster on real frames?",
+      "group": "faster",
+      "blocking": true,
+      "passed": true,
+      "detail": "low 43x (at least 35x); typical 50x (at least 49x); high 38x (at least 34x); peak 30x (at least 25x)"
+    },
+    {
+      "name": "spec_target",
+      "question": "Meets the original goal?",
+      "group": "faster",
+      "blocking": false,
+      "passed": true,
+      "detail": "1.86 ms in the high band; limit 2 ms"
+    },
+    {
+      "name": "target_survival",
+      "question": "Do IDs shown to the LLM still work later?",
+      "group": "better",
+      "blocking": true,
+      "passed": false,
+      "detail": "18.8% against 88.8% for the baseline"
+    },
+    {
+      "name": "wrong_target",
+      "question": "Could an ID point at the wrong object?",
+      "group": "better",
+      "blocking": true,
+      "passed": true,
+      "detail": "0.00% against 0.00% for the baseline"
+    },
+    {
+      "name": "recovery",
+      "question": "Does one bad frame heal?",
+      "group": "better",
+      "blocking": true,
+      "passed": false,
+      "detail": "never recovers"
+    },
+    {
+      "name": "labels",
+      "question": "Does smoothing help?",
+      "group": "better",
+      "blocking": true,
+      "passed": true,
+      "detail": "no change: accuracy 93.45% against 93.45%; flips 4.2 against 4.2 per 1,000"
+    },
+    {
+      "name": "economy_view",
+      "question": "Is the agent's picture steadier?",
+      "group": "better",
+      "blocking": true,
+      "passed": false,
+      "detail": "job count error 2.94 against 2.94"
+    },
+    {
+      "name": "event_loop",
+      "question": "Is the agent less blocked?",
+      "group": "better",
+      "blocking": true,
+      "passed": false,
+      "detail": "p99 lag 1.58 ms against 0.79 ms"
+    },
+    {
+      "name": "stability",
+      "question": "Does it hold up over a game?",
+      "group": "better",
+      "blocking": true,
+      "passed": true,
+      "detail": "p95 drift -69.9%; memory growth 0.0 MB"
+    }
+  ],
+  "controls": {
+    "oracle is perfect": [
+      true,
+      "IDF1 1.000, survival 1.000"
+    ],
+    "raw scores lowest": [
+      true,
+      "survival 0.000"
+    ],
+    "A/A is unbiased": [
+      true,
+      "1.01x, 0.93x, 0.94x, 0.99x"
+    ],
+    "injected slowdown is flagged": [
+      true,
+      "38.6 ms against 20 ms"
+    ]
+  },
+  "quality": {
+    "raw": {
+      "idf1": 0.032793362307388385,
+      "idf1_mobile": 0.04075877980005127,
+      "idf1_static": 0.02924377427461732,
+      "switches_per_1000": 1000.0,
+      "job_error": 2.9375,
+      "label_accuracy": 0.9344849536456082,
+      "label_flips_per_1000": 4.168459432588665,
+      "survival_1s": 0.0,
+      "wrong_1s": 0.0,
+      "survival_2s": 0.0,
+      "wrong_2s": 0.0,
+      "survival_5s": 0.0,
+      "wrong_5s": 0.0
+    },
+    "oracle": {
+      "idf1": 1.0,
+      "idf1_mobile": 1.0,
+      "idf1_static": 1.0,
+      "switches_per_1000": 0.0,
+      "job_error": 2.858333333333334,
+      "label_accuracy": 1.0,
+      "label_flips_per_1000": 0.0,
+      "survival_1s": 1.0,
+      "wrong_1s": 0.0,
+      "survival_2s": 1.0,
+      "wrong_2s": 0.0,
+      "survival_5s": 1.0,
+      "wrong_5s": 0.0
+    },
+    "iou": {
+      "idf1": 0.7992097984986172,
+      "idf1_mobile": 0.6477826198410664,
+      "idf1_static": 0.8666895133653187,
+      "switches_per_1000": 82.49795947258718,
+      "job_error": 2.9375,
+      "label_accuracy": 0.9344849536456082,
+      "label_flips_per_1000": 4.168459432588665,
+      "survival_1s": 0.9449385052034058,
+      "wrong_1s": 0.0001892147587511826,
+      "survival_2s": 0.8881875563570785,
+      "wrong_2s": 0.0004508566275924256,
+      "survival_5s": 0.7314990512333965,
+      "wrong_5s": 0.0
+    },
+    "python": {
+      "idf1": 0.19802449624654286,
+      "idf1_mobile": 0.15585747244296333,
+      "idf1_static": 0.21681517020790494,
+      "switches_per_1000": 811.8753654250647,
+      "job_error": 2.9395833333333337,
+      "label_accuracy": 0.9344849536456082,
+      "label_flips_per_1000": 4.168459432588665,
+      "survival_1s": 0.19697256385998108,
+      "wrong_1s": 0.0,
+      "survival_2s": 0.18755635707844906,
+      "wrong_2s": 0.0,
+      "survival_5s": 0.1650853889943074,
+      "wrong_5s": 0.0
+    },
+    "screentrack": {
+      "idf1": 0.19802449624654286,
+      "idf1_mobile": 0.15585747244296333,
+      "idf1_static": 0.21681517020790494,
+      "switches_per_1000": 811.8753654250647,
+      "job_error": 2.9395833333333337,
+      "label_accuracy": 0.9344849536456082,
+      "label_flips_per_1000": 4.168459432588665,
+      "survival_1s": 0.19697256385998108,
+      "wrong_1s": 0.0,
+      "survival_2s": 0.18755635707844906,
+      "wrong_2s": 0.0,
+      "survival_5s": 0.1650853889943074,
+      "wrong_5s": 0.0
+    },
+    "candidate": {
+      "idf1": 0.46455946266297904,
+      "idf1_mobile": 0.3655472955652397,
+      "idf1_static": 0.5087959789810372,
+      "switches_per_1000": 444.92062532303737,
+      "job_error": 2.941666666666667,
+      "label_accuracy": 0.9344214373854457,
+      "label_flips_per_1000": 4.307696413930909,
+      "survival_1s": 0.5776726584673605,
+      "wrong_1s": 0.0,
+      "survival_2s": 0.5220919747520288,
+      "wrong_2s": 0.0,
+      "survival_5s": 0.3942125237191651,
+      "wrong_5s": 0.0
+    }
+  },
+  "system": {
+    "loop_lag_python": 0.7856659833341837,
+    "loop_lag_screentrack": 1.5845000054687262,
+    "early_p95_ms": 5.313417059369385,
+    "late_p95_ms": 1.5973750269040465,
+    "memory_growth_mb": 0.0
+  },
+  "camera_p95_ms": 13.69,
+  "timing_p95_ms": {
+    "python": {
+      "low": 64.13741805590689,
+      "typical": 95.01062496565282,
+      "high": 70.67704293876886,
+      "peak": 92.93583303224295
+    },
+    "screentrack": {
+      "low": 1.548456959426403,
+      "typical": 1.894541084766388,
+      "high": 1.8617919413372874,
+      "peak": 3.105292096734047
+    },
+    "python_again": {
+      "low": 62.844041851349175,
+      "typical": 102.59116708766669,
+      "high": 75.47579205129296,
+      "peak": 94.69304187223315
+    },
+    "slowed": {
+      "low": 36.20437509380281,
+      "typical": 37.52258303575218,
+      "high": 36.965458071790636,
+      "peak": 38.58308296184987
+    }
+  }
+}
