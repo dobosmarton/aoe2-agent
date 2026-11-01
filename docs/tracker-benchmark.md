@@ -1,26 +1,24 @@
 # Tracker benchmark
 
-**Faster: no. Better: no.**
+**Faster: yes. Better: no.**
 
-> **Don't read this run's timing as a verdict.** The VM was running at about 230% CPU, so the "Faster: no" headline and the `overhead`, `spec_target` and `stability` failures aren't reliable. See [Reading this run](#reading-this-run). Quality scores don't depend on load.
-
-Run on arm64 at commit `7d2244e`, over 12 generated scenes from real annotated frames, with the real detector. Units move as pasted sprites, so recorded footage is still needed for the final word.
+Run on arm64 at commit `a77c135`, over 12 generated scenes from real annotated frames, with the real detector. Units move as pasted sprites, so recorded footage is still needed for the final word.
 
 ## Gates
 
 | Result | Gate | Question | Evidence |
 |---|---|---|---|
 | pass | parity | Same decisions as Python? | 0 differing frames (first: none) |
-| **FAIL** | overhead | Inside the perception budget? | camera 18.1 + tracker 4.62 = 22.7 ms; Python 135.6 ms; limit 20 ms |
-| pass | speed | Faster on real frames? | low 32x (at least 26x); typical 37x (at least 32x); high 26x (at least 23x); peak 25x (at least 21x) |
-| miss | spec_target | Meets the original goal? | 2.83 ms in the high band; limit 2 ms |
+| pass | overhead | Inside the perception budget? | camera 13.0 + tracker 2.48 = 15.5 ms; Python 107.9 ms; limit 20 ms |
+| pass | speed | Faster on real frames? | low 62x (at least 60x); typical 56x (at least 54x); high 45x (at least 40x); peak 35x (at least 33x) |
+| pass | spec_target | Meets the original goal? | 1.48 ms in the high band; limit 2 ms |
 | **FAIL** | target_survival | Do IDs shown to the LLM still work later? | 86.9% against 88.8% for the baseline |
 | pass | wrong_target | Could an ID point at the wrong object? | 0.00% against 0.00% for the baseline |
 | pass | recovery | Does one bad frame heal? | recovers in 0.2 s |
 | pass | labels | Does smoothing help? | accuracy 93.46% against 93.45%; flips 3.9 against 4.2 per 1,000 |
 | pass | economy_view | Is the agent's picture steadier? | job count error 2.94 against 2.94 |
-| **FAIL** | event_loop | Is the agent less blocked? | p99 lag 0.52 ms against 0.34 ms; idle loop 0.53 ms |
-| **FAIL** | stability | Does it hold up over a game? | p95 drift +27.8%; memory growth 0.0 MB |
+| **FAIL** | event_loop | Is the agent less blocked? | p99 lag 1.09 ms against 0.22 ms; idle loop 1.00 ms |
+| pass | stability | Does it hold up over a game? | p95 drift +3.2%; memory growth 0.0 MB |
 
 ## Agent outcomes
 
@@ -36,10 +34,10 @@ Run on arm64 at commit `7d2244e`, over 12 generated scenes from real annotated f
 
 | Band | Python prepare p95 | Python associate p95 | Python total p95 | screentrack prepare p95 | screentrack associate p95 | screentrack total p95 |
 |---|---|---|---|---|---|---|
-| low | 75.05 | 0.71 | 75.37 | 2.00 | 0.18 | 2.39 |
-| typical | 109.30 | 1.68 | 110.66 | 2.65 | 0.27 | 3.05 |
-| high | 73.19 | 2.76 | 74.32 | 2.33 | 0.46 | 2.83 |
-| peak | 109.94 | 3.98 | 117.52 | 3.79 | 0.72 | 4.62 |
+| low | 60.42 | 0.29 | 60.60 | 0.91 | 0.08 | 0.98 |
+| typical | 93.93 | 0.95 | 94.93 | 1.56 | 0.15 | 1.71 |
+| high | 65.31 | 1.86 | 66.74 | 1.30 | 0.22 | 1.48 |
+| peak | 84.77 | 2.35 | 86.95 | 2.11 | 0.33 | 2.48 |
 
 ## Benchmark controls
 
@@ -47,17 +45,19 @@ Run on arm64 at commit `7d2244e`, over 12 generated scenes from real annotated f
 |---|---|---|
 | pass | oracle is perfect | IDF1 1.000, survival 1.000 |
 | pass | raw scores lowest | survival 0.000 |
-| pass | A/A is unbiased | 0.90x, 0.93x, 0.91x, 0.87x |
-| pass | injected slowdown is flagged | 38.7 ms against 20 ms |
+| pass | A/A is unbiased | 0.99x, 1.01x, 0.94x, 1.01x |
+| pass | injected slowdown is flagged | 37.2 ms against 20 ms |
 
-Camera analysis p95 was 18.1 ms.
+Camera analysis p95 was 13.0 ms.
 
 ## Reading this run
 
-- **Timing is unreliable.** The Windows VM was left running, using about 230% CPU, with a load average of 7-12. Code that didn't change got 1.40-1.56x slower than the 2026-10-31 run in `screentrack` prepare, and camera analysis got 1.32x slower. This needs a rerun on a quiet machine.
-- **The fix shows no sign of costing time.** `screentrack` associate slowed by 1.29-1.50x, no more than the unchanged stage. Python associate fell by up to 41% even under load, because there are far fewer tracks to compare.
+This is the clean rerun. An earlier run the same day had the VM using about 230% CPU, which pushed `overhead`, `spec_target` and `stability` into false failures. With the VM suspended, Python's unchanged prepare stage matched the 2026-10-31 run within 5%, and the A/A control read 0.94-1.01x.
+
+- **The fix made association faster.** Against 2026-10-31, `screentrack` associate p95 fell by 29-35% and Python's by 48-65%, because far fewer stale tracks remain to compare.
+- **Part of the larger speedup is noise.** `screentrack` prepare is unchanged code, yet it read 8-29% lower than on 2026-10-31. Treat these speedups and the older ones as the same order of magnitude, about 35-60x.
 - **`target_survival` is close but real.** 86.9% against 88.8%. The recorded gap below is wider.
-- **`event_loop` still needs its rule replaced.** `screentrack` measured 0.52 ms against 0.53 ms for an idle loop, so it adds nothing measurable.
+- **`event_loop` still needs its rule replaced.** `screentrack` measured 1.09 ms against 1.00 ms for an idle loop, while Python reads lower because its busy worker keeps the CPU awake.
 - **`recovery` now passes:** one duplicate box heals in 0.2 s.
 
 ## Recorded footage
