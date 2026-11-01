@@ -39,7 +39,7 @@ from scorecard import ScoredFrame
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-QUALITY_CONTENDERS = ("raw", "oracle", "iou", "python", "screentrack", "candidate")
+QUALITY_CONTENDERS = ("raw", "oracle", "iou", "python", "screentrack")
 LATENCIES = (1.0, 2.0, 5.0)
 SETTLED_AFTER = 8  # About a second of frames: track lists have stopped growing.
 MODEL = "packages/detection/src/inference/models/aoe2_yolo_v9.onnx"

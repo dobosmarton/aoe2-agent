@@ -31,7 +31,6 @@ Prepared = temporal_entities.PreparedDetection
 HISTORY_SECONDS = 1.0
 IOU_MATCH = 0.3
 ORACLE_MATCH = 0.5
-STALE_OVERLAP = 0.5
 SLOWDOWN_SECONDS = 0.03
 NATIVE_BOX_LENGTH = 4
 NATIVE_SIGNATURE_LENGTH = 6
@@ -271,37 +270,8 @@ class IouTracker(_Baseline):
         return tuple(output)
 
 
-class StaleDuplicatePruned(temporal_entities.TemporalEntities):
-    """The Python tracker, dropping old tracks that overlap one just updated.
-
-    This is an experiment for the `candidate` slot, not a proposed final fix.
-    """
-
-    def observe(
-        self,
-        detections: tuple[Prepared, ...],
-        *,
-        capture_id: int,
-        captured_at: float,
-        camera_revision: int,
-        motion: CameraMotion,
-    ) -> tuple[EntitySnapshot, ...]:
-        output = super().observe(
-            detections,
-            capture_id=capture_id,
-            captured_at=captured_at,
-            camera_revision=camera_revision,
-            motion=motion,
-        )
-        fresh = [track for track in self._tracks if track.last_seen_at == captured_at]
-        stale = [
-            track
-            for track in self._tracks
-            if track.last_seen_at != captured_at
-            and all(_overlap(track.box, item.box) <= STALE_OVERLAP for item in fresh)
-        ]
-        self._tracks = (*fresh, *stale)
-        return output
+class Experiment(temporal_entities.TemporalEntities):
+    """The `candidate` slot: override a method here to judge an idea by the same gates."""
 
 
 def load_screentrack() -> ModuleType:
@@ -426,7 +396,7 @@ class _PythonContender:
 
     def tracker(self, directory: Path) -> Tracker:
         if self.name == "candidate":
-            return StaleDuplicatePruned()
+            return Experiment()
         return temporal_entities.TemporalEntities()
 
 

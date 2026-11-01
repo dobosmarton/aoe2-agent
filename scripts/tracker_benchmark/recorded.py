@@ -58,7 +58,7 @@ VELOCITY_FRAMES = 5
 CONTESTED_MARGIN = 0.1
 SEED = 0
 MAX_FIT_PIXELS = 600_000
-REPORT_NAMES = ("raw", "oracle", "iou", "python", "screentrack", "candidate")
+REPORT_NAMES = ("raw", "oracle", "iou", "python", "screentrack")
 
 
 @dataclass(frozen=True, slots=True)

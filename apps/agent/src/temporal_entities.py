@@ -20,6 +20,8 @@ _HISTORY_SECONDS = 1.0
 _HALF_LIFE_SECONDS = 0.4
 _MAX_OBSERVATIONS = 3
 _MIN_CLASS_MARGIN = 0.25
+_AMBIGUITY_MARGIN = 0.15
+_STALE_OVERLAP = 0.5
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +81,24 @@ def _translated_box(
     return (box[0] + shift[0], box[1] + shift[1], box[2] + shift[0], box[3] + shift[1])
 
 
+def _box_overlap(
+    a: tuple[float, float, float, float], b: tuple[float, float, float, float]
+) -> float:
+    width = min(a[2], b[2]) - max(a[0], b[0])
+    height = min(a[3], b[3]) - max(a[1], b[1])
+    if width <= 0.0 or height <= 0.0:
+        return 0.0
+    intersection = width * height
+    area_a = (a[2] - a[0]) * (a[3] - a[1])
+    area_b = (b[2] - b[0]) * (b[3] - b[1])
+    return intersection / (area_a + area_b - intersection)
+
+
+def _is_stale_duplicate(track: _Track, updated: Sequence[_Track]) -> bool:
+    """An unmatched track on top of a fresh one would make that object ambiguous forever."""
+    return any(_box_overlap(track.box, item.box) > _STALE_OVERLAP for item in updated)
+
+
 def _matching_cost(
     track: _Track,
     box: tuple[float, float, float, float],
@@ -129,23 +149,35 @@ def _candidates(
     return candidates
 
 
+def _check_runner_up(
+    cost: float, identity: int, cheapest: dict[int, float | None], ambiguous: set[int]
+) -> None:
+    """Compare an identity's second candidate with its first, then ignore the rest."""
+    if identity not in cheapest:
+        cheapest[identity] = cost
+        return
+    best = cheapest[identity]
+    if best is not None and cost - best < _AMBIGUITY_MARGIN:
+        ambiguous.add(identity)
+    cheapest[identity] = None
+
+
 def _ambiguous_candidates(
     candidates: Sequence[tuple[float, int, int]],
 ) -> tuple[set[int], set[int]]:
-    """Adjacent costs within each identity suffice because candidates are sorted."""
-    previous_old: dict[int, float] = {}
-    previous_new: dict[int, float] = {}
+    """Only an identity's two cheapest candidates can make it ambiguous.
+
+    Candidates are sorted, so those are the first two seen for each identity. Worse
+    options must not count: in a crowded frame nearly every identity has some pair of
+    similar ones, which rejected almost every match on real footage.
+    """
+    cheapest_old: dict[int, float | None] = {}
+    cheapest_new: dict[int, float | None] = {}
     ambiguous_old: set[int] = set()
     ambiguous_new: set[int] = set()
     for cost, old_index, new_index in candidates:
-        old_cost = previous_old.get(old_index)
-        new_cost = previous_new.get(new_index)
-        if old_cost is not None and cost - old_cost < 0.15:
-            ambiguous_old.add(old_index)
-        if new_cost is not None and cost - new_cost < 0.15:
-            ambiguous_new.add(new_index)
-        previous_old[old_index] = cost
-        previous_new[new_index] = cost
+        _check_runner_up(cost, old_index, cheapest_old, ambiguous_old)
+        _check_runner_up(cost, new_index, cheapest_new, ambiguous_new)
     return ambiguous_old, ambiguous_new
 
 
@@ -271,7 +303,11 @@ class TemporalEntities:
             )
         self._tracks = (
             *updated,
-            *(track for index, track in enumerate(tracks) if index not in used_old),
+            *(
+                track
+                for index, track in enumerate(tracks)
+                if index not in used_old and not _is_stale_duplicate(track, updated)
+            ),
         )
         self.last_matching_ms = (time.perf_counter() - matching_started) * 1000
         return tuple(output)
