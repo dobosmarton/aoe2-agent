@@ -1,9 +1,10 @@
 """Turn a Mac screen recording of AoE2 into a sequence the benchmark can score.
 
-Recording from the host keeps the VM untouched and gives 15 fps, while the tracker
-only sees every third frame. Identity truth comes from all of them, because units
-barely move between frames. Camera motion comes from static objects, so the truth
-does not depend on the camera code or trackers it judges.
+The tracker only sees about five frames a second, while identity truth comes from every
+recorded frame, because units barely move between them. A recording of the VM gives
+15 fps and one of the Mac game about 9.5, so limits counted in frames follow the clip's
+own rate. Camera motion comes from static objects, so the truth does not depend on the
+camera code or trackers it judges.
 
     python scripts/tracker_benchmark/recorded.py colour --pair clip.mov frame.png --out c.npy
     python scripts/tracker_benchmark/recorded.py prepare --video m.mov --colour c.npy \
@@ -49,13 +50,10 @@ JPEG_QUALITY = 85  # What the detector receives live.
 DETECTOR_SIZE = 1280
 NMS_OVERLAP = 0.5  # RemoteDetector's client-side suppression.
 COLOUR_BINS = 33
-SAMPLE_STEP = 3  # 15 fps recording, 5 Hz tracker.
 LINK_OVERLAP = 0.3
 RELABEL_OVERLAP = 0.6  # A static box may change label only when clearly the same object.
 MAX_UNIT_SIZE_PX = 80.0  # The detector also labels whole farms `villager`, at high confidence.
 NOT_A_UNIT = "not_a_unit"
-MOBILE_GAP_FRAMES = 6  # 0.4 s. Static objects can't walk off, so they have no limit.
-MIN_TRACK_FRAMES = 8
 STRIP_MIN_FRAMES = 15  # Sampled frames. Shorter tracks can't reach a 2 s target anyway.
 STRIP_COLUMNS = 9
 STRIP_ROWS = 4
@@ -63,23 +61,52 @@ STRIP_CELL_PX = 240
 STRIP_CROP_PX = 120
 MIN_CAMERA_VOTES = 4
 CAMERA_TOLERANCE_PX = 12.0  # Boxes scatter this much while the view scrolls.
-MAX_SCROLL_PX = 150.0  # Further than this in one frame is a jump, not a scroll.
 MIN_JUMP_VOTES = 6
 JUMP_VOTE_SHARE = 0.4  # Chance agreement is easy over a whole screen of offsets.
 CAMERA_SNAP_PX = 2.0  # Box jitter, not a scroll: stops rounding adding up over a clip.
-MAX_LOST_FRAMES = 20  # How long to wait for a fast scroll to settle before calling it a cut.
-STITCH_MAX_GAP_FRAMES = 6
 STITCH_BASE_PX = 20.0
-STITCH_PX_PER_FRAME = 3.0
 STITCH_MARGIN_PX = 10.0
 UNLINKABLE = 1e9
-VELOCITY_FRAMES = 5
 CONTESTED_MARGIN = 0.1
 SEED = 0
 GATES = Path(__file__).parent / "gates.toml"
 VERIFIED = "verified.json"
 MAX_FIT_PIXELS = 600_000
+MIN_FULL_RATE = 12.0  # Frames a second. Below this a clip gets the slow limits.
 REPORT_NAMES = ("raw", "oracle", "iou", "python", "screentrack")
+
+
+@dataclass(frozen=True, slots=True)
+class Pace:
+    """Limits counted per frame, which would change meaning in seconds with the frame rate."""
+
+    sample_step: int = 3  # Frames between tracker samples, for about 5 Hz.
+    mobile_gap_frames: int = 6  # 0.4 s. Static objects can't walk off, so they have no limit.
+    min_track_frames: int = 8
+    max_scroll_px: float = 150.0  # Further than this in one frame is a jump, not a scroll.
+    max_lost_frames: int = 20  # How long to wait for a fast scroll to settle before a cut.
+    stitch_max_gap_frames: int = 6
+    stitch_px_per_frame: float = 3.0
+    velocity_frames: int = 5
+
+
+FULL_RATE = Pace()  # 15 fps, from the VM.
+SLOW_RATE = Pace(  # About 9.5 fps, from the Mac game.
+    sample_step=2,
+    mobile_gap_frames=4,
+    min_track_frames=5,
+    max_scroll_px=240.0,
+    max_lost_frames=13,
+    stitch_max_gap_frames=4,
+    stitch_px_per_frame=4.8,
+    velocity_frames=3,
+)
+
+
+def pace_for(times: Sequence[float]) -> Pace:
+    """Choose limits from a clip's own frame times."""
+    rate = (len(times) - 1) / (times[-1] - times[0])
+    return FULL_RATE if rate >= MIN_FULL_RATE else SLOW_RATE
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,9 +128,9 @@ class Track:
     def last(self) -> int:
         return max(self.boxes)
 
-    def predicted(self, frame: int) -> Box:
+    def predicted(self, frame: int, pace: Pace) -> Box:
         """Where the object should be, in world coordinates."""
-        frames = sorted(self.boxes)[-VELOCITY_FRAMES:]
+        frames = sorted(self.boxes)[-pace.velocity_frames :]
         latest = self.boxes[frames[-1]]
         if not self.mobile or len(frames) < 2:
             return latest
@@ -192,7 +219,9 @@ def _static_offsets(previous: Sequence[Detection], current: Sequence[Detection])
     return offsets
 
 
-def camera_step(previous: Sequence[Detection], current: Sequence[Detection]) -> Step | None:
+def camera_step(
+    previous: Sequence[Detection], current: Sequence[Detection], pace: Pace = FULL_RATE
+) -> Step | None:
     """How static objects moved on screen, or None when they don't agree.
 
     Every same-label pair proposes an offset. Wrong pairs scatter, while objects that
@@ -207,7 +236,7 @@ def camera_step(previous: Sequence[Detection], current: Sequence[Detection]) -> 
     best = max(range(len(offsets)), key=lambda index: (votes[index], -distances[index]))
     dx, dy = np.median(offsets[near[best]], axis=0).tolist()
     needed = MIN_CAMERA_VOTES
-    if max(abs(dx), abs(dy)) > MAX_SCROLL_PX:
+    if max(abs(dx), abs(dy)) > pace.max_scroll_px:
         statics = min(
             sum(item.label not in MOBILE_CLASSES for item in frame) for frame in (previous, current)
         )
@@ -226,12 +255,16 @@ def _can_link(track: Track, detection: Detection, overlap: float) -> bool:
 
 
 def _assign(
-    open_tracks: Sequence[Track], detections: Sequence[Detection], world: Sequence[Box], frame: int
+    open_tracks: Sequence[Track],
+    detections: Sequence[Detection],
+    world: Sequence[Box],
+    frame: int,
+    pace: Pace,
 ) -> dict[int, Track]:
     """Greedy, best overlap first, noting when a choice was a close call."""
     pairs: list[tuple[float, int, int]] = []
     for track_index, track in enumerate(open_tracks):
-        predicted = track.predicted(frame)
+        predicted = track.predicted(frame, pace)
         for index, box in enumerate(world):
             overlap = _overlap(predicted, box)
             if _can_link(track, detections[index], overlap):
@@ -260,19 +293,19 @@ def _majority(track: Track) -> str:
     return track.labels.most_common(1)[0][0]
 
 
-def _stitch_distance(before: Track, after: Track) -> float | None:
+def _stitch_distance(before: Track, after: Track, pace: Pace) -> float | None:
     """How far apart two pieces are, or None if one can't be the other's continuation."""
     start = min(after.boxes)
     gap = start - before.last
-    if not 0 < gap <= STITCH_MAX_GAP_FRAMES or _majority(before) != _majority(after):
+    if not 0 < gap <= pace.stitch_max_gap_frames or _majority(before) != _majority(after):
         return None
     leaving = _centre(before.boxes[before.last])
     arriving = _centre(after.boxes[start])
     distance = float(np.hypot(arriving[0] - leaving[0], arriving[1] - leaving[1]))
-    return distance if distance <= STITCH_BASE_PX + STITCH_PX_PER_FRAME * gap else None
+    return distance if distance <= STITCH_BASE_PX + pace.stitch_px_per_frame * gap else None
 
 
-def stitch(tracks: Sequence[Track]) -> list[Track]:
+def stitch(tracks: Sequence[Track], pace: Pace = FULL_RATE) -> list[Track]:
     """Join pieces of moving units across gaps too short for a unit to be swapped.
 
     Precision beats length here. A broken track only skips an object when scoring, while
@@ -283,7 +316,7 @@ def stitch(tracks: Sequence[Track]) -> list[Track]:
     for row, before in enumerate(pieces):
         for column, after in enumerate(pieces):
             if before is not after:
-                distance = _stitch_distance(before, after)
+                distance = _stitch_distance(before, after, pace)
                 if distance is not None:
                     costs[row, column] = distance
     following: dict[int, int] = {}
@@ -327,7 +360,7 @@ def split_at_contested(track: Track) -> list[Track]:
     return pieces
 
 
-def link(detections: Sequence[Sequence[Detection]]) -> Linked:
+def link(detections: Sequence[Sequence[Detection]], pace: Pace = FULL_RATE) -> Linked:
     """Follow every object through the full-rate frames, in world coordinates."""
     tracks: list[Track] = []
     open_tracks: list[Track] = []
@@ -336,8 +369,8 @@ def link(detections: Sequence[Sequence[Detection]]) -> Linked:
     lost: set[int] = set()
     anchor = 0  # The last frame whose camera position is known.
     for frame, current in enumerate(detections):
-        step = (0.0, 0.0) if frame == 0 else camera_step(detections[anchor], current)
-        if step is None and frame - anchor <= MAX_LOST_FRAMES:
+        step = (0.0, 0.0) if frame == 0 else camera_step(detections[anchor], current, pace)
+        if step is None and frame - anchor <= pace.max_lost_frames:
             shifts.append(shifts[anchor])
             lost.add(frame)
             continue
@@ -355,9 +388,9 @@ def link(detections: Sequence[Sequence[Detection]]) -> Linked:
         open_tracks = [
             track
             for track in open_tracks
-            if not track.mobile or frame - track.last <= MOBILE_GAP_FRAMES
+            if not track.mobile or frame - track.last <= pace.mobile_gap_frames
         ]
-        taken = _assign(open_tracks, current, world, frame)
+        taken = _assign(open_tracks, current, world, frame, pace)
         for index, detection in enumerate(current):
             track = taken.get(index)
             if track is None:
@@ -366,8 +399,8 @@ def link(detections: Sequence[Sequence[Detection]]) -> Linked:
                 open_tracks.append(track)
             track.boxes[frame] = world[index]
             track.labels[detection.label] += 1
-    whole = [piece for track in stitch(tracks) for piece in split_at_contested(track)]
-    kept = tuple(track for track in whole if len(track.boxes) >= MIN_TRACK_FRAMES)
+    whole = [piece for track in stitch(tracks, pace) for piece in split_at_contested(track)]
+    kept = tuple(track for track in whole if len(track.boxes) >= pace.min_track_frames)
     return Linked(kept, tuple(shifts), tuple(cuts), frozenset(lost))
 
 
@@ -514,16 +547,22 @@ def _dense_row(frame: int, at: float, detections: Sequence[Detection]) -> str:
     return json.dumps({"frame": frame, "at": at, "detections": objects})
 
 
+def _frame_jpeg(table: np.ndarray | None, frame: np.ndarray) -> bytes:
+    """Correct the capture path's colours when a table exists. The Mac game has no pair."""
+    return _jpeg(frame if table is None else apply_colour(table, frame))
+
+
 def _detect_clip(arguments: argparse.Namespace, directory: Path) -> None:
-    table = np.load(arguments.colour)
+    table = None if arguments.colour is None else np.load(arguments.colour)
     times = frame_times(arguments.video, arguments.start, arguments.seconds)
+    pace = pace_for(times)
     frames = video_frames(arguments.video, arguments.start, arguments.seconds, arguments.top)
     lines: list[str] = []
     with httpx.Client(timeout=30) as client:
         for index, (at, recorded) in enumerate(zip(times, frames, strict=False)):
-            jpeg = _jpeg(apply_colour(table, recorded))
-            if index % SAMPLE_STEP == 0:
-                (directory / f"frame_{index // SAMPLE_STEP:05d}.jpg").write_bytes(jpeg)
+            jpeg = _frame_jpeg(table, recorded)
+            if index % pace.sample_step == 0:
+                (directory / f"frame_{index // pace.sample_step:05d}.jpg").write_bytes(jpeg)
             lines.append(_dense_row(index, at, _detect(client, arguments.server, jpeg)))
             if index % 150 == 0:
                 print(f"{directory.name}: frame {index}", flush=True)
@@ -564,23 +603,25 @@ def _verified(linked: Linked, directory: Path) -> Linked:
     return replace(linked, tracks=tracks)
 
 
-def _sample_tracks(linked: Linked, count: int, seed: int) -> list[Track]:
+def _sample_tracks(linked: Linked, count: int, seed: int, pace: Pace) -> list[Track]:
     long_enough = [
         track
         for track in linked.tracks
         if track.mobile
-        and len(set(track.boxes) & set(range(0, 10**6, SAMPLE_STEP))) >= STRIP_MIN_FRAMES
+        and len(set(track.boxes) & set(range(0, 10**6, pace.sample_step))) >= STRIP_MIN_FRAMES
     ]
     random.Random(seed).shuffle(long_enough)
     return long_enough[:count]
 
 
-def _strip_cell(directory: Path, linked: Linked, track: Track, frame: int) -> Image.Image:
+def _strip_cell(
+    directory: Path, linked: Linked, track: Track, frame: int, pace: Pace
+) -> Image.Image:
     scale = STRIP_CELL_PX / STRIP_CROP_PX
     x0, y0, x1, y1 = _shifted(track.boxes[frame], linked.shifts[frame])
     centre_x, centre_y = (x0 + x1) / 2, (y0 + y1) / 2
     left, top = int(centre_x - STRIP_CROP_PX / 2), int(centre_y - STRIP_CROP_PX / 2)
-    image = Image.open(directory / f"frame_{frame // SAMPLE_STEP:05d}.jpg").convert("RGB")
+    image = Image.open(directory / f"frame_{frame // pace.sample_step:05d}.jpg").convert("RGB")
     cell = image.crop((left, top, left + STRIP_CROP_PX, top + STRIP_CROP_PX))
     cell = cell.resize((STRIP_CELL_PX, STRIP_CELL_PX), Image.Resampling.NEAREST)
     ImageDraw.Draw(cell).rectangle(
@@ -593,9 +634,10 @@ def _strip_cell(directory: Path, linked: Linked, track: Track, frame: int) -> Im
 
 def write_strips(directory: Path, count: int, seed: int) -> None:
     """Draw sampled tracks for review. No tracker output appears, so review can't favour one."""
-    _, frames = _read_dense(directory)
-    linked = link(frames)
-    tracks = _sample_tracks(linked, count, seed)
+    times, frames = _read_dense(directory)
+    pace = pace_for(times)
+    linked = link(frames, pace)
+    tracks = _sample_tracks(linked, count, seed, pace)
     output = directory / "strips"
     output.mkdir(exist_ok=True)
     (output / "rows.json").write_text(
@@ -605,11 +647,11 @@ def write_strips(directory: Path, count: int, seed: int) -> None:
         rows = tracks[sheet_index : sheet_index + STRIP_ROWS]
         sheet = Image.new("RGB", (STRIP_CELL_PX * STRIP_COLUMNS, STRIP_CELL_PX * len(rows)))
         for row, track in enumerate(rows):
-            sampled = sorted(frame for frame in track.boxes if frame % SAMPLE_STEP == 0)
+            sampled = sorted(frame for frame in track.boxes if frame % pace.sample_step == 0)
             for column in range(STRIP_COLUMNS):
                 frame = sampled[round(column * (len(sampled) - 1) / (STRIP_COLUMNS - 1))]
                 sheet.paste(
-                    _strip_cell(directory, linked, track, frame),
+                    _strip_cell(directory, linked, track, frame, pace),
                     (column * STRIP_CELL_PX, row * STRIP_CELL_PX),
                 )
         sheet.save(output / f"sheet_{sheet_index // STRIP_ROWS:02d}.jpg", quality=88)
@@ -618,8 +660,9 @@ def write_strips(directory: Path, count: int, seed: int) -> None:
 def write_sequence(directory: Path) -> dict[str, object]:
     """Build the replay's files from cached detections, so truth rules can change freely."""
     times, frames = _read_dense(directory)
-    linked = _verified(link(frames), directory)
-    picked = range(0, len(frames), SAMPLE_STEP)
+    pace = pace_for(times)
+    linked = _verified(link(frames, pace), directory)
+    picked = range(0, len(frames), pace.sample_step)
     start = times[0]
     _write_jsonl(
         directory / "sequence.jsonl",
@@ -795,7 +838,7 @@ def main() -> int:
     colour.add_argument("--top", type=int, default=WINDOW_TOP)
     prepare = commands.add_parser("prepare")
     prepare.add_argument("--video", type=Path, required=True)
-    prepare.add_argument("--colour", type=Path, required=True)
+    prepare.add_argument("--colour", type=Path)
     prepare.add_argument("--start", type=float, required=True)
     prepare.add_argument("--seconds", type=float, required=True)
     prepare.add_argument("--output", type=Path, required=True)
