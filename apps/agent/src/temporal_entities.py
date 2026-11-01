@@ -22,6 +22,8 @@ _MAX_OBSERVATIONS = 3
 _MIN_CLASS_MARGIN = 0.25
 _AMBIGUITY_MARGIN = 0.15
 _STALE_OVERLAP = 0.5
+_LABEL_PENALTY = 1.0
+_GAP_FACTOR = 3.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,9 +96,21 @@ def _box_overlap(
     return intersection / (area_a + area_b - intersection)
 
 
+def _last_label(track: _Track) -> str | None:
+    return track.evidence[-1].label if track.evidence else None
+
+
 def _is_stale_duplicate(track: _Track, updated: Sequence[_Track]) -> bool:
-    """An unmatched track on top of a fresh one would make that object ambiguous forever."""
-    return any(_box_overlap(track.box, item.box) > _STALE_OVERLAP for item in updated)
+    """An unmatched track on top of a fresh one would make that object ambiguous forever.
+
+    Only the same label counts. The detector often puts two labels on one spot, and a
+    second label that skips a frame should get its ID back when it returns.
+    """
+    label = _last_label(track)
+    return any(
+        _box_overlap(track.box, item.box) > _STALE_OVERLAP and _last_label(item) == label
+        for item in updated
+    )
 
 
 def _matching_cost(
@@ -104,7 +118,14 @@ def _matching_cost(
     box: tuple[float, float, float, float],
     appearance: tuple[float, ...],
     elapsed: float,
+    label: str,
 ) -> float | None:
+    """Rank a pair by overlap, looks and label.
+
+    Overlap separates neighbours far better than distance, because a tracked object
+    barely moves between frames. The label penalty stops a second label on one spot from
+    tying with the first, while a flickering label can still continue its track.
+    """
     old_x, old_y = _box_center(track.box)
     new_x, new_y = _box_center(box)
     distance = math.hypot(new_x - old_x, new_y - old_y)
@@ -117,7 +138,10 @@ def _matching_cost(
     )
     if appearance_distance > 0.55:
         return None
-    return distance / allowed + appearance_distance
+    overlap = _box_overlap(track.box, box)
+    position = 1.0 - overlap if overlap > 0.0 else 1.0 + distance / allowed
+    relabelled = bool(track.evidence) and _last_label(track) != label
+    return position + appearance_distance + (_LABEL_PENALTY if relabelled else 0.0)
 
 
 def _candidates(
@@ -142,7 +166,9 @@ def _candidates(
             detection = detections[new_index]
             box = detection.entity.bbox
             assert box is not None
-            cost = _matching_cost(track, box, detection.appearance, elapsed)
+            cost = _matching_cost(
+                track, box, detection.appearance, elapsed, detection.entity.class_name
+            )
             if cost is not None:
                 candidates.append((cost, old_index, new_index))
     candidates.sort()
@@ -252,15 +278,17 @@ class TemporalEntities:
         if not self.accepts(capture_id, captured_at):
             return ()
         self.last_ambiguous_count = 0
-        if motion.kind == "reset" or captured_at - self._last_at > _HISTORY_SECONDS:
+        if motion.kind == "reset":
             self.reset()
+        # Slow frames still need history: a fixed lifetime would forget everything at once.
+        lifetime = max(_HISTORY_SECONDS, _GAP_FACTOR * (captured_at - self._last_at))
         self._last_capture_id = capture_id
         self._last_at = captured_at
         fresh = tuple(item.entity for item in detections)
         tracks = [
             replace(item, box=_translated_box(item.box, motion.shift))
             for item in self._tracks
-            if captured_at - item.last_seen_at <= _HISTORY_SECONDS
+            if captured_at - item.last_seen_at <= lifetime
         ]
         candidate_started = time.perf_counter()
         candidates = _candidates(tracks, detections, captured_at)

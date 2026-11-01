@@ -62,25 +62,48 @@ This is the clean rerun. An earlier run the same day had the VM using about 230%
 
 ## Recorded footage
 
-One human-played match, recorded on the Mac at 15 fps. Each clip is 60 s, replayed to the tracker at 5 Hz, with about 45 detections per frame, of which about 21 are moving units. Raw scores are in `docs/tracker-benchmark-results/2026-11-01-recorded-match-01.json` (before the fix) and `2026-11-01-recorded-match-01-fixed.json`.
+One human-played match, recorded on the Mac at 15 fps. Each clip is 60 s, replayed to the tracker at 5 Hz, with about 45 detections per frame. Scores before the first fix are in `docs/tracker-benchmark-results/2026-11-01-recorded-match-01.json`, and those after it in `2026-11-01-recorded-match-01-fixed.json`.
 
-| Contender | Still camera, 2 s survival | Moving camera, 2 s survival | Wrong target, still / moving | Town Center IDs, still clip |
+**This match is for tuning, so these aren't a verdict.** The held-out test uses matches the tracker has never seen, with the rules in the `[recorded]` table of `gates.toml`.
+
+Share of IDs still correct after 2 s, on the current truth:
+
+| Contender | Still camera | Moving camera | Moving units, moving camera | After 5 s, still / moving |
 |---|---|---|---|---|
-| `python` and `screentrack`, before the fix | 0.0% | 1.5% | 0.0% / 0.0% | 296 in 300 frames |
-| `python` and `screentrack`, fixed | 80.1% | 66.0% | 0.2% / 0.1% | 1 |
-| `iou` | 94.2% | 92.0% | 4.4% / 1.8% | 1 |
+| After the first fix (`screentrack` today) | 80.5% | 65.4% | 53.7% | 78.8% / 53.2% |
+| New rules, Python only | 94.2% | 94.0% | 97.0% | 93.7% / 86.6% |
+| `iou` | 94.7% | 92.5% | 88.1% | 92.3% / 81.4% |
 
-Both trackers differ on 0 frames on both clips, before and after the fix.
+Before the first fix, on older truth, the clips scored 0.0% and 1.5%.
 
-- **Cause:** `_ambiguous_candidates` rejected an identity when any two of its candidates were close in cost, not just its best two. In a crowded frame most identities have such a pair, so 97% of detections were rejected from the first second. A stale duplicate could also keep one object ambiguous forever.
-- **Both changes were needed.** Alone, the top-two rule reached 66.0% and 47.8%, and dropping stale duplicates reached 23.8% and 22.6%.
+Remaining wrong objects on these clips are 12 events, none on a reviewed unit: they involve farms, camps and farm-sized boxes.
 
-How far to trust each number:
+**Why IDs broke:** almost every break was an ambiguity rejection, and in about 85% of those the rival sat on the same spot under another label. The detector labels one spot twice on nearly every frame, for example `farm`+`mill` on 300 of 300 frames, and the two tracks looked identical to the matcher.
 
-- **Firm:** the Town Center count, which needs no truth, and static survival on the still clip, where nothing moves and the camera holds.
-- **Rough:** moving-unit scores and the moving clip. Truth is linked automatically and hasn't had its hand audit. Camera cuts split the moving clip's truth into 734 tracks, which can also count kept IDs as wrong, so `iou`'s wrong-target figures may be too high. Truth linking resembles `iou`, which may flatter its moving-unit score.
-- **Colour:** the recording passes through a colour table fitted on paused frame pairs. The rule set before that check failed even for the VM's own frame moved by 1 px, so it was replaced by "no worse than harmless changes". The corrected recording meets that on five of six measures and misses the sixth by one object, with 7 confidences moving over 0.1 against a worst case of 6.
-- **Scope:** one match, played by a person, at the 5 Hz target. The agent reached about 0.08 fresh detections per second on the VM on 2026-11-01, and tracking resets when frames are over 1 s apart, so these results only apply once perception is faster.
+**The rules that fixed it:**
+
+- **Overlap in the cost:** `1 - IoU` replaces `distance / allowed`, because a tracked object barely moves between frames.
+- **Label penalty:** a label change costs 1.0. That stops two labels tying, while a flickering label can still continue its track.
+- **Same-label stale pruning:** a second label that skips a frame gets its ID back.
+- **Adaptive memory:** tracks live for `max(1 s, 3 × frame gap)`, and only a camera reset clears them. On the still clip, with the camera held, 92.8% survive 10 s gaps, where the older rule scored 0%. Too few moving-unit targets reached long gaps to judge them.
+
+**Tested and dropped:** velocity prediction, a ratio test and voted labels didn't help.
+
+### How the truth is built
+
+- **Static objects** link automatically, and looked right throughout the audit.
+- **Moving units** can't be trusted automatically: 15 of 48 random tracks failed review by eye, from swaps, farm ghosts, static objects or silhouettes that couldn't be checked. So they count only if reviewed, and the 33 that passed are in `docs/tracker-benchmark-results/verified/`. The review shows no tracker output, so it can't favour one.
+- **Linking stops rather than guesses.** A broken track only skips an object when scoring, while a wrong join blames a tracker for being right.
+- **Wrong target** now means a different object. A second label on the same spot is counted separately, because a click lands in the same place.
+
+### Detector finding
+
+The detector labels whole farms `villager`, at about 0.8 confidence. Boxes over 80 px make up about a third of `villager` detections, around 6 per frame. Truth treats them as `not_a_unit`. These phantom villagers probably skew the agent's worker counts too, which needs its own look.
+
+### How far to trust this
+
+- **Colour:** the recording passes through a colour table fitted on paused frame pairs. The rule set before that check failed even for the VM's own frame moved by 1 px, so it was replaced by "no worse than harmless changes". The corrected recording meets that on five of six measures and misses the sixth by one object.
+- **Scope:** one match, played by a person, at the 5 Hz target. The agent reached about 0.08 fresh detections per second on the VM on 2026-11-01, and `apps/agent/src/loops/source.py` still resets at gaps over 1 s, so the agent won't see this until perception is faster.
 
 ### Recording another match
 
@@ -92,4 +115,6 @@ How far to trust each number:
    ```
 
 3. Press F3 to pause, then capture the same frame both ways: `python -m gameplay_agent.capture_sequence --output logs\pixel-check-N --count 3 --interval 1` in the VM, and the command above with `-t 5` on the Mac. Use `frame_00002.png`, because the first frame can be half size.
-4. Fit a table with `recorded.py colour`, using that pair and any earlier ones, cut clips with `recorded.py prepare`, and rate them with `recorded.py score`.
+4. Fit a table with `recorded.py colour`, using that pair and any earlier ones, then cut clips with `recorded.py prepare`.
+5. Draw review strips with `recorded.py strips`, and save the tracks that pass as `verified.json` beside the clip.
+6. Rebuild with `recorded.py prepare`, then judge held-out matches once with `recorded.py verdict`.
