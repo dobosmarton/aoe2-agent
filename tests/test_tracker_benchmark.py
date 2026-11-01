@@ -71,10 +71,29 @@ def test_target_is_lost_when_the_id_disappears() -> None:
     assert (outcome.survived, outcome.wrong, outcome.lost) == (0, 0, 1)
 
 
+def _apart(at: float, owners: dict[str, str]) -> ScoredFrame:
+    """Two objects far apart, each detected under the given ID."""
+    boxes = {"a": _BOX, "b": (100.0, 100.0, 110.0, 110.0)}
+    truths = tuple(TruthObject(name, "villager", box) for name, box in boxes.items())
+    found = {
+        name: EntitySnapshot(owner, "villager", boxes[name], (5.0, 5.0), 0.8)
+        for name, owner in owners.items()
+    }
+    return ScoredFrame(at, tuple(found.values()), truths, found)
+
+
 def test_target_is_wrong_when_the_id_moved_to_another_object() -> None:
+    frames = [_apart(0.0, {"a": "x", "b": "y"}), _apart(1.0, {"a": "y", "b": "x"})]
+    outcome = scorecard.target_outcomes(frames, 1.0)
+    assert (outcome.survived, outcome.wrong, outcome.lost, outcome.same_spot) == (0, 2, 0, 0)
+
+
+def test_a_second_label_on_the_same_spot_is_not_a_wrong_object() -> None:
     frames = [_frame(0.0, {"a": "x", "b": "y"}), _frame(1.0, {"a": "y", "b": "x"})]
     outcome = scorecard.target_outcomes(frames, 1.0)
-    assert (outcome.survived, outcome.wrong, outcome.lost) == (0, 2, 0)
+    assert (outcome.wrong, outcome.same_spot, outcome.total) == (0, 2, 2)
+    assert outcome.same_spot_rate == 1.0
+    assert outcome.wrong_rate == 0.0
 
 
 def test_target_ignores_objects_the_detector_no_longer_finds() -> None:

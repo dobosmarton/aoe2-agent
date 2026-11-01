@@ -16,12 +16,14 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import random
 import subprocess
 import sys
+import tomllib
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import contenders
 import httpx
@@ -31,7 +33,8 @@ from core import DetectedEntity
 from detection.inference.postprocess import nms
 from gameplay_agent.camera_motion import MOBILE_CLASSES
 from gameplay_agent.sequence_replay import _overlap
-from PIL import Image
+from PIL import Image, ImageDraw
+from scipy.optimize import linear_sum_assignment
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -49,14 +52,32 @@ COLOUR_BINS = 33
 SAMPLE_STEP = 3  # 15 fps recording, 5 Hz tracker.
 LINK_OVERLAP = 0.3
 RELABEL_OVERLAP = 0.6  # A static box may change label only when clearly the same object.
-MOBILE_GAP_FRAMES = 15  # One second. Static objects can't walk off, so they have no limit.
+MAX_UNIT_SIZE_PX = 80.0  # The detector also labels whole farms `villager`, at high confidence.
+NOT_A_UNIT = "not_a_unit"
+MOBILE_GAP_FRAMES = 6  # 0.4 s. Static objects can't walk off, so they have no limit.
 MIN_TRACK_FRAMES = 8
-MIN_CAMERA_VOTES = 3
-CAMERA_BIN_PX = 4
+STRIP_MIN_FRAMES = 15  # Sampled frames. Shorter tracks can't reach a 2 s target anyway.
+STRIP_COLUMNS = 9
+STRIP_ROWS = 4
+STRIP_CELL_PX = 240
+STRIP_CROP_PX = 120
+MIN_CAMERA_VOTES = 4
+CAMERA_TOLERANCE_PX = 12.0  # Boxes scatter this much while the view scrolls.
+MAX_SCROLL_PX = 150.0  # Further than this in one frame is a jump, not a scroll.
+MIN_JUMP_VOTES = 6
+JUMP_VOTE_SHARE = 0.4  # Chance agreement is easy over a whole screen of offsets.
 CAMERA_SNAP_PX = 2.0  # Box jitter, not a scroll: stops rounding adding up over a clip.
+MAX_LOST_FRAMES = 20  # How long to wait for a fast scroll to settle before calling it a cut.
+STITCH_MAX_GAP_FRAMES = 6
+STITCH_BASE_PX = 20.0
+STITCH_PX_PER_FRAME = 3.0
+STITCH_MARGIN_PX = 10.0
+UNLINKABLE = 1e9
 VELOCITY_FRAMES = 5
 CONTESTED_MARGIN = 0.1
 SEED = 0
+GATES = Path(__file__).parent / "gates.toml"
+VERIFIED = "verified.json"
 MAX_FIT_PIXELS = 600_000
 REPORT_NAMES = ("raw", "oracle", "iou", "python", "screentrack")
 
@@ -99,6 +120,7 @@ class Linked:
     tracks: tuple[Track, ...]
     shifts: tuple[Step, ...]  # Screen position of the world origin, per frame.
     cuts: tuple[int, ...]
+    lost: frozenset[int] = frozenset()  # Frames whose camera position is unknown.
 
 
 def colour_key(rgb: np.ndarray) -> np.ndarray:
@@ -142,6 +164,12 @@ def apply_colour(table: np.ndarray, rgb: np.ndarray) -> np.ndarray:
     return np.clip(table[colour_key(rgb)].round(), 0, 255).astype(np.uint8)
 
 
+def is_unit(detection: Detection) -> bool:
+    """Whether this box can walk. A unit-labelled box the size of a farm can't."""
+    x0, y0, x1, y1 = detection.box
+    return detection.label in MOBILE_CLASSES and max(x1 - x0, y1 - y0) <= MAX_UNIT_SIZE_PX
+
+
 def _centre(box: Box) -> Step:
     return (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
 
@@ -151,12 +179,7 @@ def _shifted(box: Box, step: Step, sign: float = 1.0) -> Box:
     return (box[0] + dx, box[1] + dy, box[2] + dx, box[3] + dy)
 
 
-def camera_step(previous: Sequence[Detection], current: Sequence[Detection]) -> Step | None:
-    """How static objects moved on screen, or None when too few are shared.
-
-    Every same-label pair votes for the offset between them. Wrong pairs scatter, while
-    objects that really are the same agree, so the largest group is the camera.
-    """
+def _static_offsets(previous: Sequence[Detection], current: Sequence[Detection]) -> list[Step]:
     offsets: list[Step] = []
     for before in previous:
         if before.label in MOBILE_CLASSES:
@@ -166,26 +189,38 @@ def camera_step(previous: Sequence[Detection], current: Sequence[Detection]) -> 
             if after.label == before.label:
                 target = _centre(after.box)
                 offsets.append((target[0] - origin[0], target[1] - origin[1]))
-    if not offsets:
+    return offsets
+
+
+def camera_step(previous: Sequence[Detection], current: Sequence[Detection]) -> Step | None:
+    """How static objects moved on screen, or None when they don't agree.
+
+    Every same-label pair proposes an offset. Wrong pairs scatter, while objects that
+    really are the same agree, so the largest group is the camera.
+    """
+    offsets = np.asarray(_static_offsets(previous, current))
+    if not offsets.size:
         return None
-    votes = Counter((round(dx / CAMERA_BIN_PX), round(dy / CAMERA_BIN_PX)) for dx, dy in offsets)
-    (bin_x, bin_y), count = votes.most_common(1)[0]
-    if count < MIN_CAMERA_VOTES:
+    near = np.abs(offsets[:, None] - offsets[None, :]).max(axis=2) <= CAMERA_TOLERANCE_PX
+    votes = near.sum(axis=1)
+    distances = np.abs(offsets).max(axis=1)
+    best = max(range(len(offsets)), key=lambda index: (votes[index], -distances[index]))
+    dx, dy = np.median(offsets[near[best]], axis=0).tolist()
+    needed = MIN_CAMERA_VOTES
+    if max(abs(dx), abs(dy)) > MAX_SCROLL_PX:
+        statics = min(
+            sum(item.label not in MOBILE_CLASSES for item in frame) for frame in (previous, current)
+        )
+        needed = max(MIN_JUMP_VOTES, round(statics * JUMP_VOTE_SHARE))
+    if votes[best] < needed:
         return None
-    agreeing = [
-        offset
-        for offset in offsets
-        if abs(offset[0] - bin_x * CAMERA_BIN_PX) <= CAMERA_BIN_PX
-        and abs(offset[1] - bin_y * CAMERA_BIN_PX) <= CAMERA_BIN_PX
-    ]
-    dx, dy = np.median(np.asarray(agreeing), axis=0).tolist()
     if abs(dx) <= CAMERA_SNAP_PX and abs(dy) <= CAMERA_SNAP_PX:
         return 0.0, 0.0
     return dx, dy
 
 
 def _can_link(track: Track, detection: Detection, overlap: float) -> bool:
-    if track.mobile != (detection.label in MOBILE_CLASSES) or overlap < LINK_OVERLAP:
+    if track.mobile != is_unit(detection) or overlap < LINK_OVERLAP:
         return False
     return track.mobile or detection.label in track.labels or overlap >= RELABEL_OVERLAP
 
@@ -221,21 +256,100 @@ def _assign(
     return taken
 
 
+def _majority(track: Track) -> str:
+    return track.labels.most_common(1)[0][0]
+
+
+def _stitch_distance(before: Track, after: Track) -> float | None:
+    """How far apart two pieces are, or None if one can't be the other's continuation."""
+    start = min(after.boxes)
+    gap = start - before.last
+    if not 0 < gap <= STITCH_MAX_GAP_FRAMES or _majority(before) != _majority(after):
+        return None
+    leaving = _centre(before.boxes[before.last])
+    arriving = _centre(after.boxes[start])
+    distance = float(np.hypot(arriving[0] - leaving[0], arriving[1] - leaving[1]))
+    return distance if distance <= STITCH_BASE_PX + STITCH_PX_PER_FRAME * gap else None
+
+
+def stitch(tracks: Sequence[Track]) -> list[Track]:
+    """Join pieces of moving units across gaps too short for a unit to be swapped.
+
+    Precision beats length here. A broken track only skips an object when scoring, while
+    a wrong join blames a tracker for being right, so a close call stays broken.
+    """
+    pieces = [track for track in tracks if track.mobile]
+    costs = np.full((len(pieces), len(pieces)), UNLINKABLE)
+    for row, before in enumerate(pieces):
+        for column, after in enumerate(pieces):
+            if before is not after:
+                distance = _stitch_distance(before, after)
+                if distance is not None:
+                    costs[row, column] = distance
+    following: dict[int, int] = {}
+    for row, column in zip(*linear_sum_assignment(costs), strict=True):
+        if costs[row, column] < UNLINKABLE:
+            rivals = (
+                np.delete(costs[row], column).min(initial=UNLINKABLE),
+                np.delete(costs[:, column], row).min(initial=UNLINKABLE),
+            )
+            if min(rivals) - costs[row, column] >= STITCH_MARGIN_PX:
+                following[int(row)] = int(column)
+    followers = set(following.values())
+    joined = [track for track in tracks if not track.mobile]
+    for index, head in enumerate(pieces):
+        if index in followers:
+            continue
+        cursor = index
+        while cursor in following:
+            cursor = following[cursor]
+            piece = pieces[cursor]
+            head.boxes.update(piece.boxes)
+            head.labels.update(piece.labels)
+            head.contested.extend(piece.contested)
+        joined.append(head)
+    return joined
+
+
+def split_at_contested(track: Track) -> list[Track]:
+    """End a unit's track wherever two units could be confused, rather than guess."""
+    if not track.mobile or not track.contested:
+        return [track]
+    pieces: list[Track] = []
+    start = -1
+    for index, end in enumerate([*sorted(set(track.contested)), max(track.boxes)]):
+        boxes = {frame: box for frame, box in track.boxes.items() if start < frame <= end}
+        if boxes:
+            pieces.append(
+                Track(f"{track.identifier}_{index}", True, boxes, Counter(track.labels), [end])
+            )
+        start = end
+    return pieces
+
+
 def link(detections: Sequence[Sequence[Detection]]) -> Linked:
     """Follow every object through the full-rate frames, in world coordinates."""
     tracks: list[Track] = []
     open_tracks: list[Track] = []
     shifts: list[Step] = []
     cuts: list[int] = []
-    shift: Step = (0.0, 0.0)
+    lost: set[int] = set()
+    anchor = 0  # The last frame whose camera position is known.
     for frame, current in enumerate(detections):
-        if frame:
-            step = camera_step(detections[frame - 1], current)
-            if step is None:
-                cuts.append(frame)
-                open_tracks = []
-            else:
-                shift = (shift[0] + step[0], shift[1] + step[1])
+        step = (0.0, 0.0) if frame == 0 else camera_step(detections[anchor], current)
+        if step is None and frame - anchor <= MAX_LOST_FRAMES:
+            shifts.append(shifts[anchor])
+            lost.add(frame)
+            continue
+        if step is None:
+            cuts.append(frame)
+            open_tracks = []
+            step = (0.0, 0.0)
+            shift = shifts[anchor]
+        else:
+            base = shifts[anchor] if shifts else (0.0, 0.0)
+            shift = (base[0] + step[0], base[1] + step[1])
+        anchor = frame
         shifts.append(shift)
         world = [_shifted(item.box, shift, -1.0) for item in current]
         open_tracks = [
@@ -247,13 +361,14 @@ def link(detections: Sequence[Sequence[Detection]]) -> Linked:
         for index, detection in enumerate(current):
             track = taken.get(index)
             if track is None:
-                track = Track(f"track_{len(tracks)}", detection.label in MOBILE_CLASSES)
+                track = Track(f"track_{len(tracks)}", is_unit(detection))
                 tracks.append(track)
                 open_tracks.append(track)
             track.boxes[frame] = world[index]
             track.labels[detection.label] += 1
-    kept = tuple(track for track in tracks if len(track.boxes) >= MIN_TRACK_FRAMES)
-    return Linked(kept, tuple(shifts), tuple(cuts))
+    whole = [piece for track in stitch(tracks) for piece in split_at_contested(track)]
+    kept = tuple(track for track in whole if len(track.boxes) >= MIN_TRACK_FRAMES)
+    return Linked(kept, tuple(shifts), tuple(cuts), frozenset(lost))
 
 
 def _world_box(track: Track, frame: int) -> Box | None:
@@ -272,8 +387,15 @@ def _world_box(track: Track, frame: int) -> Box | None:
     )  # type: ignore[return-value]
 
 
+def _truth_label(track: Track) -> str:
+    label = _majority(track)
+    return NOT_A_UNIT if label in MOBILE_CLASSES and not track.mobile else label
+
+
 def truth_at(linked: Linked, frame: int) -> list[dict[str, object]]:
     objects: list[dict[str, object]] = []
+    if frame in linked.lost:
+        return objects
     for track in linked.tracks:
         box = _world_box(track, frame)
         if box is None:
@@ -284,7 +406,7 @@ def truth_at(linked: Linked, frame: int) -> list[dict[str, object]]:
             objects.append(
                 {
                     "track_id": track.identifier,
-                    "class_name": track.labels.most_common(1)[0][0],
+                    "class_name": _truth_label(track),
                     "bbox": [x0, y0, x1, y1],
                 }
             )
@@ -311,6 +433,7 @@ def _review(linked: Linked, count: int) -> dict[str, object]:
         "tracks": len(linked.tracks),
         "mobile_tracks": len(mobile),
         "camera_cuts": list(linked.cuts),
+        "lost_frames": len(linked.lost),
         "contested_frames": contested,
         "overlapping_pairs": len(pairs),
         "overlap_events": crossings,
@@ -426,10 +549,76 @@ def _write_jsonl(path: Path, rows: Sequence[dict[str, object]]) -> None:
     path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
 
 
+def _verified(linked: Linked, directory: Path) -> Linked:
+    """Keep only the moving units a person checked, when a review exists.
+
+    Automatic identity is reliable for static objects, but not for units in a crowd.
+    """
+    path = directory / VERIFIED
+    if not path.exists():
+        return linked
+    approved = set(json.loads(path.read_text(encoding="utf-8"))["approved"])
+    tracks = tuple(
+        track for track in linked.tracks if not track.mobile or track.identifier in approved
+    )
+    return replace(linked, tracks=tracks)
+
+
+def _sample_tracks(linked: Linked, count: int, seed: int) -> list[Track]:
+    long_enough = [
+        track
+        for track in linked.tracks
+        if track.mobile
+        and len(set(track.boxes) & set(range(0, 10**6, SAMPLE_STEP))) >= STRIP_MIN_FRAMES
+    ]
+    random.Random(seed).shuffle(long_enough)
+    return long_enough[:count]
+
+
+def _strip_cell(directory: Path, linked: Linked, track: Track, frame: int) -> Image.Image:
+    scale = STRIP_CELL_PX / STRIP_CROP_PX
+    x0, y0, x1, y1 = _shifted(track.boxes[frame], linked.shifts[frame])
+    centre_x, centre_y = (x0 + x1) / 2, (y0 + y1) / 2
+    left, top = int(centre_x - STRIP_CROP_PX / 2), int(centre_y - STRIP_CROP_PX / 2)
+    image = Image.open(directory / f"frame_{frame // SAMPLE_STEP:05d}.jpg").convert("RGB")
+    cell = image.crop((left, top, left + STRIP_CROP_PX, top + STRIP_CROP_PX))
+    cell = cell.resize((STRIP_CELL_PX, STRIP_CELL_PX), Image.Resampling.NEAREST)
+    ImageDraw.Draw(cell).rectangle(
+        [(x0 - left) * scale, (y0 - top) * scale, (x1 - left) * scale, (y1 - top) * scale],
+        outline=(255, 40, 40),
+        width=2,
+    )
+    return cell
+
+
+def write_strips(directory: Path, count: int, seed: int) -> None:
+    """Draw sampled tracks for review. No tracker output appears, so review can't favour one."""
+    _, frames = _read_dense(directory)
+    linked = link(frames)
+    tracks = _sample_tracks(linked, count, seed)
+    output = directory / "strips"
+    output.mkdir(exist_ok=True)
+    (output / "rows.json").write_text(
+        json.dumps([track.identifier for track in tracks]), encoding="utf-8"
+    )
+    for sheet_index in range(0, len(tracks), STRIP_ROWS):
+        rows = tracks[sheet_index : sheet_index + STRIP_ROWS]
+        sheet = Image.new("RGB", (STRIP_CELL_PX * STRIP_COLUMNS, STRIP_CELL_PX * len(rows)))
+        for row, track in enumerate(rows):
+            sampled = sorted(frame for frame in track.boxes if frame % SAMPLE_STEP == 0)
+            for column in range(STRIP_COLUMNS):
+                frame = sampled[round(column * (len(sampled) - 1) / (STRIP_COLUMNS - 1))]
+                sheet.paste(
+                    _strip_cell(directory, linked, track, frame),
+                    (column * STRIP_CELL_PX, row * STRIP_CELL_PX),
+                )
+        sheet.save(output / f"sheet_{sheet_index // STRIP_ROWS:02d}.jpg", quality=88)
+
+
 def write_sequence(directory: Path) -> dict[str, object]:
     """Build the replay's files from cached detections, so truth rules can change freely."""
     times, frames = _read_dense(directory)
-    linked = link(frames)
+    linked = _verified(link(frames), directory)
     picked = range(0, len(frames), SAMPLE_STEP)
     start = times[0]
     _write_jsonl(
@@ -487,6 +676,7 @@ def score(directory: Path, names: Sequence[str]) -> dict[str, dict[str, float]]:
             "survival_2s_mobile": scorecard.target_outcomes(frames, 2.0, mobile=True).survival,
             "survival_2s_static": scorecard.target_outcomes(frames, 2.0, mobile=False).survival,
             "wrong_2s": scorecard.target_outcomes(frames, 2.0).wrong_rate,
+            "same_spot_2s": scorecard.target_outcomes(frames, 2.0).same_spot_rate,
             "idf1": scorecard.idf1(frames),
             "switches": scorecard.id_switches(frames),
         }
@@ -500,20 +690,68 @@ def score(directory: Path, names: Sequence[str]) -> dict[str, dict[str, float]]:
 
 
 def _print_scores(results: dict[str, dict[str, float]]) -> None:
-    print("contender      1 s     2 s     5 s  mobile  static  wrong   IDF1  switches/1000")
+    print(
+        "contender      1 s     2 s     5 s  mobile  static  wrong  same spot   IDF1  switches/1000"
+    )
     for name, row in results.items():
         if name == "parity":
             continue
         print(
             f"{name:12s} {_percent(row['survival_1s'])} {_percent(row['survival_2s'])} "
             f"{_percent(row['survival_5s'])} {_percent(row['survival_2s_mobile'])} "
-            f"{_percent(row['survival_2s_static'])} {_percent(row['wrong_2s'])} "
+            f"{_percent(row['survival_2s_static'])} {row['wrong_2s'] * 100:5.2f}% "
+            f"{_percent(row['same_spot_2s'])}     "
             f"{_percent(row['idf1'])} {row['switches']:8.0f}"
         )
     if "parity" in results:
         print(
             f"python and screentrack differ on {results['parity']['differing_frames']:.0f} frames"
         )
+
+
+def pooled_outcome(
+    runs: Sequence[Sequence[scorecard.ScoredFrame]], latency: float
+) -> scorecard.TargetOutcome:
+    outcomes = [scorecard.target_outcomes(frames, latency) for frames in runs]
+    return scorecard.TargetOutcome(
+        sum(item.survived for item in outcomes),
+        sum(item.wrong for item in outcomes),
+        sum(item.lost for item in outcomes),
+        sum(item.same_spot for item in outcomes),
+    )
+
+
+def _mean_labels(runs: Sequence[Sequence[scorecard.ScoredFrame]]) -> tuple[float, float]:
+    accuracy, flips = zip(*(scorecard.label_scores(frames) for frames in runs), strict=True)
+    return float(np.mean(accuracy)), float(np.mean(flips))
+
+
+def verdict(directories: Sequence[Path], name: str, rules: dict[str, object]) -> list[str]:
+    """Apply the pre-agreed rules, pooling every clip, and describe each one."""
+    latency = cast("float", rules["latency_seconds"])
+    baseline = cast("str", rules["baseline"])
+    label_baseline = cast("str", rules["label_baseline"])
+    runs: dict[str, list[list[scorecard.ScoredFrame]]] = {}
+    for entrant in {name, baseline, label_baseline}:
+        runs[entrant] = [
+            scorecard.score_frames(
+                contenders.replay(contenders.contender(entrant), directory)[0],
+                scorecard.read_truth(directory),
+            )
+            for directory in directories
+        ]
+    ours = pooled_outcome(runs[name], latency)
+    theirs = pooled_outcome(runs[baseline], latency)
+    accuracy, flips = _mean_labels(runs[name])
+    plain_accuracy, plain_flips = _mean_labels(runs[label_baseline])
+    checks = (
+        ("survival", ours.survival >= theirs.survival, f"{ours.survival:.1%} against {theirs.survival:.1%}"),
+        ("wrong object", ours.wrong_rate <= theirs.wrong_rate, f"{ours.wrong_rate:.2%} against {theirs.wrong_rate:.2%}"),
+        ("labels", accuracy >= plain_accuracy and flips <= plain_flips, f"accuracy {accuracy:.2%} against {plain_accuracy:.2%}; flips {flips:.1f} against {plain_flips:.1f}"),
+    )  # fmt: skip
+    return [
+        f"{'pass' if passed else 'FAIL'}  {label}: {detail}" for label, passed, detail in checks
+    ]
 
 
 def _paused_frame(video: Path, top: int) -> np.ndarray:
@@ -563,6 +801,13 @@ def main() -> int:
     prepare.add_argument("--output", type=Path, required=True)
     prepare.add_argument("--top", type=int, default=WINDOW_TOP)
     prepare.add_argument("--server", default="http://127.0.0.1:8420")
+    strips = commands.add_parser("strips")
+    strips.add_argument("directory", type=Path)
+    strips.add_argument("--count", type=int, default=24)
+    strips.add_argument("--seed", type=int, default=SEED)
+    judged = commands.add_parser("verdict")
+    judged.add_argument("directories", type=Path, nargs="+")
+    judged.add_argument("--name", default="screentrack")
     rate = commands.add_parser("score")
     rate.add_argument("directory", type=Path)
     rate.add_argument("--names", nargs="+", default=list(REPORT_NAMES))
@@ -571,6 +816,11 @@ def main() -> int:
         _colour_command(arguments)
     elif arguments.command == "prepare":
         _prepare_command(arguments)
+    elif arguments.command == "strips":
+        write_strips(arguments.directory, arguments.count, arguments.seed)
+    elif arguments.command == "verdict":
+        rules = tomllib.loads(GATES.read_text(encoding="utf-8"))["recorded"]
+        print("\n".join(verdict(arguments.directories, arguments.name, rules)))
     else:
         results = score(arguments.directory, arguments.names)
         _print_scores(results)
