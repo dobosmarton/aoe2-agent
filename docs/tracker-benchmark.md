@@ -105,16 +105,34 @@ The detector labels whole farms `villager`, at about 0.8 confidence. Boxes over 
 - **Colour:** the recording passes through a colour table fitted on paused frame pairs. The rule set before that check failed even for the VM's own frame moved by 1 px, so it was replaced by "no worse than harmless changes". The corrected recording meets that on five of six measures and misses the sixth by one object.
 - **Scope:** one match, played by a person, at the 5 Hz target. The agent reached about 0.08 fresh detections per second on the VM on 2026-11-01, and `apps/agent/src/loops/source.py` still resets at gaps over 1 s, so the agent won't see this until perception is faster.
 
+### Held-out result
+
+The rules in `gates.toml` were fixed before matches 2 and 3 existed, and the reviewed tracks were committed before any tracker was scored on them. Python tracker at `17ac2d1` against the IoU matcher, pooled over four clips and 7,947 targets:
+
+| Check | Python | IoU | Result |
+|---|---|---|---|
+| Still the same object after 2 s | 93.7% | 94.4% | Fail |
+| Wrong object | 0.34% (27) | 0.05% (4) | Fail |
+| Label accuracy | 86.84% | 86.88% | Fail |
+| Label flips | 16.9 | 17.1 | Pass |
+
+Labels count as one check, so the tracker failed all three. Generated scenes, recovery and speed were not run, because the result was already decided. Per the plan, the rules were not ported to Rust, and these matches are now spent: a retest needs a new match.
+
+The result differs by object type. Reviewed units survived better than with IoU on three clips and tied on the fourth (100% against 95.2%, 97.0% and 73.3%, then 94.1% each), but those are only 20 units. Static objects make up most targets, and they did slightly worse on the VM clips (97.0% against 98.6%, and 94.3% against 96.3%). Full figures are in `docs/tracker-benchmark-results/2026-11-01-recorded-heldout.json`.
+
+**Match 3 is weak evidence.** It is the Mac game, recorded at about 9.5 fps. The detector found only 14-19 objects per frame in a crowded match, misplaced many building boxes, and missed most massed units, so only 11 tracks were long enough to review and 6 passed. The moving clip also has 25 camera cuts, which is why it has no 5 s targets. Playing Magyars on Arabia did not fix the buildings, so an unfamiliar civ was not the cause.
+
 ### Recording another match
 
-1. On the Mac, set Displays > Preset to Internet & Web (sRGB). The colour table only applies to this mode.
-2. Run the game in the VM, and leave the VMware window where it is. Record from Terminal.app, which needs Screen Recording permission:
+Record the Mac game from Terminal.app, which needs Screen Recording permission. The fragmented format keeps frame times if a recording dies: in a test, killing the recording lost only the last unwritten fragment, about two seconds, rather than the whole file. Ten minutes takes about 10 GB at the rate below, so start with at least 30 GB free, because swap also uses the disk.
+
+1. On the Mac, set Displays > Preset to Internet & Web (sRGB).
+2. Record with this command. Try it first with `-t 30` while the game is busy, and expect about 9.5 fps, with nearly every gap at 67 or 133 ms.
 
    ```bash
-   ffmpeg -y -f avfoundation -capture_cursor 0 -framerate 15 -pixel_format nv12 -i "Capture screen 0:none" -t 600 -c:v prores_videotoolbox -profile:v standard ~/aoe2-capture/match-02.mov
+   ffmpeg -y -f avfoundation -capture_cursor 0 -framerate 15 -pixel_format nv12 -i "Capture screen 0:none" -t 600 -c:v prores_videotoolbox -profile:v standard -movflags +frag_keyframe+empty_moov -min_frag_duration 2000000 match.mov
    ```
 
-3. Press F3 to pause, then capture the same frame both ways: `python -m gameplay_agent.capture_sequence --output logs\pixel-check-N --count 3 --interval 1` in the VM, and the command above with `-t 5` on the Mac. Use `frame_00002.png`, because the first frame can be half size.
-4. Fit a table with `recorded.py colour`, using that pair and any earlier ones, then cut clips with `recorded.py prepare`.
-5. Draw review strips with `recorded.py strips`, and save the tracks that pass as `verified.json` beside the clip.
-6. Rebuild with `recorded.py prepare`, then judge held-out matches once with `recorded.py verdict`.
+3. Cut clips with `recorded.py prepare --top 66`. Leave out `--colour`, because no paired capture exists for the Mac game yet. Limits follow each clip's own frame rate, so VM clips rebuild unchanged.
+4. Draw review strips with `recorded.py strips`, and save the tracks that pass as `verified.json` beside the clip.
+5. Rebuild with `recorded.py prepare`, then judge held-out matches once with `recorded.py verdict`.

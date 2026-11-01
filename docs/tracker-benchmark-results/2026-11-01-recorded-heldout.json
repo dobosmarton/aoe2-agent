@@ -1,0 +1,232 @@
+{
+  "date": "2026-11-01",
+  "tracker_commit": "17ac2d1",
+  "truth_commit": "09eb4e0",
+  "name": "python",
+  "verdict": {
+    "survival_2s": {
+      "passed": false,
+      "python": 0.9373348433371084,
+      "iou": 0.9443815276204858
+    },
+    "wrong_object": {
+      "passed": false,
+      "python": 0.0033975084937712344,
+      "iou": 0.0005033345916698125
+    },
+    "labels": {
+      "passed": false,
+      "accuracy": [
+        0.8684,
+        0.8688
+      ],
+      "flips": [
+        16.9,
+        17.1
+      ]
+    }
+  },
+  "not_run": "generated scenes, recovery and speed: the verdict had already failed",
+  "targets": 7947,
+  "reviewed_units": {
+    "match-02": 14,
+    "match-03": 6,
+    "sampled": 59
+  },
+  "counts": {
+    "iou": {
+      "match-02-still": {
+        "survived": 2892,
+        "wrong": 4,
+        "lost": 38,
+        "same_spot": 5
+      },
+      "match-02-moving": {
+        "survived": 1552,
+        "wrong": 0,
+        "lost": 50,
+        "same_spot": 9
+      },
+      "match-03-still": {
+        "survived": 2813,
+        "wrong": 0,
+        "lost": 216,
+        "same_spot": 85
+      },
+      "match-03-moving": {
+        "survived": 248,
+        "wrong": 0,
+        "lost": 33,
+        "same_spot": 2
+      }
+    },
+    "python": {
+      "match-02-still": {
+        "survived": 2854,
+        "wrong": 10,
+        "lost": 70,
+        "same_spot": 5
+      },
+      "match-02-moving": {
+        "survived": 1525,
+        "wrong": 0,
+        "lost": 69,
+        "same_spot": 17
+      },
+      "match-03-still": {
+        "survived": 2823,
+        "wrong": 15,
+        "lost": 215,
+        "same_spot": 61
+      },
+      "match-03-moving": {
+        "survived": 247,
+        "wrong": 2,
+        "lost": 32,
+        "same_spot": 2
+      }
+    }
+  },
+  "clips": {
+    "match-02-still": {
+      "raw": {
+        "survival_1s": 0.0,
+        "survival_2s": 0.0,
+        "survival_5s": 0.0,
+        "survival_2s_mobile": 0.0,
+        "survival_2s_static": 0.0,
+        "wrong_2s": 0.0,
+        "same_spot_2s": 0.0,
+        "idf1": 0.010943199583116207,
+        "switches": 1000.0
+      },
+      "iou": {
+        "survival_1s": 0.9958132045088567,
+        "survival_2s": 0.9840081660428718,
+        "survival_5s": 0.9401980198019801,
+        "survival_2s_mobile": 0.952054794520548,
+        "survival_2s_static": 0.9856784819190835,
+        "wrong_2s": 0.0013610071452875127,
+        "same_spot_2s": 0.001701258931609391,
+        "idf1": 0.7889525794684732,
+        "switches": 1.994870333428327
+      },
+      "python": {
+        "survival_1s": 0.991304347826087,
+        "survival_2s": 0.9710785981626403,
+        "survival_5s": 0.9057425742574258,
+        "survival_2s_mobile": 1.0,
+        "survival_2s_static": 0.9695667740780523,
+        "wrong_2s": 0.003402517863218782,
+        "same_spot_2s": 0.001701258931609391,
+        "idf1": 0.7701928087545596,
+        "switches": 0.5699629524080935
+      }
+    },
+    "match-02-moving": {
+      "raw": {
+        "survival_1s": 0.0,
+        "survival_2s": 0.0,
+        "survival_5s": 0.0,
+        "survival_2s_mobile": 0.0,
+        "survival_2s_static": 0.0,
+        "wrong_2s": 0.0,
+        "same_spot_2s": 0.0,
+        "idf1": 0.042305129913391075,
+        "switches": 1000.0
+      },
+      "iou": {
+        "survival_1s": 0.9874686716791979,
+        "survival_2s": 0.9633767846058349,
+        "survival_5s": 0.8965102286401926,
+        "survival_2s_mobile": 0.9702970297029703,
+        "survival_2s_static": 0.9629139072847682,
+        "wrong_2s": 0.0,
+        "same_spot_2s": 0.00558659217877095,
+        "idf1": 0.9070619586942039,
+        "switches": 7.0266272189349115
+      },
+      "python": {
+        "survival_1s": 0.9819548872180451,
+        "survival_2s": 0.946617008069522,
+        "survival_5s": 0.8616125150421179,
+        "survival_2s_mobile": 1.0,
+        "survival_2s_static": 0.9430463576158941,
+        "wrong_2s": 0.0,
+        "same_spot_2s": 0.010552451893234015,
+        "idf1": 0.8554297135243171,
+        "switches": 5.547337278106508
+      }
+    },
+    "match-03-still": {
+      "raw": {
+        "survival_1s": 0.0,
+        "survival_2s": 0.0,
+        "survival_5s": 0.0,
+        "survival_2s_mobile": 0.0,
+        "survival_2s_static": 0.0,
+        "wrong_2s": 0.0,
+        "same_spot_2s": 0.0,
+        "idf1": 0.021077792264232943,
+        "switches": 1000.0
+      },
+      "iou": {
+        "survival_1s": 0.9404727166618033,
+        "survival_2s": 0.903339755940912,
+        "survival_5s": 0.8093415007656968,
+        "survival_2s_mobile": 0.7333333333333333,
+        "survival_2s_static": 0.9058325187357446,
+        "wrong_2s": 0.0,
+        "same_spot_2s": 0.027296082209377008,
+        "idf1": 0.682529335071708,
+        "switches": 32.71620593456759
+      },
+      "python": {
+        "survival_1s": 0.9445579223810914,
+        "survival_2s": 0.9065510597302505,
+        "survival_5s": 0.8403522205206738,
+        "survival_2s_mobile": 1.0,
+        "survival_2s_static": 0.9051808406647116,
+        "wrong_2s": 0.004816955684007707,
+        "same_spot_2s": 0.019588953114964676,
+        "idf1": 0.6931768796175576,
+        "switches": 34.745117930509764
+      }
+    },
+    "match-03-moving": {
+      "raw": {
+        "survival_1s": 0.0,
+        "survival_2s": 0.0,
+        "survival_5s": 0.0,
+        "survival_2s_mobile": 0.0,
+        "survival_2s_static": 0.0,
+        "wrong_2s": 0.0,
+        "same_spot_2s": 0.0,
+        "idf1": 0.12769010043041606,
+        "switches": 1000.0
+      },
+      "iou": {
+        "survival_1s": 0.945993031358885,
+        "survival_2s": 0.8763250883392226,
+        "survival_5s": 0.0,
+        "survival_2s_mobile": 0.9411764705882353,
+        "survival_2s_static": 0.8674698795180723,
+        "wrong_2s": 0.0,
+        "same_spot_2s": 0.007067137809187279,
+        "idf1": 0.9182209469153515,
+        "switches": 44.923629829290206
+      },
+      "python": {
+        "survival_1s": 0.9425087108013938,
+        "survival_2s": 0.872791519434629,
+        "survival_5s": 0.0,
+        "survival_2s_mobile": 0.9411764705882353,
+        "survival_2s_static": 0.8634538152610441,
+        "wrong_2s": 0.007067137809187279,
+        "same_spot_2s": 0.007067137809187279,
+        "idf1": 0.9153515064562411,
+        "switches": 35.93890386343217
+      }
+    }
+  }
+}
