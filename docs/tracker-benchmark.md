@@ -17,7 +17,7 @@ Run on arm64 at commit `a77c135`, over 12 generated scenes from real annotated f
 | pass | recovery | Does one bad frame heal? | recovers in 0.2 s |
 | pass | labels | Does smoothing help? | accuracy 93.46% against 93.45%; flips 3.9 against 4.2 per 1,000 |
 | pass | economy_view | Is the agent's picture steadier? | job count error 2.94 against 2.94 |
-| **FAIL** | event_loop | Is the agent less blocked? | p99 lag 1.09 ms against 0.22 ms; idle loop 1.00 ms |
+| pass | event_loop | Does the agent stay responsive? | p99 lag 1.09 ms against 1.00 ms for an idle loop; Python 0.22 ms |
 | pass | stability | Does it hold up over a game? | p95 drift +3.2%; memory growth 0.0 MB |
 
 ## Agent outcomes
@@ -57,7 +57,7 @@ This is the clean rerun. An earlier run the same day had the VM using about 230%
 - **The fix made association faster.** Against 2026-10-31, `screentrack` associate p95 fell by 29-35% and Python's by 48-65%, because far fewer stale tracks remain to compare.
 - **Part of the larger speedup is noise.** `screentrack` prepare is unchanged code, yet it read 8-29% lower than on 2026-10-31. Treat these speedups and the older ones as the same order of magnitude, about 35-60x.
 - **`target_survival` is close but real.** 86.9% against 88.8%. The recorded gap below is wider.
-- **`event_loop` still needs its rule replaced.** `screentrack` measured 1.09 ms against 1.00 ms for an idle loop, while Python reads lower because its busy worker keeps the CPU awake.
+- **`event_loop` uses a new rule.** It now requires p99 lag within 25% of an idle loop, because Python reads faster than doing nothing, so the old comparison could never be passed. The rule was changed after this run, with agreement, and applied to its saved measurements: 1.09 ms against 1.00 ms is 1.09x. Lag in the VM is unmeasured.
 - **`recovery` now passes:** one duplicate box heals in 0.2 s.
 
 ## Recorded footage
