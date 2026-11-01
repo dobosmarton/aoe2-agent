@@ -1,0 +1,229 @@
+{
+  "versions": {
+    "commit": "7d2244e",
+    "machine": "arm64",
+    "system": "macOS-26.6.2-arm64-arm-64bit",
+    "python": "3.11.9",
+    "screentrack": "0.1.0"
+  },
+  "gates": [
+    {
+      "name": "parity",
+      "question": "Same decisions as Python?",
+      "group": "faster",
+      "blocking": true,
+      "passed": true,
+      "detail": "0 differing frames (first: none)"
+    },
+    {
+      "name": "overhead",
+      "question": "Inside the perception budget?",
+      "group": "faster",
+      "blocking": true,
+      "passed": false,
+      "detail": "camera 18.1 + tracker 4.62 = 22.7 ms; Python 135.6 ms; limit 20 ms"
+    },
+    {
+      "name": "speed",
+      "question": "Faster on real frames?",
+      "group": "faster",
+      "blocking": true,
+      "passed": true,
+      "detail": "low 32x (at least 26x); typical 37x (at least 32x); high 26x (at least 23x); peak 25x (at least 21x)"
+    },
+    {
+      "name": "spec_target",
+      "question": "Meets the original goal?",
+      "group": "faster",
+      "blocking": false,
+      "passed": false,
+      "detail": "2.83 ms in the high band; limit 2 ms"
+    },
+    {
+      "name": "target_survival",
+      "question": "Do IDs shown to the LLM still work later?",
+      "group": "better",
+      "blocking": true,
+      "passed": false,
+      "detail": "86.9% against 88.8% for the baseline"
+    },
+    {
+      "name": "wrong_target",
+      "question": "Could an ID point at the wrong object?",
+      "group": "better",
+      "blocking": true,
+      "passed": true,
+      "detail": "0.00% against 0.00% for the baseline"
+    },
+    {
+      "name": "recovery",
+      "question": "Does one bad frame heal?",
+      "group": "better",
+      "blocking": true,
+      "passed": true,
+      "detail": "recovers in 0.2 s"
+    },
+    {
+      "name": "labels",
+      "question": "Does smoothing help?",
+      "group": "better",
+      "blocking": true,
+      "passed": true,
+      "detail": "accuracy 93.46% against 93.45%; flips 3.9 against 4.2 per 1,000"
+    },
+    {
+      "name": "economy_view",
+      "question": "Is the agent's picture steadier?",
+      "group": "better",
+      "blocking": true,
+      "passed": true,
+      "detail": "job count error 2.94 against 2.94"
+    },
+    {
+      "name": "event_loop",
+      "question": "Is the agent less blocked?",
+      "group": "better",
+      "blocking": true,
+      "passed": false,
+      "detail": "p99 lag 0.52 ms against 0.34 ms; idle loop 0.53 ms"
+    },
+    {
+      "name": "stability",
+      "question": "Does it hold up over a game?",
+      "group": "better",
+      "blocking": true,
+      "passed": false,
+      "detail": "p95 drift +27.8%; memory growth 0.0 MB"
+    }
+  ],
+  "controls": {
+    "oracle is perfect": [
+      true,
+      "IDF1 1.000, survival 1.000"
+    ],
+    "raw scores lowest": [
+      true,
+      "survival 0.000"
+    ],
+    "A/A is unbiased": [
+      true,
+      "0.90x, 0.93x, 0.91x, 0.87x"
+    ],
+    "injected slowdown is flagged": [
+      true,
+      "38.7 ms against 20 ms"
+    ]
+  },
+  "quality": {
+    "raw": {
+      "idf1": 0.032793362307388385,
+      "idf1_mobile": 0.04075877980005127,
+      "idf1_static": 0.02924377427461732,
+      "switches_per_1000": 1000.0,
+      "job_error": 2.9375,
+      "label_accuracy": 0.9344849536456082,
+      "label_flips_per_1000": 4.168459432588665,
+      "survival_1s": 0.0,
+      "wrong_1s": 0.0,
+      "survival_2s": 0.0,
+      "wrong_2s": 0.0,
+      "survival_5s": 0.0,
+      "wrong_5s": 0.0
+    },
+    "oracle": {
+      "idf1": 1.0,
+      "idf1_mobile": 1.0,
+      "idf1_static": 1.0,
+      "switches_per_1000": 0.0,
+      "job_error": 2.858333333333334,
+      "label_accuracy": 1.0,
+      "label_flips_per_1000": 0.0,
+      "survival_1s": 1.0,
+      "wrong_1s": 0.0,
+      "survival_2s": 1.0,
+      "wrong_2s": 0.0,
+      "survival_5s": 1.0,
+      "wrong_5s": 0.0
+    },
+    "iou": {
+      "idf1": 0.7992097984986172,
+      "idf1_mobile": 0.6477826198410664,
+      "idf1_static": 0.8666895133653187,
+      "switches_per_1000": 82.49795947258718,
+      "job_error": 2.9375,
+      "label_accuracy": 0.9344849536456082,
+      "label_flips_per_1000": 4.168459432588665,
+      "survival_1s": 0.9449385052034058,
+      "wrong_1s": 0.0001892147587511826,
+      "survival_2s": 0.8881875563570785,
+      "wrong_2s": 0.0004508566275924256,
+      "survival_5s": 0.7314990512333965,
+      "wrong_5s": 0.0
+    },
+    "python": {
+      "idf1": 0.7813512445673647,
+      "idf1_mobile": 0.6411176621379133,
+      "idf1_static": 0.8439570482065342,
+      "switches_per_1000": 71.22771279067528,
+      "job_error": 2.935416666666667,
+      "label_accuracy": 0.9346432294084722,
+      "label_flips_per_1000": 3.864971522801495,
+      "survival_1s": 0.9290444654683065,
+      "wrong_1s": 0.0,
+      "survival_2s": 0.8685752930568079,
+      "wrong_2s": 0.0,
+      "survival_5s": 0.7082542694497154,
+      "wrong_5s": 0.0
+    },
+    "screentrack": {
+      "idf1": 0.7813512445673647,
+      "idf1_mobile": 0.6411176621379133,
+      "idf1_static": 0.8439570482065342,
+      "switches_per_1000": 71.22771279067528,
+      "job_error": 2.935416666666667,
+      "label_accuracy": 0.9346432294084722,
+      "label_flips_per_1000": 3.864971522801495,
+      "survival_1s": 0.9290444654683065,
+      "wrong_1s": 0.0,
+      "survival_2s": 0.8685752930568079,
+      "wrong_2s": 0.0,
+      "survival_5s": 0.7082542694497154,
+      "wrong_5s": 0.0
+    }
+  },
+  "system": {
+    "loop_lag_python": 0.34029192849993706,
+    "loop_lag_screentrack": 0.5204589581117034,
+    "loop_lag_idle": 0.5304170083254576,
+    "early_p95_ms": 2.6573329232633114,
+    "late_p95_ms": 3.394791972823441,
+    "memory_growth_mb": 0.0
+  },
+  "camera_p95_ms": 18.05,
+  "timing_p95_ms": {
+    "python": {
+      "low": 75.3702080110088,
+      "typical": 110.6559579493478,
+      "high": 74.31962492410094,
+      "peak": 117.52470792271197
+    },
+    "screentrack": {
+      "low": 2.3900001542642713,
+      "typical": 3.0533759854733944,
+      "high": 2.827332937158644,
+      "peak": 4.622791078872979
+    },
+    "python_again": {
+      "low": 83.43749993946403,
+      "typical": 119.77608304005116,
+      "high": 81.60862501244992,
+      "peak": 133.04316601715982
+    },
+    "slowed": {
+      "low": 36.24454198870808,
+      "typical": 37.54129202570766,
+      "high": 37.221709033474326,
+      "peak": 38.719624979421496
+    }
+  }
+}
