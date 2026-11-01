@@ -1,4 +1,4 @@
-"""Optimized association must make the same conservative choices as exhaustive matching."""
+"""Optimized association must make the same choices as exhaustive matching."""
 
 from __future__ import annotations
 
@@ -41,25 +41,19 @@ def _exhaustive_candidates(
 def _exhaustive_ambiguity(
     candidates: Sequence[tuple[float, int, int]],
 ) -> tuple[set[int], set[int]]:
-    ambiguous_new = {
-        new_index
-        for cost, _old, new_index in candidates
-        if sum(
-            other_new == new_index and abs(other_cost - cost) < 0.15
-            for other_cost, _other_old, other_new in candidates
-        )
-        > 1
-    }
-    ambiguous_old = {
-        old_index
-        for cost, old_index, _new in candidates
-        if sum(
-            other_old == old_index and abs(other_cost - cost) < 0.15
-            for other_cost, other_old, _other_new in candidates
-        )
-        > 1
-    }
-    return ambiguous_old, ambiguous_new
+    def ambiguous(position: int) -> set[int]:
+        identities = {item[position] for item in candidates}
+        costs = {
+            identity: sorted(item[0] for item in candidates if item[position] == identity)
+            for identity in identities
+        }
+        return {
+            identity
+            for identity, values in costs.items()
+            if len(values) > 1 and values[1] - values[0] < 0.15
+        }
+
+    return ambiguous(1), ambiguous(2)
 
 
 def test_matching_matches_exhaustive_reference_over_complete_sequences(
@@ -104,10 +98,53 @@ def test_matching_matches_exhaustive_reference_over_complete_sequences(
         assert optimized.last_ambiguous_count == reference.last_ambiguous_count
 
 
-def test_lower_ranked_close_costs_remain_ambiguous() -> None:
-    candidates = [(0.0, 0, 0), (0.10, 1, 1), (0.20, 0, 2), (0.24, 2, 1), (0.25, 0, 3)]
-    assert temporal._ambiguous_candidates(candidates) == _exhaustive_ambiguity(candidates)
-    assert temporal._ambiguous_candidates(candidates) == ({0}, {1})
+def test_only_the_two_cheapest_candidates_decide_ambiguity() -> None:
+    clear_winner = [(0.0, 0, 0), (0.50, 0, 1), (0.52, 0, 2), (0.54, 0, 3)]
+    assert temporal._ambiguous_candidates(clear_winner) == (set(), set())
+    assert temporal._ambiguous_candidates(clear_winner) == _exhaustive_ambiguity(clear_winner)
+
+    close_leaders = [(0.0, 0, 0), (0.10, 0, 1), (0.90, 0, 2)]
+    assert temporal._ambiguous_candidates(close_leaders) == ({0}, set())
+    assert temporal._ambiguous_candidates(close_leaders) == _exhaustive_ambiguity(close_leaders)
+
+
+def test_stale_duplicates_are_dropped_after_a_duplicate_box() -> None:
+    pixels = np.full((200, 400, 3), 90, dtype=np.uint8)
+    stable = CameraMotion("stable")
+    entity = _entity(0, 100.0, 50.0)
+    twin = EntitySnapshot("1", "villager", (102.0, 50.0, 122.0, 80.0), (112.0, 65.0), 0.8)
+    tracker = temporal.TemporalEntities()
+
+    def observe(
+        capture_id: int, entities: tuple[EntitySnapshot, ...]
+    ) -> tuple[EntitySnapshot, ...]:
+        return tracker.observe(
+            temporal.prepare_detections(entities, pixels),
+            capture_id=capture_id,
+            captured_at=1.0 + 0.2 * capture_id,
+            camera_revision=0,
+            motion=stable,
+        )
+
+    observe(1, (entity,))
+    observe(2, (entity,))
+    observe(3, (entity, twin))
+    settled = [observe(capture_id, (entity,))[0].id for capture_id in range(4, 10)]
+    assert len(set(settled[1:])) == 1
+
+
+def test_a_track_beside_a_fresh_box_is_not_stale() -> None:
+    fresh = temporal._Track("fresh", (0.0, 0.0, 10.0, 10.0), (0.0,) * 6, (), 1.0)
+    beside = temporal._Track("old", (20.0, 0.0, 30.0, 10.0), (0.0,) * 6, (), 0.8)
+    half = temporal._Track("old", (0.0, 0.0, 10.0, 5.0), (0.0,) * 6, (), 0.8)
+    covered = temporal._Track("old", (0.0, 0.0, 10.0, 9.0), (0.0,) * 6, (), 0.8)
+    assert not temporal._is_stale_duplicate(beside, (fresh,))
+    assert not temporal._is_stale_duplicate(half, (fresh,))
+    assert temporal._is_stale_duplicate(covered, (fresh,))
+
+
+def test_boxes_that_only_touch_have_no_overlap() -> None:
+    assert temporal._box_overlap((0.0, 0.0, 10.0, 10.0), (10.0, 0.0, 20.0, 10.0)) == 0.0
 
 
 def test_equal_costs_are_ambiguous_but_the_exact_threshold_is_not() -> None:

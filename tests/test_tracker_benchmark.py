@@ -185,24 +185,18 @@ def test_no_tracker_keeps_no_identity(scenes: dict[str, Path]) -> None:
     assert scorecard.target_outcomes(frames, 1.0).survival == 0.0
 
 
-def test_one_duplicate_box_never_heals_in_the_python_tracker(scenes: dict[str, Path]) -> None:
+def test_one_duplicate_box_heals_in_the_python_tracker(scenes: dict[str, Path]) -> None:
     frames = _scored("python", scenes["duplicate_box"])
     disturbed = 1.0 + sequences.DUPLICATE_FRAME * sequences.FRAME_SECONDS
-    assert scorecard.recovery_seconds(frames, "gt_0", disturbed) is None
+    recovered = scorecard.recovery_seconds(frames, "gt_0", disturbed)
+    assert recovered is not None
+    assert recovered <= 1.0
 
 
 def test_the_iou_baseline_shrugs_off_a_duplicate_box(scenes: dict[str, Path]) -> None:
     frames = _scored("iou", scenes["duplicate_box"])
     disturbed = 1.0 + sequences.DUPLICATE_FRAME * sequences.FRAME_SECONDS
     assert scorecard.recovery_seconds(frames, "gt_0", disturbed) == 0.0
-
-
-def test_pruning_stale_duplicates_flips_the_recovery_result(scenes: dict[str, Path]) -> None:
-    frames = _scored("candidate", scenes["duplicate_box"])
-    disturbed = 1.0 + sequences.DUPLICATE_FRAME * sequences.FRAME_SECONDS
-    recovered = scorecard.recovery_seconds(frames, "gt_0", disturbed)
-    assert recovered is not None
-    assert recovered <= 1.0
 
 
 def test_screentrack_reproduces_the_python_decisions(scenes: dict[str, Path]) -> None:
