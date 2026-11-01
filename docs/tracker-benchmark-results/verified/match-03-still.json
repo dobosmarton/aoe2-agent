@@ -1,0 +1,13 @@
+{
+  "reviewer": "By eye, from 9-frame strips without tracker output",
+  "seed": 5,
+  "approved": [
+    "track_405",
+    "track_462"
+  ],
+  "rejected": {
+    "track_200": "a fallen corpse, then something else",
+    "track_256": "a patch of moss, not a unit",
+    "track_257": "half a horse, then a different view; not one unit"
+  }
+}
