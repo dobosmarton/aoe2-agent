@@ -1,6 +1,6 @@
 {
   "versions": {
-    "commit": "7d2244e",
+    "commit": "a77c135",
     "machine": "arm64",
     "system": "macOS-26.6.2-arm64-arm-64bit",
     "python": "3.11.9",
@@ -20,8 +20,8 @@
       "question": "Inside the perception budget?",
       "group": "faster",
       "blocking": true,
-      "passed": false,
-      "detail": "camera 18.1 + tracker 4.62 = 22.7 ms; Python 135.6 ms; limit 20 ms"
+      "passed": true,
+      "detail": "camera 13.0 + tracker 2.48 = 15.5 ms; Python 107.9 ms; limit 20 ms"
     },
     {
       "name": "speed",
@@ -29,15 +29,15 @@
       "group": "faster",
       "blocking": true,
       "passed": true,
-      "detail": "low 32x (at least 26x); typical 37x (at least 32x); high 26x (at least 23x); peak 25x (at least 21x)"
+      "detail": "low 62x (at least 60x); typical 56x (at least 54x); high 45x (at least 40x); peak 35x (at least 33x)"
     },
     {
       "name": "spec_target",
       "question": "Meets the original goal?",
       "group": "faster",
       "blocking": false,
-      "passed": false,
-      "detail": "2.83 ms in the high band; limit 2 ms"
+      "passed": true,
+      "detail": "1.48 ms in the high band; limit 2 ms"
     },
     {
       "name": "target_survival",
@@ -85,15 +85,15 @@
       "group": "better",
       "blocking": true,
       "passed": false,
-      "detail": "p99 lag 0.52 ms against 0.34 ms; idle loop 0.53 ms"
+      "detail": "p99 lag 1.09 ms against 0.22 ms; idle loop 1.00 ms"
     },
     {
       "name": "stability",
       "question": "Does it hold up over a game?",
       "group": "better",
       "blocking": true,
-      "passed": false,
-      "detail": "p95 drift +27.8%; memory growth 0.0 MB"
+      "passed": true,
+      "detail": "p95 drift +3.2%; memory growth 0.0 MB"
     }
   ],
   "controls": {
@@ -107,11 +107,11 @@
     ],
     "A/A is unbiased": [
       true,
-      "0.90x, 0.93x, 0.91x, 0.87x"
+      "0.99x, 1.01x, 0.94x, 1.01x"
     ],
     "injected slowdown is flagged": [
       true,
-      "38.7 ms against 20 ms"
+      "37.2 ms against 20 ms"
     ]
   },
   "quality": {
@@ -192,38 +192,38 @@
     }
   },
   "system": {
-    "loop_lag_python": 0.34029192849993706,
-    "loop_lag_screentrack": 0.5204589581117034,
-    "loop_lag_idle": 0.5304170083254576,
-    "early_p95_ms": 2.6573329232633114,
-    "late_p95_ms": 3.394791972823441,
+    "loop_lag_python": 0.21529202442616222,
+    "loop_lag_screentrack": 1.0895840134471655,
+    "loop_lag_idle": 0.9981670193374157,
+    "early_p95_ms": 1.4343749498948455,
+    "late_p95_ms": 1.4802080113440752,
     "memory_growth_mb": 0.0
   },
-  "camera_p95_ms": 18.05,
+  "camera_p95_ms": 13.01,
   "timing_p95_ms": {
     "python": {
-      "low": 75.3702080110088,
-      "typical": 110.6559579493478,
-      "high": 74.31962492410094,
-      "peak": 117.52470792271197
+      "low": 60.59762497898191,
+      "typical": 94.92820804007351,
+      "high": 66.74291694071144,
+      "peak": 86.9456670479849
     },
     "screentrack": {
-      "low": 2.3900001542642713,
-      "typical": 3.0533759854733944,
-      "high": 2.827332937158644,
-      "peak": 4.622791078872979
+      "low": 0.9789169998839498,
+      "typical": 1.705499948002398,
+      "high": 1.4847080456092954,
+      "peak": 2.476333058439195
     },
     "python_again": {
-      "low": 83.43749993946403,
-      "typical": 119.77608304005116,
-      "high": 81.60862501244992,
-      "peak": 133.04316601715982
+      "low": 60.93458295799792,
+      "typical": 94.01462599635124,
+      "high": 71.09225005842745,
+      "peak": 85.701250936836
     },
     "slowed": {
-      "low": 36.24454198870808,
-      "typical": 37.54129202570766,
-      "high": 37.221709033474326,
-      "peak": 38.719624979421496
+      "low": 36.07491706497967,
+      "typical": 36.67391603812575,
+      "high": 36.40754101797938,
+      "peak": 37.232583039440215
     }
   }
 }
