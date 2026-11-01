@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 Box = tuple[float, float, float, float]
 
 MATCH_OVERLAP = 0.5
+SAME_SPOT_OVERLAP = 0.3  # A click on either box lands on the same place.
 SUMMARY_LIMIT = 20  # build_entity_summary's default: what the LLM actually sees.
 STABLE_FRAMES = 5
 BOOTSTRAP_ROUNDS = 2000
@@ -167,12 +168,13 @@ class TargetOutcome:
     """What happens when the agent acts on an ID it saw `latency` seconds ago."""
 
     survived: int
-    wrong: int
+    wrong: int  # A different object, so a click would land somewhere else.
     lost: int
+    same_spot: int = 0  # A second label on the same spot, as the detector often reports.
 
     @property
     def total(self) -> int:
-        return self.survived + self.wrong + self.lost
+        return self.survived + self.wrong + self.lost + self.same_spot
 
     @property
     def survival(self) -> float:
@@ -181,6 +183,10 @@ class TargetOutcome:
     @property
     def wrong_rate(self) -> float:
         return self.wrong / self.total if self.total else 0.0
+
+    @property
+    def same_spot_rate(self) -> float:
+        return self.same_spot / self.total if self.total else 0.0
 
 
 def target_outcomes(
@@ -191,7 +197,7 @@ def target_outcomes(
     Only objects the detector still finds later count, so `oracle` scores 100%.
     """
     labels = _truth_labels(frames)
-    survived = wrong = lost = 0
+    survived = wrong = lost = same_spot = 0
     for index, frame in enumerate(frames):
         later = next(
             (item for item in frames[index + 1 :] if item.at >= frame.at + latency_seconds),
@@ -201,6 +207,7 @@ def target_outcomes(
             break
         owners = frame.owner_of
         later_owners = later.owner_of
+        boxes = {truth.identifier: truth.box for truth in later.truths}
         for prediction in frame.predictions[:SUMMARY_LIMIT]:
             identifier = owners.get(prediction.id)
             if (
@@ -214,9 +221,11 @@ def target_outcomes(
                 survived += 1
             elif resolved is None:
                 lost += 1
+            elif _overlap(boxes[identifier], boxes[resolved]) >= SAME_SPOT_OVERLAP:
+                same_spot += 1
             else:
                 wrong += 1
-    return TargetOutcome(survived, wrong, lost)
+    return TargetOutcome(survived, wrong, lost, same_spot)
 
 
 def label_scores(frames: Sequence[ScoredFrame]) -> tuple[float, float]:

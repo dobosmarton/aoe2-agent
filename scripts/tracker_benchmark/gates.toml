@@ -40,7 +40,9 @@ baseline = "iou"
 question = "Could an ID point at the wrong object?"
 group = "better"
 latency_seconds = 2.0
-baseline = "python"
+# Only a different object counts. The detector often puts two labels on one spot, and
+# moving between those lands a click in the same place.
+baseline = "iou"
 
 [recovery]
 question = "Does one bad frame heal?"
@@ -70,3 +72,10 @@ group = "better"
 frames = 9000
 max_drift = 0.10
 max_memory_growth_mb = 5.0
+
+# Judged once, on matches the tracker was never tuned on. Failing uses those matches up,
+# so a retest needs a new recording. See `recorded.py verdict`.
+[recorded]
+latency_seconds = 2.0
+baseline = "iou"
+label_baseline = "raw"
