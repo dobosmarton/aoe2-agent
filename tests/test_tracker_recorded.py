@@ -101,10 +101,10 @@ def test_objects_keep_their_identity_through_a_camera_pan() -> None:
 
 def test_a_camera_cut_ends_tracks_instead_of_guessing() -> None:
     far = [Detection("house", _box(x, 900.0), 0.9) for x in (100.0, 300.0, 500.0, 700.0)]
-    settled = recorded.MAX_LOST_FRAMES + 10
+    settled = recorded.FULL_RATE.max_lost_frames + 10
     frames = [_still_trees() for _ in range(10)] + [far for _ in range(settled + 30)]
     linked = recorded.link(frames)
-    assert linked.cuts == (10 + recorded.MAX_LOST_FRAMES,)
+    assert linked.cuts == (10 + recorded.FULL_RATE.max_lost_frames,)
     assert len(linked.tracks) == len(_TREES) + len(far)
 
 
@@ -245,3 +245,72 @@ def test_truth_is_unchanged_until_a_review_exists(tmp_path: Path) -> None:
     frames = [[*_still_trees(), _unit(600.0, 600.0)] for _ in range(12)]
     linked = recorded.link(frames)
     assert recorded._verified(linked, tmp_path) is linked
+
+
+def test_a_clip_gets_limits_from_its_own_frame_times() -> None:
+    assert recorded.pace_for([index / 15 for index in range(90)]) is recorded.FULL_RATE
+    assert recorded.pace_for([index / 9.5 for index in range(90)]) is recorded.SLOW_RATE
+
+
+def test_a_slow_clip_allows_a_longer_scroll_per_frame() -> None:
+    before, after = _still_trees(), _still_trees(-200.0, 0.0)
+    assert recorded.camera_step(before, after) is None
+    assert recorded.camera_step(before, after, recorded.SLOW_RATE) == pytest.approx((-200.0, 0.0))
+
+
+def test_a_slow_clip_waits_fewer_frames_before_a_cut() -> None:
+    far = [Detection("house", _box(x, 900.0), 0.9) for x in (100.0, 300.0, 500.0, 700.0)]
+    frames = [_still_trees() for _ in range(10)] + [far for _ in range(40)]
+    linked = recorded.link(frames, recorded.SLOW_RATE)
+    assert linked.cuts == (10 + recorded.SLOW_RATE.max_lost_frames,)
+
+
+def test_a_slow_clip_ends_a_missing_unit_after_the_same_time() -> None:
+    frames = [
+        [*_still_trees(), *([] if 10 <= index < 15 else [_unit(300.0, 300.0)])]
+        for index in range(30)
+    ]
+    assert sum(track.mobile for track in recorded.link(frames).tracks) == 1
+    assert sum(track.mobile for track in recorded.link(frames, recorded.SLOW_RATE).tracks) == 2
+
+
+def test_a_slow_clip_keeps_a_track_that_lasted_the_same_time() -> None:
+    frames = [
+        [*_still_trees(), *([_unit(300.0, 300.0)] if index < 6 else [])] for index in range(20)
+    ]
+    assert sum(track.mobile for track in recorded.link(frames).tracks) == 0
+    assert sum(track.mobile for track in recorded.link(frames, recorded.SLOW_RATE).tracks) == 1
+
+
+def test_a_slow_clip_stitches_a_shorter_gap_over_a_longer_distance() -> None:
+    near = [_piece("a", range(10), 0.0), _piece("b", range(15, 25), 0.0)]
+    assert len(recorded.stitch(near)) == 1
+    assert len(recorded.stitch(near, recorded.SLOW_RATE)) == 2
+    far = [_piece("a", range(10), 0.0), _piece("b", range(13, 25), 32.0)]
+    assert len(recorded.stitch(far)) == 2
+    assert len(recorded.stitch(far, recorded.SLOW_RATE)) == 1
+
+
+def test_a_slow_clip_predicts_from_the_same_stretch_of_time() -> None:
+    track = recorded.Track("a", mobile=True)
+    for frame, x in enumerate((0.0, 0.0, 0.0, 0.0, 10.0, 20.0)):
+        track.boxes[frame] = _box(x, 0.0)
+    assert track.predicted(6, recorded.FULL_RATE)[0] == pytest.approx(25.0)
+    assert track.predicted(6, recorded.SLOW_RATE)[0] == pytest.approx(30.0)
+
+
+def test_a_slow_clip_gives_the_tracker_every_second_frame(tmp_path: Path) -> None:
+    rows = [
+        recorded._dense_row(index, index / 9.5, [*_still_trees(), _unit(300.0, 300.0)])
+        for index in range(20)
+    ]
+    (tmp_path / "dense.jsonl").write_text("\n".join(rows) + "\n", encoding="utf-8")
+    recorded.write_sequence(tmp_path)
+    sequence = (tmp_path / "sequence.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(sequence) == 10
+    assert json.loads(sequence[1])["captured_at_monotonic"] == pytest.approx(1.0 + 2 / 9.5)
+
+
+def test_a_frame_without_a_colour_table_is_left_alone() -> None:
+    frame = np.full((8, 8, 3), 90, dtype=np.uint8)
+    assert recorded._frame_jpeg(None, frame) == recorded._jpeg(frame)
