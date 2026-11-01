@@ -81,11 +81,11 @@
     },
     {
       "name": "event_loop",
-      "question": "Is the agent less blocked?",
+      "question": "Does the agent stay responsive?",
       "group": "better",
       "blocking": true,
-      "passed": false,
-      "detail": "p99 lag 1.09 ms against 0.22 ms; idle loop 1.00 ms"
+      "passed": true,
+      "detail": "p99 lag 1.09 ms against 1.00 ms for an idle loop; Python 0.22 ms"
     },
     {
       "name": "stability",

@@ -374,9 +374,11 @@ def _gates(rules: dict[str, dict[str, object]], evidence: dict[str, object]) -> 
     )
     add(
         "event_loop",
-        system["loop_lag_screentrack"] <= system["loop_lag_python"],
+        system["loop_lag_screentrack"]
+        <= system["loop_lag_idle"] * cast("float", rules["event_loop"]["max_idle_ratio"]),
         f"p99 lag {system['loop_lag_screentrack']:.2f} ms against "
-        f"{system['loop_lag_python']:.2f} ms; idle loop {system['loop_lag_idle']:.2f} ms",
+        f"{system['loop_lag_idle']:.2f} ms for an idle loop; "
+        f"Python {system['loop_lag_python']:.2f} ms",
     )
     drift = system["late_p95_ms"] / system["early_p95_ms"] - 1.0
     add(

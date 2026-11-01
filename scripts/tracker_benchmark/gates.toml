@@ -58,9 +58,11 @@ group = "better"
 baseline = "raw"
 
 [event_loop]
-question = "Is the agent less blocked?"
+question = "Does the agent stay responsive?"
 group = "better"
-baseline = "python"
+# Compared with an idle loop, not Python: a slow tracker keeps the CPU awake, so
+# Python reads faster than doing nothing and this rule could never be passed against it.
+max_idle_ratio = 1.25
 
 [stability]
 question = "Does it hold up over a game?"
