@@ -61,3 +61,41 @@ Rechecks after the run, with the same code and scenes:
 - **The stability drift figure is noise.** Three repeat runs gave -63%, +8% and -53%. Memory growth was 0.0 MB each time, which is the reliable part.
 
 The two real failures are `target_survival` and `recovery`.
+
+## Recorded footage: first look
+
+Run on 2026-11-01 with `scripts/tracker_benchmark/recorded.py`, from one human-played match
+recorded on the Mac at 15 fps. Each clip is 60 s, replayed to the tracker at 5 Hz. It holds
+about 45 detections per frame, of which about 21 are moving units. Raw scores are in
+`docs/tracker-benchmark-results/2026-11-01-recorded-match-01.json`.
+
+| Contender | Still camera, 2 s survival | Moving camera, 2 s survival | Wrong target, still / moving | Town Center IDs, still clip |
+|---|---|---|---|---|
+| `python` and `screentrack` | 0.0% | 1.5% | 0.0% / 0.0% | 296 in 300 frames |
+| Top-two ambiguity rule | 66.0% | 47.8% | 0.1% / 0.3% | 1 |
+| `candidate` (stale prune) | 23.8% | 22.6% | 0.1% / 0.0% | 2 |
+| Top-two rule and stale prune | 80.1% | 66.0% | 0.2% / 0.1% | 1 |
+| `iou` | 94.2% | 92.0% | 4.4% / 1.8% | 1 |
+
+- **Cause:** `_ambiguous_candidates` rejects an identity when any two of its candidates are
+  close in cost, not just its best two. In a crowded frame most identities have such a pair,
+  so 97% of detections were rejected from the first second. A Town Center is affected too,
+  because its size gives it a wide gate.
+- **`screentrack` copies this exactly:** 0 differing frames on both clips.
+- **The top-two rows are throwaway patches**, not changes to either tracker.
+
+How far to trust each number:
+
+- **Firm:** the Town Center count, which needs no truth, and static survival on the still clip,
+  where nothing moves and the camera holds.
+- **Rough:** moving-unit scores and the moving clip. Truth is linked automatically and has not
+  had its hand audit. Camera cuts split the moving clip's truth into 734 tracks, which can
+  also count kept IDs as wrong, so `iou`'s wrong-target figures may be too high. Truth linking
+  resembles `iou`, which may flatter its moving-unit score.
+- **Colour:** the recording passes through a colour table fitted on paused frame pairs. The rule
+  set before that check failed even for the VM's own frame moved by 1 px, so it was replaced by
+  "no worse than harmless changes". The corrected recording meets that on five of six measures,
+  and misses the sixth by one object, with 7 confidences moving over 0.1 against a worst case of 6.
+- **Scope:** one match, played by a person, at the 5 Hz target. The agent reached about 0.08 fresh
+  detections per second on the VM on 2026-11-01, and tracking resets when frames are over 1 s
+  apart, so these results only apply once perception is faster.
