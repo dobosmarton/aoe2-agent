@@ -1,8 +1,8 @@
 """Capture lossless, session-scoped AoE2 frames for detector evaluation.
 
-Run this as a separate process on the Windows game VM. The exact game window is
-required; unlike routine agent capture, this command never falls back to a
-monitor screenshot that might include a different UI or scale.
+Run this as a separate process on the machine with the game: the Windows VM or the
+Mac. The exact game window is required; unlike routine agent capture, this command
+never falls back to a monitor screenshot that might include a different UI or scale.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from detection.labeling.session_dataset import (
 )
 from PIL import Image
 
-from .window import get_game_window_rect
+from .window import game_platform, get_game_geometry, get_game_window_rect
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -41,6 +41,14 @@ _ROOT = (
 
 
 def capture_game_window() -> Image.Image:
+    if game_platform() == "macos":
+        # The window's own pixels at full Retina size. MSS would grab half size.
+        geometry = get_game_geometry()
+        if geometry is None:
+            raise RuntimeError("AoE2 game window not found; capture will not use the whole display")
+        from .screen_macos import grab_game_area
+
+        return Image.fromarray(grab_game_area(geometry))
     # MSS makes the process DPI-aware on Windows. Read the window rectangle only
     # after that happens, so its coordinates match the physical capture pixels.
     with mss.MSS() as screen:

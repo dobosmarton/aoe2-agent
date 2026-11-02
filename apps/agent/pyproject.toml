@@ -15,6 +15,9 @@ dependencies = [
     "pyautogui>=0.9.54",
     "pydantic>=2.5.0",
     "pygetwindow>=0.0.9",
+    # The native Mac game: window list, focus and full-resolution capture.
+    "pyobjc-framework-Cocoa>=12.1; sys_platform == 'darwin'",
+    "pyobjc-framework-Quartz>=12.1; sys_platform == 'darwin'",
     "pyyaml>=6.0",
     # Resource-bar OCR (pip-only, runs on the onnxruntime detection already ships):
     "rapidocr-onnxruntime>=1.4.0",

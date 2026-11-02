@@ -1,16 +1,21 @@
-"""Read-only Windows qualification checks for the supported game profile.
+"""Qualification checks for the supported game profile, on Windows or macOS.
 
 Run ``python -m gameplay_agent.preflight --profile PROFILE.json`` while the
 game is open with a villager or Town Center selected. This cannot prove a key
 binding's in-game effect; that remains a separate manual qualification gate.
+
+Nothing here clicks or presses keys. On macOS the cursor moves to the middle of the
+game and back is read, to prove that frame pixels and input points line up.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 from PIL import Image
@@ -23,7 +28,19 @@ from .resource_ocr import (
     read_selected_unit_pixels,
 )
 from .screen import NativeCapture, capture_native
-from .window import get_game_window_rect
+from .window import game_platform, get_game_geometry, get_game_window_rect
+
+if TYPE_CHECKING:
+    from .window import GameGeometry
+
+# The band under the menu bar is black; game frames are not.
+_BAND_ROWS = 10
+_BAND_BRIGHTNESS = 8.0
+_CURSOR_SETTLE_SECONDS = 0.1
+# Points round to whole input units, so a round trip can land one pixel off.
+_ROUND_TRIP_TOLERANCE_PX = 1
+_US_LAYOUTS = frozenset({"ABC", "U.S.", "US"})
+_SRGB_NAMES = ("srgb", "internet")
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +48,8 @@ class PreflightCheck:
     name: str
     passed: bool
     detail: str
+    # A failed check that isn't blocking is a warning: the run can still go ahead.
+    blocking: bool = True
 
 
 class _PreflightArgs(argparse.Namespace):
@@ -128,20 +147,126 @@ def run_preflight(
             "team-color recognition requires labeled Windows combat screenshots",
         ),
     ]
+    macos = game_platform() == "macos"
+    if macos:
+        checks.extend(_macos_checks(profile))
+    frame_width: int | None = None
     if screenshot is None:
         if rect is None:
             return tuple(checks)
-        checks.extend(inspect_pixels(profile, capture_native()))
+        if macos and not _passed(checks, "screen_recording"):
+            return tuple(checks)
+        capture = capture_native()
+        frame_width = capture.width
+        checks.extend(inspect_pixels(profile, capture))
+        if macos:
+            checks.append(_band_check(capture.pixels()))
     else:
         checks.extend(inspect_capture(profile, screenshot))
-    checks.append(
-        PreflightCheck(
-            "capture_to_input_geometry",
-            window_ok,
-            "capture origin and input window offset agree only when the exact game window is found",
+    if macos:
+        checks.append(
+            _cursor_round_trip(get_game_geometry(), _passed(checks, "accessibility"), frame_width)
         )
-    )
+    else:
+        checks.append(
+            PreflightCheck(
+                "capture_to_input_geometry",
+                window_ok,
+                "capture origin and input window offset agree only when the exact game window "
+                "is found",
+            )
+        )
     return tuple(checks)
+
+
+def _passed(checks: list[PreflightCheck], name: str) -> bool:
+    return any(check.name == name and check.passed for check in checks)
+
+
+def _macos_checks(profile: GameProfile) -> list[PreflightCheck]:
+    from .window_macos import (
+        colour_space,
+        input_allowed,
+        keyboard_layouts,
+        screen_recording_allowed,
+    )
+
+    layouts = keyboard_layouts()
+    colours = colour_space()
+    return [
+        PreflightCheck(
+            "profile_platform",
+            profile.platform == "macos",
+            f"profile is for {profile.platform}; use a macOS profile on the Mac",
+        ),
+        PreflightCheck(
+            "screen_recording",
+            screen_recording_allowed(),
+            "allow this terminal in System Settings > Privacy & Security > Screen Recording",
+        ),
+        PreflightCheck(
+            "accessibility",
+            input_allowed(),
+            "allow this terminal in System Settings > Privacy & Security > Accessibility",
+        ),
+        PreflightCheck(
+            "keyboard_layout",
+            bool(layouts) and set(layouts) <= _US_LAYOUTS,
+            f"selected layouts: {', '.join(layouts) or 'unknown'}; pyautogui sends US key "
+            "codes, so switch to ABC or U.S. if a hotkey misfires",
+            blocking=False,
+        ),
+        PreflightCheck(
+            "colour_profile",
+            any(name in colours.lower() for name in _SRGB_NAMES),
+            f"display colour profile: {colours}; the detector learned sRGB colours, so "
+            "choose Internet & Web (sRGB) in System Settings > Displays",
+            blocking=False,
+        ),
+    ]
+
+
+def _band_check(rgb: np.ndarray) -> PreflightCheck:
+    brightness = float(np.mean(rgb[:_BAND_ROWS]))
+    return PreflightCheck(
+        "no_black_band",
+        brightness >= _BAND_BRIGHTNESS,
+        f"top rows' mean brightness {brightness:.1f}; a black band means the frame "
+        "still includes the strip under the menu bar",
+    )
+
+
+def _cursor_round_trip(
+    geometry: GameGeometry | None, input_allowed: bool, frame_width: int | None
+) -> PreflightCheck:
+    """Prove that frame pixels and input units line up.
+
+    Two parts. The captured frame's width over the screen's width in input units must
+    equal the scale the executor divides by; the full-screen game spans the screen.
+    And the cursor, sent to the frame's centre, must read back there, which shows that
+    input reaches the system at all.
+    """
+    name = "capture_to_input_geometry"
+    if geometry is None:
+        return PreflightCheck(name, False, "the game window wasn't found")
+    if not input_allowed:
+        return PreflightCheck(name, False, "skipped: this terminal can't move the cursor yet")
+    import pyautogui
+
+    screen_width = int(pyautogui.size().width)
+    measured = (frame_width or geometry.width) / screen_width
+    target = (geometry.width // 2, geometry.height // 2)
+    pyautogui.moveTo(*geometry.to_input(*target))
+    time.sleep(_CURSOR_SETTLE_SECONDS)
+    position = pyautogui.position()
+    back = geometry.to_frame(position.x, position.y)
+    error = max(abs(back[0] - target[0]), abs(back[1] - target[1]))
+    return PreflightCheck(
+        name,
+        error <= _ROUND_TRIP_TOLERANCE_PX and abs(measured - geometry.scale) < 1e-6,
+        f"frame width over screen width is scale {measured:g} and the executor uses "
+        f"{geometry.scale:g}; the cursor sent to frame {target} read back at {back}",
+    )
 
 
 def main() -> None:
@@ -153,7 +278,7 @@ def main() -> None:
     screenshot = args.screenshot.read_bytes() if args.screenshot is not None else None
     checks = run_preflight(profile, screenshot)
     print(json.dumps([asdict(check) for check in checks], indent=2))
-    raise SystemExit(0 if all(check.passed for check in checks) else 1)
+    raise SystemExit(0 if all(check.passed or not check.blocking for check in checks) else 1)
 
 
 if __name__ == "__main__":

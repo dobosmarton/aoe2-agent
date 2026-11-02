@@ -10,7 +10,13 @@ import numpy as np
 from PIL import Image
 
 from .config import config
-from .window import get_game_window_rect
+from .window import (
+    GameGeometry,
+    game_platform,
+    get_game_geometry,
+    get_game_window_rect,
+    get_input_scale,
+)
 
 RESOURCE_BAR_HEIGHT = 60
 RESOURCE_BAR_JPEG_QUALITY = 80
@@ -43,7 +49,9 @@ class NativeCapture:
 
 def _capture_image(monitor: int, rect: tuple[int, int, int, int] | None = None) -> Image.Image:
     """Read native game-window pixels once, before either encoding path."""
-    with mss.mss() as sct:
+    if game_platform() == "macos":
+        return Image.fromarray(_grab_macos(_macos_geometry()))
+    with mss.MSS() as sct:
         if rect is None:
             rect = get_game_window_rect()
         if rect:
@@ -55,23 +63,52 @@ def _capture_image(monitor: int, rect: tuple[int, int, int, int] | None = None) 
         return Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
 
 
+def _macos_geometry() -> GameGeometry:
+    """The Mac game's geometry. Without the window there is nothing to capture: the
+    whole display would show this terminal, not the game."""
+    geometry = get_game_geometry()
+    if geometry is None:
+        raise RuntimeError("the game window wasn't found, so nothing was captured")
+    return geometry
+
+
+def _grab_macos(geometry: GameGeometry) -> np.ndarray:
+    from .screen_macos import grab_game_area
+
+    return grab_game_area(geometry)
+
+
 def capture_native(monitor: int = 1) -> NativeCapture:
     """Keep native pixels so detection, HUD and camera estimation share a view."""
     stamped = time.monotonic()
+    if game_platform() == "macos":
+        geometry = _macos_geometry()
+        pixels = _grab_macos(geometry)  # Exactly the geometry's size, or it raised.
+        rect = geometry.rect
+        return NativeCapture(
+            pixels.tobytes(), geometry.width, geometry.height, stamped, rect, _cursor_in(rect)
+        )
     rect = get_game_window_rect()
     image = _capture_image(monitor, rect)
-    cursor: tuple[int, int] | None = None
-    if rect is not None:
-        try:
-            import pyautogui
+    return NativeCapture(
+        image.tobytes(), image.width, image.height, stamped, rect, _cursor_in(rect)
+    )
 
-            position = pyautogui.position()
-            cursor = (int(position.x) - rect[0], int(position.y) - rect[1])
-        except Exception:
-            # Cursor masking is diagnostic enrichment, never a reason to lose
-            # the native frame if a desktop automation backend is unavailable.
-            pass
-    return NativeCapture(image.tobytes(), image.width, image.height, stamped, rect, cursor)
+
+def _cursor_in(rect: tuple[int, int, int, int] | None) -> tuple[int, int] | None:
+    """The cursor in frame pixels, relative to the window. pyautogui reports input units."""
+    if rect is None:
+        return None
+    try:
+        import pyautogui
+
+        position = pyautogui.position()
+        scale = get_input_scale()
+        return (round(position.x * scale) - rect[0], round(position.y * scale) - rect[1])
+    except Exception:
+        # Cursor masking is diagnostic enrichment, never a reason to lose
+        # the native frame if a desktop automation backend is unavailable.
+        return None
 
 
 def _jpeg(image: Image.Image, quality: int) -> bytes:
