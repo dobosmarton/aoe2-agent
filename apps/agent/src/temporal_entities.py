@@ -8,6 +8,8 @@ from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, cast
 
+from .camera_motion import MOBILE_CLASSES
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -24,6 +26,11 @@ _AMBIGUITY_MARGIN = 0.15
 _STALE_OVERLAP = 0.5
 _LABEL_PENALTY = 1.0
 _GAP_FACTOR = 3.0
+# A new label is the detector changing its mind about one box, never a different box.
+_RELABEL_OVERLAP = 0.5
+# Buildings and resources don't move, so their tracks only continue on a box they touch.
+# Low on purpose: the camera estimate can be a box-width off during a pan.
+_STATIC_OVERLAP = 0.1
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,11 +127,15 @@ def _matching_cost(
     elapsed: float,
     label: str,
 ) -> float | None:
-    """Rank a pair by overlap, looks and label.
+    """Rank a pair by overlap, looks and label, or refuse it.
 
     Overlap separates neighbours far better than distance, because a tracked object
     barely moves between frames. The label penalty stops a second label on one spot from
     tying with the first, while a flickering label can still continue its track.
+
+    Only units may continue on a box they don't touch. Without that limit, a farm whose
+    box was missed for a frame passed its ID to a villager standing in it, and the
+    villager walked off with it.
     """
     old_x, old_y = _box_center(track.box)
     new_x, new_y = _box_center(box)
@@ -139,8 +150,14 @@ def _matching_cost(
     if appearance_distance > 0.55:
         return None
     overlap = _box_overlap(track.box, box)
+    previous = _last_label(track)
+    relabelled = previous is not None and previous != label
+    if relabelled and overlap < _RELABEL_OVERLAP:
+        return None
+    units = previous in MOBILE_CLASSES and label in MOBILE_CLASSES
+    if previous is not None and not units and overlap < _STATIC_OVERLAP:
+        return None
     position = 1.0 - overlap if overlap > 0.0 else 1.0 + distance / allowed
-    relabelled = bool(track.evidence) and _last_label(track) != label
     return position + appearance_distance + (_LABEL_PENALTY if relabelled else 0.0)
 
 
