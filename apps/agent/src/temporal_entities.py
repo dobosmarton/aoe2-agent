@@ -31,6 +31,9 @@ _RELABEL_OVERLAP = 0.5
 # Buildings and resources don't move, so their tracks only continue on a box they touch.
 # Low on purpose: the camera estimate can be a box-width off during a pan.
 _STATIC_OVERLAP = 0.1
+# They also outlive a missed box. A neighbour forgotten after a second came back as a
+# stranger, and the track of a building missed at that moment took it.
+_STATIC_MEMORY_SECONDS = 5.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +108,10 @@ def _box_overlap(
 
 def _last_label(track: _Track) -> str | None:
     return track.evidence[-1].label if track.evidence else None
+
+
+def _is_unit(track: _Track) -> bool:
+    return _last_label(track) in MOBILE_CLASSES
 
 
 def _is_stale_duplicate(track: _Track, updated: Sequence[_Track]) -> bool:
@@ -299,13 +306,14 @@ class TemporalEntities:
             self.reset()
         # Slow frames still need history: a fixed lifetime would forget everything at once.
         lifetime = max(_HISTORY_SECONDS, _GAP_FACTOR * (captured_at - self._last_at))
+        static_lifetime = max(lifetime, _STATIC_MEMORY_SECONDS)
         self._last_capture_id = capture_id
         self._last_at = captured_at
         fresh = tuple(item.entity for item in detections)
         tracks = [
             replace(item, box=_translated_box(item.box, motion.shift))
             for item in self._tracks
-            if captured_at - item.last_seen_at <= lifetime
+            if captured_at - item.last_seen_at <= (lifetime if _is_unit(item) else static_lifetime)
         ]
         candidate_started = time.perf_counter()
         candidates = _candidates(tracks, detections, captured_at)

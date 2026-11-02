@@ -124,36 +124,39 @@ The result differs by object type. Reviewed units survived better than with IoU 
 
 ### After the held-out test
 
-These figures are development evidence, not a retest. Matches 2 and 3 are spent, and the rule below came from studying match 2's failures.
+These figures are development evidence, not a retest. Matches 2 and 3 are spent, and both changes below came from studying their failures.
 
-Most static losses on match 2 had one cause. When a static object's box was missed for a frame or two, the Python tracker moved the object's ID onto a nearby box. It allows matches without overlap so it can follow units through slow frames. A farm's ID went to a villager standing in it, and the villager walked off with it. Trees and farms passed their IDs to neighbours. IoU can't do this, because it needs 30% overlap. Two farms caused 36 of the 50 losses on the still clip.
-
-The fix in `temporal_entities.py`:
+**Overlap.** Most static losses on match 2 had one cause. When a static object's box was missed for a frame or two, the Python tracker moved the object's ID onto a nearby box. It allows matches without overlap so it can follow units through slow frames. A farm's ID went to a villager standing in it, and the villager walked off with it. Trees and farms passed their IDs to neighbours. IoU can't do this, because it needs 30% overlap. Two farms caused 36 of the 50 losses on the still clip. The fix:
 
 - A label change needs 50% overlap, because a new label means the detector changed its mind about the same box.
 - A pair with a static label needs 10% overlap. 30% was too strict: it broke matches the tracker keeps through camera pans.
 - Units still match without overlap.
 
+**Memory.** Most of the wrong objects left after that had one cause too. A static object's box was missed just as a neighbour of the same kind came back into view. The tracker had forgotten the neighbour after a second, so the neighbour looked new, and the missed object's track took it at 10-36% overlap. The truth never forgets static objects, so it knew the neighbour. Static tracks now live for 5 s, while units keep the one-second memory. Memories of 3 s and 10 s scored within 0.1 points of 5 s.
+
 Scored as the held-out verdict, on the same four clips:
 
-| Check | Before | After | IoU |
-|---|---|---|---|
-| Still the same object after 2 s | 93.7% | 94.7% | 94.4% |
-| Wrong object | 0.34% (27) | 0.11% (9) | 0.05% (4) |
-| Label accuracy | 86.84% | 86.89% | 86.88% |
-| Label flips | 16.9 | 16.6 | 17.1 |
+| Check | Before | With overlap | With memory | IoU |
+|---|---|---|---|---|
+| Still the same object after 2 s | 93.7% | 94.7% | 96.5% | 94.4% |
+| Wrong object | 0.34% (27) | 0.11% (9) | 0.06% (5) | 0.05% (4) |
+| Label accuracy | 86.84% | 86.89% | 86.89% | 86.88% |
+| Label flips | 16.9 | 16.6 | 16.6 | 17.1 |
 
-Elsewhere:
+With both changes:
 
-- **Match 3:** wrong objects fell from 17 to 5, although its failures were never studied.
-- **Match 1:** survival went from 94.1% to 94.3%, against 93.9% for IoU.
-- **Generated scenes:** unchanged at 88.89%.
+- **Match 1:** survival is 94.5% against 93.9% for IoU, with 5 wrong objects against 8.
+- **Match 2:** static survival is 98.5% against 97.8%, with 1 wrong object against 4.
+- **Match 3:** survival is 93.8% against 90.1%. Its 4 wrong objects, against none for IoU, are the only gap left.
+- **All six clips:** 10 wrong objects against 12.
+- **Generated scenes:** 88.95% against 88.82%.
 - **Units:** survival is unchanged on every clip.
+
+A stricter overlap for static objects while the camera is still cut wrong objects to 3. It also dropped match 1's survival to 92.9%, so it was left out.
 
 Still open:
 
-- **Wrong objects:** 9 against 4, all of them static.
-- **Match 2's moving clip:** static objects still trail IoU, 95.0% against 96.3%. The losses come mostly from close calls the tracker refuses to decide.
+- **Match 3's wrong objects:** this is the Mac recording, where the detector misplaces building boxes. They probably need the detector fixed first.
 - **Match 1's "same spot" losses:** most of what remains there happens when the detector puts two labels on one box. Python keeps one ID per label, while the truth gives the box to one object arbitrarily. A click lands in the same place either way, so this may be a scoring question rather than a tracker fault. The rules stay unchanged until that is decided.
 
 The Rust port still waits for a new held-out match.
