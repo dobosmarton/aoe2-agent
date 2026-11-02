@@ -327,7 +327,7 @@ def test_memory_only_stretches_with_the_frame_gap() -> None:
     pixels = np.full((400, 400, 3), 90, dtype=np.uint8)
     tracker = temporal.TemporalEntities()
     observe = _observing(tracker, pixels)
-    gone = _boxed(0, "tree", (100.0, 100.0, 160.0, 180.0))
+    gone = _boxed(0, "sheep", (100.0, 100.0, 160.0, 180.0))
     other = _boxed(1, "house", (300.0, 300.0, 360.0, 380.0))
     observe(1, 1.0, (gone, other))
     for capture_id in range(2, 8):
@@ -379,3 +379,40 @@ def test_a_new_label_continues_a_track_only_on_the_same_box() -> None:
     beside = temporal._matching_cost(track, (60.0, 0.0, 160.0, 100.0), (0.0,) * 6, 0.2, "mill")
     assert same_box is not None
     assert beside is None
+
+
+def test_a_building_is_remembered_for_seconds_then_forgotten() -> None:
+    pixels = np.full((400, 400, 3), 90, dtype=np.uint8)
+    observe = _observing(temporal.TemporalEntities(), pixels)
+    house = _boxed(0, "house", (100.0, 100.0, 160.0, 180.0))
+    other = _boxed(1, "tree", (300.0, 300.0, 360.0, 380.0))
+    [house_id, _] = observe(1, 1.0, (house, other))
+    for capture_id in range(2, 17):
+        observe(capture_id, 1.0 + 0.2 * capture_id, (other,))
+    assert observe(17, 4.6, (house,)) == [house_id]  # Missed for 3.6 s.
+    for capture_id in range(18, 48):
+        observe(capture_id, 4.6 + 0.2 * (capture_id - 17), (other,))
+    assert observe(48, 10.8, (house,)) != [house_id]  # Missed for 6.2 s.
+
+
+def test_a_returning_neighbour_takes_back_its_own_id() -> None:
+    pixels = np.full((400, 600, 3), 90, dtype=np.uint8)
+    observe = _observing(temporal.TemporalEntities(), pixels)
+    left = _boxed(0, "farm", (100.0, 100.0, 300.0, 200.0))
+    right = _boxed(1, "farm", (250.0, 100.0, 450.0, 200.0))  # Overlaps `left` by 0.14.
+    left_id, right_id = observe(1, 1.0, (left, right))
+    for capture_id in range(2, 12):
+        observe(capture_id, 1.0 + 0.2 * capture_id, (left,))  # `right` unseen for 2 s.
+    assert observe(12, 3.4, (right,)) == [right_id]  # `left` missed as `right` returns.
+    assert observe(13, 3.6, (left,)) == [left_id]
+
+
+def test_a_unit_is_still_forgotten_after_a_second() -> None:
+    pixels = np.full((400, 400, 3), 90, dtype=np.uint8)
+    observe = _observing(temporal.TemporalEntities(), pixels)
+    sheep = _boxed(0, "sheep", (100.0, 100.0, 130.0, 130.0))
+    other = _boxed(1, "house", (300.0, 300.0, 360.0, 380.0))
+    [sheep_id, _] = observe(1, 1.0, (sheep, other))
+    for capture_id in range(2, 10):
+        observe(capture_id, 1.0 + 0.2 * capture_id, (other,))
+    assert observe(10, 3.0, (sheep,)) != [sheep_id]
