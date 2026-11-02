@@ -122,6 +122,42 @@ The result differs by object type. Reviewed units survived better than with IoU 
 
 **Match 3 is weak evidence.** It is the Mac game, recorded at about 9.5 fps. The detector found only 14-19 objects per frame in a crowded match, misplaced many building boxes, and missed most massed units, so only 11 tracks were long enough to review and 6 passed. The moving clip also has 25 camera cuts, which is why it has no 5 s targets. Playing Magyars on Arabia did not fix the buildings, so an unfamiliar civ was not the cause.
 
+### After the held-out test
+
+These figures are development evidence, not a retest. Matches 2 and 3 are spent, and the rule below came from studying match 2's failures.
+
+Most static losses on match 2 had one cause. When a static object's box was missed for a frame or two, the Python tracker moved the object's ID onto a nearby box. It allows matches without overlap so it can follow units through slow frames. A farm's ID went to a villager standing in it, and the villager walked off with it. Trees and farms passed their IDs to neighbours. IoU can't do this, because it needs 30% overlap. Two farms caused 36 of the 50 losses on the still clip.
+
+The fix in `temporal_entities.py`:
+
+- A label change needs 50% overlap, because a new label means the detector changed its mind about the same box.
+- A pair with a static label needs 10% overlap. 30% was too strict: it broke matches the tracker keeps through camera pans.
+- Units still match without overlap.
+
+Scored as the held-out verdict, on the same four clips:
+
+| Check | Before | After | IoU |
+|---|---|---|---|
+| Still the same object after 2 s | 93.7% | 94.7% | 94.4% |
+| Wrong object | 0.34% (27) | 0.11% (9) | 0.05% (4) |
+| Label accuracy | 86.84% | 86.89% | 86.88% |
+| Label flips | 16.9 | 16.6 | 17.1 |
+
+Elsewhere:
+
+- **Match 3:** wrong objects fell from 17 to 5, although its failures were never studied.
+- **Match 1:** survival went from 94.1% to 94.3%, against 93.9% for IoU.
+- **Generated scenes:** unchanged at 88.89%.
+- **Units:** survival is unchanged on every clip.
+
+Still open:
+
+- **Wrong objects:** 9 against 4, all of them static.
+- **Match 2's moving clip:** static objects still trail IoU, 95.0% against 96.3%. The losses come mostly from close calls the tracker refuses to decide.
+- **Match 1's "same spot" losses:** most of what remains there happens when the detector puts two labels on one box. Python keeps one ID per label, while the truth gives the box to one object arbitrarily. A click lands in the same place either way, so this may be a scoring question rather than a tracker fault. The rules stay unchanged until that is decided.
+
+The Rust port still waits for a new held-out match.
+
 ### Recording another match
 
 Record the Mac game from Terminal.app, which needs Screen Recording permission. The fragmented format keeps frame times if a recording dies: in a test, killing the recording lost only the last unwritten fragment, about two seconds, rather than the whole file. Ten minutes takes about 10 GB at the rate below, so start with at least 30 GB free, because swap also uses the disk.

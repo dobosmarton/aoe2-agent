@@ -343,3 +343,39 @@ def test_a_second_label_that_skips_a_frame_gets_its_id_back() -> None:
     first = observe(1, 1.0, (farm, mill))
     observe(2, 1.2, (farm,))
     assert observe(3, 1.4, (farm, mill)) == first
+
+
+def test_a_missed_farm_does_not_hand_its_id_to_a_villager_inside_it() -> None:
+    pixels = np.full((600, 600, 3), 90, dtype=np.uint8)
+    observe = _observing(temporal.TemporalEntities(), pixels)
+    farm = _boxed(0, "farm", (100.0, 100.0, 500.0, 300.0))
+    [farm_id] = observe(1, 1.0, (farm,))
+    [villager_id] = observe(2, 1.2, (_boxed(1, "villager", (300.0, 200.0, 330.0, 240.0)),))
+    assert villager_id != farm_id
+    assert observe(3, 1.4, (farm,)) == [farm_id]
+
+
+def test_a_missed_tree_does_not_hand_its_id_to_the_tree_beside_it() -> None:
+    pixels = np.full((400, 400, 3), 90, dtype=np.uint8)
+    observe = _observing(temporal.TemporalEntities(), pixels)
+    tree = _boxed(0, "tree", (100.0, 100.0, 160.0, 180.0))
+    [tree_id] = observe(1, 1.0, (tree,))
+    [neighbour_id] = observe(2, 1.2, (_boxed(1, "tree", (165.0, 100.0, 225.0, 180.0)),))
+    assert neighbour_id != tree_id
+    assert observe(3, 1.4, (tree,)) == [tree_id]
+
+
+def test_a_unit_still_follows_a_box_it_no_longer_touches() -> None:
+    pixels = np.full((400, 400, 3), 90, dtype=np.uint8)
+    observe = _observing(temporal.TemporalEntities(), pixels)
+    first = observe(1, 1.0, (_boxed(0, "villager", (100.0, 100.0, 120.0, 130.0)),))
+    assert observe(2, 2.0, (_boxed(0, "villager", (150.0, 100.0, 170.0, 130.0)),)) == first
+
+
+def test_a_new_label_continues_a_track_only_on_the_same_box() -> None:
+    evidence = (temporal._Evidence("farm", 0.8, 1.0),)
+    track = temporal._Track("t", (0.0, 0.0, 100.0, 100.0), (0.0,) * 6, evidence, 1.0)
+    same_box = temporal._matching_cost(track, (2.0, 0.0, 102.0, 100.0), (0.0,) * 6, 0.2, "mill")
+    beside = temporal._matching_cost(track, (60.0, 0.0, 160.0, 100.0), (0.0,) * 6, 0.2, "mill")
+    assert same_box is not None
+    assert beside is None
