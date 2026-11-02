@@ -2,7 +2,7 @@
 
 **Faster: yes. Better: no.**
 
-Run on arm64 at commit `a77c135`, over 12 generated scenes from real annotated frames, with the real detector. Units move as pasted sprites, so recorded footage is still needed for the final word.
+Run on arm64 at commit `1cca928`, over 12 generated scenes from real annotated frames, with the real detector. Units move as pasted sprites, so recorded footage is still needed for the final word.
 
 ## Gates
 
@@ -107,7 +107,7 @@ The detector labels whole farms `villager`, at about 0.8 confidence. Boxes over 
 
 ### Held-out result
 
-The rules in `gates.toml` were fixed before matches 2 and 3 existed, and the reviewed tracks were committed before any tracker was scored on them. Python tracker at `17ac2d1` against the IoU matcher, pooled over four clips and 7,947 targets:
+The rules in `gates.toml` were fixed before matches 2 and 3 existed, and the reviewed tracks were committed before any tracker was scored on them. Python tracker at `b8752f3` against the IoU matcher, pooled over four clips and 7,947 targets:
 
 | Check | Python | IoU | Result |
 |---|---|---|---|
