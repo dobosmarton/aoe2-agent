@@ -1,7 +1,7 @@
 {
   "date": "2026-11-01",
-  "tracker_commit": "17ac2d1",
-  "truth_commit": "09eb4e0",
+  "tracker_commit": "b8752f3",
+  "truth_commit": "ac59357",
   "name": "python",
   "verdict": {
     "survival_2s": {

@@ -3,7 +3,7 @@
     "start_s": 360,
     "seconds": 60,
     "sample_hz": 5,
-    "tracker_commit": "7d2244e",
+    "tracker_commit": "954f943",
     "scores": {
       "raw": {
         "survival_1s": 0.0,
@@ -64,7 +64,7 @@
     "start_s": 530,
     "seconds": 60,
     "sample_hz": 5,
-    "tracker_commit": "7d2244e",
+    "tracker_commit": "954f943",
     "scores": {
       "raw": {
         "survival_1s": 0.0,

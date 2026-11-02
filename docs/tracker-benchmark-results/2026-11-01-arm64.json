@@ -1,6 +1,6 @@
 {
   "versions": {
-    "commit": "a77c135",
+    "commit": "1cca928",
     "machine": "arm64",
     "system": "macOS-26.6.2-arm64-arm-64bit",
     "python": "3.11.9",
