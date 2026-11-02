@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 import structlog
 
 if TYPE_CHECKING:
+    from .game_profile import GameProfile
     from .overlay import DetectionOverlay
     from .providers.base import ChatWire
     from .providers.executor_provider import ExecutorProvider
@@ -29,6 +30,8 @@ from .executor import (
     ActionLedger,
     bind_ledger,
     clear_refresh_callbacks,
+    set_absolute_zoom,
+    set_modifier_map,
     set_rescan_fn,
     set_rescan_full_fn,
     set_selection_refresh_fn,
@@ -46,8 +49,38 @@ from .models import validate_actions
 from .providers.strategist import StrategistProvider, get_default_goals
 from .resource_ocr import warm_up_ocr
 from .turn_phases import get_ground_commands
+from .window import ensure_game_focused, game_platform
 
 log = structlog.stdlib.get_logger()
+
+_PERMISSION_FIX = (
+    "run the agent from Terminal.app and allow Terminal in System Settings > "
+    "Privacy & Security > Screen Recording and Accessibility"
+)
+
+
+def _missing_macos_permissions() -> list[str]:
+    from .window_macos import input_allowed, screen_recording_allowed
+
+    checks = (("screen_recording", screen_recording_allowed()), ("accessibility", input_allowed()))
+    return [name for name, allowed in checks if not allowed]
+
+
+async def _prepare_macos_game(profile: GameProfile | None) -> bool:
+    """Bring the game forward once, then fix its zoom and modifier keys.
+
+    This is the only place the agent pulls the game to the front. After this, input
+    stops while another app is in front, so switching away stops the agent.
+    """
+    if not ensure_game_focused():
+        log.error("game_not_in_front", message="the game window couldn't be brought forward")
+        return False
+    set_modifier_map(profile.modifier_map.items() if profile is not None else ())
+    zoom_steps = profile.zoom_steps if profile is not None else 0
+    zoom = await set_absolute_zoom(zoom_steps)
+    if not zoom.success:
+        log.warning("zoom_not_set", detail=zoom.detail, zoom_steps=zoom_steps)
+    return True
 
 
 @runtime_checkable
@@ -99,6 +132,7 @@ def _build_context(
     max_iterations: int | None,
     detector_factory: DetectorFactory | None,
     ledger: ActionLedger,
+    profile: GameProfile | None,
 ) -> LoopContext:
     """Everything the clocks share, wired to the real game."""
     log_dir = Path(config.log_dir)
@@ -111,9 +145,6 @@ def _build_context(
     overlay = _open_overlay() if use_overlay else None
     goal_manager = GoalManager()
     goal_manager.set_goals(get_default_goals(turn=0))
-    from .game_profile import load_profile
-
-    profile = load_profile(config.game_profile_path) if config.game_profile_path else None
     writer = DiagnosticWriter()
     return LoopContext(
         memory=memory,
@@ -202,6 +233,13 @@ async def game_loop(
     ctx: LoopContext | None = None
     clocks_started = False
     try:
+        if game_platform() == "macos" and (missing := _missing_macos_permissions()):
+            log.error("macos_permission_missing", missing=missing, fix=_PERMISSION_FIX)
+            _request_stop(ctx, memory, "missing_permission")
+            return memory
+        from .game_profile import load_profile
+
+        profile = load_profile(config.game_profile_path) if config.game_profile_path else None
         ctx = _build_context(
             memory,
             use_detection=use_detection,
@@ -210,6 +248,7 @@ async def game_loop(
             max_iterations=max_iterations,
             detector_factory=detector_factory,
             ledger=ledger,
+            profile=profile,
         )
         memory.latency = ctx.latency
         # Perception owns captures; selection/HUD reads need not wait for YOLO.
@@ -228,9 +267,17 @@ async def game_loop(
             time_budget=time_budget,
             memories=len(memory.memories_loaded),
         )
+        relative_zoom = True
+        if game_platform() == "macos":
+            if not await _prepare_macos_game(profile):
+                _request_stop(ctx, memory, "lost_focus")
+                return memory
+            relative_zoom = False
         # Before the first frame on purpose: the scout explores during the
         # slowest perception pass of the game (engine warm-up).
-        await ctx.actuator.execute(validate_actions(get_ground_commands(1)))
+        await ctx.actuator.execute(
+            validate_actions(get_ground_commands(1, relative_zoom=relative_zoom))
+        )
         clocks_started = True
         await _run_clocks(ctx, StrategistProvider(), provider, policy_advisor)
     except KeyboardInterrupt:

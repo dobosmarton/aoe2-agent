@@ -78,16 +78,23 @@ def _extract_applied_memories(
 INITIAL_ZOOM_CLICKS = 5
 
 
-def get_ground_commands(iteration: int) -> list[dict]:
-    """Return hardcoded actions injected BEFORE LLM actions each turn."""
+def get_ground_commands(iteration: int, *, relative_zoom: bool = True) -> list[dict]:
+    """Return hardcoded actions injected BEFORE LLM actions each turn.
+
+    `relative_zoom=False` leaves out the zoom scroll. The macOS game sets an absolute
+    zoom instead (`executor.set_absolute_zoom`).
+    """
     if iteration != 1:
         return []
-    return [
+    zoom = [
         {
             "type": "scroll",
             "clicks": INITIAL_ZOOM_CLICKS,
             "intent": "Zoom in for better object detection",
-        },
+        }
+    ]
+    return [
+        *(zoom if relative_zoom else []),
         {"type": "press", "key": ",", "intent": "Select scout (ground cmd)"},
         {"type": "press", "key": "g", "intent": "Auto Scout (ground cmd)"},
     ]
