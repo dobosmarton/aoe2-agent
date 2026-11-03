@@ -35,6 +35,39 @@ This does **not** establish robustness at all zooms or resolutions. The test als
 
 The preceding synthetic audit found roughly 2–3× differences in median linear size across several classes, not a slight mismatch. The recommendation is to cover an appropriate distribution automatically, not to force the user to reproduce one exact scale. [Synthetic audit](aoe2-synthetic-data-quality.md)
 
+### Does enlarging hurt? (2026-11-03)
+
+On the native Mac game, houses were about 1.7 times wider than in the VM frames. This test measured what that size change alone does to the current models. It used the 40-frame independent VM test set (`tmp/test_data_independent_20261030`, 1,248 boxes), CPU ONNX, and the server's thresholds, NMS and IoU 0.50 matching. First, `detection_server.evaluate` reproduced the recorded results exactly: F1 0.8422 for v9, 0.8297 for v10 and 0.8463 for v11, with every per-class count identical.
+
+**Method** (`scripts/detector_scale_probe.py enlarge`):
+
+- **Enlarged:** for each scale, the detector sees overlapping crops of 1/scale of the frame. The letterbox then enlarges objects by the scale.
+- **Control:** the same crops at their original size, pasted in place on a grey `(114,114,114)` canvas. It loses the same view, but not the size.
+- **Scoring:** each object is scored once, in the crop whose core holds its centre and which shows it whole. An object cut by a crop edge, and any guess on it, counts nowhere. All 1,248 boxes were scored at every scale.
+- **Range:** the 90% range of the size effect comes from 10,000 paired bootstrap resamples of whole frames.
+
+F1 on the full frame, on the control and on the enlarged crops, with the size effect (enlarged minus control):
+
+| Scale | v11 full / control / enlarged | v11 size effect | v9 full / control / enlarged | v9 size effect |
+| --- | --- | --- | --- | --- |
+| 1.25 | 0.846 / 0.850 / 0.828 | −0.022 [−0.033, −0.011] | 0.842 / 0.831 / 0.816 | −0.015 [−0.030, +0.001] |
+| 1.5 | 0.846 / 0.846 / 0.812 | −0.033 [−0.047, −0.019] | 0.842 / 0.822 / 0.778 | −0.045 [−0.057, −0.032] |
+| 1.7 | 0.846 / 0.845 / 0.770 | −0.075 [−0.094, −0.056] | 0.842 / 0.817 / 0.723 | −0.094 [−0.113, −0.076] |
+| 2.0 | 0.846 / 0.843 / 0.683 | −0.160 [−0.178, −0.142] | 0.842 / 0.811 / 0.592 | −0.218 [−0.239, −0.198] |
+
+- **Size matters:** enlargement alone explains a large share of the Mac problem. At 1.7×, v11 loses 0.075 F1 and v9 loses 0.094. Cropping without enlarging costs v11 nothing measurable and v9 0.01–0.03.
+- **Both kinds of error grow:** at 1.7×, v11's false boxes rise from 47 to 165, mostly villagers (10 to 59) and trees (3 to 42). Villager recall falls from 0.72 to 0.64, and berry bush recall from 0.68 to 0.20.
+- **v11 holds up better than v9:** house recall at 1.7× is 0.92 against 0.67, and at 2× it is 0.76 against 0.40.
+- **Matched zoom:** on the Mac, the zoom has to bring objects to their VM size, not just stay fixed. Rule R2 in the Mac plan accepts 0.9–1.15× the VM size, and v11 already loses 0.022 at 1.25×.
+
+**Limits:**
+
+- **Resampling:** the test resamples VM pixels bicubically. The Mac game draws the same standard-resolution sprites larger when zoomed in, but with its own filtering.
+- **Game stage:** the frames are early Dark Age, so massed units aren't covered.
+- **Independence:** crops of one frame are not independent, which is why the range resamples whole frames.
+
+Results: [`aoe2-detector-enlargement/`](aoe2-detector-enlargement/).
+
 ## Three different meanings of size
 
 - **Game camera zoom:** changes the size of rendered units/buildings and how much world fits in the viewport.
