@@ -71,3 +71,11 @@ def test_a_window_is_at_rest_once_it_stays_on_the_screen() -> None:
     assert macos_probe.at_rest(dict(RESTING), dict(RESTING), SCREEN_WIDTH)
     assert not macos_probe.at_rest(None, dict(RESTING), SCREEN_WIDTH)
     assert not macos_probe.at_rest(dict(RESTING), None, SCREEN_WIDTH)
+
+
+def test_spare_bytes_after_the_last_row_are_ignored() -> None:
+    width, height, row_bytes = 2, 2, 8
+    raw = bytes(range(row_bytes * height)) + bytes(5)
+    rgb = macos_probe.bgra_to_rgb(raw, width, height, row_bytes)
+    assert rgb.shape == (2, 2, 3)
+    assert rgb[1, 1].tolist() == [14, 13, 12]

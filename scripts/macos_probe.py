@@ -19,15 +19,20 @@ import argparse
 import json
 import statistics
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import AppKit
+import CoreMedia
 import mss
 import mss.darwin
 import numpy as np
+import objc
 import Quartz
+import ScreenCaptureKit
+from Foundation import NSObject
 from PIL import Image
 
 if TYPE_CHECKING:
@@ -55,6 +60,10 @@ WINDOW_OPTIONS = (
     | Quartz.kCGWindowImageBestResolution
 )
 MSS_OPTIONS = Quartz.kCGWindowImageBoundsIgnoreFraming | Quartz.kCGWindowImageShouldBeOpaque
+SCK_FPS = 30
+SCK_QUEUE_DEPTH = 4
+SCK_ANSWER_SECONDS = 5.0
+SCK_GRAB_GAP_SECONDS = 0.1  # About the agent's pace, so a grab usually finds a new frame.
 
 
 def game_app() -> AppKit.NSRunningApplication | None:
@@ -171,7 +180,9 @@ def display() -> dict[str, Any]:
 
 
 def bgra_to_rgb(raw: bytes, width: int, height: int, row_bytes: int) -> np.ndarray:
-    pixels = np.frombuffer(raw, dtype=np.uint8).reshape(height, row_bytes // 4, 4)[:, :width]
+    # Some buffers carry spare bytes after the last row.
+    pixels = np.frombuffer(raw, dtype=np.uint8, count=row_bytes * height)
+    pixels = pixels.reshape(height, row_bytes // 4, 4)[:, :width]
     return np.ascontiguousarray(pixels[..., 2::-1])
 
 
@@ -181,6 +192,10 @@ def grab_window(window_id: int) -> np.ndarray:
     )
     if image is None:
         raise RuntimeError("window capture returned nothing")
+    return cgimage_to_rgb(image)
+
+
+def cgimage_to_rgb(image: object) -> np.ndarray:
     raw = bytes(Quartz.CGDataProviderCopyData(Quartz.CGImageGetDataProvider(image)))
     return bgra_to_rgb(
         raw,
@@ -188,6 +203,137 @@ def grab_window(window_id: int) -> np.ndarray:
         Quartz.CGImageGetHeight(image),
         Quartz.CGImageGetBytesPerRow(image),
     )
+
+
+def _answer(ask: Callable[[Callable[..., None]], None]) -> tuple[object, ...]:
+    """Call a ScreenCaptureKit method that answers through a completion handler."""
+    answered = threading.Event()
+    answers: list[tuple[object, ...]] = []
+
+    def handler(*values: object) -> None:
+        answers.append(values)
+        answered.set()
+
+    ask(handler)
+    if not answered.wait(SCK_ANSWER_SECONDS):
+        raise RuntimeError("ScreenCaptureKit didn't answer")
+    return answers[0]
+
+
+def sck_source(window_id: int, width: int, height: int) -> tuple[object, object]:
+    """A filter for the game window alone, and a full-resolution BGRA configuration."""
+    content, error = _answer(
+        lambda handler: (
+            ScreenCaptureKit.SCShareableContent.getShareableContentExcludingDesktopWindows_onScreenWindowsOnly_completionHandler_(
+                True, True, handler
+            )
+        )
+    )
+    if error is not None:
+        raise RuntimeError(f"ScreenCaptureKit refused: {error}")
+    window = next((item for item in content.windows() if item.windowID() == window_id), None)
+    if window is None:
+        raise RuntimeError("ScreenCaptureKit can't see the game window")
+    source = ScreenCaptureKit.SCContentFilter.alloc().initWithDesktopIndependentWindow_(window)
+    config = ScreenCaptureKit.SCStreamConfiguration.alloc().init()
+    config.setWidth_(width)
+    config.setHeight_(height)
+    config.setPixelFormat_(Quartz.kCVPixelFormatType_32BGRA)
+    config.setShowsCursor_(False)
+    config.setMinimumFrameInterval_(CoreMedia.CMTimeMake(1, SCK_FPS))
+    config.setQueueDepth_(SCK_QUEUE_DEPTH)
+    return source, config
+
+
+def sck_screenshot(source: object, config: object) -> np.ndarray:
+    image, error = _answer(
+        lambda handler: (
+            ScreenCaptureKit.SCScreenshotManager.captureImageWithFilter_configuration_completionHandler_(
+                source, config, handler
+            )
+        )
+    )
+    if image is None:
+        raise RuntimeError(f"ScreenCaptureKit screenshot failed: {error}")
+    return cgimage_to_rgb(image)
+
+
+def pixel_buffer_to_rgb(buffer: object) -> np.ndarray:
+    Quartz.CVPixelBufferLockBaseAddress(buffer, Quartz.kCVPixelBufferLock_ReadOnly)
+    try:
+        row_bytes = Quartz.CVPixelBufferGetBytesPerRow(buffer)
+        height = Quartz.CVPixelBufferGetHeight(buffer)
+        width = Quartz.CVPixelBufferGetWidth(buffer)
+        base = Quartz.CVPixelBufferGetBaseAddress(buffer)
+        raw = bytes(base.as_buffer(row_bytes * height))
+    finally:
+        Quartz.CVPixelBufferUnlockBaseAddress(buffer, Quartz.kCVPixelBufferLock_ReadOnly)
+    return bgra_to_rgb(raw, width, height, row_bytes)
+
+
+class LatestFrame(NSObject, protocols=[objc.protocolNamed("SCStreamOutput")]):
+    """Keeps the newest frame the stream delivered. Unchanged screens deliver none."""
+
+    def init(self) -> LatestFrame | None:
+        self = objc.super(LatestFrame, self).init()
+        if self is None:
+            return None
+        self.lock = threading.Lock()
+        self.buffer = None
+        self.delivered = 0
+        return self
+
+    def stream_didOutputSampleBuffer_ofType_(
+        self, _stream: object, sample: object, kind: int
+    ) -> None:
+        if kind != ScreenCaptureKit.SCStreamOutputTypeScreen:
+            return
+        buffer = CoreMedia.CMSampleBufferGetImageBuffer(sample)
+        if buffer is None:
+            return
+        with self.lock:
+            self.buffer = buffer
+            self.delivered += 1
+
+    def take(self) -> object:
+        with self.lock:
+            return self.buffer
+
+
+def sck_stream_result(source: object, config: object) -> dict[str, Any]:
+    """Stream the window, and time taking the newest frame at roughly the agent's pace."""
+    try:
+        stream = ScreenCaptureKit.SCStream.alloc().initWithFilter_configuration_delegate_(
+            source, config, None
+        )
+        latest = LatestFrame.alloc().init()
+        added, error = stream.addStreamOutput_type_sampleHandlerQueue_error_(
+            latest, ScreenCaptureKit.SCStreamOutputTypeScreen, None, None
+        )
+        if not added:
+            raise RuntimeError(f"ScreenCaptureKit wouldn't add the output: {error}")
+        (error,) = _answer(stream.startCaptureWithCompletionHandler_)
+        if error is not None:
+            raise RuntimeError(f"ScreenCaptureKit wouldn't start: {error}")
+    except Exception as error:  # Report the failure instead of hiding the other methods.
+        return {"error": f"{type(error).__name__}: {error}"}
+    try:
+        deadline = time.monotonic() + SCK_ANSWER_SECONDS
+        while latest.take() is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        if latest.take() is None:
+            return {"error": "the stream delivered no frame"}
+        started, first_count = time.monotonic(), latest.delivered
+        result = _method_result(
+            "sck_stream",
+            lambda: pixel_buffer_to_rgb(latest.take()),
+            pause=SCK_GRAB_GAP_SECONDS,
+        )
+        seconds = time.monotonic() - started
+        result["frames_per_second"] = round((latest.delivered - first_count) / seconds, 1)
+        return result
+    finally:
+        _answer(stream.stopCaptureWithCompletionHandler_)
 
 
 def grab_region(sct: MSSBase, bounds: dict[str, float]) -> np.ndarray:
@@ -259,11 +405,13 @@ def _timed(grab: Callable[[], np.ndarray]) -> tuple[np.ndarray, float]:
     return frame, (time.perf_counter() - started) * 1000
 
 
-def _method_result(name: str, grab: Callable[[], np.ndarray]) -> dict[str, Any]:
+def _method_result(name: str, grab: Callable[[], np.ndarray], pause: float = 0.0) -> dict[str, Any]:
+    """Time each grab alone. `pause` waits between grabs, outside the timing."""
     try:
         timings: list[float] = []
         frame = None
         for _ in range(GRABS):
+            time.sleep(pause)
             frame, took = _timed(grab)
             timings.append(took)
     except Exception as error:  # Report the failure instead of hiding the other method.
@@ -295,6 +443,23 @@ def capture_command(_: argparse.Namespace) -> None:
                 "mss", lambda: grab_region(sct, window["kCGWindowBounds"])
             ),
         }
+    scale = float(AppKit.NSScreen.mainScreen().backingScaleFactor())
+    bounds = window["kCGWindowBounds"]
+    try:
+        source, config = sck_source(
+            window["kCGWindowNumber"],
+            round(bounds["Width"] * scale),
+            round(bounds["Height"] * scale),
+        )
+    except Exception as error:  # Report the failure instead of hiding the other methods.
+        results["sck_screenshot"] = results["sck_stream"] = {
+            "error": f"{type(error).__name__}: {error}"
+        }
+    else:
+        results["sck_screenshot"] = _method_result(
+            "sck_screenshot", lambda: sck_screenshot(source, config)
+        )
+        results["sck_stream"] = sck_stream_result(source, config)
     update_report("capture", results)
 
 

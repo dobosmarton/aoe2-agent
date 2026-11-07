@@ -23,6 +23,7 @@ dependencies = [
     "rapidocr-onnxruntime>=1.4.0",
     "structlog>=24.1.0",
     "typesafe-sdk>=0.7.0",
+    "pyobjc-framework-screencapturekit>=12.1 ; sys_platform == 'darwin'",
 ]
 
 [project.scripts]
