@@ -154,12 +154,23 @@ With both changes:
 
 A stricter overlap for static objects while the camera is still cut wrong objects to 3. It also dropped match 1's survival to 92.9%, so it was left out.
 
-Still open:
+Still open: match 3's wrong objects. This is the Mac recording, where the detector misplaces building boxes, so they probably need the detector fixed first.
 
-- **Match 3's wrong objects:** this is the Mac recording, where the detector misplaces building boxes. They probably need the detector fixed first.
-- **Match 1's "same spot" losses:** most of what remains there happens when the detector puts two labels on one box. Python keeps one ID per label, while the truth gives the box to one object arbitrarily. A click lands in the same place either way, so this may be a scoring question rather than a tracker fault. The rules stay unchanged until that is decided.
+Match 1's "same spot" losses are decided. Most of what remains there happens when the detector puts two labels on one box: Python keeps one ID per label, while the truth gives the box to one object arbitrarily. A click lands in the same place either way, so this could have been scored as a pass. On 2026-11-07 the rule was kept as it is: these still count as not surviving, and `verdict` now prints their share on a separate line.
 
 The Rust port still waits for a new held-out match.
+
+### Rules for match 4
+
+Fixed on 2026-11-07, before match 4 was recorded. None of them change once the recording exists.
+
+- **Tracker:** the Python tracker (`--name python`) as of `e0d8bf9`, "remember static objects for five seconds". `apps/agent/src/temporal_entities.py` stays unchanged until the verdict: its git blob must still be `0f29ad1c`, which survives rebases (`git rev-parse HEAD:apps/agent/src/temporal_entities.py`).
+- **Checks:** the `[recorded]` rules in `gates.toml`, unchanged and pooled over every clip. Survival after 2 s must be at least IoU's, wrong objects at most IoU's, and label accuracy and flips at least as good as raw detections.
+- **Same spot:** counts as not surviving. Its `info` line can't pass or fail anything.
+- **Recording:** the Mac game, after the probe has set the zoom so a Town Center is 0.9-1.15x its width on the VM. Recording at the default zoom would test the tracker on detector output already known to be degraded.
+- **Clips:** two 60 s clips, as for matches 1-3: the minute with the least camera motion and the minute with the most, starting on a 5 s grid and not overlapping. They are picked from pixel change alone, before any detector or tracker runs on the match.
+- **Truth:** unit tracks are reviewed from `recorded.py strips`, which show no tracker output, and `verified.json` is committed before any tracker is scored on the clips.
+- **Once:** `verdict` runs once. A fail spends match 4 like matches 2 and 3. A pass lets the rules move to screentrack, where the speed, parity and generated-scene gates then run on the port.
 
 ### Recording another match
 
@@ -174,4 +185,4 @@ Record the Mac game from Terminal.app, which needs Screen Recording permission. 
 
 3. Cut clips with `recorded.py prepare --top 66`. Leave out `--colour`, because no paired capture exists for the Mac game yet. Limits follow each clip's own frame rate, so VM clips rebuild unchanged.
 4. Draw review strips with `recorded.py strips`, and save the tracks that pass as `verified.json` beside the clip.
-5. Rebuild with `recorded.py prepare`, then judge held-out matches once with `recorded.py verdict`.
+5. Rebuild with `recorded.py prepare`, then judge held-out matches once with `recorded.py verdict --name python`, following the rules above.

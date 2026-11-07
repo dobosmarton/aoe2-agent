@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "scripts" / "tracker_bench
 
 import recorded
 from recorded import Detection
+from scorecard import TargetOutcome
 
 
 def _box(x: float, y: float, size: float = 40.0) -> recorded.Box:
@@ -314,3 +315,12 @@ def test_a_slow_clip_gives_the_tracker_every_second_frame(tmp_path: Path) -> Non
 def test_a_frame_without_a_colour_table_is_left_alone() -> None:
     frame = np.full((8, 8, 3), 90, dtype=np.uint8)
     assert recorded._frame_jpeg(None, frame) == recorded._jpeg(frame)
+
+
+def test_same_spot_losses_count_against_survival_and_are_reported_apart() -> None:
+    ours = TargetOutcome(survived=90, wrong=0, lost=0, same_spot=10)
+    theirs = TargetOutcome(survived=95, wrong=0, lost=5, same_spot=0)
+    lines = recorded.judge(ours, theirs, (0.9, 10.0), (0.9, 10.0))
+    assert [line.split()[0] for line in lines] == ["FAIL", "pass", "pass", "info"]
+    assert lines[0] == "FAIL  survival: 90.0% against 95.0%"
+    assert lines[-1] == "info  same spot, counted in survival: 10.00% against 0.00%"
