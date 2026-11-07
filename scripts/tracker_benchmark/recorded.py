@@ -783,18 +783,40 @@ def verdict(directories: Sequence[Path], name: str, rules: dict[str, object]) ->
             )
             for directory in directories
         ]
-    ours = pooled_outcome(runs[name], latency)
-    theirs = pooled_outcome(runs[baseline], latency)
-    accuracy, flips = _mean_labels(runs[name])
-    plain_accuracy, plain_flips = _mean_labels(runs[label_baseline])
+    return judge(
+        pooled_outcome(runs[name], latency),
+        pooled_outcome(runs[baseline], latency),
+        _mean_labels(runs[name]),
+        _mean_labels(runs[label_baseline]),
+    )
+
+
+def judge(
+    ours: scorecard.TargetOutcome,
+    theirs: scorecard.TargetOutcome,
+    labels: tuple[float, float],
+    plain_labels: tuple[float, float],
+) -> list[str]:
+    """Pass or fail each rule, then report the same-spot share, which is never judged.
+
+    A second label on the same spot already counts as not surviving. That was kept on
+    2026-11-07, before match 4 was recorded, so the extra line only explains a survival gap.
+    """
+    accuracy, flips = labels
+    plain_accuracy, plain_flips = plain_labels
     checks = (
         ("survival", ours.survival >= theirs.survival, f"{ours.survival:.1%} against {theirs.survival:.1%}"),
         ("wrong object", ours.wrong_rate <= theirs.wrong_rate, f"{ours.wrong_rate:.2%} against {theirs.wrong_rate:.2%}"),
         ("labels", accuracy >= plain_accuracy and flips <= plain_flips, f"accuracy {accuracy:.2%} against {plain_accuracy:.2%}; flips {flips:.1f} against {plain_flips:.1f}"),
     )  # fmt: skip
-    return [
+    lines = [
         f"{'pass' if passed else 'FAIL'}  {label}: {detail}" for label, passed, detail in checks
     ]
+    lines.append(
+        f"info  same spot, counted in survival: "
+        f"{ours.same_spot_rate:.2%} against {theirs.same_spot_rate:.2%}"
+    )
+    return lines
 
 
 def _paused_frame(video: Path, top: int) -> np.ndarray:

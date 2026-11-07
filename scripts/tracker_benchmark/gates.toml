@@ -75,6 +75,8 @@ max_memory_growth_mb = 5.0
 
 # Judged once, on matches the tracker was never tuned on. Failing uses those matches up,
 # so a retest needs a new recording. See `recorded.py verdict`.
+# A second label on the same spot counts as not surviving. Kept on 2026-11-07, before
+# match 4 was recorded; its share is printed beside the verdict but never judged.
 [recorded]
 latency_seconds = 2.0
 baseline = "iou"
