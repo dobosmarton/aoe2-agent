@@ -36,7 +36,15 @@ from .policy.catalog import (
     UNITS,
 )
 from .policy.state import PolicyState
-from .window import ensure_game_focused, get_game_window_rect
+from .window import (
+    Platform,
+    ensure_game_focused,
+    game_in_front,
+    game_platform,
+    get_game_window_rect,
+    get_input_scale,
+    to_input_point,
+)
 
 log = structlog.stdlib.get_logger()
 
@@ -53,6 +61,11 @@ pyautogui.PAUSE = 0.02
 
 # Module-level state (updated per-action batch)
 _window_offset: tuple[int, int] = (0, 0)
+# Frame pixels per input unit: 2 on a Retina Mac, where the mouse moves in points.
+_input_scale: float = 1.0
+_platform: Platform = "none"
+# The catalog's modifiers mapped to the keys the Mac game binds (see GameProfile).
+_modifier_map: dict[str, str] = {}
 _detected_entities: list[dict] = []
 _rescan_fn: Callable[[], Awaitable[bool]] | None = None
 _rescan_full_fn: Callable[[], Awaitable[bool]] | None = None
@@ -1963,8 +1976,129 @@ def can_resolve(action_dict: dict[str, object]) -> bool:
 
 
 def _translate(x: int, y: int) -> tuple[int, int]:
-    """Translate screenshot-relative coords to screen-absolute."""
-    return (x + _window_offset[0], y + _window_offset[1])
+    """Translate screenshot-relative coords to screen-absolute input units."""
+    return to_input_point(x, y, _window_offset[0], _window_offset[1], _input_scale)
+
+
+# ---------------------------------------------------------------------------
+# macOS input
+# ---------------------------------------------------------------------------
+
+# The button is held this long, so the game sees a press and a release, not one instant.
+MAC_CLICK_HOLD_S = 0.04
+# Zoom goes as separate one-step scroll events, so each one counts as one zoom step.
+MAC_SCROLL_GAP_S = 0.03
+# Enough one-step zoom-outs to reach full zoom-out from any zoom.
+MAC_FULL_ZOOM_OUT_STEPS = 30
+# The scroll direction that zooms in. Flip it if the probe's zoom ladder runs backwards.
+MAC_ZOOM_IN_DIRECTION = 1
+GAME_NOT_IN_FRONT = "the game is not the front window, so no input was sent"
+MAC_ZOOM_FIXED = "zoom is fixed on macOS so the detector always sees one scale; scroll is disabled"
+
+_MAC_MODIFIER_NAMES: dict[str, str] = {
+    "cmd": "command",
+    "control": "ctrl",
+    "alt": "option",
+    "opt": "option",
+}
+# macOS shortcuts that quit, hide or leave the game. A chord containing one is refused.
+_MAC_BLOCKED_CHORDS: tuple[frozenset[str], ...] = tuple(
+    frozenset(chord)
+    for chord in (
+        {"command", "q"},
+        {"command", "w"},
+        {"command", "h"},
+        {"command", "m"},
+        {"command", "tab"},
+        {"command", "space"},
+        {"command", "option", "escape"},
+        {"ctrl", "command", "f"},
+        {"ctrl", "command", "q"},
+        {"ctrl", "up"},
+        {"ctrl", "down"},
+        {"ctrl", "left"},
+        {"ctrl", "right"},
+        {"ctrl", "space"},
+    )
+)
+_MAC_BLOCKED_KEYS: frozenset[str] = frozenset({"f11"})  # Show Desktop.
+
+
+def set_modifier_map(pairs: Iterable[tuple[str, str]]) -> None:
+    """Map the catalog's modifiers to the Mac game's, e.g. ("ctrl", "command")."""
+    global _modifier_map
+    _modifier_map = dict(pairs)
+
+
+def _mac_chord(modifiers: Sequence[str], key: str) -> tuple[list[str], str | None]:
+    """The Mac modifiers for a press, and a refusal if the chord is a system shortcut."""
+    names = [_MAC_MODIFIER_NAMES.get(name.lower(), name.lower()) for name in modifiers]
+    mapped = [_modifier_map.get(name, name) for name in names]
+    chord = frozenset([*mapped, key.lower()])
+    if key.lower() in _MAC_BLOCKED_KEYS or any(blocked <= chord for blocked in _MAC_BLOCKED_CHORDS):
+        return mapped, f"{'+'.join([*mapped, key])} is a macOS system shortcut, so it was not sent"
+    return mapped, None
+
+
+async def _mouse_click(x: int, y: int, button: Literal["left", "right"]) -> None:
+    if _platform != "macos":
+        if button == "left":
+            pyautogui.click(x, y)
+        else:
+            pyautogui.rightClick(x, y)
+        return
+    pyautogui.mouseDown(x, y, button=button)
+    try:
+        await asyncio.sleep(MAC_CLICK_HOLD_S)
+    finally:
+        pyautogui.mouseUp(x, y, button=button)  # Never leave the button held.
+
+
+def _refresh_input_geometry() -> tuple[int, int, int, int] | None:
+    """Read the window's offset, scale and platform once before an input."""
+    global _window_offset, _input_scale, _platform
+    rect = get_game_window_rect()
+    if rect:
+        _window_offset = (rect[0], rect[1])
+    _input_scale = get_input_scale()
+    _platform = game_platform()
+    return rect
+
+
+def _withheld_input() -> ActionResult | None:
+    """On macOS, input goes only to the game in front. Cmd+Tab away to stop the agent."""
+    if _platform == "macos" and not game_in_front():
+        log.warning("input_withheld", reason="game_not_in_front")
+        return ActionResult(False, GAME_NOT_IN_FRONT)
+    return None
+
+
+async def set_absolute_zoom(zoom_steps: int) -> ActionResult:
+    """macOS: zoom all the way out, then `zoom_steps` in, so every game starts at one zoom.
+
+    The detector was trained at one scale. A relative zoom from wherever the last game
+    ended would give it a different one.
+    """
+    rect = _refresh_input_geometry()
+    if withheld := _withheld_input():
+        return withheld
+    if rect is None:
+        return ActionResult(False, "game window not found")
+    width, height = _size_of(rect)
+    pyautogui.moveTo(*_translate(width // 2, height // 2))  # Scroll over the map, not the HUD.
+    current_ledger().note_camera_input()
+    current_ledger().spatial_valid = False
+    for direction, steps in (
+        (-MAC_ZOOM_IN_DIRECTION, MAC_FULL_ZOOM_OUT_STEPS),
+        (MAC_ZOOM_IN_DIRECTION, zoom_steps),
+    ):
+        for _ in range(steps):
+            if withheld := _withheld_input():
+                return withheld
+            pyautogui.scroll(direction)
+            await asyncio.sleep(MAC_SCROLL_GAP_S)
+    log.info("zoom_set", zoom_out_steps=MAC_FULL_ZOOM_OUT_STEPS, zoom_in_steps=zoom_steps)
+    return ActionResult(True, "ok")
 
 
 # ---------------------------------------------------------------------------
@@ -2064,12 +2198,16 @@ _MIN_WINDOW_DIM: int = 320
 
 
 def _window_size() -> tuple[int, int]:
-    """(width, height) of the game window, or ``_DEFAULT_SCREEN`` when unavailable.
+    """(width, height) of the game window, or ``_DEFAULT_SCREEN`` when unavailable."""
+    return _size_of(get_game_window_rect())
+
+
+def _size_of(rect: tuple[int, int, int, int] | None) -> tuple[int, int]:
+    """(width, height) of a window rect, or ``_DEFAULT_SCREEN`` when unavailable.
 
     Defensive against ``get_game_window_rect`` returning ``None`` or a malformed
     rect whose dimensions are absent, non-numeric, or implausibly small.
     """
-    rect = get_game_window_rect()
     if rect is not None:
         try:
             width, height = int(rect[2]), int(rect[3])
@@ -2372,7 +2510,7 @@ async def _handle_click(action_dict: dict[str, object], intent: str) -> ActionRe
             current_ledger().note_economic_input()
         else:
             current_ledger().note_selection_input()
-        pyautogui.click(screen_x, screen_y)
+        await _mouse_click(screen_x, screen_y, "left")
         log.info(
             "click",
             x=x,
@@ -2420,7 +2558,7 @@ async def _handle_right_click(action_dict: dict[str, object], intent: str) -> Ac
 
     screen_x, screen_y = _translate(x, y)
     current_ledger().note_input()
-    pyautogui.rightClick(screen_x, screen_y)
+    await _mouse_click(screen_x, screen_y, "right")
     log.info(
         "right_click",
         x=x,
@@ -2437,6 +2575,11 @@ async def _handle_press(action_dict: dict[str, object], intent: str) -> ActionRe
     key = str(action_dict["key"])
     raw_modifiers = action_dict.get("modifiers", [])
     modifiers: list[str] = list(raw_modifiers) if isinstance(raw_modifiers, list) else []
+    if _platform == "macos":
+        modifiers, refusal = _mac_chord(modifiers, key)
+        if refusal is not None:
+            log.warning("system_chord_refused", key=key, modifiers=modifiers, intent=intent)
+            return ActionResult(False, refusal)
     if key.lower() in CAMERA_KEYS or action_dict.get("rescan"):
         current_ledger().note_camera_input()
         current_ledger().spatial_valid = False
@@ -2484,6 +2627,9 @@ async def _handle_drag(action_dict: dict[str, object], intent: str) -> ActionRes
 
 async def _handle_scroll(action_dict: dict[str, object], intent: str) -> ActionResult:
     clicks = _to_int(action_dict["clicks"])
+    if _platform == "macos":
+        log.warning("scroll_refused", clicks=clicks, intent=intent)
+        return ActionResult(False, MAC_ZOOM_FIXED)
     x, y = action_dict.get("x"), action_dict.get("y")
     current_ledger().note_camera_input()
     current_ledger().spatial_valid = False
@@ -2920,18 +3066,18 @@ async def execute_action(action: dict[str, object] | Action) -> ActionResult:
         return ActionResult(False, f"unknown action type '{action_type}'")
 
     try:
-        # Refresh window offset before each action
-        global _window_offset
-        rect = get_game_window_rect()
-        if rect:
-            _window_offset = (rect[0], rect[1])
+        # Refresh window offset, input scale and platform before each action
+        rect = _refresh_input_geometry()
+        if withheld := _withheld_input():
+            return withheld
 
         result = await handler(action_dict, intent)
 
         # Move cursor to window center to prevent AoE2 edge-scrolling.
         # Leaving the cursor near screen edges causes camera drift during delays.
         if rect:
-            pyautogui.moveTo(rect[0] + 1512, rect[1] + 836)
+            width, height = _size_of(rect)
+            pyautogui.moveTo(*_translate(width // 2, height // 2))
 
         # Small delay between actions for stability
         await asyncio.sleep(config.action_delay)
@@ -2976,8 +3122,15 @@ async def execute_actions(actions: Sequence[dict[str, object] | Action]) -> list
     refused instead of executed: its x/y were computed from the pre-move frame
     and land on arbitrary terrain (run 8, F-33 — villagers walked to nothing).
     The failure detail teaches the LLM to name targets instead.
+
+    On macOS the game is never pulled back to the front here: switching away is how
+    a person stops the agent, so the batch is refused instead.
     """
-    if not ensure_game_focused():
+    if game_platform() == "macos":
+        if not game_in_front():
+            log.warning("input_withheld", reason="game_not_in_front", actions=len(actions))
+            return [ActionResult(False, GAME_NOT_IN_FRONT)]
+    elif not ensure_game_focused():
         log.warning("could_not_focus_before_actions")
         await asyncio.sleep(0.5)
         ensure_game_focused()

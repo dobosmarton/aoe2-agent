@@ -31,6 +31,7 @@ from .loops.source import GameActuator, Sighting
 from .memory import AgentMemory
 from .policy.advice import PolicyAdvice, readonly_probabilities
 from .policy.controller import AgentController
+from .window import NullBackend, use_backend
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -408,7 +409,12 @@ async def run_scenario_async(path: Path) -> ScenarioResult:
         executor._rescan_full_fn,
     )
     try:
-        with tempfile.TemporaryDirectory(prefix="agent-scenario-") as temporary:
+        # No real window: on a Mac with the game open, the real backend would switch
+        # the executor to point-scaled input and its in-front check.
+        with (
+            use_backend(NullBackend()),
+            tempfile.TemporaryDirectory(prefix="agent-scenario-") as temporary,
+        ):
             ctx = LoopContext(
                 memory=AgentMemory(),
                 goal_manager=GoalManager(),

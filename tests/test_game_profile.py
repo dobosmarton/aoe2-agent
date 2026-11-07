@@ -84,3 +84,37 @@ def test_preflight_reads_calibrated_hud_but_does_not_self_certify_window(monkeyp
     assert not checks["hotkeys"].passed
     assert not checks["ownership_colors"].passed
     assert "map" not in checks
+
+
+_MAC = Path(__file__).parents[1] / "apps/agent/profiles/magyars_arabia_4v4.macos.example.json"
+
+
+def test_the_mac_example_is_the_full_screen_game_area() -> None:
+    profile = load_profile(_MAC)
+    assert profile.platform == "macos"
+    assert (profile.capture_width, profile.capture_height) == (3024, 1898)
+    assert load_profile(_EXAMPLE).platform == "windows"  # Older profiles default to Windows.
+
+
+@pytest.mark.parametrize(
+    ("source", "change"),
+    [
+        (_EXAMPLE, {"capture_height": 1898}),  # A Windows profile with the Mac's height.
+        (_MAC, {"capture_height": 1672}),  # And the reverse.
+        (_EXAMPLE, {"zoom_steps": 4}),  # Mac-only settings on Windows.
+        (_EXAMPLE, {"modifier_map": {"ctrl": "command"}}),
+        (_MAC, {"zoom_steps": 31}),
+        (_MAC, {"modifier_map": {"ctrl": "super"}}),
+    ],
+)
+def test_platform_settings_must_agree(source: Path, change: dict[str, object]) -> None:
+    data = {**json.loads(source.read_text()), **change}
+    with pytest.raises(ValidationError):
+        GameProfile.model_validate_json(json.dumps(data))
+
+
+def test_a_mac_profile_takes_a_zoom_and_a_modifier_map() -> None:
+    data = {**json.loads(_MAC.read_text()), "zoom_steps": 6, "modifier_map": {"ctrl": "command"}}
+    profile = GameProfile.model_validate_json(json.dumps(data))
+    assert profile.zoom_steps == 6
+    assert profile.modifier_map == {"ctrl": "command"}

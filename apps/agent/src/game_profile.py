@@ -11,6 +11,14 @@ if TYPE_CHECKING:
 
 Relationship = Literal["own", "ally", "enemy"]
 PlayerColor = Literal["blue", "red", "green", "yellow", "cyan", "purple", "gray", "orange"]
+Platform = Literal["windows", "macos"]
+Modifier = Literal["ctrl", "command", "option", "shift"]
+
+# The game area's height on each supported setup. The Mac game runs full screen on a
+# 3024x1964 Retina panel and leaves 66 pixels under the menu bar.
+CAPTURE_HEIGHT: dict[Platform, int] = {"windows": 1672, "macos": 1898}
+# Zoom steps go in from full zoom-out; the probe tried up to this many.
+MAX_ZOOM_STEPS = 30
 
 
 class PlayerSlot(BaseModel):
@@ -34,8 +42,14 @@ class GameProfile(BaseModel):
     population_limit: Literal[200]
     locked_teams: Literal[True]
     language: Literal["en"]
+    platform: Platform = "windows"
     capture_width: Literal[3024]
-    capture_height: Literal[1672]
+    capture_height: Literal[1672, 1898]
+    # macOS only. The game may bind Cmd where Windows uses Ctrl; this maps the
+    # catalog's modifiers to the keys the Mac game expects.
+    modifier_map: dict[Modifier, Modifier] = Field(default_factory=dict)
+    # macOS only. Steps in from full zoom-out, giving the same zoom every game.
+    zoom_steps: int = Field(default=0, ge=0, le=MAX_ZOOM_STEPS)
     ui_scale: float = Field(gt=0)
     hotkey_profile: str = Field(min_length=1)
     game_data_version: str = Field(min_length=1)
@@ -43,6 +57,17 @@ class GameProfile(BaseModel):
     roster_verified: bool = False
     hotkeys_verified: bool = False
     ownership_verified: bool = False
+
+    @model_validator(mode="after")
+    def validate_platform(self) -> GameProfile:
+        expected = CAPTURE_HEIGHT[self.platform]
+        if self.capture_height != expected:
+            raise ValueError(
+                f"a {self.platform} game area is {expected} pixels high, not {self.capture_height}"
+            )
+        if self.platform != "macos" and (self.modifier_map or self.zoom_steps):
+            raise ValueError("modifier_map and zoom_steps apply only to the macOS game")
+        return self
 
     @model_validator(mode="after")
     def validate_roster(self) -> GameProfile:
@@ -85,4 +110,10 @@ def recording_qualification(profile: GameProfile | None) -> tuple[str, ...]:
     return tuple(name for name, verified in checks if not verified)
 
 
-__all__ = ["GameProfile", "PlayerSlot", "load_profile", "recording_qualification"]
+__all__ = [
+    "CAPTURE_HEIGHT",
+    "GameProfile",
+    "PlayerSlot",
+    "load_profile",
+    "recording_qualification",
+]

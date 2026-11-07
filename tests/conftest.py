@@ -49,6 +49,17 @@ for _mod_name in ("pyautogui", "pygetwindow"):
         sys.modules[_mod_name] = MagicMock()
 
 
+@pytest.fixture(autouse=True)
+def _no_real_game_window(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests never see a real game window, so they pass with the game open or closed.
+
+    A test that wants a platform installs its own backend over this one.
+    """
+    from gameplay_agent import window
+
+    monkeypatch.setattr(window, "_backend", window.NullBackend())
+
+
 def pytest_addoption(parser):
     parser.addoption(
         "--runlive",
