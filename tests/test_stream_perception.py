@@ -139,11 +139,16 @@ def test_class_flicker_does_not_authorize_historical_click() -> None:
 def test_history_expires_and_track_ids_are_not_reused() -> None:
     tracks = TemporalEntities()
     box = (100, 100, 120, 140)
-    first = _observe(tracks, (_entity("tree", box),), capture_id=1, at=1.0)
-    second = _observe(tracks, (_entity("tree", box),), capture_id=2, at=2.1)
+    other = (300, 300, 320, 340)
+    first = _observe(tracks, (_entity("sheep", box), _entity("house", other)), capture_id=1, at=1.0)
+    for capture_id in range(2, 9):
+        _observe(
+            tracks, (_entity("house", other),), capture_id=capture_id, at=0.8 + 0.2 * capture_id
+        )
+    later = _observe(tracks, (_entity("sheep", box),), capture_id=9, at=2.6)
 
-    assert first[0].id != second[0].id
-    assert second[0].class_agreement is None
+    assert later[0].id not in {item.id for item in first}
+    assert later[0].class_agreement is None
 
 
 def test_occlusion_keeps_a_short_lived_identity_without_publishing_prediction() -> None:

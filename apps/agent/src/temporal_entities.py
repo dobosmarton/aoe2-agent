@@ -8,6 +8,8 @@ from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, cast
 
+from .camera_motion import MOBILE_CLASSES
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -20,6 +22,18 @@ _HISTORY_SECONDS = 1.0
 _HALF_LIFE_SECONDS = 0.4
 _MAX_OBSERVATIONS = 3
 _MIN_CLASS_MARGIN = 0.25
+_AMBIGUITY_MARGIN = 0.15
+_STALE_OVERLAP = 0.5
+_LABEL_PENALTY = 1.0
+_GAP_FACTOR = 3.0
+# A new label is the detector changing its mind about one box, never a different box.
+_RELABEL_OVERLAP = 0.5
+# Buildings and resources don't move, so their tracks only continue on a box they touch.
+# Low on purpose: the camera estimate can be a box-width off during a pan.
+_STATIC_OVERLAP = 0.1
+# They also outlive a missed box. A neighbour forgotten after a second came back as a
+# stranger, and the track of a building missed at that moment took it.
+_STATIC_MEMORY_SECONDS = 5.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,7 +61,7 @@ class PreparedDetection:
 def _appearance(pixels: np.ndarray, box: tuple[float, ...]) -> tuple[float, ...]:
     height, width = cast("tuple[int, int]", pixels.shape[:2])
     x0, y0, x1, y1 = (int(value) for value in box)
-    crop = pixels[max(0, y0) : min(height, y1), max(0, x0) : min(width, x1)]
+    crop = pixels[max(0, y0) : max(0, min(height, y1)), max(0, x0) : max(0, min(width, x1))]
     if crop.size == 0:
         return (0.0,) * 6
     # NumPy's installed stubs expose aggregate arrays as Any; narrow here.
@@ -79,12 +93,57 @@ def _translated_box(
     return (box[0] + shift[0], box[1] + shift[1], box[2] + shift[0], box[3] + shift[1])
 
 
+def _box_overlap(
+    a: tuple[float, float, float, float], b: tuple[float, float, float, float]
+) -> float:
+    width = min(a[2], b[2]) - max(a[0], b[0])
+    height = min(a[3], b[3]) - max(a[1], b[1])
+    if width <= 0.0 or height <= 0.0:
+        return 0.0
+    intersection = width * height
+    area_a = (a[2] - a[0]) * (a[3] - a[1])
+    area_b = (b[2] - b[0]) * (b[3] - b[1])
+    return intersection / (area_a + area_b - intersection)
+
+
+def _last_label(track: _Track) -> str | None:
+    return track.evidence[-1].label if track.evidence else None
+
+
+def _is_unit(track: _Track) -> bool:
+    return _last_label(track) in MOBILE_CLASSES
+
+
+def _is_stale_duplicate(track: _Track, updated: Sequence[_Track]) -> bool:
+    """An unmatched track on top of a fresh one would make that object ambiguous forever.
+
+    Only the same label counts. The detector often puts two labels on one spot, and a
+    second label that skips a frame should get its ID back when it returns.
+    """
+    label = _last_label(track)
+    return any(
+        _box_overlap(track.box, item.box) > _STALE_OVERLAP and _last_label(item) == label
+        for item in updated
+    )
+
+
 def _matching_cost(
     track: _Track,
     box: tuple[float, float, float, float],
     appearance: tuple[float, ...],
     elapsed: float,
+    label: str,
 ) -> float | None:
+    """Rank a pair by overlap, looks and label, or refuse it.
+
+    Overlap separates neighbours far better than distance, because a tracked object
+    barely moves between frames. The label penalty stops a second label on one spot from
+    tying with the first, while a flickering label can still continue its track.
+
+    Only units may continue on a box they don't touch. Without that limit, a farm whose
+    box was missed for a frame passed its ID to a villager standing in it, and the
+    villager walked off with it.
+    """
     old_x, old_y = _box_center(track.box)
     new_x, new_y = _box_center(box)
     distance = math.hypot(new_x - old_x, new_y - old_y)
@@ -97,7 +156,16 @@ def _matching_cost(
     )
     if appearance_distance > 0.55:
         return None
-    return distance / allowed + appearance_distance
+    overlap = _box_overlap(track.box, box)
+    previous = _last_label(track)
+    relabelled = previous is not None and previous != label
+    if relabelled and overlap < _RELABEL_OVERLAP:
+        return None
+    units = previous in MOBILE_CLASSES and label in MOBILE_CLASSES
+    if previous is not None and not units and overlap < _STATIC_OVERLAP:
+        return None
+    position = 1.0 - overlap if overlap > 0.0 else 1.0 + distance / allowed
+    return position + appearance_distance + (_LABEL_PENALTY if relabelled else 0.0)
 
 
 def _candidates(
@@ -122,30 +190,44 @@ def _candidates(
             detection = detections[new_index]
             box = detection.entity.bbox
             assert box is not None
-            cost = _matching_cost(track, box, detection.appearance, elapsed)
+            cost = _matching_cost(
+                track, box, detection.appearance, elapsed, detection.entity.class_name
+            )
             if cost is not None:
                 candidates.append((cost, old_index, new_index))
     candidates.sort()
     return candidates
 
 
+def _check_runner_up(
+    cost: float, identity: int, cheapest: dict[int, float | None], ambiguous: set[int]
+) -> None:
+    """Compare an identity's second candidate with its first, then ignore the rest."""
+    if identity not in cheapest:
+        cheapest[identity] = cost
+        return
+    best = cheapest[identity]
+    if best is not None and cost - best < _AMBIGUITY_MARGIN:
+        ambiguous.add(identity)
+    cheapest[identity] = None
+
+
 def _ambiguous_candidates(
     candidates: Sequence[tuple[float, int, int]],
 ) -> tuple[set[int], set[int]]:
-    """Adjacent costs within each identity suffice because candidates are sorted."""
-    previous_old: dict[int, float] = {}
-    previous_new: dict[int, float] = {}
+    """Only an identity's two cheapest candidates can make it ambiguous.
+
+    Candidates are sorted, so those are the first two seen for each identity. Worse
+    options must not count: in a crowded frame nearly every identity has some pair of
+    similar ones, which rejected almost every match on real footage.
+    """
+    cheapest_old: dict[int, float | None] = {}
+    cheapest_new: dict[int, float | None] = {}
     ambiguous_old: set[int] = set()
     ambiguous_new: set[int] = set()
     for cost, old_index, new_index in candidates:
-        old_cost = previous_old.get(old_index)
-        new_cost = previous_new.get(new_index)
-        if old_cost is not None and cost - old_cost < 0.15:
-            ambiguous_old.add(old_index)
-        if new_cost is not None and cost - new_cost < 0.15:
-            ambiguous_new.add(new_index)
-        previous_old[old_index] = cost
-        previous_new[new_index] = cost
+        _check_runner_up(cost, old_index, cheapest_old, ambiguous_old)
+        _check_runner_up(cost, new_index, cheapest_new, ambiguous_new)
     return ambiguous_old, ambiguous_new
 
 
@@ -177,13 +259,15 @@ def _label(evidence: tuple[_Evidence, ...], current: str) -> tuple[str, float | 
         weight = item.confidence * 2 ** (-(now - item.captured_at) / _HALF_LIFE_SECONDS)
         scores[item.label] = scores.get(item.label, 0.0) + weight
     total = sum(scores.values())
+    if not total:
+        return current, 0.0
     winner = max(scores, key=scores.__getitem__)
-    agreement = scores[winner] / total if total else 0.0
+    agreement = scores[winner] / total
     if winner != current:
         runner_up = max((score for label, score in scores.items() if label != winner), default=0.0)
         supporting = sum(item.label == winner for item in evidence)
         if supporting < 2 or (scores[winner] - runner_up) / total < _MIN_CLASS_MARGIN:
-            return current, scores.get(current, 0.0) / total if total else 0.0
+            return current, scores.get(current, 0.0) / total
     return winner, agreement
 
 
@@ -218,15 +302,18 @@ class TemporalEntities:
         if not self.accepts(capture_id, captured_at):
             return ()
         self.last_ambiguous_count = 0
-        if motion.kind == "reset" or captured_at - self._last_at > _HISTORY_SECONDS:
+        if motion.kind == "reset":
             self.reset()
+        # Slow frames still need history: a fixed lifetime would forget everything at once.
+        lifetime = max(_HISTORY_SECONDS, _GAP_FACTOR * (captured_at - self._last_at))
+        static_lifetime = max(lifetime, _STATIC_MEMORY_SECONDS)
         self._last_capture_id = capture_id
         self._last_at = captured_at
         fresh = tuple(item.entity for item in detections)
         tracks = [
             replace(item, box=_translated_box(item.box, motion.shift))
             for item in self._tracks
-            if captured_at - item.last_seen_at <= _HISTORY_SECONDS
+            if captured_at - item.last_seen_at <= (lifetime if _is_unit(item) else static_lifetime)
         ]
         candidate_started = time.perf_counter()
         candidates = _candidates(tracks, detections, captured_at)
@@ -269,7 +356,11 @@ class TemporalEntities:
             )
         self._tracks = (
             *updated,
-            *(track for index, track in enumerate(tracks) if index not in used_old),
+            *(
+                track
+                for index, track in enumerate(tracks)
+                if index not in used_old and not _is_stale_duplicate(track, updated)
+            ),
         )
         self.last_matching_ms = (time.perf_counter() - matching_started) * 1000
         return tuple(output)

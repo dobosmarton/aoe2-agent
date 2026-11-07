@@ -1,0 +1,83 @@
+# What "better" means, written down before the first full run.
+# Changing a rule needs a stated reason in the commit, so results can't move the goalposts.
+#
+# `faster` gates answer "is it faster without changing behaviour?".
+# `better` gates answer "does the agent actually get a better picture of the game?".
+# A non-blocking gate is reported but can't fail the verdict.
+
+[parity]
+question = "Same decisions as Python?"
+group = "faster"
+max_differences = 0
+
+[overhead]
+question = "Inside the perception budget?"
+group = "faster"
+# Camera plus temporal p95, from docs/streaming-perception.md.
+max_p95_ms = 20.0
+
+[speed]
+question = "Faster on real frames?"
+group = "faster"
+# Lower confidence bound, at every density band.
+min_ratio = 10.0
+
+[spec_target]
+question = "Meets the original goal?"
+group = "faster"
+blocking = false
+# Tracker p95 in the band around 60 objects, from docs/SPEC.md in screentrack.
+max_p95_ms = 2.0
+band = "high"
+
+[target_survival]
+question = "Do IDs shown to the LLM still work later?"
+group = "better"
+latency_seconds = 2.0
+baseline = "iou"
+
+[wrong_target]
+question = "Could an ID point at the wrong object?"
+group = "better"
+latency_seconds = 2.0
+# Only a different object counts. The detector often puts two labels on one spot, and
+# moving between those lands a click in the same place.
+baseline = "iou"
+
+[recovery]
+question = "Does one bad frame heal?"
+group = "better"
+max_seconds = 1.0
+
+[labels]
+question = "Does smoothing help?"
+group = "better"
+baseline = "raw"
+
+[economy_view]
+question = "Is the agent's picture steadier?"
+group = "better"
+baseline = "raw"
+
+[event_loop]
+question = "Does the agent stay responsive?"
+group = "better"
+# Compared with an idle loop, not Python: a slow tracker keeps the CPU awake, so
+# Python reads faster than doing nothing and this rule could never be passed against it.
+max_idle_ratio = 1.25
+
+[stability]
+question = "Does it hold up over a game?"
+group = "better"
+frames = 9000
+max_drift = 0.10
+max_memory_growth_mb = 5.0
+
+# Judged once, on matches the tracker was never tuned on. Failing uses those matches up,
+# so a retest needs a new recording. See `recorded.py verdict`.
+# A second label on the same spot counts as not surviving. Kept on 2026-11-07, before
+# match 4 was recorded; its share is printed beside the verdict but never judged.
+[recorded]
+latency_seconds = 2.0
+baseline = "iou"
+label_baseline = "raw"

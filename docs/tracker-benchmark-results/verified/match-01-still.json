@@ -1,0 +1,32 @@
+{
+  "reviewer": "By eye, from 9-frame strips without tracker output",
+  "seed": 5,
+  "approved": [
+    "track_558",
+    "track_99_1",
+    "track_559",
+    "track_208",
+    "track_541",
+    "track_279",
+    "track_232",
+    "track_171",
+    "track_256",
+    "track_156",
+    "track_30",
+    "track_342",
+    "track_471",
+    "track_222_0",
+    "track_496",
+    "track_433_2",
+    "track_305",
+    "track_111",
+    "track_554",
+    "track_453"
+  ],
+  "rejected": {
+    "track_402": "box ends on nothing",
+    "track_488": "farm ghost beside a villager",
+    "track_58_0": "farm ghost beside a villager",
+    "track_267": "not one unit"
+  }
+}
