@@ -47,6 +47,8 @@ ZOOM_OUT_STEPS = 30
 ZOOM_IN_STEPS = 12
 SETTLE_SECONDS = 0.5
 FOCUS_WAIT_SECONDS = 1.5
+REST_WAIT_SECONDS = 3.0  # A full-screen game slides in from its own Space after focusing.
+REST_POLL_SECONDS = 0.15
 WINDOW_OPTIONS = (
     Quartz.kCGWindowImageBoundsIgnoreFraming
     | Quartz.kCGWindowImageShouldBeOpaque
@@ -103,6 +105,37 @@ def bring_to_front(app: AppKit.NSRunningApplication) -> bool:
     subprocess.run(["open", "-b", app.bundleIdentifier()], check=False)
     time.sleep(2.0)
     return frontmost_is_game(pid)
+
+
+def at_rest(
+    previous: dict[str, float] | None, current: dict[str, float] | None, screen_width: float
+) -> bool:
+    """Still in the same place as last time, and wholly on the screen.
+
+    The game reports itself in front before its slide-in ends, and bounds read mid-slide
+    put it half off the screen.
+    """
+    if current is None or current != previous:
+        return False
+    return current["X"] >= 0 and current["X"] + current["Width"] <= screen_width
+
+
+def resting_window(app: AppKit.NSRunningApplication) -> dict[str, Any]:
+    """The game window once it has stopped moving. Stops the probe if it never does."""
+    pid = app.processIdentifier()
+    screen_width = float(AppKit.NSScreen.mainScreen().frame().size.width)
+    previous: dict[str, float] | None = None
+    deadline = time.monotonic() + REST_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        window = game_window(pid)
+        current = dict(window["kCGWindowBounds"]) if window else None
+        if window is not None and at_rest(previous, current, screen_width):
+            return window
+        previous = current
+        time.sleep(REST_POLL_SECONDS)
+    raise SystemExit(
+        "The game window kept moving or stayed off the screen, so nothing was sent or measured."
+    )
 
 
 def display() -> dict[str, Any]:
@@ -250,7 +283,7 @@ def _method_result(name: str, grab: Callable[[], np.ndarray]) -> dict[str, Any]:
 def capture_command(_: argparse.Namespace) -> None:
     app, window = require_game()
     front = bring_to_front(app)
-    window = game_window(app.processIdentifier()) or window
+    window = resting_window(app)
     with mss.MSS() as sct:
         results = {
             "game_in_front": front,
@@ -268,8 +301,9 @@ def capture_command(_: argparse.Namespace) -> None:
 def snap_command(arguments: argparse.Namespace) -> None:
     app, _ = require_game()
     bring_to_front(app)
-    time.sleep(1.0)
-    frame = grab_window(game_window(app.processIdentifier())["kCGWindowNumber"])
+    window = resting_window(app)
+    time.sleep(SETTLE_SECONDS)
+    frame = grab_window(window["kCGWindowNumber"])
     update_report(
         f"snap_{arguments.name}",
         {"size": list(frame.shape[1::-1]), "png": save(frame, f"snap_{arguments.name}")},
@@ -283,10 +317,11 @@ def input_command(_: argparse.Namespace) -> None:
         raise SystemExit(
             "This terminal can't send input yet: allow it in System Settings > Privacy & Security > Accessibility."
         )
-    app, window = require_game()
+    app = require_game()[0]
     pid = app.processIdentifier()
     if not bring_to_front(app):
         raise SystemExit("Couldn't bring the game to the front, so nothing was sent.")
+    window = resting_window(app)
     bounds = window["kCGWindowBounds"]
     centre = (bounds["X"] + bounds["Width"] / 2, bounds["Y"] + bounds["Height"] / 2)
     window_id = window["kCGWindowNumber"]

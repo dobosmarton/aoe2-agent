@@ -55,3 +55,19 @@ def test_a_black_band_is_seen_only_at_the_top() -> None:
     assert not macos_probe.top_is_black(frame)
     frame[: macos_probe.BAND_ROWS] = 0
     assert macos_probe.top_is_black(frame)
+
+
+SCREEN_WIDTH = 1512.0
+RESTING = {"X": 0.0, "Y": 33.0, "Width": 1512.0, "Height": 949.0}
+
+
+def test_a_window_still_sliding_in_is_not_at_rest() -> None:
+    sliding = {**RESTING, "X": 1454.0}
+    assert not macos_probe.at_rest(sliding, sliding, SCREEN_WIDTH)
+    assert not macos_probe.at_rest(sliding, RESTING, SCREEN_WIDTH)
+
+
+def test_a_window_is_at_rest_once_it_stays_on_the_screen() -> None:
+    assert macos_probe.at_rest(dict(RESTING), dict(RESTING), SCREEN_WIDTH)
+    assert not macos_probe.at_rest(None, dict(RESTING), SCREEN_WIDTH)
+    assert not macos_probe.at_rest(dict(RESTING), None, SCREEN_WIDTH)
