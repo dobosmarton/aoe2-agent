@@ -6,17 +6,33 @@ Trains YOLO models for AoE2 entity detection. Supports any ultralytics
 base model (YOLO11, YOLO26, etc.).
 
 Usage:
-    python train_yolo.py                                    # Train with defaults (YOLO26n)
-    python train_yolo.py --model yolo26s.pt --epochs 200    # Larger model
-    python train_yolo.py --resume                           # Resume training
+    python train_yolo.py --data <dataset>/dataset.yaml --name aoe2_yolo_v10
+    python train_yolo.py --data <dataset>/dataset.yaml --name aoe2_yolo_v10 --resume
 
-Lambda Labs Training:
-    1. Upload dataset: scp -r detection/training_data_v3 ubuntu@<IP>:/home/ubuntu/
-    2. Upload script:  scp train_yolo.py ubuntu@<IP>:/home/ubuntu/
+Defaults match the deployed contract: YOLO26n trained at 1280, and
+``--export-onnx`` writes a static ``[1, 3, 1280, 1280]`` graph like v9's.
+``--data`` and ``--name`` are required so a run never trains on a stale
+dataset or overwrites an existing model's files.
+
+Every run-defining setting is explicit. Ultralytics' ``optimizer=auto`` picks
+the optimizer from the iteration count: v10, v11 and runs A/B/C/E/E-s got
+AdamW(lr=0.000145, momentum=0.9), but run D crossed 10,000 iterations and got
+MuSGD(lr=0.01), so adding data silently changed the learning rate ~70x. The
+optimizer 2x2 with 2 seeds (R1, 2026-11-05) showed that AdamW at 0.000145
+underfits: on the E data MuSGD scored F1 0.861 against 0.840 (p = 0.014), and
+on the D data 0.869 against 0.860. The defaults are therefore MuSGD(lr=0.01,
+momentum=0.9), what 'auto' chose for run D (v12); change them on purpose, not by
+growing the dataset. Training never stops early and the exported model is the
+final epoch (``last.pt``): the 8-frame validation set cannot pick checkpoints.
+
+Cloud GPU training:
+    1. Upload dataset: scp -r training_data_<version> root@<IP>:/workspace/
+    2. Upload script:  scp train_yolo.py root@<IP>:/workspace/
     3. SSH and run:
-    python train_yolo.py --export-onnx
+    python train_yolo.py --data /workspace/training_data_<version>/dataset.yaml \
+        --name aoe2_yolo_v10 --cache ram --export-onnx
     4. Download:
-    scp ubuntu@<IP>:/home/ubuntu/runs/<name>/weights/best.pt ./
+    scp root@<IP>:/workspace/runs/<name>/weights/last.pt ./
 
 Estimated training time: ~1-2 hours on A100 for 150 epochs
 """
@@ -35,6 +51,12 @@ class _TrainYoloArgs(argparse.Namespace):
     workers: int
     cache: str
     patience: int
+    optimizer: str
+    lr0: float
+    momentum: float
+    warmup_bias_lr: float
+    seed: int
+    save_period: int
     project: str
     name: str
     resume: bool
@@ -49,8 +71,8 @@ def main() -> int:
     parser.add_argument(
         "--data",
         "-d",
-        default="detection/training_data_v3/dataset.yaml",
-        help="Path to dataset.yaml (default: detection/training_data_v3/dataset.yaml)",
+        required=True,
+        help="Path to dataset.yaml (absolute, or relative to packages/detection/src or cwd)",
     )
     parser.add_argument(
         "--model",
@@ -69,7 +91,12 @@ def main() -> int:
         default=16,
         help="Batch size (default: 16, adjust based on GPU memory)",
     )
-    parser.add_argument("--imgsz", type=int, default=640, help="Input image size (default: 640)")
+    parser.add_argument(
+        "--imgsz",
+        type=int,
+        default=1280,
+        help="Train and export size (default: 1280, the size the agent infers at)",
+    )
     parser.add_argument("--device", type=int, default=0, help="GPU device ID (default: 0)")
     parser.add_argument(
         "--workers", type=int, default=8, help="Number of data loader workers (default: 8)"
@@ -83,15 +110,54 @@ def main() -> int:
         "runs fresh each epoch, so model quality is unaffected.",
     )
     parser.add_argument(
-        "--patience", type=int, default=20, help="Early stopping patience (default: 20)"
+        "--patience",
+        type=int,
+        default=0,
+        help="Early stopping patience; 0 (default) trains every epoch. The 8-frame "
+        "validation set is too small to stop on.",
+    )
+    parser.add_argument(
+        "--optimizer",
+        default="MuSGD",
+        help="Optimizer (default: MuSGD). Never 'auto': it picks AdamW at lr 0.000145, "
+        "which underfits, until ceil(N/64)*epochs exceeds 10,000.",
+    )
+    parser.add_argument(
+        "--lr0",
+        type=float,
+        default=0.01,
+        help="Initial learning rate (default: 0.01, what 'auto' chose with MuSGD for v12)",
+    )
+    parser.add_argument(
+        "--momentum",
+        type=float,
+        default=0.9,
+        help="Momentum, or AdamW beta1 (default: 0.9, what 'auto' chose for v12)",
+    )
+    parser.add_argument(
+        "--warmup-bias-lr",
+        type=float,
+        default=0.0,
+        help="Bias learning rate during warmup (default: 0.0, what 'auto' sets for both "
+        "AdamW and MuSGD; Ultralytics' own default is 0.1)",
+    )
+    parser.add_argument(
+        "--seed", type=int, default=0, help="Training seed (default: 0); vary it to measure noise"
+    )
+    parser.add_argument(
+        "--save-period",
+        type=int,
+        default=-1,
+        help="Save a checkpoint every N epochs (default: -1, off); 1 keeps the epochs "
+        "that checkpoint averaging (SWA) needs",
     )
     parser.add_argument(
         "--project", default="runs", help="Project directory for outputs (default: runs)"
     )
     parser.add_argument(
         "--name",
-        default="aoe2_yolo_v6",
-        help="Run name and output model name (default: aoe2_yolo_v6, the YOLO26 model)",
+        required=True,
+        help="Run name and output model name, e.g. aoe2_yolo_v10 (must be a new version)",
     )
     parser.add_argument(
         "--resume", action="store_true", help="Resume training from last checkpoint"
@@ -137,98 +203,119 @@ def main() -> int:
     print(f"Epochs: {args.epochs}")
     print(f"Batch size: {args.batch}")
     print(f"Image size: {args.imgsz}")
+    print(f"Optimizer: {args.optimizer} (lr0={args.lr0}, momentum={args.momentum})")
+    print(f"Seed: {args.seed}")
     print(f"Device: cuda:{args.device}")
     print("=" * 60)
 
-    # Load model
-    if args.resume:
-        checkpoint_path = Path(args.project) / args.name / "weights" / "last.pt"
-        if checkpoint_path.exists():
-            print(f"Resuming from: {checkpoint_path}")
-            model = YOLO(str(checkpoint_path))
-        else:
-            print(f"No checkpoint found at {checkpoint_path}, starting fresh")
-            model = YOLO(args.model)
-    else:
-        model = YOLO(args.model)
-
-    # Optional loss-gain overrides; omitted gains keep the ultralytics defaults.
-    loss_gains: dict[str, float] = {
-        name: value
-        for name, value in (
-            ("cls", args.cls_gain),
-            ("box", args.box_gain),
-            ("dfl", args.dfl_gain),
-        )
-        if value is not None
-    }
-    if loss_gains:
-        print(f"Loss-gain overrides: {loss_gains}")
+    # Ultralytics nests a relative project under its runs dir (e.g. 8.4.54 wrote
+    # runs/detect/runs/<name>); an absolute project is used as given.
+    project_dir = Path(args.project).resolve()
 
     # cache=ram/disk skips disk decode on epochs after the first; "none" -> False (no
     # caching). Augmentation still runs per-epoch, so this is a pure speedup.
     cache: str | bool = args.cache if args.cache != "none" else False
 
-    # Train with optimized hyperparameters for AoE2
-    model.train(
-        data=str(data_path),
-        epochs=args.epochs,
-        imgsz=args.imgsz,
-        batch=args.batch,
-        device=args.device,
-        workers=args.workers,
-        cache=cache,
-        patience=args.patience,
-        **loss_gains,
-        # Augmentation settings optimized for isometric game graphics
-        hsv_h=0.015,  # Hue augmentation (slight)
-        hsv_s=0.7,  # Saturation augmentation
-        hsv_v=0.4,  # Value/brightness augmentation
-        degrees=10,  # Rotation (units can face different directions)
-        translate=0.1,  # Translation
-        scale=0.5,  # Scale augmentation (important for zoom levels)
-        flipud=0.0,  # No vertical flip (isometric view)
-        fliplr=0.5,  # Horizontal flip OK
-        mosaic=1.0,  # Mosaic augmentation
-        mixup=0.1,  # MixUp augmentation
-        # Output settings
-        project=args.project,
-        name=args.name,
-        exist_ok=True,
-        verbose=True,
-    )
+    last_model_path = project_dir / args.name / "weights" / "last.pt"
+    if args.resume:
+        # resume=True continues the interrupted run: same epoch count, optimizer
+        # state and settings. Loading last.pt and calling train() without it
+        # starts a new full run from those weights.
+        if not last_model_path.exists():
+            print(f"Error: no checkpoint to resume at {last_model_path}")
+            return 1
+        print(f"Resuming from: {last_model_path}")
+        YOLO(str(last_model_path)).train(resume=True, workers=args.workers, cache=cache)
+    else:
+        model = YOLO(args.model)
+
+        # Optional loss-gain overrides; omitted gains keep the ultralytics defaults.
+        loss_gains: dict[str, float] = {
+            name: value
+            for name, value in (
+                ("cls", args.cls_gain),
+                ("box", args.box_gain),
+                ("dfl", args.dfl_gain),
+            )
+            if value is not None
+        }
+        if loss_gains:
+            print(f"Loss-gain overrides: {loss_gains}")
+
+        # Train with optimized hyperparameters for AoE2
+        model.train(
+            data=str(data_path),
+            epochs=args.epochs,
+            imgsz=args.imgsz,
+            batch=args.batch,
+            device=args.device,
+            workers=args.workers,
+            cache=cache,
+            patience=args.patience,
+            optimizer=args.optimizer,
+            lr0=args.lr0,
+            momentum=args.momentum,
+            warmup_bias_lr=args.warmup_bias_lr,
+            seed=args.seed,
+            deterministic=True,
+            save_period=args.save_period,
+            **loss_gains,
+            # Augmentation settings optimized for isometric game graphics
+            hsv_h=0.015,  # Hue augmentation (slight)
+            hsv_s=0.7,  # Saturation augmentation
+            hsv_v=0.4,  # Value/brightness augmentation
+            degrees=10,  # Rotation (units can face different directions)
+            translate=0.1,  # Translation
+            scale=0.5,  # Scale augmentation (important for zoom levels)
+            flipud=0.0,  # No vertical flip (isometric view)
+            fliplr=0.5,  # Horizontal flip OK
+            mosaic=1.0,  # Mosaic augmentation
+            mixup=0.1,  # MixUp augmentation
+            # Output settings
+            project=str(project_dir),
+            name=args.name,
+            exist_ok=True,
+            verbose=True,
+        )
 
     print("\n" + "=" * 60)
     print("Training Complete!")
     print("=" * 60)
 
-    # Get best model path
-    best_model_path = Path(args.project) / args.name / "weights" / "best.pt"
-    print(f"Best model: {best_model_path}")
+    print(f"Final model: {last_model_path}")
+    if not last_model_path.exists():
+        print(f"Error: final checkpoint not found at {last_model_path}")
+        return 1
 
     # Export to ONNX if requested
-    if args.export_onnx and best_model_path.exists():
-        print("\nExporting to ONNX (dynamic batch)...")
-        best_model = YOLO(str(best_model_path))
-        onnx_path_raw = best_model.export(  # pyright: ignore[reportAny]
+    if args.export_onnx:
+        # Static shape, like the deployed v9 graph: the ONNX Runtime CoreML
+        # provider cannot plan a dynamic graph at 1280 (see export_onnx.py).
+        print(f"\nExporting to ONNX (static {args.imgsz}px)...")
+        final_model = YOLO(str(last_model_path))
+        onnx_path_raw = final_model.export(  # pyright: ignore[reportAny]
             format="onnx",
             imgsz=args.imgsz,
             simplify=True,
-            dynamic=True,
+            dynamic=False,
         )
         onnx_path = str(onnx_path_raw)
         print(f"ONNX model: {onnx_path}")
 
-        # Copy to detection/inference/models using the run name
-        models_dir = script_dir / "detection" / "inference" / "models"
-        models_dir.mkdir(exist_ok=True)
+        # Copy to inference/models using the run name. On a bare cloud machine
+        # (only this file copied over) that directory does not exist; download
+        # the run outputs instead.
+        models_dir = script_dir / "inference" / "models"
+        if not models_dir.is_dir():
+            print(f"\n{models_dir} not found; download {last_model_path} and {onnx_path}")
+            return 0
 
         import shutil
 
         dest_pt = models_dir / f"{args.name}.pt"
         dest_onnx = models_dir / f"{args.name}.onnx"
 
-        shutil.copy(best_model_path, dest_pt)
+        shutil.copy(last_model_path, dest_pt)
         shutil.copy(onnx_path, dest_onnx)
 
         print("\nModels copied to:")

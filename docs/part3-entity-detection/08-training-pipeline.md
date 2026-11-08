@@ -22,10 +22,10 @@ flowchart LR
     MODEL -->|copy| PT["aoe2_yolo_v6.pt"]
 ```
 
-> The `aoe2_yolo_v6` name here is illustrative — it matches `train_yolo.py`'s
-> default `--name`, which lags the served version. The **current served model is
-> v9** (§8.4 has the v9 metrics); the detector resolves the newest bundled
-> `aoe2_yolo_v*`, so a new export is picked up by version number.
+> The `aoe2_yolo_v6` name here is illustrative; `train_yolo.py` requires an
+> explicit `--name`. The **current served model is v9** (§8.4 has the v9
+> metrics); the detector resolves the newest bundled `aoe2_yolo_v*`, so a new
+> export is picked up by version number.
 
 ## 8.2 Synthetic Data Generation
 
@@ -156,7 +156,7 @@ Game-realistic effects that simulate actual screenshot conditions:
 
 ## 8.4 YOLO Training
 
-`packages/detection/src/training/train_yolo.py` trains a YOLO26 nano model (defaults: `--model yolo26n.pt --name aoe2_yolo_v6`):
+`packages/detection/src/training/train_yolo.py` trains a YOLO26 nano model (default `--model yolo26n.pt`; `--data` and `--name` are required so a run cannot train on a stale dataset or overwrite an existing model):
 
 ### Model
 
@@ -170,7 +170,7 @@ Tuned for isometric game graphics:
 |-----------|-------|-----------|
 | `epochs` | 150 | Sufficient for convergence with early stopping |
 | `batch` | 16 | Fits in GPU memory (A100 40GB) |
-| `imgsz` | 640 | Standard YOLO input size |
+| `imgsz` | 1280 | Matches the agent's inference size; small objects stay above YOLO's detection floor |
 | `patience` | 20 | Early stopping patience |
 | `hsv_h` | 0.015 | Slight hue variation |
 | `hsv_s` | 0.7 | Saturation augmentation |
@@ -206,12 +206,13 @@ training_data/
 
 Training produces:
 - `runs/aoe2_yolo_v6/weights/best.pt` -- best validation mAP checkpoint
-- Optionally exported to ONNX with `--export-onnx` flag
-- Copied to `packages/detection/src/inference/models/aoe2_yolo_v6.pt` and `.onnx`
+- Optionally exported to ONNX with `--export-onnx`: a static `[1, 3, imgsz, imgsz]` graph, the shape the CoreML provider can serve at 1280 (`export_onnx.py` uses the same defaults)
+- Copied to `packages/detection/src/inference/models/<name>.pt` and `.onnx` when that directory exists; on a bare cloud machine, download the run outputs instead
+- The detection server and the ONNX detector read class names embedded in the export, so a model with more classes than the server's fallback `classes.yaml` keeps its own names
 
 ### Results
 
-**The real+synthetic model shipped as v7 @640, then improved to v9 @1280** — `aoe2_yolo_v9.onnx` / `.pt` are the **current served artifacts** (the served version is set in `apps/agent/src/config.py` `detection_model` — the single source of truth; a bare `get_detector()` falls back to the newest bundled weights, and the server runs its model via `--model`). The lineage moved off the large mixed v5 corpus to a smaller, real-terrain-backed synthetic set merged with **real CVAT screenshots**: v7 added more/cleaner real labels at `imgsz=640`, and **v9 retrained on a *cleaned* synthetic set (corrected sprite labels) at `imgsz=1280`** — the higher resolution enlarges small objects, and the agent infers at the same 1280 (see [Chapter 7 §7.4](./07-detector-architecture.md)).
+**The real+synthetic model shipped as v7 @640, then improved to v9 @1280, and v12 replaced v9 in November 2026** — `aoe2_yolo_v12.onnx` / `.pt` are the **current served artifacts** (the served version is set in `apps/agent/src/config.py` `detection_model` — the single source of truth; a bare `get_detector()` falls back to the newest bundled weights, and the server runs its model via `--model`). The lineage moved off the large mixed v5 corpus to a smaller, real-terrain-backed synthetic set merged with **real CVAT screenshots**: v7 added more/cleaner real labels at `imgsz=640`, and **v9 retrained on a *cleaned* synthetic set (corrected sprite labels) at `imgsz=1280`** — the higher resolution enlarges small objects, and the agent infers at the same 1280 (see [Chapter 7 §7.4](./07-detector-architecture.md)). **v12** (65 classes) trains on reviewed real frames (ibex relabelled and trained as `deer`), the v9 renders and scale-matched copy-paste composites on real frames. On the independent 40-frame test set it scores micro F1 0.867 against v9's 0.842: more villagers, sheep, deer and boar, but fewer gold mines, stone mines and trees. It is the only early run that trained with MuSGD (lr 0.01) instead of AdamW (lr 0.000145), because `optimizer=auto` switched on its larger dataset. A 2x2 with 2 seeds per cell (R1, November 2026) separated the two: mean F1 was 0.840 for the E data with AdamW, 0.861 with MuSGD, 0.860 for the D data (with composites) with AdamW and 0.869 with MuSGD. AdamW at 0.000145 underfits; MuSGD and the composites each fix most of it, and their gains overlap. The seed noise is about 0.005 F1, but gold-mine recall moves by up to 0.085 between seeds, so v12's gold drop was noise. `train_yolo.py` now defaults to MuSGD (lr 0.01, momentum 0.9). The served file `aoe2_yolo_v12_nms736.onnx` is v12 exported at 736x1280 with the one-to-many head (F1 0.873).
 
 **Two metrics, deliberately separated.** Synthetic-validation mAP50 flatters the model; the metric of record is **real** F1, measured by `evaluate_real.py` (Chapter 7 §7.13):
 

@@ -46,7 +46,7 @@ The detection system enables an AI agent to identify game entities (units, build
 
 ## Training Results
 
-> **Current served model: `aoe2_yolo_v9`** (YOLO26n, NMS-free, trained and inferred at imgsz=1280). The served version is configured in `apps/agent/src/config.py` (`detection_model` / `AOE2_DETECTION_MODEL`) — that is the single source of truth; bump it there when a new version ships.
+> **Current served model: `aoe2_yolo_v12_nms736`** (YOLO26n v12 weights, trained at imgsz=1280, exported at 736x1280 with the one-to-many head; the decoder runs NMS). Train with the `train_yolo.py` defaults: MuSGD at lr 0.01, because AdamW at lr 0.000145 underfits (F1 0.840 against 0.861 in the R1 2x2). The served version is configured in `apps/agent/src/config.py` (`detection_model` / `AOE2_DETECTION_MODEL`) — that is the single source of truth; bump it there when a new version ships.
 >
 > **Metric of record: real-frame micro-F1** via `evaluate_real.py` (single-pass at the training resolution), *not* synthetic-validation mAP — the validation set is synthetic-heavy and flatters the model. Current numbers: **v9 F1 ≈ 0.67** (P 0.676 / R 0.665), up from v7 ≈ 0.54 (@640) and v6 ≈ 0.42 (synthetic-only). See `packages/detection/README.md` → Model Performance for the full table.
 >
@@ -113,7 +113,7 @@ python -m detection.training.generate_training_data --num-images 3000 --output d
 ```python
 from ultralytics import YOLO
 
-model = YOLO("detection/inference/models/aoe2_yolo_v9.pt")
+model = YOLO("detection/inference/models/aoe2_yolo_v12.pt")
 results = model("screenshot.png", conf=0.5)
 ```
 
@@ -406,7 +406,7 @@ scp -i ~/.ssh/your-key.pem ubuntu@<IP>:/home/ubuntu/runs/aoe2_yolo_vN/weights/be
 from ultralytics import YOLO
 
 class EntityDetector:
-    def __init__(self, model_path="detection/inference/models/aoe2_yolo_v9.pt"):
+    def __init__(self, model_path="detection/inference/models/aoe2_yolo_v12.pt"):
         self.model = YOLO(model_path)
         # Class names come from the model's training schema.
         # See detection/training/config/classes.yaml for the full list
@@ -449,7 +449,7 @@ pyautogui.click(x, y)
 For prelabeling high-resolution screenshots (e.g., 3024x1964 retina), direct inference even at imgsz=1280 misses many objects because the image is still downscaled ~2.4x. SAHI (Slicing Aided Hyper Inference) solves this:
 
 ```bash
-python -m detection.labeling.prelabel --model aoe2_yolo_v9.pt --sahi --conf 0.15
+python -m detection.labeling.prelabel --model aoe2_yolo_v12.pt --sahi --conf 0.15
 ```
 
 SAHI cuts the image into overlapping 640x640 tiles, runs inference on each, and merges results with a dedup NMS pass across tiles. (This tile-merge NMS is run by the detector itself and is unrelated to the model head — YOLO26 is NMS-free, but overlapping tiles still produce duplicate boxes that need merging.) Benchmarked on 3024x1964 retina screenshots:
@@ -494,7 +494,7 @@ detection/
 ├── inference/                   # Runtime detection
 │   ├── detector.py              # EntityDetector class
 │   └── models/
-│       └── aoe2_yolo_v9.pt      # Trained model (also .onnx; served version set in apps/agent/src/config.py)
+│       └── aoe2_yolo_v12.pt      # Trained model (also .onnx; served version set in apps/agent/src/config.py)
 ├── training/                    # Training pipeline
 │   ├── train_yolo.py            # YOLO training script (yolo26n.pt base; pass --name aoe2_yolo_vN)
 │   ├── generate_training_data.py # Synthetic data generator (canonical)

@@ -104,13 +104,13 @@ experiment-gate *ARGS:
 
 # ── Detection (training / inference) ──────────────────────────────────────
 
-export-onnx model="detection/inference/models/aoe2_yolo_v5.pt":
-    uv run --package detection python -m detection.training.export_onnx --model {{model}}
+export-onnx model *ARGS:
+    uv run --package detection python -m detection.training.export_onnx --model {{model}} {{ARGS}}
 
 export-coreml model="detection/inference/models/aoe2_yolo_v5.pt":
     uv run --package detection python -m detection.training.export_coreml --model {{model}}
 
-train model="yolo11n.pt" *ARGS:
+train model="yolo26n.pt" *ARGS:
     uv run --package detection python -m detection.training.train_yolo --model {{model}} {{ARGS}}
 
 # ── Synthetic arena infrastructure ────────────────────────────────────────
