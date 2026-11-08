@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -88,6 +89,28 @@ def test_a_black_band_fails_and_a_game_frame_passes() -> None:
 
 
 def test_warnings_do_not_block() -> None:
-    warning = preflight.PreflightCheck("keyboard_layout", False, "Hungarian", blocking=False)
+    warning = preflight.PreflightCheck("colour_profile", False, "Color LCD", blocking=False)
     assert warning.blocking is False
     assert preflight.PreflightCheck("window", False, "missing").blocking
+
+
+def test_a_layout_that_cannot_type_an_agent_key_blocks_the_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("Quartz")
+    from gameplay_agent import keyboard_macos, window_macos
+    from gameplay_agent.game_profile import load_profile
+
+    monkeypatch.setattr(
+        keyboard_macos, "use_layout_keys", lambda: (keyboard_macos.Layout("Russian", {}), ["a"])
+    )
+    monkeypatch.setattr(window_macos, "screen_recording_allowed", lambda: True)
+    monkeypatch.setattr(window_macos, "input_allowed", lambda: True)
+    monkeypatch.setattr(window_macos, "colour_space", lambda: "sRGB")
+    profile = load_profile(
+        Path(__file__).parents[1] / "apps/agent/profiles/magyars_arabia_4v4.macos.example.json"
+    )
+    (check,) = [c for c in preflight._macos_checks(profile) if c.name == "keyboard_layout"]
+    assert not check.passed
+    assert check.blocking
+    assert "Russian layout can't type a" in check.detail

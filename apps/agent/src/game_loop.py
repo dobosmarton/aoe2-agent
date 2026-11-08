@@ -66,6 +66,24 @@ def _missing_macos_permissions() -> list[str]:
     return [name for name, allowed in checks if not allowed]
 
 
+def _untypeable_agent_keys() -> list[str]:
+    """Send keys through the active Mac layout; the agent keys it can't type.
+
+    Runs on the main thread, before any key press, as macOS requires.
+    """
+    from .keyboard_macos import use_layout_keys
+
+    layout, missing = use_layout_keys()
+    if missing:
+        log.error(
+            "keyboard_layout_cannot_type",
+            layout=layout.name,
+            keys=missing,
+            fix="add a layout that types these keys without Option, and select it",
+        )
+    return missing
+
+
 async def _prepare_macos_game(profile: GameProfile | None) -> bool:
     """Bring the game forward once, then fix its zoom and modifier keys.
 
@@ -236,6 +254,9 @@ async def game_loop(
         if game_platform() == "macos" and (missing := _missing_macos_permissions()):
             log.error("macos_permission_missing", missing=missing, fix=_PERMISSION_FIX)
             _request_stop(ctx, memory, "missing_permission")
+            return memory
+        if game_platform() == "macos" and _untypeable_agent_keys():
+            _request_stop(ctx, memory, "keyboard_layout")
             return memory
         from .game_profile import load_profile
 

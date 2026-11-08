@@ -124,7 +124,7 @@ def input_allowed() -> bool:
 
 
 def keyboard_layouts() -> list[str]:
-    """The selected keyboard layouts. pyautogui sends US key codes, so others can mistype."""
+    """The selected keyboard layouts, for the probe's report."""
     sources = subprocess.run(
         ["defaults", "read", "com.apple.HIToolbox", "AppleSelectedInputSources"],
         capture_output=True,

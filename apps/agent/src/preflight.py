@@ -39,7 +39,6 @@ _BAND_BRIGHTNESS = 8.0
 _CURSOR_SETTLE_SECONDS = 0.1
 # Points round to whole input units, so a round trip can land one pixel off.
 _ROUND_TRIP_TOLERANCE_PX = 1
-_US_LAYOUTS = frozenset({"ABC", "U.S.", "US"})
 _SRGB_NAMES = ("srgb", "internet")
 
 
@@ -184,14 +183,14 @@ def _passed(checks: list[PreflightCheck], name: str) -> bool:
 
 
 def _macos_checks(profile: GameProfile) -> list[PreflightCheck]:
+    from .keyboard_macos import use_layout_keys
     from .window_macos import (
         colour_space,
         input_allowed,
-        keyboard_layouts,
         screen_recording_allowed,
     )
 
-    layouts = keyboard_layouts()
+    layout, missing = use_layout_keys()
     colours = colour_space()
     return [
         PreflightCheck(
@@ -211,10 +210,11 @@ def _macos_checks(profile: GameProfile) -> list[PreflightCheck]:
         ),
         PreflightCheck(
             "keyboard_layout",
-            bool(layouts) and set(layouts) <= _US_LAYOUTS,
-            f"selected layouts: {', '.join(layouts) or 'unknown'}; pyautogui sends US key "
-            "codes, so switch to ABC or U.S. if a hotkey misfires",
-            blocking=False,
+            not missing,
+            f"the {layout.name} layout can't type {' '.join(missing)} without Option; "
+            "add and select a layout that can"
+            if missing
+            else f"keys are sent through the {layout.name} layout",
         ),
         PreflightCheck(
             "colour_profile",
