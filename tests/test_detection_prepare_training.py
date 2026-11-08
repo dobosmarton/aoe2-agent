@@ -226,3 +226,19 @@ def test_changed_historical_duplicate_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="oversample differs"):
         _prepare(tmp_path, images, export, manifest, historical_real_dir=historical)
     assert not (tmp_path / "dataset").exists()
+
+
+def test_fine_coco_labels_train_as_their_class(tmp_path: Path) -> None:
+    images, export, manifest = _source_batch(tmp_path)
+    coco_path = export / "annotations.json"
+    coco = json.loads(coco_path.read_text())
+    coco["categories"] = [{"id": 40, "name": "ibex"}, {"id": 41, "name": "deer"}]
+    for annotation in coco["annotations"]:
+        annotation["category_id"] = 40 if annotation["id"] % 2 else 41
+    coco_path.write_text(json.dumps(coco))
+
+    _prepare(tmp_path, images, export, manifest, val_split=0.5)
+
+    labels = (tmp_path / "dataset").glob("*/labels/*.txt")
+    classes = {line.split()[0] for label in labels for line in label.read_text().splitlines()}
+    assert classes == {"5"}  # deer

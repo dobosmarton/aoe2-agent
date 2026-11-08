@@ -43,6 +43,30 @@ def get_classes_for_cvat() -> list[str]:
     return [classes.get(i, f"unknown_{i}") for i in range(max_id + 1)]
 
 
+def load_label_aliases(path: Path | None = None) -> dict[str, str]:
+    """Map each fine annotation label to its training class name.
+
+    An alias must be a new name that maps onto an existing class; otherwise a
+    reviewer's label could silently shadow or invent a class.
+    """
+    path = path or (_CONFIG_DIR / "classes.yaml")
+    with path.open() as f:
+        data = cast("ClassesYaml", yaml.safe_load(f))
+    names = {entry["name"] for entry in data["classes"]}
+    aliases: dict[str, str] = {}
+    for alias in data.get("label_aliases", []):
+        label, target = alias["label"], alias["maps_to"]
+        if label in names or label in aliases or target not in names:
+            raise ValueError(f"Label alias {label!r} -> {target!r} must add a label to a class")
+        aliases[label] = target
+    return aliases
+
+
+def get_annotation_labels() -> list[str]:
+    """Labels a reviewer may choose: every class in ID order, then each alias."""
+    return [*get_classes_for_cvat(), *load_label_aliases()]
+
+
 def model_classes_match_schema_prefix(model_classes: Sequence[str]) -> bool:
     """A checkpoint may support the unchanged prefix of a newer training schema."""
     classes = load_classes_yaml()

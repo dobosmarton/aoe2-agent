@@ -561,6 +561,21 @@ def extract_sprite(
         return False
 
 
+def direction_frame_indices(frame_count: int, directions: int) -> list[int] | None:
+    """Two frames per facing direction, or None when the file is not directional.
+
+    Unit and animal SLDs store each direction as a contiguous block (960 frames =
+    16 directions x 60). Fixed indices such as [0, 4, 8, 12] all land in the first
+    block, so every extracted unit would face the same way.
+    """
+    per_direction = frame_count // directions
+    if directions < 2 or per_direction < 2:
+        return None
+    return [
+        d * per_direction + offset for d in range(directions) for offset in (0, per_direction // 2)
+    ]
+
+
 def extract_multiple_frames(
     sld_path: str,
     output_dir: str,
@@ -568,6 +583,7 @@ def extract_multiple_frames(
     variant_idx: int = 0,
     frame_indices: list[int] | None = None,
     apply_player_color: bool = False,
+    directions: int = 1,
 ) -> int:
     """
     Extract multiple animation frames from an SLD file.
@@ -579,6 +595,8 @@ def extract_multiple_frames(
         variant_idx: Variant index for file naming
         frame_indices: List of frame indices to extract (default: [0, 4, 8, 12])
         apply_player_color: Whether to apply random player colors
+        directions: Facing directions stored in the file; above 1, files with
+            enough frames are sampled per direction instead of by frame_indices
 
     Returns:
         Number of frames successfully extracted
@@ -594,6 +612,7 @@ def extract_multiple_frames(
     try:
         extractor = SLDExtractor(sld_path)
         frames = extractor.extract_all()
+        frame_indices = direction_frame_indices(len(frames), directions) or frame_indices
 
         extracted = 0
         for frame_idx in frame_indices:

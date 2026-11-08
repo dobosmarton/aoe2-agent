@@ -29,5 +29,13 @@ class ClassEntry(TypedDict):
     examples: NotRequired[list[str]]
 
 
+class LabelAlias(TypedDict):
+    """A reviewer label finer than a class, e.g. ibex -> deer."""
+
+    label: str
+    maps_to: str
+
+
 class ClassesYaml(TypedDict):
     classes: list[ClassEntry]
+    label_aliases: NotRequired[list[LabelAlias]]

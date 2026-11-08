@@ -175,3 +175,13 @@ classes:
     name: rhinoceros
 
 # Total: 65 classes. IDs 0-59 retain the deployed model's mapping.
+
+# Annotation labels finer than a training class. Reviewers pick the specific
+# animal, dataset builders map it to its class, and the evaluator reports its
+# recall separately. Label fine, train coarse: a fine label can become its own
+# class later without relabeling; a coarse label can never be split again.
+label_aliases:
+  - label: ibex # a_hunt_ibex: hunted like deer and runs away
+    maps_to: deer
+  - label: elephant # a_hunt_elephant: fights back like boar, 2.3x its size
+    maps_to: boar

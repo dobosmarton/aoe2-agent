@@ -65,9 +65,13 @@ SPRITE_CONFIG = [
             "u_vil_female_villager_idle*_x1.sld",
             "u_all_ant_male_villager_idle*_x1.sld",
             "u_all_ant_female_villager_idle*_x1.sld",
+            # Real frames show villagers at work far more often than idle.
+            "u_vil_*_task*_x1.sld",
+            "u_vil_*_carrywalk*_x1.sld",
+            "u_vil_*_villager_walk*_x1.sld",
         ],
-        6,
-        "Worker units",
+        24,
+        "Worker units (idle, working, carrying)",
     ),
     (
         "trade_cart",
@@ -580,6 +584,7 @@ SPRITE_CONFIG = [
         "sheep",
         [
             "a_herd_sheep_idle*_x1.sld",
+            "a_herd_sheep_walk*_x1.sld",
         ],
         2,
         "Sheep",
@@ -597,11 +602,71 @@ SPRITE_CONFIG = [
         [
             "a_hunt_boar_idle*_x1.sld",
             "a_hunt_javelina_idle*_x1.sld",
-            "a_hunt_elephant_idle*_x1.sld",
-            "a_hunt_rhino*idle*_x1.sld",
         ],
         4,
         "Boar/Huntables",
+    ),
+    # Fine labels (classes.yaml label_aliases): own sprite names, so the
+    # composite generator can set their share apart from the class they map to.
+    (
+        "elephant",
+        [
+            "a_hunt_elephant_idle*_x1.sld",
+        ],
+        1,
+        "Huntable elephant (label alias -> boar)",
+    ),
+    (
+        "ibex",
+        [
+            "a_hunt_ibex_idle*_x1.sld",
+            "a_hunt_ibex_walk*_x1.sld",
+        ],
+        2,
+        "Ibex (label alias -> deer)",
+    ),
+    (
+        "rhinoceros",
+        [
+            "a_hunt_rhino*idle*_x1.sld",
+        ],
+        1,
+        "Rhinoceros (own schema class, not boar)",
+    ),
+    (
+        "goat",
+        [
+            "a_herd_goat_idle*_x1.sld",
+            "a_herd_goat_walk*_x1.sld",
+        ],
+        2,
+        "Goat (herdable)",
+    ),
+    (
+        "cow",
+        [
+            "a_herd_cow_*_idle*_x1.sld",
+        ],
+        4,
+        "Cow (herdable)",
+    ),
+    (
+        "buffalo",
+        [
+            "a_herd_buffalo_idle*_x1.sld",
+            "a_herd_buffalo_walk*_x1.sld",
+        ],
+        2,
+        "Water buffalo (herdable)",
+    ),
+    (
+        "horse",
+        [
+            "a_hors_horse_idle*_x1.sld",
+            "a_hors_horse_*_idle*_x1.sld",
+        ],
+        3,
+        "Horse (herdable)",
     ),
     (
         "wolf",
@@ -731,6 +796,8 @@ def extract_sprites(
     extract_multiple_frames_flag: bool = False,
     apply_player_colors: bool = False,
     frame_indices: list[int] | None = None,
+    directions: int = 1,
+    classes: list[str] | None = None,
 ) -> dict:
     """Extract sprites for all configured classes.
 
@@ -741,6 +808,8 @@ def extract_sprites(
         extract_multiple_frames_flag: If True, extract multiple animation frames per sprite
         apply_player_colors: If True, apply random player colors to unit sprites
         frame_indices: List of frame indices to extract (default: [0, 4, 8, 12])
+        directions: Sample this many facing directions from directional files
+        classes: Extract only these class names (default: all configured)
 
     Returns:
         Statistics dictionary with extraction results
@@ -786,6 +855,12 @@ def extract_sprites(
         "siege_tower",
         "galley",
         "fire_galley",
+        # Owned livestock carries the owner's colour.
+        "sheep",
+        "goat",
+        "cow",
+        "buffalo",
+        "horse",
     }
 
     stats = {
@@ -808,6 +883,8 @@ def extract_sprites(
     print(f"{'=' * 60}\n")
 
     for class_name, patterns, max_variants, description in SPRITE_CONFIG:
+        if classes is not None and class_name not in classes:
+            continue
         # Apply exclusion filter for building sprites to skip destruction/rubble/shadow files
         is_building = any(p.startswith("b_") for p in patterns)
         matches = find_matching_files(
@@ -841,6 +918,7 @@ def extract_sprites(
                         variant_idx=i,
                         frame_indices=frame_indices,
                         apply_player_color=should_apply_color,
+                        directions=directions,
                     )
                     if count > 0:
                         extracted += count
@@ -937,8 +1015,15 @@ def print_config() -> None:
         "Defense": ["tower", "wall", "gate"],
         "Resources": [
             "sheep",
+            "goat",
+            "cow",
+            "buffalo",
+            "horse",
             "deer",
             "boar",
+            "elephant",
+            "ibex",
+            "rhinoceros",
             "wolf",
             "goose",
             "fish",
@@ -968,6 +1053,8 @@ class _ExtractSpritesArgs(argparse.Namespace):
     multi_frame: bool
     player_colors: bool
     frames: list[int]
+    directions: int
+    classes: list[str] | None
 
 
 def main() -> int:
@@ -1001,6 +1088,14 @@ def main() -> int:
         default=[0, 4, 8, 12],
         help="Frame indices to extract when using --multi-frame (default: 0 4 8 12)",
     )
+    parser.add_argument(
+        "--directions",
+        type=int,
+        default=1,
+        help="With --multi-frame, take 2 frames from each of N facing directions in "
+        "directional unit/animal files (AoE2 DE stores 16); other files use --frames",
+    )
+    parser.add_argument("--classes", nargs="+", help="Extract only these class names")
 
     args = parser.parse_args(namespace=_ExtractSpritesArgs())
 
@@ -1019,6 +1114,8 @@ def main() -> int:
         extract_multiple_frames_flag=args.multi_frame,
         apply_player_colors=args.player_colors,
         frame_indices=args.frames,
+        directions=args.directions,
+        classes=args.classes,
     )
 
     return 0 if not stats.get("error") else 1

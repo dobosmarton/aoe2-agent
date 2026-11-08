@@ -25,7 +25,7 @@ import yaml
 from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field
 
-from .class_mapping import load_classes_yaml
+from .class_mapping import load_classes_yaml, load_label_aliases
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -269,12 +269,15 @@ def _read_coco(
     if any(len(items) != len(set(items)) for items in (category_ids, image_ids, annotation_ids)):
         raise ValueError(f"Duplicate COCO IDs in {path}")
     name_to_id = {name: index for index, name in enumerate(classes)}
+    aliases = load_label_aliases()
     categories: dict[int, int] = {}
     for category in export.categories:
-        if category.name not in name_to_id:
+        name = aliases.get(category.name, category.name)
+        if name not in name_to_id:
             raise ValueError(f"Unknown COCO class {category.name!r} in {path}")
-        categories[category.id] = name_to_id[category.name]
-    if len(set(categories.values())) != len(categories):
+        categories[category.id] = name_to_id[name]
+    # Fine labels (ibex) share a class with their target (deer); names must not repeat.
+    if len({category.name for category in export.categories}) != len(export.categories):
         raise ValueError(f"Duplicate COCO class names in {path}")
     images = {item.id: item for item in export.images}
     lines: dict[str, list[str]] = {}
