@@ -268,7 +268,7 @@ just agent
 just agent --iterations 20
 
 # Run the detection server (macOS host)
-just server --model packages/detection/src/inference/models/aoe2_yolo_v9.onnx
+just server --model packages/detection/src/inference/models/aoe2_yolo_v12_nms736.onnx
 
 # Frontend dev servers (workspace-wide install happens once at repo root)
 bun install
@@ -332,7 +332,7 @@ Scans YOLO detections for 21 enemy military classes. Uses color-based ownership 
 
 ### Entity Detection (`detection/`)
 
-60-class YOLO v9 model served single-pass @1280 (real micro-F1 ≈ 0.67; the older 92.2% mAP50 was a synthetic v5-lineage figure). Entities persist across frames via IoU tracking (e.g., `sheep_0` stays `sheep_0`). The executor supports 9 base action types (click, right_click, press, build, queue_villager, drag, wait, scroll, detect) and can target entities by class (`target_class: "sheep"`) or by ID (`target_id: "sheep_0"`).
+65-class YOLO v12 model served single-pass @1280 (independent-test micro-F1 0.867; v9 was 0.842; the older 92.2% mAP50 was a synthetic v5-lineage figure). Entities persist across frames via IoU tracking (e.g., `sheep_0` stays `sheep_0`). The executor supports 9 base action types (click, right_click, press, build, queue_villager, drag, wait, scroll, detect) and can target entities by class (`target_class: "sheep"`) or by ID (`target_id: "sheep_0"`).
 
 ### Remote Detection Server (`server/`)
 

@@ -77,7 +77,7 @@ run this from the repository root. The `--root` option precedes the subcommand.
 uv run --no-sync python -m detection_server.session_tools \
   --root packages/detection/src/real_screenshots/quality_sessions \
   prelabel --session-id dev_20261005_match01 \
-  --model packages/detection/src/inference/models/aoe2_yolo_v9.onnx
+  --model packages/detection/src/inference/models/aoe2_yolo_v12.onnx
 ```
 
 Create one CVAT task per session with the session's PNGs. For development,
@@ -166,7 +166,7 @@ phase-1 inference and scorer. Development scoring is safe for iteration:
 
 ```bash
 uv run --no-sync python -m detection_server.evaluate_sessions \
-  --model packages/detection/src/inference/models/aoe2_yolo_v9.onnx \
+  --model packages/detection/src/inference/models/aoe2_yolo_v12.onnx \
   --root packages/detection/src/real_screenshots/quality_sessions \
   --split development --output tmp/evaluations/session-development.json
 ```

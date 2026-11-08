@@ -126,12 +126,13 @@ class Config(BaseModel):
     seed: int | None = None  # Local RNG seed; None = OS entropy (today's behavior)
 
     # Detection settings
-    # Inference resolution must match the served model's training res. v9
-    # (YOLO26n) is trained at 1280 and serves at 1280 for better small-object
-    # recall (villagers, sheep, mills). NOTE: the ONNX must be a *static* 1280
-    # export (export_onnx.py --no-dynamic) — the CoreML/ANE provider cannot build
-    # a plan for a dynamic graph at 1280. A static graph accepts only this one
-    # size, so every /detect request uses it (see remote_detector.detect_fast).
+    # Inference resolution must match the served model's training res. v12
+    # (YOLO26n) is trained at 1280 and serves at the same scale for better
+    # small-object recall (villagers, sheep, mills). NOTE: the ONNX must be a
+    # *static* export (export_onnx.py --no-dynamic): the CoreML/ANE provider
+    # cannot build a plan for a dynamic graph at 1280. A static graph accepts
+    # only its own shape; the server and the local detector read that shape from
+    # the graph, so a 736x1280 export ignores this value.
     # History: v6 was trained @640; upscaling it to 1280 tanked F1 (0.42→0.21) —
     # that penalty is a train/inference scale mismatch, not a property of 1280.
     detection_imgsz: int = 1280
@@ -139,8 +140,14 @@ class Config(BaseModel):
     # locally (detection.inference.detector resolves this name in its bundled
     # models dir). The remote detection server picks its model via --model at
     # launch; keep the two in sync. detection_imgsz above must match this
-    # model's training resolution (v9 trained @1280).
-    detection_model: str = "aoe2_yolo_v9"  # AOE2_DETECTION_MODEL
+    # model's training resolution (v12 trained @1280). v12 = run D (real frames,
+    # renders and copy-paste composites, MuSGD): independent-test F1 0.867 vs
+    # v9's 0.842; more villagers and animals. It has 65 classes (v9: 60) and
+    # embeds its class names in the ONNX metadata. The served file is the same
+    # weights exported at 736x1280 with the one-to-many head (`_nms736`: the
+    # server and the local decoder run a class-wise NMS): F1 0.873, and the
+    # CoreML forward pass takes 10 ms instead of 15 ms on an M2 Pro.
+    detection_model: str = "aoe2_yolo_v12_nms736"  # AOE2_DETECTION_MODEL
     detection_host: str = ""  # Remote CoreML server URL (e.g., "http://192.168.64.1:8420")
 
     # Timing settings
@@ -180,7 +187,7 @@ class Config(BaseModel):
             perceive_interval=float(os.environ.get("AOE2_PERCEIVE_INTERVAL", "0.1")),
             save_screenshots=os.environ.get("AOE2_SAVE_SCREENSHOTS", "true").lower() == "true",
             detection_host=os.environ.get("AOE2_DETECTION_HOST", ""),
-            detection_model=os.environ.get("AOE2_DETECTION_MODEL", "aoe2_yolo_v9"),
+            detection_model=os.environ.get("AOE2_DETECTION_MODEL", "aoe2_yolo_v12_nms736"),
             temperature=_parse_optional_float(os.environ.get("AOE2_TEMPERATURE")),
             seed=_parse_optional_int(os.environ.get("AOE2_SEED")),
         )

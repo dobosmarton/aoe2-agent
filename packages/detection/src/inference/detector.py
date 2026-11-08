@@ -21,6 +21,7 @@ from core import DetectedEntity
 
 from ._ultralytics_results import yolo_boxes_to_lists
 from .mock import mock_detect
+from .model_metadata import parse_ultralytics_names
 from .onnx_layout import UnknownOnnxLayoutError, decode_example
 from .postprocess import nms
 from .preprocess import letterbox
@@ -163,7 +164,7 @@ class EntityDetector:
         # (e.g. [1,3,640,640]) pins these; a dynamic re-export leaves them at
         # the permissive defaults so the configured imgsz / batched SAHI is used.
         self.onnx_batch_dynamic = True
-        self.onnx_input_hw: int | None = None
+        self.onnx_input_hw: tuple[int, int] | None = None
         self._class_counters: dict[str, int] = {}
 
         if model_path and not use_mock:
@@ -238,6 +239,12 @@ class EntityDetector:
             self.onnx_session = ort.InferenceSession(model_path, sess_options, providers=providers)
             self.backend = "onnx"
             self.use_mock = False
+            # Like the PyTorch path: names embedded by the export are authoritative.
+            embedded_names = parse_ultralytics_names(
+                self.onnx_session.get_modelmeta().custom_metadata_map.get("names")
+            )
+            if embedded_names is not None:
+                self.class_names = list(embedded_names)
             # Inspect the declared input shape so inference adapts to a
             # static-shape export instead of assuming a dynamic batch / the
             # configured imgsz. onnxruntime reports symbolic dims as strings.
@@ -248,8 +255,8 @@ class EntityDetector:
                     b, _c, h, w = shape
                     self.onnx_batch_dynamic = not (isinstance(b, int) and b > 0)
                     if isinstance(h, int) and h > 0 and isinstance(w, int) and w > 0:
-                        self.onnx_input_hw = int(min(h, w))
-                        if self.onnx_input_hw != self.input_size:
+                        self.onnx_input_hw = (h, w)
+                        if self.onnx_input_hw != (self.input_size, self.input_size):
                             logger.info(
                                 "ONNX has static input %sx%s; using it for inference (imgsz=%d ignored)",
                                 h,
@@ -559,7 +566,9 @@ class EntityDetector:
             else self.confidence_threshold
         )
         try:
-            rows = decode_example(cast("np.ndarray", raw_output[0]), min_confidence)
+            rows = decode_example(
+                cast("np.ndarray", raw_output[0]), min_confidence, len(self.class_names)
+            )
         except UnknownOnnxLayoutError:
             logger.warning(
                 "Unrecognised ONNX output shape %s; returning no detections", raw_output.shape

@@ -31,28 +31,32 @@ class Letterboxed(NamedTuple):
     ``orig = (coord - pad) / scale``.
     """
 
-    chw: np.ndarray  # (3, target, target) float32 in [0, 1]
+    chw: np.ndarray  # (3, target_h, target_w) float32 in [0, 1]
     scale: float  # uniform resize factor applied before padding
     pad_x: int  # left padding in model-space pixels
     pad_y: int  # top padding in model-space pixels
 
 
-def letterbox(image: Image.Image, target_size: int) -> Letterboxed:
-    """Aspect-preserving resize of ``image`` into a ``target_size`` square.
+def letterbox(image: Image.Image, target_size: int | tuple[int, int]) -> Letterboxed:
+    """Aspect-preserving resize of ``image`` into the model input.
 
-    Scales by ``min(target/w, target/h)`` and centres the result on a grey
-    ``PAD_COLOR`` canvas — matching Ultralytics' training preprocessing. Returns the
-    CHW float32 tensor and the scale/pad needed to map detections back (see
+    ``target_size`` is a square side or a ``(height, width)`` pair: a static
+    rectangular export such as 736x1280 fits a 16:9 frame at the same scale as
+    the 1280 square, with less padding to compute. Scales by
+    ``min(target_w/w, target_h/h)`` and centres the result on a grey
+    ``PAD_COLOR`` canvas, matching Ultralytics' training preprocessing. Returns
+    the CHW float32 tensor and the scale/pad needed to map detections back (see
     ``Letterboxed``).
     """
     from PIL import Image as PILImage
 
+    target_h, target_w = (target_size, target_size) if isinstance(target_size, int) else target_size
     orig_w, orig_h = image.size
-    scale = min(target_size / orig_w, target_size / orig_h)
+    scale = min(target_w / orig_w, target_h / orig_h)
     new_w, new_h = round(orig_w * scale), round(orig_h * scale)
-    pad_x, pad_y = (target_size - new_w) // 2, (target_size - new_h) // 2
+    pad_x, pad_y = (target_w - new_w) // 2, (target_h - new_h) // 2
 
-    canvas = PILImage.new("RGB", (target_size, target_size), PAD_COLOR)
+    canvas = PILImage.new("RGB", (target_w, target_h), PAD_COLOR)
     canvas.paste(image.resize((new_w, new_h)), (pad_x, pad_y))
     chw = np.transpose(np.array(canvas, dtype=np.float32) / 255.0, (2, 0, 1))
     return Letterboxed(chw=chw, scale=scale, pad_x=pad_x, pad_y=pad_y)

@@ -451,7 +451,9 @@ def parse_onnx_tile(
         min(det.class_thresholds.values()) if det.class_thresholds else det.confidence_threshold
     )
     try:
-        rows = decode_example(cast("np.ndarray", raw_output[tile_idx]), min_confidence)
+        rows = decode_example(
+            cast("np.ndarray", raw_output[tile_idx]), min_confidence, len(det.class_names)
+        )
     except UnknownOnnxLayoutError:
         return []
 

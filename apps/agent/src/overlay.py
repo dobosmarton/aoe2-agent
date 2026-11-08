@@ -26,7 +26,18 @@ logger = logging.getLogger(__name__)
 
 # Category colors (RGB) — matches detection/labeling/prelabel.py
 _RESOURCE_CLASSES = {"tree", "gold_mine", "stone_mine", "berry_bush", "relic"}
-_ANIMAL_CLASSES = {"sheep", "deer", "boar", "wolf", "goose"}
+_ANIMAL_CLASSES = {
+    "sheep",
+    "deer",
+    "boar",
+    "wolf",
+    "goose",
+    "goat",
+    "cow",
+    "buffalo",
+    "horse",
+    "rhinoceros",
+}
 _BUILDING_CLASSES = {
     "town_center",
     "house",

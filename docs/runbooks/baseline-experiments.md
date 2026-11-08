@@ -8,7 +8,7 @@ instead of vibes.
 
 - Windows VM with AoE2 DE running in a skirmish game (see the VM setup notes),
   repo synced to the commit you want to baseline.
-- Detection server running on the Mac host (`just server --model <path-to-aoe2_yolo_v9.onnx>`)
+- Detection server running on the Mac host (`just server --model <path-to-aoe2_yolo_v12_nms736.onnx>`)
   and `AOE2_DETECTION_HOST` pointing at it.
 - `AOE2_LLM_API_KEY` set.
 - `TYPESAFE_API_KEY` set.

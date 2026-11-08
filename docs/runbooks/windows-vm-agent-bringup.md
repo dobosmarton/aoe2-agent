@@ -17,7 +17,7 @@ cd ~/Projects/home/aoe2-llm-arena/agent
 source venv/bin/activate
 
 # Start detection server — needs to be on 0.0.0.0 for the VM to reach it
-just server --model detection/inference/models/aoe2_yolo_v9.onnx
+just server --model detection/inference/models/aoe2_yolo_v12_nms736.onnx
 # INFO: Uvicorn running on http://0.0.0.0:8420
 
 # In another shell, find the VM-facing IP. DISCOVER it — do not assume a
@@ -76,7 +76,7 @@ venv\Scripts\activate
 
 :: Sanity: can the VM reach the Mac?
 curl http://192.168.64.1:8420/health
-:: {"backend": "onnx_cpu", "classes": 60, "model": "aoe2_yolo_v9.onnx"}
+:: {"backend": "onnx_cpu", "classes": 65, "model": "aoe2_yolo_v12_nms736.onnx"}
 ```
 
 ### Start the game and the agent

@@ -1,6 +1,6 @@
 # Chapter 7: Detector Architecture
 
-The entity detection system runs YOLO inference on game screenshots, producing labeled bounding boxes. It supports three backends (PyTorch, ONNX, Mock), a 60-class taxonomy, and optional SAHI tiling. Detector IDs are frame-local; the live agent performs separate, camera-aware temporal association. Sections 7.9, 7.11, and 7.12 below describe older approaches retained only as historical context. See [streaming perception](../streaming-perception.md) for the live pipeline.
+The entity detection system runs YOLO inference on game screenshots, producing labeled bounding boxes. It supports three backends (PyTorch, ONNX, Mock), a 65-class taxonomy, and optional SAHI tiling. Detector IDs are frame-local; the live agent performs separate, camera-aware temporal association. Sections 7.9, 7.11, and 7.12 below describe older approaches retained only as historical context. See [streaming perception](../streaming-perception.md) for the live pipeline.
 
 > **What the agent actually runs (v9).** A **single forward pass at `imgsz=1280`** — the model's training resolution. `config.detection_imgsz=1280`, and `init_detector` in `apps/agent/src/detection_phase.py` pins `use_sahi=False`. Every frame calls `detect_fast` through the one ladder in `detect_frame` (`detect_fast_multi` measured worse at native resolution — see §7.3). There is no `adaptive_sahi` config flag: a flag cannot fix a scale mismatch, so re-enabling SAHI means a code change plus a SAHI-aware retrain. SAHI tiling (§7.4, §7.11) is still implemented in the detection package, but the agent never calls it, because on real screenshots it *lowers* accuracy (§7.4 — Why single-pass at training res). The SAHI sections below document a path the agent keeps for a future model retrained at SAHI-native scale, not the deployed one.
 
@@ -59,14 +59,14 @@ Defined at `packages/detection/src/inference/detector.py`. Key initialization pa
 |-----------|---------|---------|
 | `model_path` | auto-detect | Path to .pt or .onnx model file |
 | `confidence_threshold` | `0.35` | Minimum confidence for detections |
-| `class_names` | loaded from `classes.yaml` | 60-class name list (PyTorch overrides with `model.names`) |
+| `class_names` | loaded from `classes.yaml` | 65-class name list (both backends prefer the names embedded in the model) |
 | `use_mock` | `False` | Use mock detections for testing |
 | `imgsz` | `1280` | Constructor default. The agent runs at **`1280`** via `config.detection_imgsz` — matches v9's training resolution |
 | `use_sahi` | `True` | Constructor default. The agent pins **`False`** — single-pass, no tiling |
 
 ### Model Loading
 
-The trained artifact is **YOLO26n** (NMS-free), shipped as `aoe2_yolo_v9.onnx` / `aoe2_yolo_v9.pt`. The detector supports two model formats:
+The trained artifact is **YOLO26n**, shipped as `aoe2_yolo_v12.pt` and served as `aoe2_yolo_v12_nms736.onnx`: the same weights exported at a static 736x1280 input with the one-to-many head (`export_onnx.py --imgsz 736 1280 --no-end2end`). A frame with an aspect ratio of 1.74 or wider (16:9, or the 3024x1672 capture) letterboxes into 736x1280 at the same scale as into the 1280 square; a narrower frame (4:3, 16:10) gets a smaller scale than in training, so serve such frames with the square export. The raw output `[1, 69, anchors]` goes through `inference/onnx_layout.py`, which keeps the best class per anchor and runs a class-wise NMS at IoU 0.5; the end-to-end `(num_boxes, 6)` layout of `aoe2_yolo_v12.onnx` still decodes. On the independent test set the served export scores F1 0.873 against 0.867 for the end-to-end square graph, and CoreML runs its forward pass in 10 ms instead of 15 ms (M2 Pro). The detector supports two model formats:
 
 - **PyTorch (.pt)** -- loaded via ultralytics YOLO library. Requires `torch` and `ultralytics` packages. At load time, `_load_pytorch()` reads `model.names` from the model file to set `self.class_names` — this is authoritative and overrides the YAML-loaded defaults.
 - **ONNX (.onnx)** -- loaded via `onnxruntime`. Cross-platform, works on ARM64 Windows where PyTorch may not be available. Uses `DEFAULT_CLASSES` loaded from `classes.yaml`. Session options: `ORT_ENABLE_ALL` graph optimization, 4 intra-op threads, auto-detected execution provider (DML or CPU).
@@ -309,9 +309,9 @@ See [Chapter 8 — Training Pipeline](./08-training-pipeline.md) for the sim-to-
 
 ## Summary
 
-- 60-class taxonomy organized by category (resources, buildings, units, siege, naval, animals)
+- 65-class taxonomy organized by category (resources, buildings, units, siege, naval, animals)
 - Three backends: PyTorch (ultralytics), ONNX Runtime, Mock
-- Resolves the model as `aoe2_yolo_v9.onnx` (preferred, the deployed artifact), else `aoe2_yolo_v9.pt`, else mock — YOLO26n, NMS-free, no legacy version fallback
+- Resolves the configured name (`aoe2_yolo_v12_nms736`) as `.onnx` (preferred, the deployed artifact), else `.pt`, else mock; no legacy version fallback. The ONNX decoder accepts the end-to-end layout and the one-to-many layout (class-wise NMS), and a static input shape (such as 736x1280) overrides `imgsz`
 - **Deployed path: single forward pass at `imgsz=1280`** (`detect_fast`, no tiling) — matches v9's training resolution; beats off-scale inference and SAHI on real F1
 - **SAHI (full + adaptive)**: implemented and tested but **disabled** — scale mismatch lowers real accuracy; parked for a future SAHI-native retrain
 - **ONNX batched SAHI**: all tiles in one inference call (~3-5x faster than sequential) — only relevant when SAHI is re-enabled

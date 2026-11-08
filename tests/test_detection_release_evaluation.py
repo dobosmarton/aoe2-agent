@@ -11,7 +11,9 @@ from detection_server.benchmark_latency import percentile
 from detection_server.evaluate import (
     Case,
     build_report,
+    collect_samples,
     discover_cases,
+    fine_label_recall,
     load_ground_truth,
     manifest_sha256,
     predict,
@@ -107,6 +109,38 @@ def test_report_includes_false_positives_and_model_hash(tmp_path: Path) -> None:
     assert len(report["model_sha256"]) == 64
 
 
+def test_only_the_test_split_claims_independence(tmp_path: Path) -> None:
+    model = tmp_path / "model.onnx"
+    image = tmp_path / "real_frame.jpg"
+    label = tmp_path / "real_frame.txt"
+    model.write_bytes(b"model")
+    image.write_bytes(b"image")
+    label.write_text("")
+    state = ModelState("onnx_cpu", object(), ("tree",), str(model))
+
+    report = build_report(model, [Case(image, label)], state, [([], [])], independent_test=True)
+
+    assert report["independent_test_set"] is True
+    assert report["evaluation_kind"] == "independent_real_frame_test"
+
+
+def test_classes_a_model_cannot_predict_count_as_misses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    image = tmp_path / "real_frame.png"
+    label = tmp_path / "real_frame.txt"
+    Image.new("RGB", (100, 100)).save(image)
+    label.write_text("62 0.5 0.5 0.2 0.2\n")  # buffalo: appended after the 60-class v9
+    state = ModelState("onnx_cpu", object(), ("tree", "villager"), "model.onnx")
+    monkeypatch.setattr("detection_server.evaluate._detect_single", lambda *_: [])
+
+    samples = collect_samples(state, [Case(image, label)])
+    report = build_report(image, [Case(image, label)], state, samples)
+
+    assert report["micro"]["false_negative"] == 1
+    assert report["per_class"]["buffalo"]["ground_truth"] == 1
+
+
 def test_latency_percentiles_interpolate_between_samples() -> None:
     assert percentile([40.0, 10.0, 30.0, 20.0], 0.5) == 25.0
     assert percentile([40.0, 10.0, 30.0, 20.0], 0.95) == 38.5
@@ -116,3 +150,25 @@ def test_latency_percentiles_interpolate_between_samples() -> None:
 def test_latency_percentile_rejects_invalid_input(samples: list[float], fraction: float) -> None:
     with pytest.raises(ValueError):
         percentile(samples, fraction)
+
+
+def test_fine_label_recall_counts_hits_on_the_mapped_class(tmp_path: Path) -> None:
+    fine = tmp_path / "real_frame.fine.txt"
+    fine.write_text("ibex\nibex\ndeer\n")
+    case = Case(tmp_path / "real_frame.jpg", tmp_path / "real_frame.txt", fine)
+    ground_truth = [
+        GroundTruth(5, (10, 10, 30, 30)),
+        GroundTruth(5, (50, 50, 70, 70)),
+        GroundTruth(5, (80, 10, 99, 30)),
+    ]
+    predictions = [Prediction(5, (10, 10, 30, 30), 0.9), Prediction(60, (50, 50, 70, 70), 0.8)]
+
+    report = fine_label_recall([case], [(predictions, ground_truth)])
+
+    assert report["ibex"] == {
+        "maps_to": "deer",
+        "ground_truth": 2,
+        "true_positive": 1,
+        "recall": 0.5,
+    }
+    assert report["elephant"]["ground_truth"] == 0

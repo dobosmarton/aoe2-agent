@@ -167,17 +167,20 @@ def test_gather_classes_exclude_farm_but_jobs_keep_it() -> None:
 
 
 def test_dangerous_huntables_excluded_from_gather_targets() -> None:
-    """Boar (lethal to a lone villager, run 4 F-20) and deer (a misread boar
-    is fatal at F1 0.67) are never right-click targets; job inference keeps
-    them as food-worker evidence."""
+    """Boar (lethal to a lone villager, run 4 F-20), rhinoceros (fights back
+    like a boar) and deer (a misread boar is fatal at F1 0.67) are never
+    right-click targets; job inference keeps them as food-worker evidence.
+    The herdables gather like sheep."""
     from gameplay_agent.entity_utils import (
         CLASSES_BY_KIND,
         GATHER_CLASSES_BY_KIND,
         nearest_class_of_kind,
     )
 
-    assert {"boar", "deer"} <= CLASSES_BY_KIND["food"]
-    assert GATHER_CLASSES_BY_KIND["food"] == frozenset({"sheep", "berry_bush"})
+    assert {"boar", "rhinoceros", "deer"} <= CLASSES_BY_KIND["food"]
+    assert GATHER_CLASSES_BY_KIND["food"] == frozenset(
+        {"sheep", "goat", "cow", "buffalo", "berry_bush"}
+    )
     fauna = [
         {"id": "boar_0", "class": "boar", "center": (10, 10), "confidence": 0.9},
         {"id": "deer_0", "class": "deer", "center": (20, 20), "confidence": 0.9},

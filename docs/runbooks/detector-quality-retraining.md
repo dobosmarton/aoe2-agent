@@ -16,7 +16,7 @@ The existing development result can be reproduced from the repository root with 
 
 ```bash
 uv run --no-sync python -m detection_server.evaluate \
-  --model packages/detection/src/inference/models/aoe2_yolo_v9.onnx \
+  --model packages/detection/src/inference/models/aoe2_yolo_v12.onnx \
   --data packages/detection/src/training_data_v9_slim \
   --output tmp/evaluations/current-development.json
 ```

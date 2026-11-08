@@ -48,28 +48,28 @@ pip install coremltools
 
 The ONNX model should be at:
 ```
-detection/inference/models/aoe2_yolo_v9.onnx
+detection/inference/models/aoe2_yolo_v12_nms736.onnx
 ```
 
 If you have the `.pt` weights and want CoreML (faster on Apple Silicon):
 ```bash
 # Export to CoreML (optional, ONNX works fine)
-just export-coreml detection/inference/models/aoe2_yolo_v9.pt
+just export-coreml detection/inference/models/aoe2_yolo_v12.pt
 ```
 
 ### 1.3 Start the server
 
 ```bash
 # Using justfile
-just server --model detection/inference/models/aoe2_yolo_v9.onnx
+just server --model detection/inference/models/aoe2_yolo_v12_nms736.onnx
 
 # Or directly
-python -m detection_server --model detection/inference/models/aoe2_yolo_v9.onnx --host 0.0.0.0 --port 8420
+python -m detection_server --model detection/inference/models/aoe2_yolo_v12_nms736.onnx --host 0.0.0.0 --port 8420
 ```
 
 For CoreML model:
 ```bash
-just server --model detection/inference/models/aoe2_yolo_v9.mlpackage
+just server --model detection/inference/models/aoe2_yolo_v12.mlpackage
 ```
 
 You should see:
@@ -86,7 +86,7 @@ curl http://localhost:8420/health
 
 Expected response:
 ```json
-{"backend": "onnx_coreml", "classes": 60, "model": "aoe2_yolo_v9.onnx"}
+{"backend": "onnx_coreml", "classes": 65, "model": "aoe2_yolo_v12_nms736.onnx"}
 ```
 
 ### 1.5 Find your Mac's IP address
@@ -329,7 +329,7 @@ python -m gameplay_agent [--iterations N] [--overlay]
 ```bash
 cd ~/Projects/home/aoe2-llm-arena/agent
 source venv/bin/activate
-just server --model detection/inference/models/aoe2_yolo_v9.onnx
+just server --model detection/inference/models/aoe2_yolo_v12_nms736.onnx
 ```
 
 **Windows VM (Command Prompt):**

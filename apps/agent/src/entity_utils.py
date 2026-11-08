@@ -50,8 +50,13 @@ class EntityAttrs(NamedTuple):
 # maps each kind to the YOLO classes a villager gathers it from. Kept here (a
 # dependency-light module both callers already import) so the mapping lives once.
 RESOURCE_KINDS: tuple[ResourceKind, ...] = ("food", "wood", "gold", "stone")
+# Goat, cow and buffalo are herdables (`a_herd_*` sprites) gathered like sheep. A
+# rhinoceros (`a_hunt_rhino*`) fights back like a boar. Horses are left out: it is
+# not established that villagers gather food from them.
 CLASSES_BY_KIND: dict[ResourceKind, frozenset[str]] = {
-    "food": frozenset({"sheep", "boar", "deer", "berry_bush", "farm"}),
+    "food": frozenset(
+        {"sheep", "goat", "cow", "buffalo", "boar", "rhinoceros", "deer", "berry_bush", "farm"}
+    ),
     "wood": frozenset({"tree"}),
     "gold": frozenset({"gold_mine"}),
     "stone": frozenset({"stone_mine"}),
@@ -67,11 +72,12 @@ CLASSES_BY_KIND: dict[ResourceKind, frozenset[str]] = {
 #   and TC luring, beyond the reactive tier.
 # - deer: harmless in principle, but at real F1 ≈ 0.67 a boar misread as deer
 #   is fatal — species labels aren't trusted with villager lives.
+# - rhinoceros: fights back like a boar.
 # Job inference keeps using CLASSES_BY_KIND, where all of these still mean
 # "food worker".
 GATHER_CLASSES_BY_KIND: dict[ResourceKind, frozenset[str]] = {
     **CLASSES_BY_KIND,
-    "food": CLASSES_BY_KIND["food"] - {"farm", "boar", "deer"},
+    "food": CLASSES_BY_KIND["food"] - {"farm", "boar", "rhinoceros", "deer"},
 }
 # Camps/drop-offs that also signal a villager's job (used by the job model, not for
 # gather targeting — you can't right-click a lumber camp to chop). A mining camp

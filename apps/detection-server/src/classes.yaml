@@ -1,6 +1,7 @@
-# AoE2 Detection Classes — mapping pinned to the deployed 60-class checkpoint.
-# IDs 0-59 match the training schema. Update this file when deploying a model
-# trained with the appended classes; do not advertise classes it cannot predict.
+# AoE2 Detection Classes — fallback mapping for the 60-class v9 checkpoint.
+# The server reads class names embedded in the model file (Ultralytics export
+# metadata) and uses this list only when a model carries none. IDs 0-59 match
+# the training schema; do not advertise classes the model cannot predict.
 
 classes:
   # Resources & Nature (9)

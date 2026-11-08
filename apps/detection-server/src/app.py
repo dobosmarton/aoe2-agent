@@ -23,6 +23,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol, TypeAlias, TypeVar, cast
 
 import numpy as np
+from detection.inference.model_metadata import parse_ultralytics_names
+from detection.inference.onnx_layout import UnknownOnnxLayoutError, decode_example
 from detection.inference.preprocess import PAD_COLOR, letterbox
 from detection.inference.thresholds import (
     CLASS_THRESHOLDS,
@@ -94,7 +96,10 @@ class HealthResponse(BaseModel):
 
 
 def _load_class_names() -> tuple[str, ...]:
-    """Load class names from bundled classes.yaml."""
+    """Load the fallback class names from bundled classes.yaml.
+
+    Used only when the model file carries no embedded names (see `_model_class_names`).
+    """
     yaml_path = Path(__file__).parent / "classes.yaml"
     try:
         import yaml
@@ -169,6 +174,17 @@ def _load_class_names() -> tuple[str, ...]:
         )
 
 
+def _model_class_names(raw_names: str | None, fallback: tuple[str, ...]) -> tuple[str, ...]:
+    """Prefer the names embedded in the model; fall back to bundled classes.yaml."""
+    names = parse_ultralytics_names(raw_names)
+    if names is None:
+        logger.warning("Model has no readable class names; using bundled classes.yaml")
+        return fallback
+    if names[: len(fallback)] != fallback[: len(names)]:
+        logger.warning("Model class names differ from bundled classes.yaml; using the model's")
+    return names
+
+
 # ---------------------------------------------------------------------------
 # Model state
 # ---------------------------------------------------------------------------
@@ -177,6 +193,8 @@ def _load_class_names() -> tuple[str, ...]:
 class _CoreMLModel(Protocol):
     """Subset of ct.models.MLModel API used here."""
 
+    @property
+    def user_defined_metadata(self) -> dict[str, str]: ...
     def get_spec(self) -> object: ...
     def predict(self, inputs: dict[str, object]) -> dict[str, object]: ...
 
@@ -195,6 +213,19 @@ class ModelState:
     model_path: str
     input_name: str = ""  # ONNX input tensor name
     input_size: int = 640  # Model's native input resolution
+    # (height, width) of a static ONNX input such as 736x1280. A static graph
+    # accepts only this shape, so it overrides the requested imgsz.
+    input_hw: tuple[int, int] | None = None
+
+
+def _static_input_hw(shape: list[object]) -> tuple[int, int] | None:
+    """(height, width) of a static NCHW input; None when a spatial axis is symbolic."""
+    if len(shape) != 4:
+        return None
+    height, width = shape[2], shape[3]
+    if isinstance(height, int) and height > 0 and isinstance(width, int) and width > 0:
+        return (height, width)
+    return None
 
 
 def _get_coreml_input_size(model: object) -> int:
@@ -222,10 +253,11 @@ def _load_model(model_path: str) -> ModelState:
             model = ct.models.MLModel(str(path), compute_units=ct.ComputeUnit.CPU_AND_NE)
             input_size = _get_coreml_input_size(model)
             logger.info("Loaded CoreML model: %s (input_size=%d)", model_path, input_size)
+            metadata = cast("_CoreMLModel", model).user_defined_metadata
             return ModelState(
                 backend="coreml",
                 model=model,
-                class_names=class_names,
+                class_names=_model_class_names(metadata.get("names"), class_names),
                 model_path=model_path,
                 input_size=input_size,
             )
@@ -259,23 +291,36 @@ def _load_onnx(onnx_path: str, class_names: tuple[str, ...]) -> ModelState:
     sess_options.inter_op_num_threads = max(1, num_threads // 2)
 
     available = ort.get_available_providers()
+    providers: list[str | tuple[str, dict[str, str]]]
     if "CoreMLExecutionProvider" in available:
-        providers = ["CoreMLExecutionProvider", "CPUExecutionProvider"]
+        # The default NeuralNetwork format stores integer tensors as floats, so
+        # the YOLO26 end-to-end head picks wrong top-k anchors: on the
+        # independent test set v9 fell from F1 0.842 (CPU) to 0.282. MLProgram
+        # keeps integer types and matches the CPU output.
+        providers = [
+            ("CoreMLExecutionProvider", {"ModelFormat": "MLProgram"}),
+            "CPUExecutionProvider",
+        ]
         backend: Backend = "onnx_coreml"
     else:
         providers = ["CPUExecutionProvider"]
         backend = "onnx_cpu"
 
     session = ort.InferenceSession(onnx_path, sess_options, providers=providers)
-    input_name = session.get_inputs()[0].name
-    logger.info("Loaded ONNX model: %s (providers=%s)", onnx_path, providers)
+    model_input = session.get_inputs()[0]
+    input_hw = _static_input_hw(cast("list[object]", model_input.shape))
+    logger.info(
+        "Loaded ONNX model: %s (providers=%s, static input %s)", onnx_path, providers, input_hw
+    )
+    metadata = session.get_modelmeta().custom_metadata_map
 
     return ModelState(
         backend=backend,
         model=session,
-        class_names=class_names,
+        class_names=_model_class_names(metadata.get("names"), class_names),
         model_path=onnx_path,
-        input_name=input_name,
+        input_name=model_input.name,
+        input_hw=input_hw,
     )
 
 
@@ -335,54 +380,33 @@ def _parse_raw_output(
     clip_w: float | None = None,
     clip_h: float | None = None,
 ) -> list[DetectionResult]:
-    """Parse ONNX/CoreML raw output for one image in the batch.
+    """Parse ONNX/CoreML output for one image in the batch.
 
-    Handles both output formats:
-    - Post-NMS: (batch, num_detections, 6)
-    - Raw: (batch, 4+num_classes, num_boxes)
+    Decoding is shared with the agent's local detector (`decode_example`). Both
+    layouts work: post-NMS ``(batch, num_detections, 6)`` from the end-to-end
+    head, and raw ``(batch, 4+num_classes, num_anchors)`` from the one-to-many
+    head, which the decoder deduplicates with a class-wise NMS.
     """
-    # numpy stubs type ndarray indexing/slicing as Any (the shape-typed
-    # variants aren't in the public stubs). Cast at the boundary so the
-    # downstream loop body is typed, instead of sprinkling ignores.
     min_thresh = min(CLASS_THRESHOLDS.values())
-
-    if len(raw.shape) == 3 and raw.shape[2] == 6:
-        predictions = cast("np.ndarray", raw[batch_idx])
-    elif len(raw.shape) == 3 and raw.shape[1] == (4 + num_classes):
-        preds_raw = cast("np.ndarray", raw[batch_idx].T)  # (num_boxes, 4+num_classes)
-        boxes = cast("np.ndarray", preds_raw[:, :4])
-        class_scores = cast("np.ndarray", preds_raw[:, 4:])
-        best_cls = cast("np.ndarray", np.argmax(class_scores, axis=1))
-        best_conf = cast("np.ndarray", np.max(class_scores, axis=1))
-        mask = cast("np.ndarray", best_conf >= min_thresh)
-        boxes = cast("np.ndarray", boxes[mask])
-        best_cls = cast("np.ndarray", best_cls[mask])
-        best_conf = cast("np.ndarray", best_conf[mask])
-        # numpy ndarray iteration / indexing yields Any per the public
-        # stubs; .tolist() converts arrays to plain python floats once at
-        # the boundary so the inner loop is typed.
-        boxes_list = cast("list[list[float]]", boxes.tolist())
-        cls_list = cast("list[float]", best_cls.tolist())
-        conf_list = cast("list[float]", best_conf.tolist())
-        preds: list[list[float]] = []
-        for box_arr, cls_val, conf_val in zip(boxes_list, cls_list, conf_list, strict=True):
-            xc, yc, w, h = box_arr[0], box_arr[1], box_arr[2], box_arr[3]
-            preds.append([xc - w / 2, yc - h / 2, xc + w / 2, yc + h / 2, conf_val, cls_val])
-        predictions = np.array(preds) if preds else np.array([]).reshape(0, 6)
-    else:
+    if raw.ndim != 3:
+        logger.warning("Unrecognised model output shape %s; returning no detections", raw.shape)
+        return []
+    try:
+        rows = decode_example(cast("np.ndarray", raw[batch_idx]), min_thresh, num_classes)
+    except UnknownOnnxLayoutError:
+        logger.warning("Unrecognised model output shape %s; returning no detections", raw.shape)
         return []
 
     results: list[DetectionResult] = []
-    for pred in cast("list[list[float]]", predictions.tolist()):
-        x1, y1, x2, y2, confidence, class_id = (
-            pred[0],
-            pred[1],
-            pred[2],
-            pred[3],
-            pred[4],
-            pred[5],
+    for row in rows:
+        x1, y1, x2, y2, confidence, class_idx = (
+            row.x1,
+            row.y1,
+            row.x2,
+            row.y2,
+            row.confidence,
+            row.class_id,
         )
-        class_idx = int(class_id)
         class_name = (
             class_names[class_idx] if class_idx < len(class_names) else f"unknown_{class_idx}"
         )
@@ -425,7 +449,7 @@ def _detect_single(state: ModelState, image: Image.Image, imgsz: int) -> list[De
         detections, _ = _detect_sahi(state, image, tile_size=state.input_size)
         return detections
 
-    box = letterbox(image, imgsz)
+    box = letterbox(image, state.input_hw or imgsz)
     num_classes = len(state.class_names)
 
     if state.backend == "coreml":
