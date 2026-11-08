@@ -791,3 +791,43 @@ def test_the_mac_calibration_loads_with_its_own_count_threshold() -> None:
     assert mac is not None and vm is not None
     assert (mac.count_white_threshold, vm.count_white_threshold) == (160, 185)
     assert set(load_templates(mac.template_dir, include_slash=True)) == {*"0123456789/"}
+
+
+class _Engine:
+    """RapidOCR stand-in: records whether text detection was asked for."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def __call__(self, image: np.ndarray, **options: object) -> tuple[object, None]:
+        del image
+        self.calls.append(options)
+        if options.get("use_det") is False:
+            return [("Town Center", 0.99)], None
+        return [([[0, 0], [1, 0], [1, 1], [0, 1]], "Villager", 0.99)], None
+
+
+def _selection_calibration(*, name_line: bool) -> Calibration:
+    from gameplay_agent.resource_ocr import FieldBox
+
+    fields = {"selection": FieldBox(0, 0, 40, 20)}
+    if name_line:
+        fields["selection_name"] = FieldBox(0, 0, 40, 10)
+    return Calibration(width=40, height=20, fields=fields, template_dir=Path())
+
+
+@pytest.mark.parametrize(
+    ("name_line", "expected", "detection"),
+    [(True, "town_center", False), (False, "villager", None)],
+)
+def test_a_name_line_box_is_read_without_text_detection(
+    monkeypatch: pytest.MonkeyPatch, name_line: bool, expected: str, detection: object
+) -> None:
+    from gameplay_agent import resource_ocr
+
+    engine = _Engine()
+    monkeypatch.setattr(resource_ocr, "_field_engine", lambda: engine)
+    frame = np.full((20, 40, 3), 200, dtype=np.uint8)
+    calibration = _selection_calibration(name_line=name_line)
+    assert resource_ocr.read_selected_unit_pixels(frame, calibration) == expected
+    assert engine.calls[0].get("use_det") is detection

@@ -32,6 +32,7 @@ machinery with synthesized digits (no real screenshots needed).
 
 from __future__ import annotations
 
+import functools
 import io
 import statistics
 import threading
@@ -319,11 +320,14 @@ def _load_glyph(path: Path) -> np.ndarray:
     return _normalize_glyph(np.where(gray > 127, 255, 0).astype(np.uint8))
 
 
+@functools.cache
 def load_templates(template_dir: Path, *, include_slash: bool) -> TemplateBank:
     """Load digit (+ optional slash) glyph templates, binarized and resized.
 
     `<name>.png` is required for each character; extra samples `<name>_<n>.png`
     join it, and a glyph is read as the character of its best-matching sample.
+    Loaded once per directory: re-reading the Mac's 108 samples on every frame
+    took the bar read from 39 ms to 526 ms under game load.
     """
     chars = [str(d) for d in range(10)]
     paths = {c: template_dir / f"{c}.png" for c in chars}
@@ -1085,15 +1089,39 @@ def read_selected_unit(screenshot_bytes: bytes, calibration: Calibration) -> str
     return read_selected_unit_pixels(decode_rgb_pixels(screenshot_bytes), calibration)
 
 
+def _read_line_rapidocr(field_img: np.ndarray, *, whitelist: str) -> str:
+    """Recognize one known line of text, skipping RapidOCR's text detection.
+
+    Detection is most of the cost: on the Mac's selected-unit name it took the read
+    from 650-1025 ms to 125-373 ms under game load, with the same labels.
+    """
+    pil = _preprocess_for_ocr(field_img, pad=20, binarize=False).convert("RGB")
+    raw, _elapse = cast(
+        "tuple[list[tuple[str, float]] | None, object]",
+        _field_engine()(np.asarray(pil), use_det=False, use_cls=False, use_rec=True),
+    )
+    if not raw:
+        return ""
+    return _filter_charset("".join(line[0] for line in raw), whitelist)
+
+
 def read_selected_unit_pixels(rgb: np.ndarray, calibration: Calibration) -> str | None:
-    """Read selection from native capture pixels, converting only its small crop."""
-    box = calibration.fields.get("selection")
-    if box is None:
-        return None
+    """Read selection from native capture pixels, converting only its small crop.
+
+    A calibration with a `selection_name` box (the name line alone) is read with
+    recognition only; otherwise the `selection` box is read with full OCR.
+    """
     import cv2
 
+    name_box = calibration.fields.get("selection_name")
+    box = name_box or calibration.fields.get("selection")
+    if box is None:
+        return None
     gray = cast("np.ndarray", cv2.cvtColor(box.crop(rgb), cv2.COLOR_RGB2GRAY))
-    text = _read_field_rapidocr(gray, whitelist=_LETTERS, binarize=False)
+    if name_box is not None:
+        text = _read_line_rapidocr(gray, whitelist=_LETTERS)
+    else:
+        text = _read_field_rapidocr(gray, whitelist=_LETTERS, binarize=False)
     label = text.strip().lower().replace(" ", "_")
     if label in {
         "villager",

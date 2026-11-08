@@ -22,4 +22,5 @@ fields:
   villagers: [657, 55, 701, 79]
   idle_count: [831, 43, 861, 68]
   selection: [420, 1636, 760, 1716]
+  selection_name: [450, 1645, 760, 1695]  # The name line alone: read without text detection.
   age: [1000, 18, 1360, 74]
