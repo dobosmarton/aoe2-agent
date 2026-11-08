@@ -1885,3 +1885,21 @@ def test_nothing_pending_leaves_the_old_message(fake_pyautogui: _FakePyautogui) 
     ex.observe_hud(10, 20, {"wood": 30})
     reason = ex.build_rejection("w")
     assert reason == "mill unavailable: costs 100 wood, you have 30"
+
+
+def test_a_spot_inside_a_large_forest_box_is_not_open_ground(
+    fake_pyautogui: _FakePyautogui,
+) -> None:
+    # The detector boxes a whole forest as one "tree"; its centre is far from the
+    # spot, but the spot is inside the box.
+    forest = {
+        "id": "tree_0",
+        "class": "tree",
+        "bbox": (0, 0, 1000, 600),
+        "center": (500, 300),
+        "confidence": 0.9,
+    }
+    ex.set_detected_entities([forest])
+    assert ex._clutter_score((900, 550)) == ex._BLOCKED_CLUTTER  # Inside, far from the centre.
+    assert ex._clutter_score((1100, 550)) == 1  # 100 px from the edge: crowded, not blocked.
+    assert ex._clutter_score((1300, 550)) == 0  # Open ground.

@@ -2236,6 +2236,7 @@ BUILD_RING_RADII: tuple[int, ...] = (280, 400, 520)
 RESOURCE_RING_RADII: tuple[int, ...] = (150, 210, 270)
 BUILD_RING_DIRECTIONS: int = 8
 BUILD_CLUTTER_RADIUS: int = 160  # entities within this of a candidate = clutter
+_BLOCKED_CLUTTER = 10  # A candidate inside an entity's box counts as this much clutter.
 
 # Play-area margins (screenshot px). The HUD occupies the top resource bar and the
 # bottom command panel; those regions have no entities, so an emptiness score would
@@ -2357,14 +2358,31 @@ def _clutter_score(point: tuple[int, int]) -> int:
     Lower = emptier ground = more likely a valid building spot. Counting the
     resource itself is deliberate: on a camp's tight ring it makes the emptiest
     candidate the open ground at the forest's edge.
+
+    Distance is to an entity's box (zero inside it), not its centre: the detector
+    draws a forest as one large "tree" box whose centre can be hundreds of pixels
+    from its edge, and live a house was placed inside such a forest and refused.
+    A point inside a box is blocked ground, so it outweighs any amount of nearby
+    clutter (_BLOCKED_CLUTTER).
     """
     px, py = point
     r2 = BUILD_CLUTTER_RADIUS * BUILD_CLUTTER_RADIUS
-    return sum(
-        1
-        for entity in _detected_entities
-        if (center := entity.get("center")) and (px - center[0]) ** 2 + (py - center[1]) ** 2 <= r2
-    )
+    score = 0
+    for entity in _detected_entities:
+        bbox = entity.get("bbox")
+        if isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+            x0, y0, x1, y1 = (float(value) for value in bbox)
+            dx = max(x0 - px, 0.0, px - x1)
+            dy = max(y0 - py, 0.0, py - y1)
+        elif (center := entity.get("center")) and isinstance(center, (list, tuple)):
+            dx, dy = px - float(center[0]), py - float(center[1])
+        else:
+            continue
+        if dx == 0.0 and dy == 0.0:
+            score += _BLOCKED_CLUTTER
+        elif dx * dx + dy * dy <= r2:
+            score += 1
+    return score
 
 
 def _open_ground_candidates(
