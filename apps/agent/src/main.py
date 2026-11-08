@@ -9,24 +9,13 @@ import structlog
 
 from .config import KEY_ENV, TYPESAFE_KEY_ENV, WireName, config
 from .game_loop import game_loop
+from .logging_setup import configure_logging
 from .providers import ExecutorProvider
 from .providers.policy import PolicyAdvisor
 from .providers.wire_factory import make_wire
 
-# Configure structured logging
-structlog.configure(
-    processors=[
-        structlog.stdlib.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-        structlog.processors.format_exc_info,
-        structlog.dev.ConsoleRenderer(colors=True),
-    ],
-    wrapper_class=structlog.stdlib.BoundLogger,
-    context_class=dict,
-    logger_factory=structlog.PrintLoggerFactory(),
-    cache_logger_on_first_use=True,
-)
+# Console only until main() adds the run file.
+configure_logging()
 
 log = structlog.stdlib.get_logger()
 
@@ -110,6 +99,8 @@ def main() -> None:
     )
 
     args = parser.parse_args(namespace=_AgentArgs())
+    run_file = configure_logging(config.log_dir)
+    log.info("run_log_file", path=str(run_file))
 
     try:
         asyncio.run(main_async(args))
