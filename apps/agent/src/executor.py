@@ -118,6 +118,11 @@ async def _selection_refresh() -> bool:
     return callback is not None and await callback()
 
 
+async def _spatial_refresh() -> bool:
+    """A fresh view with detection, for a click placed from detected positions."""
+    return _rescan_fn is not None and await _rescan_fn()
+
+
 def get_rescan_fn() -> Callable[[], Awaitable[bool]] | None:
     """Return the registered fast-rescan callback, or None if unset."""
     return _rescan_fn
@@ -2736,12 +2741,15 @@ async def _handle_build(action_dict: dict[str, object], intent: str) -> ActionRe
                         action_id, _BUILD_REFRESH_RETRY_DELAY, "villager selection unverified"
                     )
                 return ActionResult(False, rejection)
-        if index == selection_index + 2 and not await _selection_refresh():
+        # The placement is resolved from detected positions at click time. The
+        # menu keys don't move the camera, but by now the builder's view is about
+        # 3 s old and click evidence must be under 1 s, so detect again.
+        if index == selection_index + 2 and not await _spatial_refresh():
             if action_id:
                 current_ledger().defer_action(
                     action_id, _BUILD_REFRESH_RETRY_DELAY, "pre-placement refresh failed"
                 )
-            return ActionResult(False, "pre-placement HUD refresh unavailable")
+            return ActionResult(False, "pre-placement refresh unavailable")
     return ActionResult(True, f"placement input issued ({intent}); awaiting evidence")
 
 

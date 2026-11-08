@@ -745,6 +745,42 @@ def test_selection_refresh_does_not_authorize_spatial_click(
     assert not ex.current_ledger().spatial_valid
 
 
+def test_a_build_detects_again_just_before_placing(
+    fake_pyautogui: _FakePyautogui, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[str] = []
+
+    async def selection_only() -> bool:
+        calls.append("selection refresh")
+        return True
+
+    async def detect() -> bool:
+        calls.append("detect")
+        return True
+
+    async def execute(step: dict[str, object]) -> ex.ActionResult:
+        calls.append(f"step {step.get('key') or step['type']}")
+        return ex.ActionResult(True, "ok")
+
+    steps = [
+        {"type": "press", "key": ".", "intent": "select builder"},
+        {"type": "press", "key": "q", "intent": "economic menu"},
+        {"type": "press", "key": "q", "intent": "house"},
+        {"type": "click", "auto_placement": True, "intent": "place"},
+        {"type": "press", "key": "h", "intent": "clear"},
+    ]
+    ex.set_selection_refresh_fn(selection_only)
+    ex.set_rescan_fn(detect)
+    monkeypatch.setattr(ex, "build_rejection", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(ex, "build_steps", lambda *_args, **_kwargs: [dict(s) for s in steps])
+    monkeypatch.setattr(ex, "execute_action", execute)
+    monkeypatch.setattr(ex, "_selection_rejection", lambda _expected: None)
+    result = _run(ex._handle_build({"building_key": "q", "menu": "q"}, "house"))
+    assert result.success
+    # The placement is resolved from detections at click time: they must be fresh.
+    assert calls == ["step .", "step q", "step q", "detect", "step click", "step h"]
+
+
 # ---------------------------------------------------------------------------
 # House feasibility — housing timing belongs to strategy, not preflight
 # ---------------------------------------------------------------------------
