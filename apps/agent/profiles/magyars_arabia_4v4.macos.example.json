@@ -10,6 +10,7 @@
   "capture_height": 1898,
   "modifier_map": {},
   "zoom_steps": 2,
+  "command_button": "left",
   "ui_scale": 1.0,
   "hotkey_profile": "RECORD_EXPORTED_PROFILE",
   "game_data_version": "RECORD_GAME_BUILD",

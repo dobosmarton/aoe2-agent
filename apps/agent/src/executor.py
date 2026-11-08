@@ -66,6 +66,8 @@ _input_scale: float = 1.0
 _platform: Platform = "none"
 # The catalog's modifiers mapped to the keys the Mac game binds (see GameProfile).
 _modifier_map: dict[str, str] = {}
+# The mouse button that gives units orders, from the game profile.
+_command_button: Literal["left", "right"] = "right"
 _detected_entities: list[dict] = []
 _rescan_fn: Callable[[], Awaitable[bool]] | None = None
 _rescan_full_fn: Callable[[], Awaitable[bool]] | None = None
@@ -2024,6 +2026,12 @@ _MAC_BLOCKED_CHORDS: tuple[frozenset[str], ...] = tuple(
 _MAC_BLOCKED_KEYS: frozenset[str] = frozenset({"f11"})  # Show Desktop.
 
 
+def set_command_button(button: Literal["left", "right"]) -> None:
+    """The button that orders units: right by default, left in the Mac game's default."""
+    global _command_button
+    _command_button = button
+
+
 def set_modifier_map(pairs: Iterable[tuple[str, str]]) -> None:
     """Map the catalog's modifiers to the Mac game's, e.g. ("ctrl", "command")."""
     global _modifier_map
@@ -2558,7 +2566,7 @@ async def _handle_right_click(action_dict: dict[str, object], intent: str) -> Ac
 
     screen_x, screen_y = _translate(x, y)
     current_ledger().note_input()
-    await _mouse_click(screen_x, screen_y, "right")
+    await _mouse_click(screen_x, screen_y, _command_button)  # The order, on either button.
     log.info(
         "right_click",
         x=x,

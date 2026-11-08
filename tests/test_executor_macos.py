@@ -284,3 +284,18 @@ def test_a_mac_key_press_first_releases_stuck_modifiers(
     monkeypatch.setattr(mouse, "press", lambda key: order.append(f"press {key}"), raising=False)
     assert _run(ex.execute_action({"type": "press", "key": "h", "intent": "x"})).success
     assert order == ["release", "press h"]
+
+
+@pytest.mark.parametrize("button", ["left", "right"])
+def test_orders_use_the_profiles_command_button(
+    mouse: _Input, mac: FakeWindowBackend, monkeypatch: pytest.MonkeyPatch, button: str
+) -> None:
+    monkeypatch.setattr(ex, "_command_button", "right")
+    ex.set_command_button(button)  # type: ignore[arg-type]
+    assert _run(ex.execute_action({"type": "right_click", "x": 1000, "y": 800, "intent": "x"}))
+    downs = mouse.named("mouseDown")
+    assert [call[2].get("button") for call in downs] == [button]
+
+
+def test_the_mac_example_profile_orders_with_the_left_button() -> None:
+    assert load_profile(_MAC_PROFILE).command_button == "left"

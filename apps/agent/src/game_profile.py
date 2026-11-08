@@ -50,6 +50,9 @@ class GameProfile(BaseModel):
     modifier_map: dict[Modifier, Modifier] = Field(default_factory=dict)
     # macOS only. Steps in from full zoom-out, giving the same zoom every game.
     zoom_steps: int = Field(default=0, ge=0, le=MAX_ZOOM_STEPS)
+    # The mouse button that gives units orders. Right on Windows; the Mac game
+    # can give them with the left button, and then its right button deselects.
+    command_button: Literal["right", "left"] = "right"
     ui_scale: float = Field(gt=0)
     hotkey_profile: str = Field(min_length=1)
     game_data_version: str = Field(min_length=1)

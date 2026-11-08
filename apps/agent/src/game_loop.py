@@ -31,6 +31,7 @@ from .executor import (
     bind_ledger,
     clear_refresh_callbacks,
     set_absolute_zoom,
+    set_command_button,
     set_modifier_map,
     set_rescan_fn,
     set_rescan_full_fn,
@@ -273,6 +274,7 @@ async def game_loop(
         from .game_profile import load_profile
 
         profile = load_profile(config.game_profile_path) if config.game_profile_path else None
+        set_command_button(profile.command_button if profile is not None else "right")
         ctx = _build_context(
             memory,
             use_detection=use_detection,
