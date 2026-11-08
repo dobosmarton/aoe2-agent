@@ -4,7 +4,7 @@ Plan rule R3: at matched object size, are Mac frames clearly worse for the detec
 than VM frames? There are no Mac labels, so the frames are reviewed by eye: the
 same model's boxes are drawn on both sets in the same layout, and the wrong boxes
 and obvious misses are counted per frame. Two numbers come without labels: boxes
-per frame, and how much v9 and v11 agree (a box from one with a same-class box of
+per frame, and how much the served model and the previous one agree (a box from one with a same-class box of
 IoU >= 0.5 from the other).
 
     # Lossless frames from the running game (Terminal.app, game in front):
@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
     from core import DetectedEntity
 
-MODELS = ("aoe2_yolo_v9", "aoe2_yolo_v11")
+MODELS = ("aoe2_yolo_v12_nms736", "aoe2_yolo_v11")  # The served model, and the previous one.
 SHEET_WIDTH = 1512  # Points on the Mac display: one sheet fills it.
 # The VM frames carry no band; Mac frames are the game area already. Both are
 # 3024 wide, so one sheet scale fits both.
