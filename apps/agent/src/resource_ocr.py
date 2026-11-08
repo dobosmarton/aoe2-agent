@@ -737,7 +737,12 @@ def _load_hud_digit_bank() -> dict[str, list[np.ndarray]]:
     return _hud_digit_bank
 
 
-def read_idle_count(rgb: np.ndarray, pop: FieldBox, idle_box: FieldBox | None = None) -> int | None:
+def read_idle_count(
+    rgb: np.ndarray,
+    pop: FieldBox,
+    idle_box: FieldBox | None = None,
+    white_threshold: int = _IDLE_WHITE_THR,
+) -> int | None:
     """Idle-villager COUNT from the badge's corner digit(s); None = unreadable.
 
     The count is drawn bottom-right of the badge in the HUD digit font: white
@@ -770,7 +775,7 @@ def read_idle_count(rgb: np.ndarray, pop: FieldBox, idle_box: FieldBox | None = 
         return None
 
     patch = rgb[y0:y1, x0:x1]
-    white_mask = cast("np.ndarray", patch.min(axis=2) >= _IDLE_WHITE_THR)
+    white_mask = cast("np.ndarray", patch.min(axis=2) >= white_threshold)
     mask = cast("np.ndarray", white_mask.astype(np.uint8) * 255)
     glyphs = _segment_components(
         mask,
@@ -1046,7 +1051,12 @@ def read_resource_bar_pixels(
         if not idle_present:
             out["idle_count"] = 0
         else:
-            idle_count = read_idle_count(rgb, pop_box, calibration.fields.get("idle_count"))
+            idle_count = read_idle_count(
+                rgb,
+                pop_box,
+                calibration.fields.get("idle_count"),
+                calibration.count_white_threshold,
+            )
             if idle_count is not None:
                 out["idle_count"] = idle_count
 

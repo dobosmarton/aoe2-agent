@@ -831,3 +831,25 @@ def test_a_name_line_box_is_read_without_text_detection(
     calibration = _selection_calibration(name_line=name_line)
     assert resource_ocr.read_selected_unit_pixels(frame, calibration) == expected
     assert engine.calls[0].get("use_det") is detection
+
+
+def test_the_mac_idle_count_uses_the_calibrations_count_threshold(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from gameplay_agent import resource_ocr
+
+    seen: list[int] = []
+
+    def fake_idle(_rgb: object, _pop: object, _box: object, white: int = 0) -> int:
+        seen.append(white)
+        return 16
+
+    monkeypatch.setattr(resource_ocr, "read_idle_count", fake_idle)
+    monkeypatch.setattr(resource_ocr, "detect_idle_present", lambda *_: True)
+    calibration = resource_ocr.calibration_for(3024, 1898)
+    assert calibration is not None
+    frame = np.zeros((1898, 3024, 3), dtype=np.uint8)
+    hud = resource_ocr.prepare_hud_pixels(frame, (3024, 1898))
+    readings = resource_ocr.read_resource_bar_pixels(hud, calibration, backend="template")
+    assert readings["idle_count"] == 16
+    assert seen == [160]

@@ -20,7 +20,7 @@ fields:
   gold_workers: [357, 55, 389, 79]
   stone_workers: [512, 55, 545, 79]
   villagers: [657, 55, 701, 79]
-  idle_count: [831, 43, 861, 68]
+  idle_count: [838, 43, 875, 68]  # Wide enough for two digits (16 idle was read as 1).
   selection: [420, 1636, 760, 1716]
   selection_name: [450, 1645, 760, 1695]  # The name line alone: read without text detection.
   age: [1000, 18, 1360, 74]

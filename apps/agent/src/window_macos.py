@@ -118,9 +118,16 @@ def screen_span_points() -> tuple[float, float]:
 
 
 def display_scale() -> float:
-    """Pixels per point on the main display: 2 on a Retina panel."""
+    """Pixels per point on the main display: 2 on a Retina panel.
+
+    A sleeping display reports a mode 0 points wide; the screen's backing scale
+    still holds then.
+    """
     mode = Quartz.CGDisplayCopyDisplayMode(Quartz.CGMainDisplayID())
-    return Quartz.CGDisplayModeGetPixelWidth(mode) / Quartz.CGDisplayModeGetWidth(mode)
+    width = Quartz.CGDisplayModeGetWidth(mode) if mode is not None else 0
+    if not width:
+        return float(AppKit.NSScreen.mainScreen().backingScaleFactor())
+    return Quartz.CGDisplayModeGetPixelWidth(mode) / width
 
 
 def menu_bar_points() -> float:
