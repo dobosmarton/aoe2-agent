@@ -1,20 +1,22 @@
 """Screen capture module for AoE2 LLM Agent."""
 
+import atexit
 import io
-import time
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-import mss
 import numpy as np
 from PIL import Image
 
+from .capture import FrameGrabber, make_grabber
 from .config import config
 from .window import (
     GameGeometry,
     game_platform,
     get_game_geometry,
-    get_game_window_rect,
     get_input_scale,
 )
 
@@ -47,51 +49,66 @@ class NativeCapture:
         return _jpeg(self.image(), config.screenshot_quality if quality is None else quality)
 
 
-def _capture_image(monitor: int, rect: tuple[int, int, int, int] | None = None) -> Image.Image:
-    """Read native game-window pixels once, before either encoding path."""
-    if game_platform() == "macos":
-        return Image.fromarray(_grab_macos(_macos_geometry()))
-    with mss.MSS() as sct:
-        if rect is None:
-            rect = get_game_window_rect()
-        if rect:
-            left, top, width, height = rect
-            region = {"left": left, "top": top, "width": width, "height": height}
-            screenshot = sct.grab(region)
-        else:
-            screenshot = sct.grab(sct.monitors[monitor])
-        return Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
+_grabber: FrameGrabber | None = None
+_grabber_lock = threading.Lock()
 
 
-def _macos_geometry() -> GameGeometry:
-    """The Mac game's geometry. Without the window there is nothing to capture: the
-    whole display would show this terminal, not the game."""
+def frame_grabber() -> FrameGrabber:
+    """The capture method for this run, built on first use (see `capture.py`)."""
+    global _grabber
+    with _grabber_lock:
+        if _grabber is None:
+            _grabber = make_grabber(config.capture_method, game_platform())
+        return _grabber
+
+
+def close_capture() -> None:
+    """Stop the capture method, such as the Mac stream. The next grab starts it again."""
+    global _grabber
+    with _grabber_lock:
+        grabber, _grabber = _grabber, None
+    if grabber is not None:
+        grabber.close()
+
+
+atexit.register(close_capture)
+
+
+@contextmanager
+def use_grabber(grabber: FrameGrabber) -> Iterator[FrameGrabber]:
+    """Capture through `grabber` inside the block; for tests and tools."""
+    global _grabber
+    with _grabber_lock:
+        previous, _grabber = _grabber, grabber
+    try:
+        yield grabber
+    finally:
+        with _grabber_lock:
+            _grabber = previous
+
+
+def _game_geometry() -> GameGeometry | None:
+    """The game's geometry. On macOS there is no capture without the window: the whole
+    display would show this terminal, not the game."""
     geometry = get_game_geometry()
-    if geometry is None:
+    if geometry is None and game_platform() == "macos":
         raise RuntimeError("the game window wasn't found, so nothing was captured")
     return geometry
 
 
-def _grab_macos(geometry: GameGeometry) -> np.ndarray:
-    from .screen_macos import grab_game_area
-
-    return grab_game_area(geometry)
+def _capture_image(monitor: int) -> Image.Image:
+    """Read native game-window pixels once, before either encoding path."""
+    frame = frame_grabber().grab(_game_geometry(), monitor)
+    return Image.frombytes("RGB", (frame.width, frame.height), frame.rgb)
 
 
 def capture_native(monitor: int = 1) -> NativeCapture:
     """Keep native pixels so detection, HUD and camera estimation share a view."""
-    stamped = time.monotonic()
-    if game_platform() == "macos":
-        geometry = _macos_geometry()
-        pixels = _grab_macos(geometry)  # Exactly the geometry's size, or it raised.
-        rect = geometry.rect
-        return NativeCapture(
-            pixels.tobytes(), geometry.width, geometry.height, stamped, rect, _cursor_in(rect)
-        )
-    rect = get_game_window_rect()
-    image = _capture_image(monitor, rect)
+    geometry = _game_geometry()
+    frame = frame_grabber().grab(geometry, monitor)
+    rect = geometry.rect if geometry is not None else None
     return NativeCapture(
-        image.tobytes(), image.width, image.height, stamped, rect, _cursor_in(rect)
+        frame.rgb, frame.width, frame.height, frame.captured_at, rect, _cursor_in(rect)
     )
 
 

@@ -5,12 +5,11 @@ from __future__ import annotations
 import sys
 from types import SimpleNamespace
 
-import numpy as np
 import pytest
 from gameplay_agent import screen, window
 from gameplay_agent.window import GameGeometry, NullBackend, to_input_point
 
-from tests.window_fakes import MAC_GAME, FakeWindowBackend
+from tests.window_fakes import MAC_GAME, FakeGrabber, FakeWindowBackend
 
 
 @pytest.mark.parametrize("offset", [(0, 0), (200, 100), (-8, 31)])
@@ -53,21 +52,23 @@ def test_a_windows_geometry_keeps_the_old_rect_tuple() -> None:
 def test_a_mac_capture_is_the_game_area_with_the_cursor_in_frame_pixels(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    grabbed: list[GameGeometry] = []
-
-    def grab(geometry: GameGeometry) -> np.ndarray:
-        grabbed.append(geometry)
-        return np.zeros((geometry.height, geometry.width, 3), dtype=np.uint8)
-
-    monkeypatch.setattr(screen, "_grab_macos", grab)
     pointer = SimpleNamespace(position=lambda: SimpleNamespace(x=500, y=433))
     monkeypatch.setitem(sys.modules, "pyautogui", pointer)
-    with window.use_backend(FakeWindowBackend()):
+    with window.use_backend(FakeWindowBackend()), screen.use_grabber(FakeGrabber()) as grabber:
         capture = screen.capture_native()
-    assert grabbed == [MAC_GAME]
+    assert grabber.grabs == [MAC_GAME]
     assert (capture.width, capture.height) == (3024, 1898)
     assert capture.window_rect == (0, 66, 3024, 1898)
     assert capture.cursor == (1000, 800)
+    assert capture.captured_at == grabber.at  # When the screen looked like this.
+
+
+def test_a_windows_capture_without_the_window_grabs_the_monitor() -> None:
+    backend = FakeWindowBackend(platform="windows", game=None)
+    with window.use_backend(backend), screen.use_grabber(FakeGrabber()) as grabber:
+        capture = screen.capture_native()
+    assert grabber.grabs == [None]
+    assert capture.window_rect is None
 
 
 def test_a_mac_capture_without_the_window_raises_instead_of_grabbing_the_display() -> None:

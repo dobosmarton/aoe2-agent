@@ -203,3 +203,107 @@ def test_capture_refuses_a_frame_of_the_wrong_size(monkeypatch: pytest.MonkeyPat
 def test_capture_needs_the_window_number() -> None:
     with pytest.raises(ValueError, match="window number"):
         screen_macos.grab_game_area(GameGeometry(0, 0, 8, 6, 2.0))
+
+
+def test_bgra_rows_above_the_game_area_and_spare_bytes_are_dropped() -> None:
+    width, height, row_bytes = 1, 3, 4
+    raw = bytes((0, 0, 9, 255, 0, 0, 8, 255, 0, 0, 7, 255)) + bytes(16)  # Spare bytes.
+    rgb = screen_macos.bgra_to_rgb(raw, width, height, row_bytes, top=1)
+    assert rgb[:, 0, 0].tolist() == [8, 7]
+
+
+def test_window_grabber_stamps_before_the_capture(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(screen_macos, "Quartz", _fake_quartz(8, 6, []))
+    frame = screen_macos.WindowGrabber().grab(GameGeometry(0, 66, 8, 6, 2.0, 42), 1)
+    assert (frame.width, frame.height, len(frame.rgb)) == (8, 6, 8 * 6 * 3)
+
+
+COMPLETE = screen_macos.ScreenCaptureKit.SCFrameStatusComplete
+IDLE = screen_macos.ScreenCaptureKit.SCFrameStatusIdle
+BLANK = 2
+
+
+def test_idle_notices_keep_the_last_image_current() -> None:
+    latest = screen_macos.LatestFrame()
+    latest.offer("first", COMPLETE, 1.0)
+    latest.offer(None, IDLE, 2.0)
+    assert latest.take(0) == ("first", 2.0)
+
+
+def test_blank_frames_and_idle_before_any_image_are_ignored() -> None:
+    latest = screen_macos.LatestFrame()
+    latest.offer(None, IDLE, 1.0)
+    with pytest.raises(RuntimeError, match="no frame"):
+        latest.take(0)
+    latest.offer("image", COMPLETE, 2.0)
+    latest.offer("blank", BLANK, 3.0)
+    assert latest.take(0) == ("image", 2.0)
+
+
+class _FakeStream:
+    def __init__(self, geometry: GameGeometry, opened: list[GameGeometry]) -> None:
+        opened.append(geometry)
+        self.top = 66
+        self.stopped = False
+
+    def take(self) -> tuple[object, float]:
+        return "buffer", 7.5
+
+    def stop(self) -> None:
+        self.stopped = True
+
+
+def _stream_grabber(opened: list[GameGeometry], rows: list[int]) -> screen_macos.StreamGrabber:
+    streams: list[_FakeStream] = []
+
+    def open_stream(geometry: GameGeometry) -> _FakeStream:
+        streams.append(_FakeStream(geometry, opened))
+        return streams[-1]
+
+    def to_rgb(buffer: object, top: int) -> np.ndarray:
+        assert buffer == "buffer"
+        rows.append(top)
+        geometry = opened[-1]
+        return np.zeros((geometry.height, geometry.width, 3), dtype=np.uint8)
+
+    grabber = screen_macos.StreamGrabber(open_stream, to_rgb)
+    grabber.streams = streams  # type: ignore[attr-defined]
+    return grabber
+
+
+def test_the_stream_starts_once_and_gives_the_game_area() -> None:
+    opened: list[GameGeometry] = []
+    rows: list[int] = []
+    grabber = _stream_grabber(opened, rows)
+    first = grabber.grab(MAC_GAME, 1)
+    grabber.grab(MAC_GAME, 1)
+    assert opened == [MAC_GAME]
+    assert rows == [66, 66]  # The band above the game area is cut.
+    assert (first.width, first.height, first.captured_at) == (3024, 1898, 7.5)
+
+
+def test_the_stream_restarts_when_the_window_changes_and_stops_on_close() -> None:
+    opened: list[GameGeometry] = []
+    grabber = _stream_grabber(opened, [])
+    grabber.grab(MAC_GAME, 1)
+    moved = GameGeometry(0, 66, 3024, 1898, 2.0, 43)
+    grabber.grab(moved, 1)
+    assert opened == [MAC_GAME, moved]
+    first, second = grabber.streams  # type: ignore[attr-defined]
+    assert first.stopped and not second.stopped
+    grabber.close()
+    assert second.stopped
+
+
+def test_the_stream_refuses_a_frame_of_the_wrong_size() -> None:
+    def half_size(_buffer: object, _top: int) -> np.ndarray:
+        return np.zeros((949, 1512, 3), dtype=np.uint8)
+
+    grabber = screen_macos.StreamGrabber(lambda g: _FakeStream(g, []), half_size)
+    with pytest.raises(RuntimeError, match="stream gave 1512x949"):
+        grabber.grab(MAC_GAME, 1)
+
+
+def test_the_stream_needs_the_window_number() -> None:
+    with pytest.raises(ValueError, match="window number"):
+        screen_macos.StreamGrabber().grab(GameGeometry(0, 0, 8, 6, 2.0), 1)

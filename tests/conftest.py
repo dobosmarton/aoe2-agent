@@ -51,13 +51,17 @@ for _mod_name in ("pyautogui", "pygetwindow"):
 
 @pytest.fixture(autouse=True)
 def _no_real_game_window(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Tests never see a real game window, so they pass with the game open or closed.
+    """Tests never see a real game window or grab the real screen, so they pass with
+    the game open or closed.
 
     A test that wants a platform installs its own backend over this one.
     """
-    from gameplay_agent import window
+    from gameplay_agent import screen, window
+
+    from tests.window_fakes import NoScreen
 
     monkeypatch.setattr(window, "_backend", window.NullBackend())
+    monkeypatch.setattr(screen, "_grabber", NoScreen())
 
 
 def pytest_addoption(parser):
