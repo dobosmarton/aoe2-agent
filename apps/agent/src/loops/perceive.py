@@ -206,9 +206,13 @@ async def _refresh_spatial_once(ctx: LoopContext, request: asyncio.Future[Spatia
     """Service an input-triggered capture before starting another full OCR pass."""
     timings = TickTimings()
     try:
-        refresh = await ctx.source.capture_spatial(
-            timings, selection_only=ctx.frames.selection_only(request)
-        )
+        detection_only = ctx.frames.detection_only(request)
+        if detection_only:
+            refresh = await ctx.source.capture_spatial(timings, detection_only=True)
+        else:
+            refresh = await ctx.source.capture_spatial(
+                timings, selection_only=ctx.frames.selection_only(request)
+            )
         if refresh.spatial_valid and refresh.sighting is not None:
             _publish_spatial(ctx, refresh.sighting.frame.tick, refresh.sighting)
         elif (
@@ -226,7 +230,7 @@ async def _refresh_spatial_once(ctx: LoopContext, request: asyncio.Future[Spatia
             )
             if ctx.ledger is not None:
                 save_action_evidence(ctx, refresh.screenshot)
-        if ctx.ledger is not None:
+        if ctx.ledger is not None and not detection_only:  # It didn't read the selection.
             ctx.ledger.selected_unit = refresh.selected_unit
             ctx.ledger.selected_at_revision = refresh.input_revision
         ctx.frames.complete_spatial_refresh(request, refresh)

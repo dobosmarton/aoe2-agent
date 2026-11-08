@@ -113,6 +113,7 @@ async def run(actions: list[str], seconds: float) -> int:
         executor.set_rescan_fn(refresh)
         executor.set_rescan_full_fn(refresh)
         executor.set_selection_refresh_fn(frame_refresh(ctx.frames, selection_only=True))
+        executor.set_detection_refresh_fn(frame_refresh(ctx.frames, detection_only=True))
         not_ready = await game_loop._prepare_macos_game(profile)
         if not_ready is not None:
             print(f"smoke: game not ready: {not_ready}", flush=True)

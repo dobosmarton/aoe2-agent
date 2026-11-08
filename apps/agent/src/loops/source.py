@@ -67,13 +67,15 @@ _REFRESH_TIMEOUT = 3.0
 
 
 def frame_refresh(
-    frames: FramePipe, *, selection_only: bool = False
+    frames: FramePipe, *, selection_only: bool = False, detection_only: bool = False
 ) -> Callable[[], Awaitable[bool]]:
-    """Wait for a post-input view, optionally skipping expensive detection."""
+    """Wait for a post-input view, optionally skipping detection or the HUD reads."""
 
     async def refresh() -> bool:
         asked = time.monotonic()
-        request = frames.request_spatial_refresh(selection_only=selection_only)
+        request = frames.request_spatial_refresh(
+            selection_only=selection_only, detection_only=detection_only
+        )
         try:
             result = await asyncio.wait_for(request, timeout=_REFRESH_TIMEOUT)
         except TimeoutError:
@@ -151,9 +153,9 @@ class FrameSource(Protocol):
         ...
 
     async def capture_spatial(
-        self, timings: TickTimings, *, selection_only: bool = False
+        self, timings: TickTimings, *, selection_only: bool = False, detection_only: bool = False
     ) -> SpatialRefresh:
-        """Capture after input; skip detection when only selection/HUD is needed."""
+        """Capture after input; skip detection, or the HUD and selection reads."""
         ...
 
     def close(self) -> None:
@@ -493,9 +495,13 @@ class GameSource:
         )
 
     async def capture_spatial(
-        self, timings: TickTimings, *, selection_only: bool = False
+        self, timings: TickTimings, *, selection_only: bool = False, detection_only: bool = False
     ) -> SpatialRefresh:
-        """One native post-input capture; a requested detector refresh has priority."""
+        """One native post-input capture; a requested detector refresh has priority.
+
+        `detection_only` skips the HUD and selected-unit reads: published boxes are
+        as old as the slowest lane, and those reads spiked to 947 ms live.
+        """
         capture = await self.capture_stream()
         pixels = capture.pixels
         calibration = calibration_for(pixels.width, pixels.height)
@@ -513,15 +519,20 @@ class GameSource:
             sighting: Sighting | None = None
             observed_camera_revision = capture.camera_revision
         else:
-            hud_readings, selected_unit, detected = await asyncio.gather(
-                self._hud(pixels, 0, timings),
-                selected(),
-                self._detect_with_screenshot(capture, 0),
-            )
-            raw, screenshot = detected
+            if detection_only:
+                hud_readings: ResourceReadings = {}
+                selected_unit = None
+                raw, screenshot = await self._detect_with_screenshot(capture, 0)
+            else:
+                hud_readings, selected_unit, detected = await asyncio.gather(
+                    self._hud(pixels, 0, timings),
+                    selected(),
+                    self._detect_with_screenshot(capture, 0),
+                )
+                raw, screenshot = detected
             sighting = await self.integrate_spatial(raw) if raw is not None else None
             entities = snapshot_entities(sighting.frame.entities) if sighting is not None else None
-            if sighting is not None:
+            if sighting is not None and not detection_only:
                 sighting = Sighting(
                     replace(
                         sighting.frame,

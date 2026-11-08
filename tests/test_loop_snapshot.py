@@ -152,3 +152,23 @@ def test_an_urgent_request_is_consumed_once() -> None:
         return time.monotonic() - started
 
     assert _run(drive()) >= 0.04
+
+
+def test_a_detection_only_request_is_told_apart_and_cleared() -> None:
+    async def run() -> tuple[bool, bool, bool]:
+        pipe = FramePipe()
+        request = pipe.request_spatial_refresh(detection_only=True)
+        flags = (pipe.detection_only(request), pipe.selection_only(request))
+        pipe.clear_spatial_refresh(request)
+        return (*flags, pipe.detection_only(request))
+
+    assert asyncio.run(run()) == (True, False, False)
+
+
+def test_selection_only_wins_over_detection_only() -> None:
+    async def run() -> bool:
+        pipe = FramePipe()
+        request = pipe.request_spatial_refresh(selection_only=True, detection_only=True)
+        return pipe.detection_only(request)
+
+    assert asyncio.run(run()) is False
