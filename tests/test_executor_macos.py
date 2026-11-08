@@ -248,10 +248,11 @@ def test_mac_startup_brings_the_game_forward_then_applies_the_profile(
         return ex.ActionResult(True, "ok")
 
     monkeypatch.setattr(game_loop, "set_absolute_zoom", zoom)
+    monkeypatch.setattr(game_loop, "_popup_open", lambda: False)
     profile = load_profile(_MAC_PROFILE).model_copy(
         update={"zoom_steps": 6, "modifier_map": {"ctrl": "command"}}
     )
-    assert _run(game_loop._prepare_macos_game(profile))
+    assert _run(game_loop._prepare_macos_game(profile)) is None
     assert mac.focus_calls == 1
     assert zooms == [6]
     assert ex._modifier_map == {"ctrl": "command"}
@@ -261,5 +262,13 @@ def test_mac_startup_stops_when_the_game_cannot_be_brought_forward(
     mouse: _Input, mac: FakeWindowBackend
 ) -> None:
     mac.front = False
-    assert not _run(game_loop._prepare_macos_game(None))
+    assert _run(game_loop._prepare_macos_game(None)) == "lost_focus"
     assert mouse.calls == []
+
+
+def test_mac_startup_stops_while_a_menu_is_open(
+    mouse: _Input, mac: FakeWindowBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(game_loop, "_popup_open", lambda: True)
+    assert _run(game_loop._prepare_macos_game(None)) == "menu_open"
+    assert mouse.calls == []  # No zoom: the scroll would land on the menu.

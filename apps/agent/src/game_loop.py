@@ -84,21 +84,33 @@ def _untypeable_agent_keys() -> list[str]:
     return missing
 
 
-async def _prepare_macos_game(profile: GameProfile | None) -> bool:
-    """Bring the game forward once, then fix its zoom and modifier keys.
+def _popup_open() -> bool:
+    """Whether a menu or popup dims the game. Input would land on it instead."""
+    from .game_screen import popup_open
+    from .screen import capture_native
+
+    return popup_open(capture_native().pixels())
+
+
+async def _prepare_macos_game(profile: GameProfile | None) -> str | None:
+    """Bring the game forward once, then fix its zoom and modifier keys. Returns why
+    the game isn't ready, or None.
 
     This is the only place the agent pulls the game to the front. After this, input
     stops while another app is in front, so switching away stops the agent.
     """
     if not ensure_game_focused():
         log.error("game_not_in_front", message="the game window couldn't be brought forward")
-        return False
+        return "lost_focus"
+    if await asyncio.to_thread(_popup_open):
+        log.error("game_menu_open", fix="close the game's menu or popup, then start the agent")
+        return "menu_open"
     set_modifier_map(profile.modifier_map.items() if profile is not None else ())
     zoom_steps = profile.zoom_steps if profile is not None else 0
     zoom = await set_absolute_zoom(zoom_steps)
     if not zoom.success:
         log.warning("zoom_not_set", detail=zoom.detail, zoom_steps=zoom_steps)
-    return True
+    return None
 
 
 @runtime_checkable
@@ -290,8 +302,8 @@ async def game_loop(
         )
         relative_zoom = True
         if game_platform() == "macos":
-            if not await _prepare_macos_game(profile):
-                _request_stop(ctx, memory, "lost_focus")
+            if (not_ready := await _prepare_macos_game(profile)) is not None:
+                _request_stop(ctx, memory, not_ready)
                 return memory
             relative_zoom = False
         # Before the first frame on purpose: the scout explores during the

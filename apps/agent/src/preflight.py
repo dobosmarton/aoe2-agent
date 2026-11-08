@@ -21,6 +21,7 @@ import numpy as np
 from PIL import Image
 
 from .game_profile import GameProfile, load_profile
+from .game_screen import hud_brightness, popup_open
 from .resource_ocr import (
     calibration_for,
     prepare_hud_pixels,
@@ -160,6 +161,7 @@ def run_preflight(
         checks.extend(inspect_pixels(profile, capture))
         if macos:
             checks.append(_band_check(capture.pixels()))
+            checks.append(_popup_check(capture.pixels()))
     else:
         checks.extend(inspect_capture(profile, screenshot))
     if macos:
@@ -176,6 +178,17 @@ def run_preflight(
             )
         )
     return tuple(checks)
+
+
+def _popup_check(rgb: np.ndarray) -> PreflightCheck:
+    """The game isn't dimmed behind a menu, where input would hit menu buttons."""
+    bar, panel = hud_brightness(rgb)
+    return PreflightCheck(
+        "no_popup",
+        not popup_open(rgb),
+        f"resource bar brightness {bar:.0f}, bottom panel {panel:.0f}; a menu or popup "
+        "dims both, so close it before starting the agent",
+    )
 
 
 def _passed(checks: list[PreflightCheck], name: str) -> bool:
