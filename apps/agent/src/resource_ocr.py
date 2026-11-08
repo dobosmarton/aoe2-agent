@@ -349,6 +349,12 @@ def load_templates(template_dir: Path, *, include_slash: bool) -> TemplateBank:
     return templates
 
 
+# Only a "1" is this narrow in the HUD's small digits: width over height measured
+# 0.38 for the Mac's 1 and 0.57-0.69 for every other digit. Stretched to template
+# size a lone 1 matched 4 (0.64) better than 1 (0.54) live, and 11 read as 40.
+_NARROW_ONE_ASPECT = 0.45
+
+
 def _segment_components(
     binary: np.ndarray,
     *,
@@ -356,11 +362,12 @@ def _segment_components(
     max_h: float | None = None,
     max_w: float | None = None,
     min_area: int,
-) -> list[tuple[int, np.ndarray]]:
+) -> list[tuple[int, np.ndarray, float]]:
     """Glyph-sized connected components of `binary`, normalized, left-to-right.
 
-    Returns (x, normalized_glyph) pairs. Size bounds are absolute pixels — the
-    caller derives them from its own geometry (field height, badge row height).
+    Returns (x, normalized_glyph, width_over_height) triples. Size bounds are
+    absolute pixels — the caller derives them from its own geometry (field height,
+    badge row height). The ratio survives normalization, which stretches a glyph.
     """
     import cv2
 
@@ -368,7 +375,7 @@ def _segment_components(
         "tuple[int, np.ndarray, np.ndarray, np.ndarray]",
         cv2.connectedComponentsWithStats(binary),
     )
-    glyphs: list[tuple[int, np.ndarray]] = []
+    glyphs: list[tuple[int, np.ndarray, float]] = []
     for i in range(1, n):  # skip background label 0
         stat_row = cast("np.ndarray", stats[i])  # [x, y, w, h, area]
         x, y, w, h, area = (int(v) for v in cast("list[int]", stat_row.tolist()))
@@ -377,7 +384,7 @@ def _segment_components(
         if (max_h is not None and h > max_h) or (max_w is not None and w > max_w):
             continue
         glyph = cast("np.ndarray", binary[y : y + h, x : x + w])
-        glyphs.append((x, _normalize_glyph(glyph)))
+        glyphs.append((x, _normalize_glyph(glyph), w / h))
     glyphs.sort(key=lambda g: g[0])
     return glyphs
 
@@ -800,7 +807,10 @@ def read_idle_count(
         return None
 
     digits = ""
-    for _x, glyph in glyphs:
+    for _x, glyph, aspect in glyphs:
+        if aspect < _NARROW_ONE_ASPECT:
+            digits += "1"
+            continue
         best_char, best_score = _classify_bank(glyph, bank)
         if best_score < _IDLE_COUNT_MIN_NCC:  # unfamiliar shape — don't guess
             return None
@@ -825,7 +835,10 @@ def read_hud_count(
         return None
     bank = _load_hud_digit_bank(extra_digits)
     digits = ""
-    for _x, glyph in glyphs:
+    for _x, glyph, aspect in glyphs:
+        if aspect < _NARROW_ONE_ASPECT:
+            digits += "1"
+            continue
         char, score = _classify_bank(glyph, bank)
         if score < _WORKFORCE_COUNT_MIN_NCC:
             return None

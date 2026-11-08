@@ -872,3 +872,13 @@ def test_a_calibrations_extra_digit_samples_join_the_shared_bank(tmp_path: Path)
     assert mac is not None and vm is not None
     assert mac.count_template_dir is not None and mac.count_template_dir.is_dir()
     assert vm.count_template_dir is None
+
+
+@pytest.mark.parametrize(("strokes", "expected"), [((24,), 1), ((24, 40), 11)])
+def test_narrow_glyphs_are_read_as_ones(strokes: tuple[int, ...], expected: int) -> None:
+    from gameplay_agent.resource_ocr import FieldBox, read_hud_count
+
+    frame = np.zeros((40, 80, 3), dtype=np.uint8)
+    for x in strokes:
+        frame[10:24, x : x + 5] = 255  # 5 wide, 14 tall: the Mac's lone 1.
+    assert read_hud_count(frame, FieldBox(0, 0, 80, 40), 160) == expected
