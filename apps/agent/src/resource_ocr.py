@@ -150,6 +150,7 @@ class _CalibrationData(TypedDict):
     height: int
     fields: dict[str, list[int]]
     template_dir: NotRequired[str]
+    count_white_threshold: NotRequired[int]
 
 
 @dataclass
@@ -165,6 +166,10 @@ class Calibration:
     height: int
     fields: dict[str, FieldBox]
     template_dir: Path
+    # Brightness a pixel needs, in every channel, to count as part of a small HUD
+    # count (workers, villagers). The Mac draws the thin strokes of these digits
+    # dimmer, so a "0" broke into two "1"s at the VM's level.
+    count_white_threshold: int = _IDLE_WHITE_THR
 
     def field_rects(self) -> dict[str, tuple[int, int, int, int]]:
         """Per-field ``(x0, y0, x1, y1)`` rectangles in screenshot pixels.
@@ -192,6 +197,7 @@ class Calibration:
             height=int(data["height"]),
             fields=fields,
             template_dir=tdir,
+            count_white_threshold=int(data.get("count_white_threshold", _IDLE_WHITE_THR)),
         )
 
 
@@ -301,22 +307,34 @@ def _ncc(a: np.ndarray, b: np.ndarray) -> float:
 # ---------------------------------------------------------------------------
 
 
-def load_templates(template_dir: Path, *, include_slash: bool) -> dict[str, np.ndarray]:
-    """Load digit (+ optional slash) glyph templates, binarized and resized."""
+TemplateBank = dict[str, tuple[np.ndarray, ...]]
+
+
+def _load_glyph(path: Path) -> np.ndarray:
+    gray = np.asarray(Image.open(path).convert("L"), dtype=np.uint8)
+    # Fixed polarity, NOT _binarize_digits: templates are saved white-on-black
+    # by the harvest scripts, and Otsu's minority-foreground auto-invert FLIPS
+    # a tight crop whose glyph fills most of its own image (8 of 11 digits at
+    # 3024x1672 loaded inverted and everything classified as '3'/'7').
+    return _normalize_glyph(np.where(gray > 127, 255, 0).astype(np.uint8))
+
+
+def load_templates(template_dir: Path, *, include_slash: bool) -> TemplateBank:
+    """Load digit (+ optional slash) glyph templates, binarized and resized.
+
+    `<name>.png` is required for each character; extra samples `<name>_<n>.png`
+    join it, and a glyph is read as the character of its best-matching sample.
+    """
     chars = [str(d) for d in range(10)]
     paths = {c: template_dir / f"{c}.png" for c in chars}
     if include_slash:
         paths["/"] = template_dir / "slash.png"
-    templates: dict[str, np.ndarray] = {}
+    templates: TemplateBank = {}
     for char, p in paths.items():
         if not p.exists():
             raise FileNotFoundError(f"missing glyph template: {p}")
-        gray = np.asarray(Image.open(p).convert("L"), dtype=np.uint8)
-        # Fixed polarity, NOT _binarize_digits: templates are saved white-on-black
-        # by the harvest scripts, and Otsu's minority-foreground auto-invert FLIPS
-        # a tight crop whose glyph fills most of its own image (8 of 11 digits at
-        # 3024x1672 loaded inverted and everything classified as '3'/'7').
-        templates[char] = _normalize_glyph(np.where(gray > 127, 255, 0).astype(np.uint8))
+        extra = sorted(template_dir.glob(f"{p.stem}_*.png"))
+        templates[char] = tuple(_load_glyph(sample) for sample in (p, *extra))
     return templates
 
 
@@ -353,16 +371,6 @@ def _segment_components(
     return glyphs
 
 
-def _segment_glyphs(field_binary: np.ndarray) -> list[tuple[int, np.ndarray]]:
-    """Connected-component digit segmentation of a resource field, left-to-right.
-
-    Filters specks by height relative to the field so noise/anti-aliasing
-    doesn't become phantom digits.
-    """
-    field_h = cast("int", field_binary.shape[0])
-    return _segment_components(field_binary, min_h=0.3 * field_h, min_area=6)
-
-
 def _classify_bank(
     glyph: np.ndarray, bank: Mapping[str, Sequence[np.ndarray]]
 ) -> tuple[str, float]:
@@ -383,15 +391,79 @@ def _classify_bank(
 _FIELD_MIN_NCC = 0.4
 
 
-def _read_field(field_img: np.ndarray, templates: dict[str, np.ndarray]) -> str:
+# A component wider than this (width over height) may be two touching digits. One
+# digit measures about 0.7; the Mac's tight kerning joins pairs like "60" and "90"
+# into one blob of about 1.4.
+_SPLIT_ASPECT = 1.0
+
+
+def _field_components(binary: np.ndarray) -> list[np.ndarray]:
+    """Glyph-sized components of a field, left-to-right, cropped but not normalized."""
+    import cv2
+
+    field_h = cast("int", binary.shape[0])
+    n, _labels, stats, _centroids = cast(
+        "tuple[int, np.ndarray, np.ndarray, np.ndarray]",
+        cv2.connectedComponentsWithStats(binary),
+    )
+    found: list[tuple[int, np.ndarray]] = []
+    for i in range(1, n):
+        stat_row = cast("np.ndarray", stats[i])  # [x, y, w, h, area]
+        x, y, w, h, area = (int(v) for v in cast("list[int]", stat_row.tolist()))
+        if h >= 0.3 * field_h and area >= 6:
+            found.append((x, cast("np.ndarray", binary[y : y + h, x : x + w])))
+    found.sort(key=lambda item: item[0])
+    return [glyph for _x, glyph in found]
+
+
+def _trim(glyph: np.ndarray) -> np.ndarray:
+    """The glyph without empty border rows and columns."""
+    inked = glyph > 0
+    rows = cast("list[int]", np.flatnonzero(cast("np.ndarray", inked.any(axis=1))).tolist())
+    cols = cast("list[int]", np.flatnonzero(cast("np.ndarray", inked.any(axis=0))).tolist())
+    if not rows or not cols:
+        return glyph
+    return glyph[rows[0] : rows[-1] + 1, cols[0] : cols[-1] + 1]
+
+
+def _split_pair(glyph: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:
+    """Two touching digits, cut out along the thinnest run of columns in the blob's
+    middle third (the bridge where they touch)."""
+    height, width = cast("int", glyph.shape[0]), cast("int", glyph.shape[1])
+    if width < _SPLIT_ASPECT * height:
+        return None
+    ink = cast("list[int]", cast("np.ndarray", (glyph > 0).sum(axis=0)).tolist())
+    start, stop = width // 3, width - width // 3
+    if stop <= start:
+        return None
+    thinnest = min(ink[start:stop])
+    first = start + ink[start:stop].index(thinnest)
+    last = first
+    while last + 1 < stop and ink[last + 1] == thinnest:
+        last += 1
+    left, right = _trim(glyph[:, :first]), _trim(glyph[:, last + 1 :])
+    if left.size == 0 or right.size == 0:
+        return None
+    return left, right
+
+
+def _read_field(field_img: np.ndarray, templates: TemplateBank) -> str:
+    """Read a field glyph by glyph. A shape no template matches is first tried as two
+    touching digits; if that fails too, the field is unknown ("") rather than guessed."""
     binary = _binarize_digits(field_img)
-    bank = {char: (tmpl,) for char, tmpl in templates.items()}
     chars: list[str] = []
-    for _x, glyph in _segment_glyphs(binary):
-        char, score = _classify_bank(glyph, bank)
-        if score < _FIELD_MIN_NCC:  # unfamiliar shape (e.g. merged digits) — don't guess
+    for glyph in _field_components(binary):
+        char, score = _classify_bank(_normalize_glyph(glyph), templates)
+        if score >= _FIELD_MIN_NCC:
+            chars.append(char)
+            continue
+        pair = _split_pair(glyph)
+        if pair is None:
             return ""
-        chars.append(char)
+        halves = [_classify_bank(_normalize_glyph(half), templates) for half in pair]
+        if any(half_score < _FIELD_MIN_NCC for _char, half_score in halves):
+            return ""
+        chars.extend(half_char for half_char, _score in halves)
     return "".join(chars)
 
 
@@ -715,12 +787,14 @@ def read_idle_count(rgb: np.ndarray, pop: FieldBox, idle_box: FieldBox | None = 
     return int(digits) if digits.isdigit() else None
 
 
-def read_hud_count(rgb: np.ndarray, box: FieldBox) -> int | None:
+def read_hud_count(
+    rgb: np.ndarray, box: FieldBox, white_threshold: int = _IDLE_WHITE_THR
+) -> int | None:
     """Read a small white-on-icon workforce count without guessing on bad glyphs."""
     patch = box.crop(rgb)
     if patch.size == 0:
         return None
-    white_mask = cast("np.ndarray", patch.min(axis=2) >= _IDLE_WHITE_THR)
+    white_mask = cast("np.ndarray", patch.min(axis=2) >= white_threshold)
     mask = cast("np.ndarray", white_mask.astype(np.uint8) * 255)
     glyphs = _segment_components(mask, min_h=10, max_h=28, max_w=22, min_area=10)
     if not glyphs or len(glyphs) > 3:
@@ -947,7 +1021,7 @@ def read_resource_bar_pixels(
         box = calibration.fields.get(name)
         if box is None:
             continue
-        value = read_hud_count(rgb, box)
+        value = read_hud_count(rgb, box, calibration.count_white_threshold)
         if value is not None:
             out[name] = value
     if pop_box is not None:

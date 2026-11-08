@@ -751,3 +751,43 @@ def test_dark_badge_publishes_zero_idle_even_when_the_digit_reader_misfires(
 
     readings = ocr.read_resource_bar(shot, calib, backend="template")
     assert readings["idle_count"] == 0
+
+
+def test_extra_template_samples_join_their_character(tmp_path: Path) -> None:
+    from gameplay_agent.resource_ocr import load_templates
+
+    glyph = np.zeros((20, 12), dtype=np.uint8)
+    glyph[2:18, 3:9] = 255
+    for name in [*(str(d) for d in range(10)), "slash", "0_mac_wood"]:
+        Image.fromarray(glyph).save(tmp_path / f"{name}.png")
+    bank = load_templates(tmp_path, include_slash=True)
+    assert len(bank["0"]) == 2
+    assert len(bank["1"]) == 1
+    assert len(bank["/"]) == 1
+
+
+def test_two_touching_digits_split_at_their_thinnest_column() -> None:
+    from gameplay_agent.resource_ocr import _split_pair
+
+    pair = np.zeros((15, 22), dtype=np.uint8)
+    pair[:, 0:10] = 255  # Left digit.
+    pair[7, 10:12] = 255  # One-pixel bridge: the touch.
+    pair[:, 12:22] = 255  # Right digit.
+    halves = _split_pair(pair)
+    assert halves is not None
+    assert [half.shape[1] for half in halves] == [10, 10]
+
+
+def test_a_single_digit_is_not_split() -> None:
+    from gameplay_agent.resource_ocr import _split_pair
+
+    assert _split_pair(np.full((15, 10), 255, dtype=np.uint8)) is None
+
+
+def test_the_mac_calibration_loads_with_its_own_count_threshold() -> None:
+    from gameplay_agent.resource_ocr import calibration_for, load_templates
+
+    mac, vm = calibration_for(3024, 1898), calibration_for(3024, 1672)
+    assert mac is not None and vm is not None
+    assert (mac.count_white_threshold, vm.count_white_threshold) == (160, 185)
+    assert set(load_templates(mac.template_dir, include_slash=True)) == {*"0123456789/"}
