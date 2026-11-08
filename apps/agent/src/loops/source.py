@@ -25,6 +25,7 @@ from ..camera_motion import (
 )
 from ..config import config
 from ..detection_phase import DetectionBusyError, detect_frame, summarize_frame
+from ..detector_scale import DetectorScale, restore, shrunk_jpeg
 from ..entity_snapshot import snapshot_entities
 from ..entity_utils import build_entity_summary
 from ..executor import execute_actions
@@ -205,6 +206,7 @@ class GameSource:
         self._inference_lock = asyncio.Lock()
         self._overlay_lock = asyncio.Lock()
         self._history = TemporalEntities()
+        self._scale = DetectorScale()
         self._last_analysis: np.ndarray | None = None
         self._last_camera_command_revision = -1
         self._last_geometry: tuple[int, int, tuple[int, int, int, int] | None] | None = None
@@ -280,7 +282,7 @@ class GameSource:
             screenshot = await asyncio.to_thread(capture.pixels.jpeg)
             encoded_at = time.monotonic()
             try:
-                entities = await detect_frame(self._detector, screenshot) if self._detector else ()
+                entities = await self._detect(screenshot, capture.pixels.pixels())
             except DetectionBusyError:
                 self._discarded_busy += 1
                 log.info("spatial_result_discarded", capture_id=capture.capture_id, reason="busy")
@@ -575,23 +577,29 @@ class GameSource:
     ) -> tuple[list[EntitySnapshot], str, Mapping[str, tuple[Owner, float]]]:
         """Detect, then tag ownership. Empty without a detector."""
         with timings.phase("detect"):
-            entities = await self._detect_entities(screenshot)
+            entities = await self._detect_entities(screenshot, pixels)
             entity_summary, ownership = await summarize_frame(
                 entities, screenshot, profile=self._profile, rgb_pixels=pixels
             )
         return entities, entity_summary, ownership
 
-    async def _detect_entities(self, screenshot: bytes) -> list[EntitySnapshot]:
-        entities: list[EntitySnapshot] = []
-        if self._detector:
-            entities = list(
-                await detect_frame(
-                    self._detector,
-                    screenshot,
-                )
-            )
+    async def _detect_entities(self, screenshot: bytes, pixels: np.ndarray) -> list[EntitySnapshot]:
+        entities = list(await self._detect(screenshot, pixels))
         if self._overlay is not None:
             self._overlay.show(entities, get_game_window_rect())
+        return entities
+
+    async def _detect(self, screenshot: bytes, pixels: np.ndarray) -> tuple[EntitySnapshot, ...]:
+        """Detect at the object size the detector learned; boxes come back in frame pixels."""
+        if not self._detector:
+            return ()
+        scale = self._scale.scale
+        if scale == 1.0:
+            entities = await detect_frame(self._detector, screenshot)
+        else:
+            shrunk = await asyncio.to_thread(shrunk_jpeg, pixels, scale, config.screenshot_quality)
+            entities = restore(await detect_frame(self._detector, shrunk), scale)
+        self._scale.observe(entities, (pixels.shape[1], pixels.shape[0]))
         return entities
 
     def _save_sample(self, screenshot: bytes, tick: int) -> None:
