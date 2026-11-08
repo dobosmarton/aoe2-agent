@@ -8,6 +8,11 @@ from math import isfinite
 from typing import Protocol, runtime_checkable
 
 MAX_SPATIAL_AGE_SECONDS = 1.0
+# Things that don't move (trees, mines, buildings, a building's placement) may be
+# clicked from evidence this old while the camera hasn't moved since. On the Mac
+# with the game running, a post-input view took 0.6-1.5 s, so the 1 s limit
+# refused every house placement and about a third of assignment clicks.
+STATIC_SPATIAL_AGE_SECONDS = 2.0
 
 
 @runtime_checkable
@@ -135,4 +140,10 @@ def _numbers(value: object, *, expected: int) -> tuple[float, ...] | None:
     return tuple(numbers)
 
 
-__all__ = ["MAX_SPATIAL_AGE_SECONDS", "EntitySnapshot", "snapshot_entities", "snapshot_entity"]
+__all__ = [
+    "MAX_SPATIAL_AGE_SECONDS",
+    "STATIC_SPATIAL_AGE_SECONDS",
+    "EntitySnapshot",
+    "snapshot_entities",
+    "snapshot_entity",
+]

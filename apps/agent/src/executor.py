@@ -17,8 +17,9 @@ import pyautogui
 import structlog
 from pydantic import BaseModel
 
+from .camera_motion import MOBILE_CLASSES
 from .config import config
-from .entity_snapshot import MAX_SPATIAL_AGE_SECONDS
+from .entity_snapshot import MAX_SPATIAL_AGE_SECONDS, STATIC_SPATIAL_AGE_SECONDS
 from .entity_utils import (
     CLASSES_BY_KIND,
     RESOURCE_KINDS,
@@ -1809,19 +1810,38 @@ def _resolve_target_class(target_class: str) -> tuple[int, int] | None:
 _MIN_BUILDER_CONFIDENCE = 0.65
 
 
-def _fresh_spatial_cache() -> bool:
-    """Tracked boxes are click evidence only briefly after native capture."""
+def _fresh_spatial_cache(*, static_target: bool = False) -> bool:
+    """Tracked boxes are click evidence only briefly after native capture.
+
+    A click on something that doesn't move may use boxes up to
+    STATIC_SPATIAL_AGE_SECONDS old, but only boxes seen at the current camera
+    position; anything else keeps MAX_SPATIAL_AGE_SECONDS.
+    """
     now = time.monotonic()
+    camera = current_ledger().camera_revision
     for entity in _detected_entities:
         capture_id = entity.get("capture_id")
         if not isinstance(capture_id, int) or capture_id < 0:
             continue  # Scripted scenarios and legacy test values have no capture clock.
         captured_at = entity.get("captured_at")
-        if not isinstance(captured_at, (int, float)):
+        if not isinstance(captured_at, (int, float)) or captured_at > now + 0.1:
             return False
-        if now - captured_at > MAX_SPATIAL_AGE_SECONDS or captured_at > now + 0.1:
+        age = now - captured_at
+        if age <= MAX_SPATIAL_AGE_SECONDS:
+            continue
+        if not static_target or age > STATIC_SPATIAL_AGE_SECONDS:
+            return False
+        if entity.get("camera_revision", camera) != camera:
             return False
     return True
+
+
+def _static_click(action_dict: dict[str, object]) -> bool:
+    """A building placement, or a click on a target class that doesn't move."""
+    if action_dict.get("auto_placement"):
+        return True
+    target = action_dict.get("expected_class") or action_dict.get("target_class")
+    return isinstance(target, str) and bool(target) and target not in MOBILE_CLASSES
 
 
 def _verified_villager_center() -> tuple[int, int] | None:
@@ -1887,7 +1907,7 @@ def _resolve_coords(action_dict: dict[str, object]) -> tuple[str, tuple[int, int
     """
     if not current_ledger().spatial_valid:
         return ("spatial observation invalid after camera movement; refresh required", None)
-    if not _fresh_spatial_cache():
+    if not _fresh_spatial_cache(static_target=_static_click(action_dict)):
         return ("spatial observation is too old for a dependent click", None)
     if action_dict.get("auto_placement"):
         key = str(action_dict.get("building_key", ""))
