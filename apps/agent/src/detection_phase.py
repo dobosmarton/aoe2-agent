@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from detection.inference.detector import EntityDetector
     from detection.inference.ownership import Owner
     from detection.inference.remote_detector import RemoteDetector
+    from PIL import Image
 
     from .game_profile import GameProfile
 
@@ -156,9 +157,15 @@ def init_required_detector() -> Detector | None:
         ) from exc
 
 
+def takes_pixels(detector: object) -> bool:
+    """Whether the detector runs in this process and reads pixels. The HTTP
+    detector needs an encoded image instead."""
+    return getattr(detector, "takes_pixels", False) is True
+
+
 async def detect_frame(
     detector: Detector,
-    screenshot: bytes,
+    screenshot: bytes | Image.Image,
 ) -> tuple[EntitySnapshot, ...]:
     """Always run one real detector inference for the supplied capture."""
     try:
@@ -239,4 +246,5 @@ __all__ = [
     "init_detector",
     "init_required_detector",
     "summarize_frame",
+    "takes_pixels",
 ]

@@ -156,3 +156,32 @@ def test_game_source_shrinks_frames_once_objects_measure_too_large() -> None:
     # The detector saw a matched Town Center; the agent sees it at frame size.
     assert last.bbox is not None
     assert (last.bbox[2] - last.bbox[0]) / 3024 == pytest.approx(REFERENCE_TC_WIDTH * 1.5, rel=0.02)
+
+
+class _PixelDetector(_Detector):
+    """The same Town Center, from a detector that reads pixels."""
+
+    takes_pixels = True
+
+    def detect_fast(self, image: Image.Image) -> list[DetectedEntity]:  # type: ignore[override]
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        return super().detect_fast(buffer.getvalue())
+
+
+def test_an_in_process_detector_gets_the_shrunk_frame_as_pixels() -> None:
+    source = GameSource(detector=_PixelDetector(1.5))  # type: ignore[arg-type]
+    pixels = np.full((1898, 3024, 3), 40, dtype=np.uint8)
+
+    async def run() -> tuple[EntitySnapshot, ...]:
+        found: tuple[EntitySnapshot, ...] = ()
+        for _ in range(MIN_SAMPLES + 1):
+            found = await source._detect(None, pixels)
+        return found
+
+    (last,) = asyncio.run(run())
+    detector = source._detector
+    assert isinstance(detector, _PixelDetector)
+    assert detector.sizes[-1] == pytest.approx(0.65, abs=0.01)
+    assert last.bbox is not None
+    assert (last.bbox[2] - last.bbox[0]) / 3024 == pytest.approx(REFERENCE_TC_WIDTH * 1.5, rel=0.02)

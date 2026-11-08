@@ -120,18 +120,29 @@ class DetectorScale:
         log.info("detector_scale_set", size_ratio=round(ratio, 2), frame_scale=scale)
 
 
-def shrunk_jpeg(
-    rgb: np.ndarray[tuple[int, int, int], np.dtype[np.uint8]], scale: float, quality: int
-) -> bytes:
-    """The frame shrunk by `scale` into the top-left of a same-size grey canvas."""
-    height, width, _ = rgb.shape
-    image = Image.fromarray(rgb).resize(
+def frame_image(
+    rgb: np.ndarray[tuple[int, int, int], np.dtype[np.uint8]], scale: float
+) -> Image.Image:
+    """The frame as an image, shrunk by `scale` into the top-left of a same-size grey
+    canvas. At scale 1 it is the frame itself."""
+    image = Image.fromarray(rgb)
+    if scale == 1.0:
+        return image
+    width, height = image.size
+    shrunk = image.resize(
         (max(1, round(width * scale)), max(1, round(height * scale))), Image.Resampling.BILINEAR
     )
     canvas = Image.new("RGB", (width, height), PAD_COLOUR)
-    canvas.paste(image, (0, 0))
+    canvas.paste(shrunk, (0, 0))
+    return canvas
+
+
+def shrunk_jpeg(
+    rgb: np.ndarray[tuple[int, int, int], np.dtype[np.uint8]], scale: float, quality: int
+) -> bytes:
+    """`frame_image`, encoded for the HTTP detector."""
     buffer = io.BytesIO()
-    canvas.save(buffer, format="JPEG", quality=quality)
+    frame_image(rgb, scale).save(buffer, format="JPEG", quality=quality)
     return buffer.getvalue()
 
 
@@ -151,6 +162,7 @@ __all__ = [
     "MATCHED_RANGE",
     "REFERENCE_TC_WIDTH",
     "DetectorScale",
+    "frame_image",
     "restore",
     "scale_for",
     "shrunk_jpeg",

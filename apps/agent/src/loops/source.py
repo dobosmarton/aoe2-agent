@@ -24,8 +24,8 @@ from ..camera_motion import (
     estimate_motion,
 )
 from ..config import config
-from ..detection_phase import DetectionBusyError, detect_frame, summarize_frame
-from ..detector_scale import DetectorScale, restore, shrunk_jpeg
+from ..detection_phase import DetectionBusyError, detect_frame, summarize_frame, takes_pixels
+from ..detector_scale import DetectorScale, frame_image, restore, shrunk_jpeg
 from ..entity_snapshot import snapshot_entities
 from ..entity_utils import build_entity_summary
 from ..executor import execute_actions
@@ -185,6 +185,13 @@ def _prepare_spatial(
     )
 
 
+async def _timed_jpeg(pixels: NativeCapture) -> tuple[bytes, float]:
+    """The capture's JPEG, and how long encoding it took in milliseconds."""
+    started = time.monotonic()
+    jpeg = await asyncio.to_thread(pixels.jpeg)
+    return jpeg, (time.monotonic() - started) * 1000
+
+
 class GameSource:
     """The real game: mss, YOLO and local OCR."""
 
@@ -278,17 +285,20 @@ class GameSource:
         """Retain the request JPEG even when the detector is temporarily busy."""
         del tick
         async with self._inference_lock:
-            started_at = time.monotonic()
-            screenshot = await asyncio.to_thread(capture.pixels.jpeg)
-            encoded_at = time.monotonic()
+            pixels = capture.pixels
+            # The JPEG is kept for samples and evidence. An in-process detector reads
+            # pixels, so it is encoded alongside detection; the HTTP detector sends it.
+            encoding = asyncio.create_task(_timed_jpeg(pixels))
+            request = None if takes_pixels(self._detector) else (await encoding)[0]
+            detect_started = time.monotonic()
             try:
-                entities = await self._detect(screenshot, capture.pixels.pixels())
+                entities = await self._detect(request, pixels.pixels())
             except DetectionBusyError:
                 self._discarded_busy += 1
                 log.info("spatial_result_discarded", capture_id=capture.capture_id, reason="busy")
-                return None, screenshot
-            detected_at = time.monotonic()
-            pixels = capture.pixels
+                return None, (await encoding)[0]
+            detector_ms = (time.monotonic() - detect_started) * 1000
+            screenshot, encode_ms = await encoding
             analysis, prepared, analysis_ms, appearance_ms = await asyncio.to_thread(
                 _prepare_spatial, pixels, entities
             )
@@ -299,8 +309,8 @@ class GameSource:
             log.info(
                 "spatial_worker_latency",
                 capture_id=capture.capture_id,
-                encode_ms=round((encoded_at - started_at) * 1000, 1),
-                detector_ms=round((detected_at - encoded_at) * 1000, 1),
+                encode_ms=round(encode_ms, 1),
+                detector_ms=round(detector_ms, 1),
                 analysis_ms=round(analysis_ms, 1),
                 appearance_ms=round(appearance_ms, 1),
                 ownership_ms=round((time.monotonic() - analyzed_at) * 1000, 1),
@@ -589,16 +599,28 @@ class GameSource:
             self._overlay.show(entities, get_game_window_rect())
         return entities
 
-    async def _detect(self, screenshot: bytes, pixels: np.ndarray) -> tuple[EntitySnapshot, ...]:
-        """Detect at the object size the detector learned; boxes come back in frame pixels."""
-        if not self._detector:
+    async def _detect(
+        self, screenshot: bytes | None, pixels: np.ndarray
+    ) -> tuple[EntitySnapshot, ...]:
+        """Detect at the object size the detector learned; boxes come back in frame pixels.
+
+        An in-process detector gets the pixels. The HTTP detector gets `screenshot`,
+        or a freshly encoded frame when there is none or the frame must shrink.
+        """
+        detector = self._detector
+        if not detector:
             return ()
         scale = self._scale.scale
-        if scale == 1.0:
-            entities = await detect_frame(self._detector, screenshot)
+        if takes_pixels(detector):
+            image = await asyncio.to_thread(frame_image, pixels, scale)
+            entities = await detect_frame(detector, image)
+        elif scale == 1.0 and screenshot is not None:
+            entities = await detect_frame(detector, screenshot)
         else:
-            shrunk = await asyncio.to_thread(shrunk_jpeg, pixels, scale, config.screenshot_quality)
-            entities = restore(await detect_frame(self._detector, shrunk), scale)
+            request = await asyncio.to_thread(shrunk_jpeg, pixels, scale, config.screenshot_quality)
+            entities = await detect_frame(detector, request)
+        if scale != 1.0:
+            entities = restore(entities, scale)
         self._scale.observe(entities, (pixels.shape[1], pixels.shape[0]))
         return entities
 
