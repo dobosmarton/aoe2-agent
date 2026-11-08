@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Protocol, TypeAlias
 import numpy as np
 import structlog
 
+from ..appearance import prepare_detections
 from ..camera_motion import (
     MOBILE_CLASSES,
     MotionLimits,
@@ -32,7 +33,7 @@ from ..executor import execute_actions
 from ..providers.strategist import read_hud_pixels
 from ..resource_ocr import calibration_for, read_selected_unit_pixels
 from ..screen import NativeCapture, capture_native
-from ..temporal_entities import PreparedDetection, TemporalEntities, prepare_detections
+from ..temporal_entities import PreparedDetection, TemporalEntities
 from ..turn_timing import TickTimings
 from ..window import get_game_window_rect
 from .snapshot import FramePipe, Perception, SpatialRefresh
