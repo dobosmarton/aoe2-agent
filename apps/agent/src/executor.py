@@ -4,6 +4,7 @@ Dispatches validated actions to per-type handler functions.
 """
 
 import asyncio
+import io
 import math
 import time
 from collections import Counter
@@ -13,8 +14,10 @@ from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Literal, cast
 
+import numpy as np
 import pyautogui
 import structlog
+from PIL import Image
 from pydantic import BaseModel
 
 from .camera_motion import MOBILE_CLASSES
@@ -70,6 +73,9 @@ _modifier_map: dict[str, str] = {}
 # The mouse button that gives units orders, from the game profile.
 _command_button: Literal["left", "right"] = "right"
 _detected_entities: list[dict] = []
+# The encoded frame those entities came from: placement reads unexplored ground from it.
+_ground_frame: bytes = b""
+_ground_luma: "tuple[bytes, _Luma] | None" = None  # The frame, decoded for `_explored`.
 _rescan_fn: Callable[[], Awaitable[bool]] | None = None
 _rescan_full_fn: Callable[[], Awaitable[bool]] | None = None
 _selection_refresh_fn: Callable[[], Awaitable[bool]] | None = None
@@ -169,6 +175,12 @@ def set_detected_entities(entities: Sequence[object]) -> None:
     log.debug("detected_entities_set", count=len(_detected_entities))
 
 
+def set_ground_frame(screenshot: bytes) -> None:
+    """The encoded frame the detected entities came from (see `_explored`)."""
+    global _ground_frame
+    _ground_frame = screenshot
+
+
 def get_detected_entities() -> list[dict]:
     """Return the current detected entity list."""
     return _detected_entities
@@ -176,8 +188,9 @@ def get_detected_entities() -> list[dict]:
 
 def clear_detected_entities() -> None:
     """Clear the cached detected entities."""
-    global _detected_entities
+    global _detected_entities, _ground_frame
     _detected_entities = []
+    _ground_frame = b""
 
 
 # ---------------------------------------------------------------------------
@@ -2412,10 +2425,68 @@ def _clutter_score(point: tuple[int, int]) -> int:
     return score
 
 
+_UNEXPLORED_BRIGHTNESS = 70.0  # Mean luma of the ground around a candidate, 0-255.
+_GROUND_PATCH = (120, 80)  # Frame pixels measured around a candidate.
+_LUMA_SHRINK = 4  # The frame is decoded at a quarter size: a patch mean needs no more.
+
+
+@dataclass(frozen=True, slots=True)
+class _Luma:
+    pixels: np.ndarray  # Luma, 0-255, at reduced size.
+    width: int
+    height: int
+    scale: float  # Frame pixels per luma pixel.
+
+
+def _ground_luma_image() -> _Luma | None:
+    """The ground frame's luma at reduced size, decoded once per frame."""
+    global _ground_luma
+    frame = _ground_frame
+    if not frame:
+        return None
+    if _ground_luma is not None and _ground_luma[0] is frame:
+        return _ground_luma[1]
+    try:
+        with Image.open(io.BytesIO(frame)) as image:
+            full_width = image.width
+            image.draft("L", (image.width // _LUMA_SHRINK, image.height // _LUMA_SHRINK))
+            gray = image.convert("L")
+            luma = _Luma(
+                np.asarray(gray, dtype=np.float32), gray.width, gray.height, full_width / gray.width
+            )
+    except (OSError, ValueError) as error:
+        log.warning("ground_frame_unreadable", error=str(error))
+        return None
+    _ground_luma = (frame, luma)
+    return luma
+
+
+def _explored(point: tuple[int, int]) -> bool:
+    """Whether the ground around `point` is explored, judged by its brightness.
+
+    Unexplored map is black, and the game refuses a building there; detections
+    can't show it, since black ground holds no objects. Live, a mill was placed
+    in black ground (patch mean 45) and refused. Measured patch means: unexplored
+    21-49, explored but fogged 86-118, in sight 122-141. Without a frame every
+    point counts as explored.
+    """
+    luma = _ground_luma_image()
+    if luma is None:
+        return True
+    half_w, half_h = _GROUND_PATCH[0] / 2 / luma.scale, _GROUND_PATCH[1] / 2 / luma.scale
+    x, y = point[0] / luma.scale, point[1] / luma.scale
+    x0, x1 = max(0, int(x - half_w)), min(luma.width, int(x + half_w) + 1)
+    y0, y1 = max(0, int(y - half_h)), min(luma.height, int(y + half_h) + 1)
+    if x0 >= x1 or y0 >= y1:
+        return True
+    patch: np.ndarray = luma.pixels[y0:y1, x0:x1]
+    return float(np.mean(patch)) >= _UNEXPLORED_BRIGHTNESS
+
+
 def _open_ground_candidates(
     anchor: tuple[int, int], radii: tuple[int, ...] = BUILD_RING_RADII
 ) -> list[tuple[int, int]]:
-    """Ring points around `anchor` that lie in the play area, emptiest-first."""
+    """Explored ring points around `anchor` in the play area, emptiest-first."""
     ax, ay = anchor
     min_x, min_y, max_x, max_y = _play_area_bounds()
     candidates: list[tuple[int, int]] = []
@@ -2424,7 +2495,7 @@ def _open_ground_candidates(
             angle = 2.0 * math.pi * i / BUILD_RING_DIRECTIONS
             cx = int(ax + radius * math.cos(angle))
             cy = int(ay + radius * math.sin(angle))
-            if min_x <= cx <= max_x and min_y <= cy <= max_y:
+            if min_x <= cx <= max_x and min_y <= cy <= max_y and _explored((cx, cy)):
                 candidates.append((cx, cy))
     candidates.sort(key=_clutter_score)
     return candidates

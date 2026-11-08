@@ -1903,3 +1903,54 @@ def test_a_spot_inside_a_large_forest_box_is_not_open_ground(
     assert ex._clutter_score((900, 550)) == ex._BLOCKED_CLUTTER  # Inside, far from the centre.
     assert ex._clutter_score((1100, 550)) == 1  # 100 px from the edge: crowded, not blocked.
     assert ex._clutter_score((1300, 550)) == 0  # Open ground.
+
+
+def _ground_jpeg(dark: tuple[int, int, int, int] | None) -> bytes:
+    """A fogged-ground frame (luma 100), with an optional black unexplored box."""
+    import io
+
+    from PIL import Image, ImageDraw
+
+    width, height = ex._DEFAULT_SCREEN
+    image = Image.new("RGB", (width, height), (100, 100, 100))
+    if dark is not None:
+        ImageDraw.Draw(image).rectangle(dark, fill=(30, 30, 30))
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG", quality=85)
+    return buffer.getvalue()
+
+
+def test_unexplored_ground_is_never_a_building_spot(fake_pyautogui: _FakePyautogui) -> None:
+    # Live, a mill was placed in black unexplored ground and refused.
+    anchor = (1500, 800)
+    ex.set_detected_entities([])
+    everywhere = ex._open_ground_candidates(anchor)
+    ex.set_ground_frame(_ground_jpeg(dark=(1500, 0, 3024, 1672)))  # The east is black.
+    try:
+        explored = ex._open_ground_candidates(anchor)
+    finally:
+        ex.clear_detected_entities()
+    assert explored
+    assert all(x < 1500 - 50 for x, _ in explored)
+    assert len(explored) < len(everywhere)
+
+
+def test_without_a_frame_every_spot_counts_as_explored(fake_pyautogui: _FakePyautogui) -> None:
+    ex.clear_detected_entities()
+    assert ex._explored((2000, 800))
+
+
+def test_fogged_ground_counts_as_explored(fake_pyautogui: _FakePyautogui) -> None:
+    ex.set_ground_frame(_ground_jpeg(dark=None))
+    try:
+        assert ex._explored((2000, 800))
+    finally:
+        ex.clear_detected_entities()
+
+
+def test_an_unreadable_frame_filters_nothing(fake_pyautogui: _FakePyautogui) -> None:
+    ex.set_ground_frame(b"not a jpeg")
+    try:
+        assert ex._explored((2000, 800))
+    finally:
+        ex.clear_detected_entities()

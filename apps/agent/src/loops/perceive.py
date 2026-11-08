@@ -25,6 +25,7 @@ from ..executor import (
     observe_hud,
     record_observed_buildings,
     set_detected_entities,
+    set_ground_frame,
     villagers_ordered,
 )
 from ..goals import THREAT_CLASSES
@@ -221,6 +222,7 @@ async def _refresh_spatial_once(ctx: LoopContext, request: asyncio.Future[Spatia
             and snapshot_entities(get_detected_entities()) != refresh.entities
         ):
             set_detected_entities(refresh.entities)
+            set_ground_frame(refresh.screenshot)
         if refresh.spatial_valid and refresh.hud_readings and refresh.sighting is None:
             sync_world_state(
                 ctx.memory,
@@ -386,6 +388,7 @@ def _publish_spatial(ctx: LoopContext, tick: int, sighting: Sighting) -> None:
         for entity_id, (owner, confidence) in sighting.ownership.items()
     )
     set_detected_entities(frame.entities)
+    set_ground_frame(frame.screenshot)
     ctx.frames.put_spatial(replace(frame, alarm=alarm, world=world, ownership=ownership))
 
 
