@@ -152,6 +152,7 @@ class _CalibrationData(TypedDict):
     fields: dict[str, list[int]]
     template_dir: NotRequired[str]
     count_white_threshold: NotRequired[int]
+    count_template_dir: NotRequired[str]
 
 
 @dataclass
@@ -171,6 +172,9 @@ class Calibration:
     # count (workers, villagers). The Mac draws the thin strokes of these digits
     # dimmer, so a "0" broke into two "1"s at the VM's level.
     count_white_threshold: int = _IDLE_WHITE_THR
+    # Extra small-count digit samples for this resolution, added to the shared HUD
+    # digit bank. The Mac draws a 9 the shared bank took for a 0 (29 read as 20).
+    count_template_dir: Path | None = None
 
     def field_rects(self) -> dict[str, tuple[int, int, int, int]]:
         """Per-field ``(x0, y0, x1, y1)`` rectangles in screenshot pixels.
@@ -199,6 +203,9 @@ class Calibration:
             fields=fields,
             template_dir=tdir,
             count_white_threshold=int(data.get("count_white_threshold", _IDLE_WHITE_THR)),
+            count_template_dir=(
+                path.parent / data["count_template_dir"] if "count_template_dir" in data else None
+            ),
         )
 
 
@@ -716,25 +723,29 @@ def detect_idle_present(rgb: np.ndarray, pop: FieldBox) -> bool:
     return saturation > _IDLE_SAT_THRESHOLD
 
 
-_hud_digit_bank: dict[str, list[np.ndarray]] | None = None
+def _load_digit_samples(directory: Path) -> dict[str, list[np.ndarray]]:
+    bank: dict[str, list[np.ndarray]] = {}
+    for p in sorted(directory.glob("[0-9]_*.png")):
+        arr = np.asarray(Image.open(p).convert("L"), dtype=np.uint8)
+        bank.setdefault(p.stem[0], []).append(np.where(arr > 127, 255, 0).astype(np.uint8))
+    return bank
 
 
-def _load_hud_digit_bank() -> dict[str, list[np.ndarray]]:
+@functools.cache
+def _load_hud_digit_bank(extra_dir: Path | None = None) -> dict[str, list[np.ndarray]]:
     """Digit → glyph samples for the HUD font, cached after first load.
 
     The bank was harvested from resource-bar digits on the real vision fixtures
     (same font/rendering as the badge count); several samples per digit absorb
     rendering variance. Glyphs are stored already `_normalize_glyph`-canonical
     (28x20 binary), so any capture resolution matches after normalization.
+    `extra_dir` adds a resolution's own samples to the shared ones.
     """
-    global _hud_digit_bank
-    if _hud_digit_bank is None:
-        bank: dict[str, list[np.ndarray]] = {}
-        for p in sorted(_HUD_DIGITS_DIR.glob("[0-9]_*.png")):
-            arr = np.asarray(Image.open(p).convert("L"), dtype=np.uint8)
-            bank.setdefault(p.stem[0], []).append(np.where(arr > 127, 255, 0).astype(np.uint8))
-        _hud_digit_bank = bank
-    return _hud_digit_bank
+    bank = _load_digit_samples(_HUD_DIGITS_DIR)
+    if extra_dir is not None:
+        for digit, samples in _load_digit_samples(extra_dir).items():
+            bank.setdefault(digit, []).extend(samples)
+    return bank
 
 
 def read_idle_count(
@@ -742,6 +753,7 @@ def read_idle_count(
     pop: FieldBox,
     idle_box: FieldBox | None = None,
     white_threshold: int = _IDLE_WHITE_THR,
+    extra_digits: Path | None = None,
 ) -> int | None:
     """Idle-villager COUNT from the badge's corner digit(s); None = unreadable.
 
@@ -770,7 +782,7 @@ def read_idle_count(
     y0, y1 = max(0, y0), min(frame_h, y1)
     if x1 <= x0 or y1 <= y0:
         return None
-    bank = _load_hud_digit_bank()
+    bank = _load_hud_digit_bank(extra_digits)
     if not bank:
         return None
 
@@ -797,7 +809,10 @@ def read_idle_count(
 
 
 def read_hud_count(
-    rgb: np.ndarray, box: FieldBox, white_threshold: int = _IDLE_WHITE_THR
+    rgb: np.ndarray,
+    box: FieldBox,
+    white_threshold: int = _IDLE_WHITE_THR,
+    extra_digits: Path | None = None,
 ) -> int | None:
     """Read a small white-on-icon workforce count without guessing on bad glyphs."""
     patch = box.crop(rgb)
@@ -808,7 +823,7 @@ def read_hud_count(
     glyphs = _segment_components(mask, min_h=10, max_h=28, max_w=22, min_area=10)
     if not glyphs or len(glyphs) > 3:
         return None
-    bank = _load_hud_digit_bank()
+    bank = _load_hud_digit_bank(extra_digits)
     digits = ""
     for _x, glyph in glyphs:
         char, score = _classify_bank(glyph, bank)
@@ -1030,7 +1045,9 @@ def read_resource_bar_pixels(
         box = calibration.fields.get(name)
         if box is None:
             continue
-        value = read_hud_count(rgb, box, calibration.count_white_threshold)
+        value = read_hud_count(
+            rgb, box, calibration.count_white_threshold, calibration.count_template_dir
+        )
         if value is not None:
             out[name] = value
     if pop_box is not None:
@@ -1056,6 +1073,7 @@ def read_resource_bar_pixels(
                 pop_box,
                 calibration.fields.get("idle_count"),
                 calibration.count_white_threshold,
+                calibration.count_template_dir,
             )
             if idle_count is not None:
                 out["idle_count"] = idle_count

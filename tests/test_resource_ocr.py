@@ -840,7 +840,9 @@ def test_the_mac_idle_count_uses_the_calibrations_count_threshold(
 
     seen: list[int] = []
 
-    def fake_idle(_rgb: object, _pop: object, _box: object, white: int = 0) -> int:
+    def fake_idle(
+        _rgb: object, _pop: object, _box: object, white: int = 0, _extra: object = None
+    ) -> int:
         seen.append(white)
         return 16
 
@@ -853,3 +855,20 @@ def test_the_mac_idle_count_uses_the_calibrations_count_threshold(
     readings = resource_ocr.read_resource_bar_pixels(hud, calibration, backend="template")
     assert readings["idle_count"] == 16
     assert seen == [160]
+
+
+def test_a_calibrations_extra_digit_samples_join_the_shared_bank(tmp_path: Path) -> None:
+    from gameplay_agent.resource_ocr import _load_hud_digit_bank, calibration_for
+
+    shared = _load_hud_digit_bank()
+    glyph = np.zeros((28, 20), dtype=np.uint8)
+    glyph[4:24, 8:12] = 255
+    Image.fromarray(glyph).save(tmp_path / "9_mac_sample_0.png")
+    merged = _load_hud_digit_bank(tmp_path)
+    assert len(merged["9"]) == len(shared["9"]) + 1
+    assert len(merged["1"]) == len(shared["1"])
+    assert len(_load_hud_digit_bank()["9"]) == len(shared["9"])  # The shared bank is untouched.
+    mac, vm = calibration_for(3024, 1898), calibration_for(3024, 1672)
+    assert mac is not None and vm is not None
+    assert mac.count_template_dir is not None and mac.count_template_dir.is_dir()
+    assert vm.count_template_dir is None

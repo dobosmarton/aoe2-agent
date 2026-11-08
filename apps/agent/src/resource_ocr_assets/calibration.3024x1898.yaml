@@ -9,6 +9,7 @@ width: 3024
 height: 1898
 template_dir: templates/3024x1898
 count_white_threshold: 160
+count_template_dir: templates/3024x1898_counts  # Mac samples beside the shared digit bank.
 fields:
   wood: [80, 28, 158, 62]
   food: [236, 28, 314, 62]
