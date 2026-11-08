@@ -97,6 +97,26 @@ def geometry_from(
     )
 
 
+def wholly_on_screen(bounds: tuple[float, float, float, float], span: tuple[float, float]) -> bool:
+    """Whether the window lies within the screens' horizontal span, in points.
+
+    A full-screen game slides in from its own Space after focusing, and reports
+    itself in front before the slide ends. Bounds read mid-slide put it partly off
+    the screens, so input sent then would land in the wrong place.
+    """
+    x, _, width, _ = bounds
+    return x >= span[0] and x + width <= span[1]
+
+
+def screen_span_points() -> tuple[float, float]:
+    """The leftmost and rightmost edges of all screens, in points."""
+    frames = [screen.frame() for screen in AppKit.NSScreen.screens()]
+    return (
+        min(float(frame.origin.x) for frame in frames),
+        max(float(frame.origin.x + frame.size.width) for frame in frames),
+    )
+
+
 def display_scale() -> float:
     """Pixels per point on the main display: 2 on a Retina panel."""
     mode = Quartz.CGDisplayCopyDisplayMode(Quartz.CGMainDisplayID())
@@ -170,13 +190,18 @@ class MacBackend:
         return display_scale()
 
     def in_front(self) -> bool:
+        """The game leads the window list and has finished sliding onto the screen."""
         app = find_game_app()
         if app is None:
             return False
+        pid = app.processIdentifier()
         rows = _window_rows(
             Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements
         )
-        return front_window_pid(rows) == app.processIdentifier()
+        if front_window_pid(rows) != pid:
+            return False
+        row = pick_game_window(rows, pid)
+        return row is not None and wholly_on_screen(_bounds(row), screen_span_points())
 
     def is_running(self) -> bool:
         return self.geometry() is not None

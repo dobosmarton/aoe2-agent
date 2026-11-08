@@ -9,7 +9,7 @@
   "capture_width": 3024,
   "capture_height": 1898,
   "modifier_map": {},
-  "zoom_steps": 0,
+  "zoom_steps": 2,
   "ui_scale": 1.0,
   "hotkey_profile": "RECORD_EXPORTED_PROFILE",
   "game_data_version": "RECORD_GAME_BUILD",

@@ -84,11 +84,11 @@ def test_the_front_window_is_the_first_normal_one() -> None:
 @pytest.fixture
 def screen_state(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """A fake desktop: which app is in front, and the game's window."""
-    state = SimpleNamespace(front_pid=GAME_PID, app=_App(), opened=[])
-    game_row = _row(GAME_PID, 0, (0, 33, 1512, 949), 42)
+    state = SimpleNamespace(front_pid=GAME_PID, app=_App(), opened=[], game_x=0.0)
 
     def rows(options: int) -> list[dict]:
         del options
+        game_row = _row(GAME_PID, 0, (state.game_x, 33, 1512, 949), 42)
         if state.front_pid == GAME_PID:
             return [game_row]
         return [_row(state.front_pid, 0, (0, 33, 1512, 949), 99), game_row]
@@ -97,6 +97,7 @@ def screen_state(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     monkeypatch.setattr(wm, "_window_rows", rows)
     monkeypatch.setattr(wm, "menu_bar_points", lambda: 33.0)
     monkeypatch.setattr(wm, "display_scale", lambda: 2.0)
+    monkeypatch.setattr(wm, "screen_span_points", lambda: (0.0, 1512.0))
     monkeypatch.setattr(wm, "FOCUS_WAIT_SECONDS", 0.05)
     monkeypatch.setattr(wm, "OPEN_WAIT_SECONDS", 0.05)
     monkeypatch.setattr(wm, "_POLL_SECONDS", 0.01)
@@ -118,6 +119,20 @@ def test_the_game_is_in_front_only_when_its_window_leads_the_list(
     assert backend.in_front()
     screen_state.front_pid = 1234  # Terminal, say.
     assert not backend.in_front()
+
+
+def test_a_game_still_sliding_in_is_not_in_front(screen_state: SimpleNamespace) -> None:
+    screen_state.game_x = 1454.0  # Read mid-slide on the probe's first run.
+    assert not wm.MacBackend().in_front()
+    screen_state.game_x = 0.0
+    assert wm.MacBackend().in_front()
+
+
+@pytest.mark.parametrize(
+    ("x", "inside"), [(0.0, True), (-1.0, False), (1.0, False), (1454.0, False)]
+)
+def test_only_a_window_within_the_screens_counts_as_on_screen(x: float, inside: bool) -> None:
+    assert wm.wholly_on_screen((x, 33.0, 1512.0, 949.0), (0.0, 1512.0)) is inside
 
 
 def test_no_game_means_no_window_and_not_in_front(
