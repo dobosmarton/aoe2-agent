@@ -5,7 +5,14 @@ from __future__ import annotations
 import sys
 
 import pytest
-from gameplay_agent.keyboard_macos import AGENT_KEYS, Layout, layout_keys, remap, untypeable
+from gameplay_agent.keyboard_macos import (
+    AGENT_KEYS,
+    Layout,
+    held_modifiers,
+    layout_keys,
+    remap,
+    untypeable,
+)
 
 SHIFT = 2
 # A Hungarian Mac keyboard, as UCKeyTranslate reports it: Y and Z swap places, 0 sits
@@ -76,3 +83,10 @@ def test_this_macs_layout_types_the_agent_keys() -> None:
     assert isinstance(layout, Layout)
     assert layout.name
     assert len(layout.keys) > 20
+
+
+def test_held_modifiers_are_read_from_the_event_flags() -> None:
+    assert held_modifiers(0x20800000) == ["fn"]  # Read live after a synthetic F10.
+    assert held_modifiers(0x20000000) == []
+    assert held_modifiers(0x40000 | 0x20000) == ["shift", "ctrl"]
+    assert held_modifiers(0x10000) == []  # Caps Lock is a toggle, not a held key.

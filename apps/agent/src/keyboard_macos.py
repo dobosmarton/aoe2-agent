@@ -9,6 +9,9 @@ The layout is read through Carbon's Text Input Sources, which must run on the ma
 thread: call `use_layout_keys` at startup, not from a worker.
 """
 
+# pyobjc fills Quartz at runtime, so a static checker can't see its functions.
+# pyright: reportAttributeAccessIssue=false
+
 from __future__ import annotations
 
 import ctypes
@@ -155,6 +158,43 @@ def untypeable(keys: Iterable[str], removed: Iterable[str]) -> list[str]:
     return sorted(key for key in keys if key in gone)
 
 
+# Modifier flags in a CGEvent, and the key code that releases each. Caps Lock is a
+# toggle, not a held key, so it is left alone.
+_MODIFIERS = (
+    ("fn", 0x800000, 63),
+    ("shift", 0x20000, 56),
+    ("ctrl", 0x40000, 59),
+    ("option", 0x80000, 58),
+    ("command", 0x100000, 55),
+)
+
+
+def held_modifiers(flags: int) -> list[str]:
+    """The modifiers `flags` reports as held."""
+    return [name for name, bit, _code in _MODIFIERS if flags & bit]
+
+
+def release_stuck_modifiers() -> list[str]:
+    """Release modifiers macOS reports as held, and name them.
+
+    Called before the agent sends a key, which is when nothing should be held. A
+    stuck flag silently changes every key: live, a synthetic F10 left fn set,
+    so H arrived as fn+H and the game ignored it.
+    """
+    import Quartz
+
+    flags = int(Quartz.CGEventSourceFlagsState(Quartz.kCGEventSourceStateCombinedSessionState))
+    held = held_modifiers(flags)
+    for name, _bit, code in _MODIFIERS:
+        if name in held:
+            release = Quartz.CGEventCreateKeyboardEvent(None, code, False)
+            Quartz.CGEventSetFlags(release, 0)
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap, release)
+    if held:
+        log.warning("stuck_modifiers_released", keys=held)
+    return held
+
+
 def use_layout_keys() -> tuple[Layout, list[str]]:
     """Make pyautogui type through the active layout. Returns the layout and the
     agent keys it can't type. Main thread only."""
@@ -181,8 +221,10 @@ def use_layout_keys() -> tuple[Layout, list[str]]:
 __all__ = [
     "AGENT_KEYS",
     "Layout",
+    "held_modifiers",
     "layout_keys",
     "read_layout",
+    "release_stuck_modifiers",
     "remap",
     "untypeable",
     "use_layout_keys",

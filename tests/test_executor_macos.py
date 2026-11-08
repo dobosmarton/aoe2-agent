@@ -272,3 +272,15 @@ def test_mac_startup_stops_while_a_menu_is_open(
     monkeypatch.setattr(game_loop, "_popup_open", lambda: True)
     assert _run(game_loop._prepare_macos_game(None)) == "menu_open"
     assert mouse.calls == []  # No zoom: the scroll would land on the menu.
+
+
+def test_a_mac_key_press_first_releases_stuck_modifiers(
+    mouse: _Input, mac: FakeWindowBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from gameplay_agent import keyboard_macos
+
+    order: list[str] = []
+    monkeypatch.setattr(keyboard_macos, "release_stuck_modifiers", lambda: order.append("release"))
+    monkeypatch.setattr(mouse, "press", lambda key: order.append(f"press {key}"), raising=False)
+    assert _run(ex.execute_action({"type": "press", "key": "h", "intent": "x"})).success
+    assert order == ["release", "press h"]

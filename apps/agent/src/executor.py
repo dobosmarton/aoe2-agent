@@ -2580,6 +2580,9 @@ async def _handle_press(action_dict: dict[str, object], intent: str) -> ActionRe
         if refusal is not None:
             log.warning("system_chord_refused", key=key, modifiers=modifiers, intent=intent)
             return ActionResult(False, refusal)
+        from . import keyboard_macos
+
+        keyboard_macos.release_stuck_modifiers()  # A held flag would change the key sent.
     if key.lower() in CAMERA_KEYS or action_dict.get("rescan"):
         current_ledger().note_camera_input()
         current_ledger().spatial_valid = False

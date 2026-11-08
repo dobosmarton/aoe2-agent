@@ -62,6 +62,8 @@ def _no_real_game_window(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(window, "_backend", window.NullBackend())
     monkeypatch.setattr(screen, "_grabber", NoScreen())
+    # Never post real key events from a test.
+    monkeypatch.setattr("gameplay_agent.keyboard_macos.release_stuck_modifiers", lambda: [])
 
 
 def pytest_addoption(parser):
