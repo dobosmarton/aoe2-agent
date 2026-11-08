@@ -11,6 +11,7 @@ pytest.importorskip("Quartz")
 
 from gameplay_agent import screen_macos
 from gameplay_agent import window_macos as wm
+from gameplay_agent.capture import Frame
 from gameplay_agent.window import GameGeometry
 
 from tests.window_fakes import MAC_GAME
@@ -281,7 +282,7 @@ def _stream_grabber(opened: list[GameGeometry], rows: list[int]) -> screen_macos
         geometry = opened[-1]
         return np.zeros((geometry.height, geometry.width, 3), dtype=np.uint8)
 
-    grabber = screen_macos.StreamGrabber(open_stream, to_rgb)
+    grabber = screen_macos.StreamGrabber(open_stream, to_rgb, clock=lambda: 7.6)
     grabber.streams = streams  # type: ignore[attr-defined]
     return grabber
 
@@ -314,7 +315,7 @@ def test_the_stream_refuses_a_frame_of_the_wrong_size() -> None:
     def half_size(_buffer: object, _top: int) -> np.ndarray:
         return np.zeros((949, 1512, 3), dtype=np.uint8)
 
-    grabber = screen_macos.StreamGrabber(lambda g: _FakeStream(g, []), half_size)
+    grabber = screen_macos.StreamGrabber(lambda g: _FakeStream(g, []), half_size, clock=lambda: 7.6)
     with pytest.raises(RuntimeError, match="stream gave 1512x949"):
         grabber.grab(MAC_GAME, 1)
 
@@ -322,3 +323,23 @@ def test_the_stream_refuses_a_frame_of_the_wrong_size() -> None:
 def test_the_stream_needs_the_window_number() -> None:
     with pytest.raises(ValueError, match="window number"):
         screen_macos.StreamGrabber().grab(GameGeometry(0, 0, 8, 6, 2.0), 1)
+
+
+def test_an_old_stream_frame_is_replaced_by_a_still_capture() -> None:
+    stills: list[GameGeometry] = []
+
+    def still(area: GameGeometry) -> Frame:
+        stills.append(area)
+        return Frame(b"", area.width, area.height, 9.0)
+
+    def no_pixels(_buffer: object, _top: int) -> np.ndarray:
+        raise AssertionError("an old stream frame must not be used")
+
+    now = [7.6]  # The fake stream's frame arrived at 7.5.
+    grabber = screen_macos.StreamGrabber(
+        lambda g: _FakeStream(g, []), no_pixels, still=still, clock=lambda: now[0]
+    )
+    now[0] = 7.5 + screen_macos.STREAM_MAX_AGE_SECONDS + 0.01  # Paused: no new frames.
+    frame = grabber.grab(MAC_GAME, 1)
+    assert stills == [MAC_GAME]
+    assert frame.captured_at == 9.0  # The still's own time, not the old frame's.

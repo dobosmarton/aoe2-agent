@@ -37,6 +37,11 @@ log = structlog.stdlib.get_logger()
 STREAM_FPS = 30
 STREAM_QUEUE_DEPTH = 4
 ANSWER_SECONDS = 5.0  # For ScreenCaptureKit's completion handlers and the first frame.
+# A running game sends a new frame every 33 ms. A paused game, or one behind a menu,
+# sends none, and its newest frame was 1-1.5 s old live. Past this age the grabber
+# takes one window capture instead, so a frame's time is always when the screen
+# looked like that.
+STREAM_MAX_AGE_SECONDS = 0.25
 
 # Best resolution gives pixels, not points; without it the frame comes back half size.
 IMAGE_OPTIONS = (
@@ -255,19 +260,26 @@ class StreamGrabber:
     """The newest frame of a ScreenCaptureKit stream of the game window.
 
     The stream starts on the first grab and restarts when the window or the game
-    area's size changes.
+    area's size changes. When the screen stops changing, the stream stops sending
+    frames; a frame older than `STREAM_MAX_AGE_SECONDS` is replaced by `still`, one
+    capture of the window as it is now.
     """
 
     def __init__(
         self,
         open_stream: Callable[[GameGeometry], Stream] = _ScreenCaptureKitStream,
         to_rgb: Callable[[object, int], np.ndarray] = pixel_buffer_to_rgb,
+        still: Callable[[GameGeometry], Frame] | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._open_stream = open_stream
         self._to_rgb = to_rgb
+        self._still = still or (lambda area: WindowGrabber().grab(area, 0))
+        self._clock = clock
         self._lock = threading.Lock()
         self._stream: Stream | None = None
         self._key: tuple[int | None, int, int] | None = None
+        self._stills = False  # Whether the last grab fell back to a still capture.
 
     def grab(self, geometry: GameGeometry | None, monitor: int) -> Frame:
         del monitor  # The window is always known on macOS.
@@ -279,6 +291,10 @@ class StreamGrabber:
                 self._stream, self._key = self._open_stream(area), key
             stream = self._stream
         buffer, captured_at = stream.take()
+        if self._clock() - captured_at > STREAM_MAX_AGE_SECONDS:
+            self._note_stills(True, captured_at)
+            return self._still(area)
+        self._note_stills(False, captured_at)
         pixels = self._to_rgb(buffer, stream.top)
         if pixels.shape[:2] != (area.height, area.width):
             raise RuntimeError(
@@ -286,6 +302,14 @@ class StreamGrabber:
                 f"is {area.width}x{area.height}"
             )
         return Frame(pixels.tobytes(), area.width, area.height, captured_at)
+
+    def _note_stills(self, stills: bool, captured_at: float) -> None:
+        """Log when the screen stops and starts changing, not on every grab."""
+        if stills == self._stills:
+            return
+        self._stills = stills
+        age_ms = round((self._clock() - captured_at) * 1000)
+        log.info("capture_stream_still" if stills else "capture_stream_moving", age_ms=age_ms)
 
     def _stop(self) -> None:
         if self._stream is not None:
