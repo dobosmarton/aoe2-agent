@@ -9,7 +9,7 @@ import time
 from collections import Counter
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from contextvars import ContextVar, Token
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Literal, cast
 
@@ -196,6 +196,18 @@ _HOUSE_CAP_STEP = 5  # cap gained per completed house
 # Houses need more grace than the wood path: a house takes ~25 s to CONSTRUCT
 # before the cap moves, and OCR lag sits on top of that.
 _HOUSE_SETTLE_SECONDS = 50.0
+# A placement still undecided this long after its deadline never happened (its
+# wood never left): drop it so the building can be tried again. Live, an
+# undecided house blocked every later house.
+_PLACEMENT_ABANDON_SECONDS = 40.0
+# A placement's payment shows within a reading or two. After this many fresh
+# readings without it, a wood drop belongs to some later purchase: live, a lumber
+# camp's 100 wood "confirmed" a house that had sat unpaid for two minutes.
+_PLACEMENT_WOOD_READINGS = 20
+# A paid building not seen complete in this time is dropped from the purchases
+# that block a rebuild. A house takes about 25 s with one builder.
+_HOUSE_COMPLETION_SECONDS = 120.0
+_BUILDING_COMPLETION_SECONDS = 240.0
 # Distinct detection frames before a building class is REPORTED as sighted
 # (context line only — sightings never gate builds: run 9, F-36, a persistent
 # phantom mill beat any count threshold and 14 outposts got built through the
@@ -375,6 +387,8 @@ class _PendingPlacement:
     point: tuple[int, int] = (0, 0)
     # Monotonic instant after which an undecided reading is judged anyway.
     settle_deadline: float = 0.0
+    # Fresh wood readings this placement has been judged against so far.
+    wood_readings: int = 0
 
     @property
     def is_house(self) -> bool:
@@ -386,6 +400,7 @@ class _PurchasedBuilding:
     operation_id: int
     preexisting_entity_ids: frozenset[str]
     cap_before: int = 0
+    purchased_at: float = 0.0  # Monotonic; 0 means unknown and never expires.
 
 
 @dataclass
@@ -783,6 +798,7 @@ def observe_hud(
         and population_cap >= purchased_house.cap_before + _HOUSE_CAP_STEP
     ):
         record_confirmed_buildings([_HOUSE_CLASS])
+    _expire_unfinished_purchases()
     _settle_pending_research(fresh_resources, claimed_spend, input_revision=input_revision)
     _settle_pending_training(
         fresh_resources,
@@ -1025,15 +1041,42 @@ def _settle_pending_placements(
         completed_house = (
             pending.is_house and _house_verdict(pending, cap_now, claimed_cap) == "confirmed"
         )
+        # Only the first readings after the click can show its payment; a later
+        # drop belongs to a later purchase. Completion evidence still counts.
+        wood_judged = wood_now is not None and pending.wood_readings < _PLACEMENT_WOOD_READINGS
         verdict = (
             "confirmed"
             if completed_house
             else _wood_verdict(pending, wood_now, spent)
-            if wood_now is not None
+            if wood_now is not None and wood_judged
             else "undecided"
         )
+        if verdict == "undecided" and _now() >= (
+            pending.settle_deadline + _PLACEMENT_ABANDON_SECONDS
+        ):
+            _note_missing_settlement(pending.building_class)
+            outcomes.append(
+                ActionOutcome(
+                    pending.operation_id,
+                    f"build_{pending.building_class}",
+                    "failed",
+                    "placement never seen: no wood spent and no building completed",
+                )
+            )
+            log.warning(
+                "build_placement_abandoned",
+                building=pending.building_class,
+                selected_by=pending.selected_by,
+                x=pending.point[0],
+                y=pending.point[1],
+            )
+            continue
         if verdict == "undecided":
-            still_pending.append(pending)
+            still_pending.append(
+                replace(pending, wood_readings=pending.wood_readings + 1)
+                if wood_judged
+                else pending
+            )
             if (
                 _now() >= pending.settle_deadline
                 and pending.operation_id not in current_ledger().uncertain_operations
@@ -1060,7 +1103,10 @@ def _settle_pending_placements(
                     # another farm can be started while the first is building.
                     current_ledger().building_purchases[pending.building_class] = (
                         _PurchasedBuilding(
-                            pending.operation_id, pending.preexisting_entity_ids, pending.cap_before
+                            pending.operation_id,
+                            pending.preexisting_entity_ids,
+                            pending.cap_before,
+                            _now(),
                         )
                     )
                 _clear_missing_streak(pending.building_class)
@@ -1093,6 +1139,25 @@ def _settle_pending_placements(
     current_ledger().pending_placements = still_pending
     for outcome in outcomes:
         current_ledger().record_outcome(outcome)
+
+
+def _expire_unfinished_purchases() -> None:
+    """Drop paid buildings never seen complete, so they stop blocking a rebuild."""
+    ledger = current_ledger()
+    for cls, purchased in list(ledger.building_purchases.items()):
+        limit = _HOUSE_COMPLETION_SECONDS if cls == _HOUSE_CLASS else _BUILDING_COMPLETION_SECONDS
+        if not purchased.purchased_at or _now() - purchased.purchased_at < limit:
+            continue
+        del ledger.building_purchases[cls]
+        ledger.record_outcome(
+            ActionOutcome(
+                purchased.operation_id,
+                f"build_{cls}",
+                "failed",
+                f"completion never observed within {round(limit)} s; purchase dropped",
+            )
+        )
+        log.warning("build_completion_never_observed", building=cls, seconds=round(limit))
 
 
 def _house_verdict(

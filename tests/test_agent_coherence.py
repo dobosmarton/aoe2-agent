@@ -146,10 +146,12 @@ def test_pending_house_suppresses_duplicates_until_failure_expires(
     assert executor.build_rejection("q") is not None
 
     executor.observe_hud(4, 5, {"wood": 210}, idle_present=True)
-    assert ledger.pending_placements == [pending]  # inconclusive, not failed yet
+    pending_ids = [pending.operation_id]
+    # Inconclusive, not failed yet.
+    assert [p.operation_id for p in ledger.pending_placements] == pending_ids
     now = pending.settle_deadline + 1
     executor.observe_hud(4, 5, {"wood": 220}, idle_present=True)
-    assert ledger.pending_placements == [pending]
+    assert [p.operation_id for p in ledger.pending_placements] == pending_ids
     assert ledger.reservations()["wood"] == 25
     assert ledger.outcomes[-1].status == "uncertain"
     assert not eligible(house, executor.ledger_policy_state())
