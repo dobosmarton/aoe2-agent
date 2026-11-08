@@ -72,7 +72,7 @@ _detected_entities: list[dict] = []
 _rescan_fn: Callable[[], Awaitable[bool]] | None = None
 _rescan_full_fn: Callable[[], Awaitable[bool]] | None = None
 _selection_refresh_fn: Callable[[], Awaitable[bool]] | None = None
-_detection_refresh_fn: Callable[[], Awaitable[bool]] | None = None
+_placement_refresh_fn: Callable[[], Awaitable[bool]] | None = None
 
 
 @dataclass
@@ -106,19 +106,19 @@ def set_selection_refresh_fn(fn: Callable[[], Awaitable[bool]]) -> None:
     _selection_refresh_fn = fn
 
 
-def set_detection_refresh_fn(fn: Callable[[], Awaitable[bool]]) -> None:
-    """Set the post-input refresh that detects without reading the HUD."""
-    global _detection_refresh_fn
-    _detection_refresh_fn = fn
+def set_placement_refresh_fn(fn: Callable[[], Awaitable[bool]]) -> None:
+    """Set the pre-placement refresh: detection and the HUD, without the selection read."""
+    global _placement_refresh_fn
+    _placement_refresh_fn = fn
 
 
 def clear_refresh_callbacks() -> None:
     """Release per-game capture callbacks after all loops have stopped."""
-    global _rescan_fn, _rescan_full_fn, _selection_refresh_fn, _detection_refresh_fn
+    global _rescan_fn, _rescan_full_fn, _selection_refresh_fn, _placement_refresh_fn
     _rescan_fn = None
     _rescan_full_fn = None
     _selection_refresh_fn = None
-    _detection_refresh_fn = None
+    _placement_refresh_fn = None
 
 
 async def _selection_refresh() -> bool:
@@ -129,10 +129,10 @@ async def _selection_refresh() -> bool:
 async def _spatial_refresh() -> bool:
     """A fresh view with detection, for a click placed from detected positions.
 
-    Detection alone when that refresh is wired: the HUD reads add nothing here and
-    would age the positions.
+    Without the selected-unit read when that refresh is wired: it adds nothing here
+    and, being the slowest read, would age the positions.
     """
-    callback = _detection_refresh_fn or _rescan_fn
+    callback = _placement_refresh_fn or _rescan_fn
     return callback is not None and await callback()
 
 

@@ -32,8 +32,8 @@ from .executor import (
     clear_refresh_callbacks,
     set_absolute_zoom,
     set_command_button,
-    set_detection_refresh_fn,
     set_modifier_map,
+    set_placement_refresh_fn,
     set_rescan_fn,
     set_rescan_full_fn,
     set_selection_refresh_fn,
@@ -292,7 +292,7 @@ async def game_loop(
         set_rescan_fn(refresh)
         set_rescan_full_fn(refresh)
         set_selection_refresh_fn(frame_refresh(ctx.frames, selection_only=True))
-        set_detection_refresh_fn(frame_refresh(ctx.frames, detection_only=True))
+        set_placement_refresh_fn(frame_refresh(ctx.frames, skip_selection=True))
 
         memory.memories_loaded = list(provider.loaded_memory_titles)
         log.info(

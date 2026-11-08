@@ -67,14 +67,14 @@ _REFRESH_TIMEOUT = 3.0
 
 
 def frame_refresh(
-    frames: FramePipe, *, selection_only: bool = False, detection_only: bool = False
+    frames: FramePipe, *, selection_only: bool = False, skip_selection: bool = False
 ) -> Callable[[], Awaitable[bool]]:
-    """Wait for a post-input view, optionally skipping detection or the HUD reads."""
+    """Wait for a post-input view, optionally skipping detection or the selection read."""
 
     async def refresh() -> bool:
         asked = time.monotonic()
         request = frames.request_spatial_refresh(
-            selection_only=selection_only, detection_only=detection_only
+            selection_only=selection_only, skip_selection=skip_selection
         )
         try:
             result = await asyncio.wait_for(request, timeout=_REFRESH_TIMEOUT)
@@ -153,9 +153,9 @@ class FrameSource(Protocol):
         ...
 
     async def capture_spatial(
-        self, timings: TickTimings, *, selection_only: bool = False, detection_only: bool = False
+        self, timings: TickTimings, *, selection_only: bool = False, skip_selection: bool = False
     ) -> SpatialRefresh:
-        """Capture after input; skip detection, or the HUD and selection reads."""
+        """Capture after input; skip detection, or the selected-unit read."""
         ...
 
     def close(self) -> None:
@@ -495,12 +495,13 @@ class GameSource:
         )
 
     async def capture_spatial(
-        self, timings: TickTimings, *, selection_only: bool = False, detection_only: bool = False
+        self, timings: TickTimings, *, selection_only: bool = False, skip_selection: bool = False
     ) -> SpatialRefresh:
         """One native post-input capture; a requested detector refresh has priority.
 
-        `detection_only` skips the HUD and selected-unit reads: published boxes are
-        as old as the slowest lane, and those reads spiked to 947 ms live.
+        `skip_selection` skips the selected-unit read (RapidOCR): published boxes are
+        as old as the slowest lane, and it spiked to 947 ms live. The resource bar
+        is still read; a placement needs its wood baseline.
         """
         capture = await self.capture_stream()
         pixels = capture.pixels
@@ -519,10 +520,11 @@ class GameSource:
             sighting: Sighting | None = None
             observed_camera_revision = capture.camera_revision
         else:
-            if detection_only:
-                hud_readings: ResourceReadings = {}
+            if skip_selection:
                 selected_unit = None
-                raw, screenshot = await self._detect_with_screenshot(capture, 0)
+                hud_readings, (raw, screenshot) = await asyncio.gather(
+                    self._hud(pixels, 0, timings), self._detect_with_screenshot(capture, 0)
+                )
             else:
                 hud_readings, selected_unit, detected = await asyncio.gather(
                     self._hud(pixels, 0, timings),
@@ -532,7 +534,7 @@ class GameSource:
                 raw, screenshot = detected
             sighting = await self.integrate_spatial(raw) if raw is not None else None
             entities = snapshot_entities(sighting.frame.entities) if sighting is not None else None
-            if sighting is not None and not detection_only:
+            if sighting is not None:
                 sighting = Sighting(
                     replace(
                         sighting.frame,

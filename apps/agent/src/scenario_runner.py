@@ -210,7 +210,7 @@ class _ScriptedSource:
         return Sighting(frame, {entity.id: (Owner.OWN, 1.0) for entity in entities})
 
     async def capture_spatial(
-        self, timings: TickTimings, *, selection_only: bool = False, detection_only: bool = False
+        self, timings: TickTimings, *, selection_only: bool = False, skip_selection: bool = False
     ) -> SpatialRefresh:
         with timings.phase("capture"):
             captured_at = time.monotonic()

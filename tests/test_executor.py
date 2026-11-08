@@ -123,7 +123,7 @@ def fake_pyautogui(monkeypatch: pytest.MonkeyPatch, clock: _Clock) -> _FakePyaut
     ex._rescan_fn = None
     ex._rescan_full_fn = None
     ex._selection_refresh_fn = None
-    ex._detection_refresh_fn = None
+    ex._placement_refresh_fn = None
     ex.reset_build_gates()
     original_observe_hud = ex.observe_hud
 
@@ -776,7 +776,7 @@ def test_a_build_detects_again_just_before_placing(
 
     ex.set_selection_refresh_fn(selection_only)
     ex.set_rescan_fn(full_refresh)
-    ex.set_detection_refresh_fn(detect)
+    ex.set_placement_refresh_fn(detect)
     monkeypatch.setattr(ex, "build_rejection", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(ex, "build_steps", lambda *_args, **_kwargs: [dict(s) for s in steps])
     monkeypatch.setattr(ex, "execute_action", execute)

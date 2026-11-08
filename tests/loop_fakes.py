@@ -53,7 +53,7 @@ class FakeSource:
         return None
 
     async def capture_spatial(
-        self, timings: TickTimings, *, selection_only: bool = False, detection_only: bool = False
+        self, timings: TickTimings, *, selection_only: bool = False, skip_selection: bool = False
     ) -> SpatialRefresh:
         with timings.phase("capture"):
             self.spatial_captures += 1
