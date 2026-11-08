@@ -81,3 +81,34 @@ def test_fresh_evidence_is_used_for_any_target(ledger: ex.ActionLedger) -> None:
 def test_a_building_placement_counts_as_static() -> None:
     assert ex._static_click({"auto_placement": True, "building_key": "q"})
     assert not ex._static_click({"type": "click", "x": 3, "y": 4})
+
+
+def _villager(identifier: str, center: tuple[int, int], confidence: float) -> dict[str, object]:
+    x, y = center
+    return {
+        "id": identifier,
+        "class": "villager",
+        "bbox": (x - 10, y - 15, x + 10, y + 15),
+        "center": center,
+        "confidence": confidence,
+    }
+
+
+_TC = {"id": "tc", "class": "town_center", "bbox": (400, 300, 800, 600), "center": (600, 450)}
+
+
+def test_a_villager_on_the_town_center_is_not_clicked(ledger: ex.ActionLedger) -> None:
+    # The stronger detection stands on the Town Center; clicking it selects the TC.
+    ex.set_detected_entities(
+        [_TC, _villager("on_tc", (600, 500), 0.95), _villager("in_field", (1000, 700), 0.8)]
+    )
+    target = ex._verified_villager_target()
+    assert target is not None and target[0] == "in_field"
+
+
+def test_a_villager_on_a_building_is_used_when_it_is_the_only_one(
+    ledger: ex.ActionLedger,
+) -> None:
+    ex.set_detected_entities([_TC, _villager("on_tc", (600, 500), 0.95)])
+    target = ex._verified_villager_target()
+    assert target is not None and target[0] == "on_tc"

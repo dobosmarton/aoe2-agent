@@ -1914,11 +1914,34 @@ def _verified_villager_center() -> tuple[int, int] | None:
     return None if target is None else target[1]
 
 
+def _over_building(point: tuple[int, int]) -> bool:
+    """Whether `point` lies on a detected building, where a click selects the building."""
+    x, y = point
+    for entity in _detected_entities:
+        cls = entity.get("class")
+        bbox = entity.get("bbox")
+        if (
+            isinstance(cls, str)
+            and cls in _CLICK_OCCLUDING_CLASSES
+            and isinstance(bbox, (list, tuple))
+            and len(bbox) == 4
+            and bbox[0] <= x <= bbox[2]
+            and bbox[1] <= y <= bbox[3]
+        ):
+            return True
+    return False
+
+
 def _verified_villager_target() -> tuple[str, tuple[int, int]] | None:
-    """Bind the strongest boxed villager, never an unbounded class guess."""
+    """Bind the strongest boxed villager, never an unbounded class guess.
+
+    A villager clear of buildings is preferred: live, the click meant for one in
+    front of the Town Center selected the Town Center (twice). One standing on a
+    building is still used when it is the only choice.
+    """
     if not _fresh_spatial_cache():
         return None
-    candidates: list[tuple[float, str, tuple[int, int]]] = []
+    candidates: list[tuple[bool, float, str, tuple[int, int]]] = []
     for entity in _detected_entities:
         if entity.get("class") != "villager":
             continue
@@ -1944,10 +1967,11 @@ def _verified_villager_target() -> tuple[str, tuple[int, int]] | None:
             continue
         x, y = int(center[0]), int(center[1])
         if bbox[0] <= x <= bbox[2] and bbox[1] <= y <= bbox[3]:
-            candidates.append((float(confidence), identifier, (x, y)))
+            clear = not _over_building((x, y))
+            candidates.append((clear, float(confidence), identifier, (x, y)))
     if not candidates:
         return None
-    _, identifier, center = max(candidates, key=lambda item: item[0])
+    _, _, identifier, center = max(candidates, key=lambda item: (item[0], item[1]))
     return identifier, center
 
 
@@ -2266,6 +2290,9 @@ _RESOURCE_REQUIRED_KEYS: frozenset[str] = frozenset(_BUILD_ANCHOR_CLASSES) - _AN
 GATE_BUILDING_CLASSES: frozenset[str] = frozenset(
     cls for menu in _MENU_BUILDINGS.values() for cls in menu.values()
 )
+
+# Buildings a click lands on instead of a unit standing in front of them.
+_CLICK_OCCLUDING_CLASSES: frozenset[str] = GATE_BUILDING_CLASSES | {"town_center"}
 
 # Wood cost per building class (every one of these is wood-only). Literals on
 # purpose: packages/data's aoe2.db holds the full cost table, but the build gate
