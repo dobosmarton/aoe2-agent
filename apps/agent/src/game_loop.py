@@ -86,12 +86,34 @@ def _untypeable_agent_keys() -> list[str]:
     return missing
 
 
+_POPUP_SAMPLES = 3
+_POPUP_SAMPLE_GAP = 0.4
+
+
 def _popup_open() -> bool:
-    """Whether a menu or popup dims the game. Input would land on it instead."""
-    from .game_screen import popup_open
+    """Whether a menu or popup dims the game. Input would land on it instead.
+
+    Only frames captured after this call count, and every one must be dimmed: an
+    open menu stays, while the first frame after the game comes forward can be
+    left over from before (a run from Terminal refused on one such frame).
+    """
+    from .game_screen import hud_brightness, popup_open
     from .screen import capture_native
 
-    return popup_open(capture_native().pixels())
+    asked = time.monotonic()
+    readings: list[tuple[float, float]] = []
+    while len(readings) < _POPUP_SAMPLES:
+        pixels = capture_native()
+        if pixels.captured_at < asked:
+            time.sleep(0.05)
+            continue
+        rgb = pixels.pixels()
+        if not popup_open(rgb):
+            return False
+        readings.append(hud_brightness(rgb))
+        time.sleep(_POPUP_SAMPLE_GAP)
+    log.info("game_dimmed", hud_brightness=[(round(a), round(b)) for a, b in readings])
+    return True
 
 
 async def _prepare_macos_game(profile: GameProfile | None) -> str | None:

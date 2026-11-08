@@ -299,3 +299,45 @@ def test_orders_use_the_profiles_command_button(
 
 def test_the_mac_example_profile_orders_with_the_left_button() -> None:
     assert load_profile(_MAC_PROFILE).command_button == "left"
+
+
+def test_one_dimmed_frame_left_over_from_before_focus_is_not_a_menu(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import numpy as np
+    from gameplay_agent import screen
+    from gameplay_agent.screen import NativeCapture
+
+    lit = np.zeros((1898, 3024, 3), dtype=np.uint8)
+    lit[:80, :1288] = 66
+    lit[1640:, 429:1400] = 150
+    dark = np.zeros_like(lit)
+    now = [100.0]
+    frames = [(dark, 99.0), (dark, 100.5), (lit, 100.6)]  # A stale frame, then fresh ones.
+
+    def capture() -> NativeCapture:
+        rgb, at = frames.pop(0) if frames else (lit, now[0])
+        return NativeCapture(rgb.tobytes(), 3024, 1898, at, (0, 66, 3024, 1898))
+
+    monkeypatch.setattr(screen, "capture_native", capture)
+    monkeypatch.setattr(game_loop.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(game_loop.time, "sleep", lambda _s: None)
+    assert game_loop._popup_open() is False
+
+
+def test_a_menu_that_stays_open_is_a_menu(monkeypatch: pytest.MonkeyPatch) -> None:
+    import numpy as np
+    from gameplay_agent import screen
+    from gameplay_agent.screen import NativeCapture
+
+    dark = np.zeros((1898, 3024, 3), dtype=np.uint8)
+    clock = [100.0]
+
+    def capture() -> NativeCapture:
+        clock[0] += 0.1
+        return NativeCapture(dark.tobytes(), 3024, 1898, clock[0], (0, 66, 3024, 1898))
+
+    monkeypatch.setattr(screen, "capture_native", capture)
+    monkeypatch.setattr(game_loop.time, "monotonic", lambda: 100.0)
+    monkeypatch.setattr(game_loop.time, "sleep", lambda _s: None)
+    assert game_loop._popup_open() is True
