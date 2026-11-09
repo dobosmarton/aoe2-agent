@@ -231,11 +231,35 @@ def _ambiguous_candidates(
     return ambiguous_old, ambiguous_new
 
 
+def _refused_first_choices(
+    candidates: Sequence[tuple[float, int, int]],
+    ambiguous_old: set[int],
+    ambiguous_new: set[int],
+) -> tuple[set[int], set[int]]:
+    """Identities whose cheapest pair was refused because the other side is ambiguous.
+
+    They sit this frame out. Falling back to a second choice handed a farm's ID to the
+    farm next to it when its own box was contested by a duplicate track.
+    """
+    first_old: dict[int, int] = {}
+    first_new: dict[int, int] = {}
+    for _cost, old_index, new_index in candidates:
+        _ = first_old.setdefault(old_index, new_index)
+        _ = first_new.setdefault(new_index, old_index)
+    return (
+        {old for old, new in first_old.items() if new in ambiguous_new},
+        {new for new, old in first_new.items() if old in ambiguous_old},
+    )
+
+
 def _matches(
     candidates: Sequence[tuple[float, int, int]],
     ambiguous_old: set[int],
     ambiguous_new: set[int],
 ) -> tuple[dict[int, int], set[int]]:
+    refused_old, refused_new = _refused_first_choices(candidates, ambiguous_old, ambiguous_new)
+    ambiguous_old = ambiguous_old | refused_old
+    ambiguous_new = ambiguous_new | refused_new
     matched: dict[int, int] = {}
     used_old: set[int] = set()
     for _cost, old_index, new_index in candidates:
