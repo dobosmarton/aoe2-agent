@@ -938,6 +938,9 @@ dependencies = [
     { name = "pyobjc-framework-screencapturekit", marker = "sys_platform == 'darwin'" },
     { name = "pyyaml" },
     { name = "rapidocr-onnxruntime" },
+    { name = "screentrack", version = "0.1.0", source = { url = "https://github.com/dobosmarton/screentrack/releases/download/v0.1.0/screentrack-0.1.0-cp311-abi3-macosx_11_0_arm64.whl" }, marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
+    { name = "screentrack", version = "0.1.0", source = { url = "https://github.com/dobosmarton/screentrack/releases/download/v0.1.0/screentrack-0.1.0-cp311-abi3-manylinux_2_28_x86_64.whl" }, marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "screentrack", version = "0.1.0", source = { url = "https://github.com/dobosmarton/screentrack/releases/download/v0.1.0/screentrack-0.1.0-cp311-abi3-win_amd64.whl" }, marker = "platform_machine == 'AMD64' and sys_platform == 'win32'" },
     { name = "structlog" },
     { name = "typesafe-sdk" },
 ]
@@ -960,6 +963,9 @@ requires-dist = [
     { name = "pyobjc-framework-screencapturekit", marker = "sys_platform == 'darwin'", specifier = ">=12.1" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "rapidocr-onnxruntime", specifier = ">=1.4.0" },
+    { name = "screentrack", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'", url = "https://github.com/dobosmarton/screentrack/releases/download/v0.1.0/screentrack-0.1.0-cp311-abi3-macosx_11_0_arm64.whl" },
+    { name = "screentrack", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", url = "https://github.com/dobosmarton/screentrack/releases/download/v0.1.0/screentrack-0.1.0-cp311-abi3-manylinux_2_28_x86_64.whl" },
+    { name = "screentrack", marker = "platform_machine == 'AMD64' and sys_platform == 'win32'", url = "https://github.com/dobosmarton/screentrack/releases/download/v0.1.0/screentrack-0.1.0-cp311-abi3-win_amd64.whl" },
     { name = "structlog", specifier = ">=24.1.0" },
     { name = "typesafe-sdk", specifier = ">=0.7.0" },
 ]
@@ -2636,6 +2642,60 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/11/2f/b29eafe4a3fbc3d6de9662b36e028d5f039e72d345e05c250e121a230dd4/scipy-1.17.1-cp314-cp314t-win_amd64.whl", hash = "sha256:eb092099205ef62cd1782b006658db09e2fed75bffcae7cc0d44052d8aa0f484", size = 37345327, upload-time = "2026-02-23T00:22:24.442Z" },
     { url = "https://files.pythonhosted.org/packages/07/39/338d9219c4e87f3e708f18857ecd24d22a0c3094752393319553096b98af/scipy-1.17.1-cp314-cp314t-win_arm64.whl", hash = "sha256:200e1050faffacc162be6a486a984a0497866ec54149a01270adc8a59b7c7d21", size = 25489165, upload-time = "2026-02-23T00:22:29.563Z" },
 ]
+
+[[package]]
+name = "screentrack"
+version = "0.1.0"
+source = { url = "https://github.com/dobosmarton/screentrack/releases/download/v0.1.0/screentrack-0.1.0-cp311-abi3-macosx_11_0_arm64.whl" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'darwin'",
+    "python_full_version < '3.12' and sys_platform == 'darwin'",
+]
+dependencies = [
+    { name = "numpy", marker = "sys_platform == 'darwin'" },
+]
+wheels = [
+    { url = "https://github.com/dobosmarton/screentrack/releases/download/v0.1.0/screentrack-0.1.0-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:20b06f5d66e82baf4351d895e91d8f65ed7dbbcc0020aa2d0de003c67d9a4539" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "numpy", specifier = ">=1.24" }]
+
+[[package]]
+name = "screentrack"
+version = "0.1.0"
+source = { url = "https://github.com/dobosmarton/screentrack/releases/download/v0.1.0/screentrack-0.1.0-cp311-abi3-manylinux_2_28_x86_64.whl" }
+resolution-markers = [
+    "(python_full_version >= '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version >= '3.12' and sys_platform != 'darwin' and sys_platform != 'linux' and sys_platform != 'win32')",
+    "(python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.12' and sys_platform != 'darwin' and sys_platform != 'linux' and sys_platform != 'win32')",
+]
+dependencies = [
+    { name = "numpy", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux' and sys_platform != 'win32')" },
+]
+wheels = [
+    { url = "https://github.com/dobosmarton/screentrack/releases/download/v0.1.0/screentrack-0.1.0-cp311-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:424f0eabd81d876cf2371927ea397bf3104295cec16379ace51d26b1e12b745d" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "numpy", specifier = ">=1.24" }]
+
+[[package]]
+name = "screentrack"
+version = "0.1.0"
+source = { url = "https://github.com/dobosmarton/screentrack/releases/download/v0.1.0/screentrack-0.1.0-cp311-abi3-win_amd64.whl" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'win32'",
+    "python_full_version < '3.12' and sys_platform == 'win32'",
+]
+dependencies = [
+    { name = "numpy", marker = "sys_platform == 'win32'" },
+]
+wheels = [
+    { url = "https://github.com/dobosmarton/screentrack/releases/download/v0.1.0/screentrack-0.1.0-cp311-abi3-win_amd64.whl", hash = "sha256:26fc36d432adfa900feea2ec657126820c21d73118dd8a4f553485ba7d04165d" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "numpy", specifier = ">=1.24" }]
 
 [[package]]
 name = "setuptools"

@@ -29,7 +29,7 @@ from .camera_motion import (
     estimate_motion,
 )
 from .entity_snapshot import EntitySnapshot
-from .temporal_entities import TemporalEntities, prepare_detections
+from .tracking import make_tracking
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -251,7 +251,8 @@ def replay_sequence(
     frames = _read_jsonl(directory / "sequence.jsonl", _Frame)
     detections = {row.capture_id: row for row in _read_jsonl(detections_path, _Detections)}
     labels = {row.capture_id: row for row in _read_jsonl(labels_path, _Labels)}
-    tracks = TemporalEntities()
+    tracking = make_tracking()
+    tracks = tracking.tracker
     raw_scores, temporal_scores = _Scores(), _Scores()
     previous_analysis: np.ndarray | None = None
     previous_at = float("-inf")
@@ -304,7 +305,7 @@ def replay_sequence(
         resets += motion.kind == "reset"
         pans += motion.kind == "pan"
         preparation_started = time.monotonic()
-        prepared = prepare_detections(raw, np.asarray(image))
+        prepared = tracking.prepare(raw, np.asarray(image))
         prepared_ms = (time.monotonic() - preparation_started) * 1000
         preparation_times.append(prepared_ms)
         association_started = time.monotonic()

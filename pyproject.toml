@@ -44,6 +44,12 @@ arena-web        = { workspace = true }
 detection-server = { workspace = true }
 autoresearch     = { workspace = true }
 data             = { workspace = true }
+# The native tracker ships as GitHub release wheels, not on PyPI.
+screentrack = [
+    { url = "https://github.com/dobosmarton/screentrack/releases/download/v0.1.0/screentrack-0.1.0-cp311-abi3-macosx_11_0_arm64.whl", marker = "sys_platform == 'darwin' and platform_machine == 'arm64'" },
+    { url = "https://github.com/dobosmarton/screentrack/releases/download/v0.1.0/screentrack-0.1.0-cp311-abi3-manylinux_2_28_x86_64.whl", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+    { url = "https://github.com/dobosmarton/screentrack/releases/download/v0.1.0/screentrack-0.1.0-cp311-abi3-win_amd64.whl", marker = "sys_platform == 'win32' and platform_machine == 'AMD64'" },
+]
 
 # Dev tooling — installed alongside every member. PEP 735 dependency-groups
 # are the modern replacement for the old `[project.optional-dependencies] dev`
