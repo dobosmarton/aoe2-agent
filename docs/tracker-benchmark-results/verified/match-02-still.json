@@ -1,0 +1,32 @@
+{
+  "reviewer": "By eye, from 9-frame strips without tracker output",
+  "seed": 5,
+  "approved": [
+    "track_104",
+    "track_170_0",
+    "track_218",
+    "track_249",
+    "track_37_2",
+    "track_39",
+    "track_68"
+  ],
+  "rejected": {
+    "track_166_0": "box starts and ends on nothing",
+    "track_103": "box ends on nothing",
+    "track_146": "box starts and ends on nothing",
+    "track_244": "box starts on nothing",
+    "track_253": "box mostly beside the villager",
+    "track_264": "box starts on nothing",
+    "track_141": "farm ghost beside a villager",
+    "track_145": "farm ghost beside a villager",
+    "track_156": "box ends beside the villager",
+    "track_248_0": "farm ghost beside a villager",
+    "track_92": "box ends on nothing",
+    "track_24": "box starts and ends on nothing",
+    "track_17": "not one unit",
+    "track_117": "box starts and ends on nothing",
+    "track_88": "not one unit",
+    "track_25": "box starts on nothing",
+    "track_89": "box ends on nothing"
+  }
+}

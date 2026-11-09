@@ -110,6 +110,19 @@ association, not detector inference or gameplay accuracy.
 | Crowded | 40 | 187.70 / 691.05 | 8.67 / 11.75 |
 | Crowded | 60 | 944.53 / 3403.13 | 15.36 / 21.56 |
 
+Those three-frame figures understate crowded scenes. Unmatched tracks survive
+for one second, so the track list keeps growing after frame 3 and only settles
+after about a second of frames. `scripts/bench_temporal.py` runs 30 frames and
+reports warm-up and steady state separately. Steady-state milliseconds for
+preparation plus association on the same Mac (64×64 boxes at 1920×1080):
+
+| Layout | Objects | 5 Hz p50 / p95 | 10 Hz p50 / p95 |
+| --- | ---: | ---: | ---: |
+| Separated | 60 | 9.10 / 9.40 | 9.20 / 10.18 |
+| Crowded | 20 | 6.75 / 6.96 | 10.11 / 13.66 |
+| Crowded | 40 | 20.37 / 20.95 | 34.81 / 38.56 |
+| Crowded | 60 | 41.33 / 43.82 | 73.32 / 86.72 |
+
 On the 3024×1964 HUD fixture,
 a separate 20-run conversion benchmark gave p50/p95 of 58.42/59.55 ms for an
 emulated prior full-image-to-PNG-to-decode preparation path versus 0.07/0.15 ms

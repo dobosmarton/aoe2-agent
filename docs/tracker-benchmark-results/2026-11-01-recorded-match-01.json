@@ -1,0 +1,142 @@
+{
+  "still": {
+    "start_s": 360,
+    "seconds": 60,
+    "sample_hz": 5,
+    "scores": {
+      "raw": {
+        "survival_1s": 0.0,
+        "survival_2s": 0.0,
+        "survival_5s": 0.0,
+        "survival_2s_mobile": 0.0,
+        "survival_2s_static": 0.0,
+        "wrong_2s": 0.0,
+        "idf1": 0.02516615637368382,
+        "switches": 1000.0
+      },
+      "oracle": {
+        "survival_1s": 1.0,
+        "survival_2s": 1.0,
+        "survival_5s": 1.0,
+        "survival_2s_mobile": 1.0,
+        "survival_2s_static": 1.0,
+        "wrong_2s": 0.0,
+        "idf1": 1.0,
+        "switches": 0.0
+      },
+      "iou": {
+        "survival_1s": 0.9548258345428157,
+        "survival_2s": 0.9423403052572075,
+        "survival_5s": 0.9165135741988161,
+        "survival_2s_mobile": 0.9456521739130435,
+        "survival_2s_static": 0.9420935412026726,
+        "wrong_2s": 0.04409270774448841,
+        "idf1": 0.8184601598088268,
+        "switches": 33.422786045376924
+      },
+      "python": {
+        "survival_1s": 0.0010885341074020319,
+        "survival_2s": 0.0003768607499528924,
+        "survival_5s": 0.0,
+        "survival_2s_mobile": 0.005434782608695652,
+        "survival_2s_static": 0.0,
+        "wrong_2s": 0.0,
+        "idf1": 0.04114703905608244,
+        "switches": 983.0039847117183
+      },
+      "screentrack": {
+        "survival_1s": 0.0010885341074020319,
+        "survival_2s": 0.0003768607499528924,
+        "survival_5s": 0.0,
+        "survival_2s_mobile": 0.005434782608695652,
+        "survival_2s_static": 0.0,
+        "wrong_2s": 0.0,
+        "idf1": 0.04114703905608244,
+        "switches": 983.0039847117183
+      },
+      "candidate": {
+        "survival_1s": 0.2940856313497823,
+        "survival_2s": 0.23836442434520444,
+        "survival_5s": 0.1577873035313329,
+        "survival_2s_mobile": 0.5353260869565217,
+        "survival_2s_static": 0.21623810487953027,
+        "wrong_2s": 0.000942151874882231,
+        "idf1": 0.2636845642595773,
+        "switches": 583.8822477026918
+      },
+      "parity": {
+        "differing_frames": 0.0
+      }
+    }
+  },
+  "moving": {
+    "start_s": 530,
+    "seconds": 60,
+    "sample_hz": 5,
+    "scores": {
+      "raw": {
+        "survival_1s": 0.0,
+        "survival_2s": 0.0,
+        "survival_5s": 0.0,
+        "survival_2s_mobile": 0.0,
+        "survival_2s_static": 0.0,
+        "wrong_2s": 0.0,
+        "idf1": 0.05873879641485275,
+        "switches": 1000.0
+      },
+      "oracle": {
+        "survival_1s": 1.0,
+        "survival_2s": 1.0,
+        "survival_5s": 1.0,
+        "survival_2s_mobile": 1.0,
+        "survival_2s_static": 1.0,
+        "wrong_2s": 0.0,
+        "idf1": 1.0,
+        "switches": 0.0
+      },
+      "iou": {
+        "survival_1s": 0.9428972618769015,
+        "survival_2s": 0.9199771363246642,
+        "survival_5s": 0.8215984776403426,
+        "survival_2s_mobile": 0.7949790794979079,
+        "survival_2s_static": 0.9397550479973519,
+        "wrong_2s": 0.018005144326950558,
+        "idf1": 0.7439180537772087,
+        "switches": 40.043584854263145
+      },
+      "python": {
+        "survival_1s": 0.024572899602153055,
+        "survival_2s": 0.015432980851671906,
+        "survival_5s": 0.003330161750713606,
+        "survival_2s_mobile": 0.0,
+        "survival_2s_static": 0.01787487586891758,
+        "wrong_2s": 0.0,
+        "idf1": 0.09106914212548016,
+        "switches": 962.8620720966131
+      },
+      "screentrack": {
+        "survival_1s": 0.024572899602153055,
+        "survival_2s": 0.015432980851671906,
+        "survival_5s": 0.003330161750713606,
+        "survival_2s_mobile": 0.0,
+        "survival_2s_static": 0.01787487586891758,
+        "wrong_2s": 0.0,
+        "idf1": 0.09106914212548016,
+        "switches": 962.8620720966131
+      },
+      "candidate": {
+        "survival_1s": 0.29230049145799203,
+        "survival_2s": 0.2263503858245213,
+        "survival_5s": 0.15033301617507136,
+        "survival_2s_mobile": 0.13598326359832635,
+        "survival_2s_static": 0.24064879179079776,
+        "wrong_2s": 0.0,
+        "idf1": 0.31089948783610755,
+        "switches": 602.37900662853
+      },
+      "parity": {
+        "differing_frames": 0.0
+      }
+    }
+  }
+}

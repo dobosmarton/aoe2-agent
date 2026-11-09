@@ -1,0 +1,32 @@
+{
+  "reviewer": "By eye, from 9-frame strips without tracker output",
+  "seed": 5,
+  "approved": [
+    "track_664",
+    "track_405",
+    "track_539_0",
+    "track_876",
+    "track_580",
+    "track_333",
+    "track_325",
+    "track_319",
+    "track_374",
+    "track_747_0",
+    "track_22",
+    "track_631",
+    "track_198"
+  ],
+  "rejected": {
+    "track_386": "static object",
+    "track_965": "ends on the HUD",
+    "track_924": "static object",
+    "track_989": "swaps woman to man",
+    "track_421_2": "silhouettes, can't verify",
+    "track_873": "farm ghost",
+    "track_54": "static object",
+    "track_36": "tree, then a unit",
+    "track_97": "farm ghost",
+    "track_413_1": "silhouettes, can't verify",
+    "track_326_3": "two units in one box"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "reviewer": "By eye, from 9-frame strips without tracker output",
+  "seed": 0,
+  "approved": [
+    "track_288",
+    "track_37",
+    "track_326_0",
+    "track_223",
+    "track_17",
+    "track_69",
+    "track_132",
+    "track_104_0",
+    "track_287"
+  ],
+  "rejected": {
+    "track_196": "two frames are an outline behind a roof",
+    "track_99_0": "overlapping foragers, then a different villager",
+    "track_272_1": "one of several overlapping foragers; can't tell which",
+    "track_267_2": "two villagers stacked at the camp",
+    "track_77": "an outline, then a different villager",
+    "track_70": "ends as an outline at the camp",
+    "track_253": "one of several overlapping foragers; can't tell which",
+    "track_238_8": "a walking villager, then possibly the forager already at the bush",
+    "track_351": "two frames box a standing villager instead of the forager",
+    "track_200_5": "moves between two overlapping foragers",
+    "track_237_2": "ends as an outline at the camp",
+    "track_267_3": "two villagers stacked at the camp",
+    "track_95": "something blue behind the camp's log pile, not a unit",
+    "track_278_2": "one of several overlapping foragers; can't tell which",
+    "track_123": "the surroundings don't stay consistent; not clearly one farmer"
+  }
+}

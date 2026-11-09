@@ -1,0 +1,14 @@
+{
+  "reviewer": "By eye, from 9-frame strips without tracker output",
+  "seed": 5,
+  "approved": [
+    "track_3",
+    "track_444",
+    "track_564",
+    "track_586"
+  ],
+  "rejected": {
+    "track_609": "the corner of a building, not a unit",
+    "track_457": "an outline behind a roof, possibly several units"
+  }
+}

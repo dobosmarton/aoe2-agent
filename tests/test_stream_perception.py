@@ -139,11 +139,16 @@ def test_class_flicker_does_not_authorize_historical_click() -> None:
 def test_history_expires_and_track_ids_are_not_reused() -> None:
     tracks = TemporalEntities()
     box = (100, 100, 120, 140)
-    first = _observe(tracks, (_entity("tree", box),), capture_id=1, at=1.0)
-    second = _observe(tracks, (_entity("tree", box),), capture_id=2, at=2.1)
+    other = (300, 300, 320, 340)
+    first = _observe(tracks, (_entity("sheep", box), _entity("house", other)), capture_id=1, at=1.0)
+    for capture_id in range(2, 9):
+        _observe(
+            tracks, (_entity("house", other),), capture_id=capture_id, at=0.8 + 0.2 * capture_id
+        )
+    later = _observe(tracks, (_entity("sheep", box),), capture_id=9, at=2.6)
 
-    assert first[0].id != second[0].id
-    assert second[0].class_agreement is None
+    assert later[0].id not in {item.id for item in first}
+    assert later[0].class_agreement is None
 
 
 def test_occlusion_keeps_a_short_lived_identity_without_publishing_prediction() -> None:
@@ -330,3 +335,34 @@ def test_spatial_publication_after_newer_hud_still_wakes_readers() -> None:
     assert published.captured_at == 10.2
     assert published.spatial_captured_at == 10.1
     assert published.publication_version == 2
+
+
+def test_a_refused_first_choice_never_falls_back_to_the_neighbour() -> None:
+    """Match 4, still clip, 48-50 s: two touching farms whose boxes shifted.
+
+    The farm's ID was refused its own box as ambiguous, then took the next farm's box,
+    which was its second choice. Boxes are the recorded ones, moved by (-900, -1250);
+    the next farm's last box is 10 px further left, because these blank pixels can't
+    add the difference in looks that made its own track ambiguous in the recording.
+    """
+    tracks = TemporalEntities()
+    pixels = np.zeros((360, 640, 3), dtype=np.uint8)
+    (farm,) = _observe(
+        tracks, (_entity("farm", (190, 131, 465, 307)),), capture_id=1, at=48.1, pixels=pixels
+    )
+    _observe(
+        tracks,
+        (_entity("farm", (119, 106, 385, 277)), _entity("farm", (268, 170, 499, 314))),
+        capture_id=2,
+        at=48.3,
+        pixels=pixels,
+    )
+    neighbour, _same = _observe(
+        tracks,
+        (_entity("farm", (58, 71, 318, 242)), _entity("farm", (218, 148, 484, 316))),
+        capture_id=3,
+        at=49.1,
+        pixels=pixels,
+    )
+
+    assert neighbour.id != farm.id
