@@ -88,6 +88,13 @@ def test_target_is_wrong_when_the_id_moved_to_another_object() -> None:
     assert (outcome.survived, outcome.wrong, outcome.lost, outcome.same_spot) == (0, 2, 0, 0)
 
 
+def test_a_swap_seen_in_many_samples_is_one_incident_per_id() -> None:
+    before = [_apart(at, {"a": "x", "b": "y"}) for at in (0.0, 0.2, 0.4)]
+    after = [_apart(at, {"a": "y", "b": "x"}) for at in (1.0, 1.2, 1.4)]
+    outcome = scorecard.target_outcomes([*before, *after], 1.0)
+    assert (outcome.wrong, outcome.incidents) == (6, 2)
+
+
 def test_a_second_label_on_the_same_spot_is_not_a_wrong_object() -> None:
     frames = [_frame(0.0, {"a": "x", "b": "y"}), _frame(1.0, {"a": "y", "b": "x"})]
     outcome = scorecard.target_outcomes(frames, 1.0)

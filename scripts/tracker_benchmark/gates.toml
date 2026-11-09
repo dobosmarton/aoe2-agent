@@ -81,3 +81,9 @@ max_memory_growth_mb = 5.0
 latency_seconds = 2.0
 baseline = "iou"
 label_baseline = "raw"
+# Added 2026-11-09, after match 4 and before match 5, see docs/tracker-benchmark.md.
+# A swap counts once however long it lasts, and IoU almost never swaps because it drops
+# IDs instead, so "no more than IoU" meant "none at all" and one swap decided a match.
+wrong_incidents_per_clip = 1
+# One object-frame of smoothing lag in about 19,000 failed match 4's label check.
+label_accuracy_tolerance = 0.0005

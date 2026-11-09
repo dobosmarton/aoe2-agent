@@ -171,6 +171,8 @@ class TargetOutcome:
     wrong: int  # A different object, so a click would land somewhere else.
     lost: int
     same_spot: int = 0  # A second label on the same spot, as the detector often reports.
+    # Distinct swaps: one ID pointing at one other object, however many samples saw it.
+    incidents: int = 0
 
     @property
     def total(self) -> int:
@@ -198,6 +200,7 @@ def target_outcomes(
     """
     labels = _truth_labels(frames)
     survived = wrong = lost = same_spot = 0
+    swaps: set[tuple[str, str, str]] = set()
     for index, frame in enumerate(frames):
         later = next(
             (item for item in frames[index + 1 :] if item.at >= frame.at + latency_seconds),
@@ -225,7 +228,8 @@ def target_outcomes(
                 same_spot += 1
             else:
                 wrong += 1
-    return TargetOutcome(survived, wrong, lost, same_spot)
+                swaps.add((prediction.id, identifier, resolved))
+    return TargetOutcome(survived, wrong, lost, same_spot, len(swaps))
 
 
 def label_scores(frames: Sequence[ScoredFrame]) -> tuple[float, float]:

@@ -321,9 +321,35 @@ def test_same_spot_losses_count_against_survival_and_are_reported_apart() -> Non
     ours = TargetOutcome(survived=90, wrong=0, lost=0, same_spot=10)
     theirs = TargetOutcome(survived=95, wrong=0, lost=5, same_spot=0)
     lines = recorded.judge(ours, theirs, (0.9, 10.0), (0.9, 10.0))
-    assert [line.split()[0] for line in lines] == ["FAIL", "pass", "pass", "info"]
+    assert [line.split()[0] for line in lines] == ["FAIL", "pass", "pass", "info", "info"]
     assert lines[0] == "FAIL  survival: 90.0% against 95.0%"
     assert lines[-1] == "info  same spot, counted in survival: 10.00% against 0.00%"
+
+
+@pytest.mark.parametrize(("swaps", "passed"), [(2, True), (3, False)])
+def test_wrong_objects_are_judged_by_swaps_within_the_allowance(swaps: int, passed: bool) -> None:
+    ours = TargetOutcome(survived=90, wrong=swaps * 6, lost=0, incidents=swaps)
+    theirs = TargetOutcome(survived=90, wrong=1, lost=0, incidents=1)
+    allowance = recorded.Allowance(wrong_incidents=1)
+    lines = recorded.judge(ours, theirs, (0.9, 1.0), (0.9, 1.0), allowance)
+    assert lines[1].startswith("pass" if passed else "FAIL")
+    assert f"swaps {swaps} against 1, at most 2" in lines[1]
+    assert lines[3].startswith("info  wrong-object samples:")
+
+
+@pytest.mark.parametrize(("accuracy", "passed"), [(0.9995, True), (0.9994, False)])
+def test_label_accuracy_may_trail_raw_by_the_tolerance(accuracy: float, passed: bool) -> None:
+    same = TargetOutcome(survived=1, wrong=0, lost=0)
+    allowance = recorded.Allowance(label_accuracy=0.0005)
+    lines = recorded.judge(same, same, (accuracy, 1.0), (1.0, 1.0), allowance)
+    assert lines[2].startswith("pass" if passed else "FAIL")
+
+
+def test_label_flips_get_no_tolerance() -> None:
+    same = TargetOutcome(survived=1, wrong=0, lost=0)
+    allowance = recorded.Allowance(label_accuracy=0.0005)
+    lines = recorded.judge(same, same, (1.0, 1.1), (1.0, 1.0), allowance)
+    assert lines[2].startswith("FAIL")
 
 
 def test_new_clips_are_detected_only_with_the_fixed_model() -> None:

@@ -843,6 +843,7 @@ def pooled_outcome(
         sum(item.wrong for item in outcomes),
         sum(item.lost for item in outcomes),
         sum(item.same_spot for item in outcomes),
+        sum(item.incidents for item in outcomes),
     )
 
 
@@ -851,9 +852,21 @@ def _mean_labels(runs: Sequence[Sequence[scorecard.ScoredFrame]]) -> tuple[float
     return float(np.mean(accuracy)), float(np.mean(flips))
 
 
+@dataclass(frozen=True, slots=True)
+class Allowance:
+    """Slack fixed before match 5, so one event can't decide a whole match."""
+
+    wrong_incidents: int = 0  # Extra swaps allowed over the baseline, pooled.
+    label_accuracy: float = 0.0  # Accuracy below raw detections, as a fraction.
+
+
 def verdict(directories: Sequence[Path], name: str, rules: dict[str, object]) -> list[str]:
     """Apply the pre-agreed rules, pooling every clip, and describe each one."""
     latency = cast("float", rules["latency_seconds"])
+    allowance = Allowance(
+        cast("int", rules.get("wrong_incidents_per_clip", 0)) * len(directories),
+        cast("float", rules.get("label_accuracy_tolerance", 0.0)),
+    )
     baseline = cast("str", rules["baseline"])
     label_baseline = cast("str", rules["label_baseline"])
     runs: dict[str, list[list[scorecard.ScoredFrame]]] = {}
@@ -870,6 +883,7 @@ def verdict(directories: Sequence[Path], name: str, rules: dict[str, object]) ->
         pooled_outcome(runs[baseline], latency),
         _mean_labels(runs[name]),
         _mean_labels(runs[label_baseline]),
+        allowance,
     )
 
 
@@ -878,22 +892,32 @@ def judge(
     theirs: scorecard.TargetOutcome,
     labels: tuple[float, float],
     plain_labels: tuple[float, float],
+    allowance: Allowance = Allowance(),
 ) -> list[str]:
-    """Pass or fail each rule, then report the same-spot share, which is never judged.
+    """Pass or fail each rule, then report what is never judged.
 
     A second label on the same spot already counts as not surviving. That was kept on
-    2026-11-07, before match 4 was recorded, so the extra line only explains a survival gap.
+    2026-11-07, before match 4 was recorded, so its line only explains a survival gap.
+
+    Wrong objects count swaps, not samples, from match 5 on: match 4 failed on one farm
+    swap seen six times. Its sample rate is still printed.
     """
     accuracy, flips = labels
     plain_accuracy, plain_flips = plain_labels
+    allowed = theirs.incidents + allowance.wrong_incidents
+    # The tolerance is a fraction like 0.0005; the epsilon keeps its edge from float noise.
+    accurate = accuracy >= plain_accuracy - allowance.label_accuracy - 1e-9
     checks = (
         ("survival", ours.survival >= theirs.survival, f"{ours.survival:.1%} against {theirs.survival:.1%}"),
-        ("wrong object", ours.wrong_rate <= theirs.wrong_rate, f"{ours.wrong_rate:.2%} against {theirs.wrong_rate:.2%}"),
-        ("labels", accuracy >= plain_accuracy and flips <= plain_flips, f"accuracy {accuracy:.2%} against {plain_accuracy:.2%}; flips {flips:.1f} against {plain_flips:.1f}"),
+        ("wrong object", ours.incidents <= allowed, f"swaps {ours.incidents} against {theirs.incidents}, at most {allowed}"),
+        ("labels", accurate and flips <= plain_flips, f"accuracy {accuracy:.2%} against {plain_accuracy:.2%}, at most {allowance.label_accuracy:.2%} below; flips {flips:.1f} against {plain_flips:.1f}"),
     )  # fmt: skip
     lines = [
         f"{'pass' if passed else 'FAIL'}  {label}: {detail}" for label, passed, detail in checks
     ]
+    lines.append(
+        f"info  wrong-object samples: {ours.wrong_rate:.2%} against {theirs.wrong_rate:.2%}"
+    )
     lines.append(
         f"info  same spot, counted in survival: "
         f"{ours.same_spot_rate:.2%} against {theirs.same_spot_rate:.2%}"

@@ -173,6 +173,51 @@ Fixed on 2026-11-07, before match 4 was recorded. None of them change once the r
 - **Truth:** unit tracks are reviewed from `recorded.py strips`, which show no tracker output, and `verified.json` is committed before any tracker is scored on the clips.
 - **Once:** `verdict` runs once. A fail spends match 4 like matches 2 and 3. A pass lets the rules move to screentrack, where the speed, parity and generated-scene gates then run on the port.
 
+### Match 4 result
+
+Run once on 2026-11-09, by the rules above. Python against IoU, pooled over both clips:
+
+| Check | Python | IoU or raw | Result |
+|---|---|---|---|
+| Still the same object after 2 s | 99.6% | 98.7% | Pass |
+| Wrong object | 0.06% (6 of 5,143) | 0.00% | Fail |
+| Label accuracy | 99.66% | 99.67% | Fail |
+| Label flips | 0.7 | 0.7 | Pass |
+
+Labels count as one check, so the tracker failed two of three, and match 4 is spent. Units did far better than with IoU: 100% against 41.7% survival on the still clip, and 97.1% against 73.3% on the moving one. IDF1 was 89.6 against 78.8, and 92.7 against 84.5. The verdict's output is in `logs/tracker-benchmark/recorded/match-04-verdict.txt`, which is not committed.
+
+Both fails came from single events:
+
+- **Wrong object:** all 6 were one farm ID. Two touching farms' boxes shifted between frames, so the farm's own box was contested by a duplicate track and refused as ambiguous. The ID then took its second choice, the next farm, and held it while it was sampled every 0.2 s.
+- **Labels:** one object-frame in about 19,000. Smoothing held "goose" on a deer for one frame longer than the raw detector. The other 62 label misses, mostly a house read as a mill, are the detector's own, and raw detections share them.
+
+### After match 4
+
+Development evidence, not a retest: the fix and the match 5 rules both came from studying matches 3 and 4.
+
+**Fix.** An ID whose first choice is refused because another track also claims it now sits out the frame, instead of falling back to its second choice. A regression test rebuilds the two farms from the recorded boxes. With the fix, match 4 has no wrong objects, and matches 1-3 are unchanged except match 2's survival, which is 0.1 points lower.
+
+**Match 3's two remaining swaps** have other causes:
+
+- A house's box was relabelled "stable" while the building beside it got both "stable" and "house". The house's ID took the neighbour's "house" box at 16% overlap, because the label penalty outweighs nearly any overlap. Halving the penalty fixed both of match 3's swaps, but cost match 1 0.3 points of survival and match 3 0.03 points of label accuracy, so it was left out.
+- Low-confidence boxes around 1,000 px wide covered a cluster of buildings, with labels flickering between farm, archery range and Town Center. That is detector output to filter before tracking, not a tracker rule.
+
+### Rules for match 5
+
+Fixed on 2026-11-09, before match 5 is recorded. Everything not listed here is unchanged from match 4.
+
+**Two checks change, because both of match 4's fails were decided by single events.**
+
+- **Wrong object counts swaps.** A swap is one published ID pointing at one other object, and sampling it again while it lasts doesn't add a second. Counting samples measured how long a swap lasted rather than how many happened. The check passes if Python has no more swaps than IoU plus one per 60 s clip. IoU almost never swaps, because it gives up on IDs instead, so "no more than IoU" had meant "none at all". The sample rate is still printed, as `info`.
+- **Label accuracy may trail raw detections by 0.05 points,** about one object-frame in 2,000. Flips still get no tolerance.
+
+Both are in the `[recorded]` table of `gates.toml` (`wrong_incidents_per_clip`, `label_accuracy_tolerance`). They were written after two failed matches, so only match 5 can judge them. With today's tracker, matches 1-4 all pass them, and match 3 sits exactly at its limit with 2 swaps. Those matches shaped both the fix and the rules, so that says nothing either way.
+
+The other rules stay as they were:
+
+- **Tracker:** the Python tracker as of `17f1250`. `apps/agent/src/temporal_entities.py` stays unchanged until the verdict: its git blob must be `c712bf45`.
+- **Same, as for match 4:** the detector `aoe2_yolo_v12_nms736`, the Mac game at the probe's zoom, two 60 s clips picked by `recorded.py pick`, reviewed truth committed before any tracker is scored, and one `verdict` run.
+
 ### Recording another match
 
 Record the Mac game from Terminal.app, which needs Screen Recording permission. The fragmented format keeps frame times if a recording dies: in a test, killing the recording lost only the last unwritten fragment, about two seconds, rather than the whole file. Ten minutes takes about 10 GB at the rate below, so start with at least 30 GB free, because swap also uses the disk.
@@ -186,4 +231,4 @@ Record the Mac game from Terminal.app, which needs Screen Recording permission. 
 
 3. Cut clips with `recorded.py prepare --top 66`. Leave out `--colour`, because no paired capture exists for the Mac game yet. Limits follow each clip's own frame rate, so VM clips rebuild unchanged.
 4. Draw review strips with `recorded.py strips`, and save the tracks that pass as `verified.json` beside the clip.
-5. Rebuild with `recorded.py prepare`, then judge held-out matches once with `recorded.py verdict --name python`, following the rules above.
+5. Rebuild with `recorded.py prepare`, then judge held-out matches once with `recorded.py verdict --name python`, following the latest rules above.
