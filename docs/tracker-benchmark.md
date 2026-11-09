@@ -1,6 +1,6 @@
 # Tracker benchmark
 
-**Faster: yes. Better: no.**
+**Faster: yes. Better: the Python rules passed held-out match 5 on 2026-11-09. The port's own gates below are from before that, and haven't been rerun.**
 
 Run on arm64 at commit `1cca928`, over 12 generated scenes from real annotated frames, with the real detector. Units move as pasted sprites, so recorded footage is still needed for the final word.
 
@@ -217,6 +217,30 @@ The other rules stay as they were:
 
 - **Tracker:** the Python tracker as of `17f1250`. `apps/agent/src/temporal_entities.py` stays unchanged until the verdict: its git blob must be `c712bf45`.
 - **Same, as for match 4:** the detector `aoe2_yolo_v12_nms736`, the Mac game at the probe's zoom, two 60 s clips picked by `recorded.py pick`, reviewed truth committed before any tracker is scored, and one `verdict` run.
+
+### Match 5 result
+
+Run once on 2026-11-09, by the rules above. The Python tracker (blob `c712bf45`) was judged against IoU, pooled over both clips. The clips are the first minute (still) and 80-140 s (moving) of a Dark Age start.
+
+| Check | Python | IoU or raw | Result |
+|---|---|---|---|
+| Still the same object after 2 s | 95.8% | 93.0% | Pass |
+| Wrong object | 1 swap | 1 swap; 3 allowed | Pass |
+| Label accuracy | 99.61% | 99.61% | Pass |
+| Label flips | 1.4 | 1.4 | Pass |
+
+**It passes match 4's rules too:** 1 wrong-object sample in 8,035 for each tracker, and identical label scores. So the pass doesn't rest on the rules changed after match 4.
+
+Per clip, Python against IoU:
+
+- **Still:** units 95.4% against 68.1%, IDF1 94.3 against 88.2.
+- **Moving:** units 99.1% against 97.4%, IDF1 53.8 against 48.4.
+
+Both trackers have low IDF1 on the moving clip, which pans the most. The review passed 12 of 24 unit tracks on the still clip and 9 of 24 on the moving one (`verified/match-05-*.json`).
+
+**Which code judged it.** The rules name the tracker as of `17f1250`, and that is the tree it was judged on (`db349ea`). Main has since gained five animal classes in `MOBILE_CLASSES` (goat, cow, buffalo, horse, rhinoceros), from the v12 detector work, and those change how the truth links v12's tracks. The review strips were drawn on the rules' tree. On main, the same reviewed IDs name different tracks, so main can't be scored against this review.
+
+**Next:** the rules move to screentrack, where the speed, parity and generated-scene gates run on the port. The port should carry main's `MOBILE_CLASSES`.
 
 ### Recording another match
 
