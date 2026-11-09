@@ -1,24 +1,24 @@
 # Tracker benchmark
 
-**Faster: yes. Better: the Python rules passed held-out match 5 on 2026-11-09. The port's own gates below are from before that, and haven't been rerun.**
+**Faster: yes. Better: yes.**
 
-Run on arm64 at commit `1cca928`, over 12 generated scenes from real annotated frames, with the real detector. Units move as pasted sprites, so recorded footage is still needed for the final word.
+Run on arm64 at commit `57c4f51`, with screentrack at `6bbd2c5` (the port of the rules that passed match 5), over 12 generated scenes from real annotated frames, with the real detector. Units move as pasted sprites, so recorded footage is still needed for the final word.
 
 ## Gates
 
 | Result | Gate | Question | Evidence |
 |---|---|---|---|
 | pass | parity | Same decisions as Python? | 0 differing frames (first: none) |
-| pass | overhead | Inside the perception budget? | camera 13.0 + tracker 2.48 = 15.5 ms; Python 107.9 ms; limit 20 ms |
-| pass | speed | Faster on real frames? | low 62x (at least 60x); typical 56x (at least 54x); high 45x (at least 40x); peak 35x (at least 33x) |
-| pass | spec_target | Meets the original goal? | 1.48 ms in the high band; limit 2 ms |
-| **FAIL** | target_survival | Do IDs shown to the LLM still work later? | 86.9% against 88.8% for the baseline |
+| pass | overhead | Inside the perception budget? | camera 14.7 + tracker 2.37 = 17.0 ms; Python 116.2 ms; limit 20 ms |
+| pass | speed | Faster on real frames? | low 59x (at least 55x); typical 51x (at least 48x); high 48x (at least 46x); peak 38x (at least 37x) |
+| pass | spec_target | Meets the original goal? | 1.42 ms in the high band; limit 2 ms |
+| pass | target_survival | Do IDs shown to the LLM still work later? | 89.0% against 88.8% for the baseline |
 | pass | wrong_target | Could an ID point at the wrong object? | 0.00% against 0.00% for the baseline |
 | pass | recovery | Does one bad frame heal? | recovers in 0.2 s |
 | pass | labels | Does smoothing help? | accuracy 93.46% against 93.45%; flips 3.9 against 4.2 per 1,000 |
-| pass | economy_view | Is the agent's picture steadier? | job count error 2.94 against 2.94 |
-| pass | event_loop | Does the agent stay responsive? | p99 lag 1.09 ms against 1.00 ms for an idle loop; Python 0.22 ms |
-| pass | stability | Does it hold up over a game? | p95 drift +3.2%; memory growth 0.0 MB |
+| pass | economy_view | Is the agent's picture steadier? | no change: job count error 2.94 against 2.94 |
+| pass | event_loop | Does the agent stay responsive? | p99 lag 1.00 ms against 0.96 ms for an idle loop; Python 0.67 ms |
+| pass | stability | Does it hold up over a game? | p95 drift -42.4%; memory growth 0.0 MB |
 
 ## Agent outcomes
 
@@ -26,18 +26,18 @@ Run on arm64 at commit `1cca928`, over 12 generated scenes from real annotated f
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | raw | 0.0% | 0.0% | 0.0% | 0.00% | 3.3% | 4.1% | 2.9% | 1000 | 93.45% | 4.2 | 2.94 |
 | oracle | 100.0% | 100.0% | 100.0% | 0.00% | 100.0% | 100.0% | 100.0% | 0 | 100.00% | 0.0 | 2.86 |
-| iou | 94.5% | 88.8% | 73.1% | 0.05% | 79.9% | 64.8% | 86.7% | 82 | 93.45% | 4.2 | 2.94 |
-| python | 92.9% | 86.9% | 70.8% | 0.00% | 78.1% | 64.1% | 84.4% | 71 | 93.46% | 3.9 | 2.94 |
-| screentrack | 92.9% | 86.9% | 70.8% | 0.00% | 78.1% | 64.1% | 84.4% | 71 | 93.46% | 3.9 | 2.94 |
+| iou | 94.5% | 88.8% | 73.1% | 0.00% | 79.9% | 64.8% | 86.7% | 82 | 93.45% | 4.2 | 2.94 |
+| python | 94.8% | 89.0% | 72.8% | 0.00% | 83.1% | 76.1% | 86.2% | 25 | 93.46% | 3.9 | 2.94 |
+| screentrack | 94.8% | 89.0% | 72.8% | 0.00% | 83.1% | 76.1% | 86.2% | 25 | 93.46% | 3.9 | 2.94 |
 
 ## Milliseconds per frame at steady state
 
 | Band | Python prepare p95 | Python associate p95 | Python total p95 | screentrack prepare p95 | screentrack associate p95 | screentrack total p95 |
 |---|---|---|---|---|---|---|
-| low | 60.42 | 0.29 | 60.60 | 0.91 | 0.08 | 0.98 |
-| typical | 93.93 | 0.95 | 94.93 | 1.56 | 0.15 | 1.71 |
-| high | 65.31 | 1.86 | 66.74 | 1.30 | 0.22 | 1.48 |
-| peak | 84.77 | 2.35 | 86.95 | 2.11 | 0.33 | 2.48 |
+| low | 63.45 | 0.35 | 63.68 | 1.01 | 0.09 | 1.09 |
+| typical | 100.50 | 1.07 | 101.54 | 1.84 | 0.17 | 1.99 |
+| high | 67.54 | 1.89 | 68.64 | 1.24 | 0.23 | 1.42 |
+| peak | 89.05 | 2.33 | 91.11 | 2.03 | 0.34 | 2.37 |
 
 ## Benchmark controls
 
@@ -45,20 +45,19 @@ Run on arm64 at commit `1cca928`, over 12 generated scenes from real annotated f
 |---|---|---|
 | pass | oracle is perfect | IDF1 1.000, survival 1.000 |
 | pass | raw scores lowest | survival 0.000 |
-| pass | A/A is unbiased | 0.99x, 1.01x, 0.94x, 1.01x |
-| pass | injected slowdown is flagged | 37.2 ms against 20 ms |
+| pass | A/A is unbiased | 0.89x, 1.06x, 1.00x, 0.98x |
+| pass | injected slowdown is flagged | 37.4 ms against 20 ms |
 
-Camera analysis p95 was 13.0 ms.
+Camera analysis p95 was 14.7 ms.
 
 ## Reading this run
 
-This is the clean rerun. An earlier run the same day had the VM using about 230% CPU, which pushed `overhead`, `spec_target` and `stability` into false failures. With the VM suspended, Python's unchanged prepare stage matched the 2026-10-31 run within 5%, and the A/A control read 0.94-1.01x.
+This is the first run of the port of the rules that passed held-out match 5. Every gate passes.
 
-- **The fix made association faster.** Against 2026-10-31, `screentrack` associate p95 fell by 29-35% and Python's by 48-65%, because far fewer stale tracks remain to compare.
-- **Part of the larger speedup is noise.** `screentrack` prepare is unchanged code, yet it read 8-29% lower than on 2026-10-31. Treat these speedups and the older ones as the same order of magnitude, about 35-60x.
-- **`target_survival` is close but real.** 86.9% against 88.8%. The recorded gap below is wider.
-- **`event_loop` uses a new rule.** It now requires p99 lag within 25% of an idle loop, because Python reads faster than doing nothing, so the old comparison could never be passed. The rule was changed after this run, with agreement, and applied to its saved measurements: 1.09 ms against 1.00 ms is 1.09x. Lag in the VM is unmeasured.
-- **`recovery` now passes:** one duplicate box heals in 0.2 s.
+- **`target_survival` now passes, narrowly:** 89.0% against 88.8% for IoU. The old rules scored 86.9%. On these generated scenes units are pasted sprites, so the recorded matches remain the real test, and Python passed match 5 there.
+- **Parity holds on recorded footage as well:** 0 differing frames between screentrack and Python across all ten clips of matches 1-5. That is 2,987 frames and 96,810 tracked objects, including every ID, label and agreement score.
+- **`overhead` is close to its limit:** 17.0 ms against 20 ms. Camera analysis takes 14.7 ms of it, and the tracker 2.37 ms.
+- **`stability` drift is negative:** frames got faster over the run rather than slower.
 
 ## Recorded footage
 
