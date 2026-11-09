@@ -333,3 +333,25 @@ def test_new_clips_are_detected_only_with_the_fixed_model() -> None:
     problem = recorded.served_model_problem(older)
     assert problem is not None and "aoe2_yolo_v12_nms736" in problem
     assert recorded.served_model_problem({}) is not None
+
+
+def test_clips_are_the_stillest_and_the_busiest_separate_minutes() -> None:
+    times = [index * 0.1 for index in range(3001)]  # 300 s at 10 fps.
+    changes = [5.0 if 200 <= at < 260 else 1.0 if 30 <= at < 90 else 3.0 for at in times[1:]]
+    picks = recorded.pick_clips(times, changes)
+    assert picks["still_start"] == 30.0
+    assert picks["moving_start"] == 200.0
+
+
+def test_the_moving_clip_never_overlaps_the_still_one() -> None:
+    times = [index * 0.1 for index in range(1801)]  # 180 s.
+    # The busiest minute starts 20 s into the still one, so it can't be used.
+    changes = [0.5 if 40 <= at < 100 else 9.0 if 60 <= at < 120 else 2.0 for at in times[1:]]
+    picks = recorded.pick_clips(times, changes)
+    assert abs(picks["moving_start"] - picks["still_start"]) >= recorded.CLIP_SECONDS
+
+
+def test_a_recording_too_short_for_two_clips_is_refused() -> None:
+    times = [index * 0.1 for index in range(901)]  # 90 s.
+    with pytest.raises(ValueError, match="two separate clips"):
+        recorded.pick_clips(times, [1.0] * 900)

@@ -6,6 +6,7 @@ recorded frame, because units barely move between them. A recording of the VM gi
 own rate. Camera motion comes from static objects, so the truth does not depend on the
 camera code or trackers it judges.
 
+    python scripts/tracker_benchmark/recorded.py pick --video m.mov --top 66
     python scripts/tracker_benchmark/recorded.py colour --pair clip.mov frame.png --out c.npy
     python scripts/tracker_benchmark/recorded.py prepare --video m.mov --colour c.npy \
         --start 360 --seconds 60 --output logs/tracker-benchmark/recorded/still
@@ -17,6 +18,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import math
 import random
 import subprocess
 import sys
@@ -51,6 +53,9 @@ DETECTOR_SIZE = 1280
 # The model new clips are detected with, fixed before match 4 was recorded: the
 # one the agent plays with. Clips already detected keep their `dense.jsonl`.
 CLIP_DETECTOR = "aoe2_yolo_v12_nms736"
+CLIP_SECONDS = 60.0
+CLIP_GRID_SECONDS = 5.0  # Clips start on this grid.
+MOTION_SHRINK = 8  # Pixel change is measured on frames shrunk this much.
 NMS_OVERLAP = 0.5  # RemoteDetector's client-side suppression.
 COLOUR_BINS = 33
 LINK_OVERLAP = 0.3
@@ -491,6 +496,63 @@ def video_frames(video: Path, start: float, seconds: float, top: int) -> Iterato
             yield np.frombuffer(raw, dtype=np.uint8).reshape(CAPTURE_HEIGHT, CAPTURE_WIDTH, 3)
 
 
+def frame_changes(video: Path, top: int) -> Iterator[float]:
+    """Mean absolute grey change from the previous frame, for every frame after the first."""
+    width, height = CAPTURE_WIDTH // MOTION_SHRINK, CAPTURE_HEIGHT // MOTION_SHRINK
+    pipeline = [
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-i", str(video),
+        "-fps_mode", "passthrough",
+        "-vf", f"crop={CAPTURE_WIDTH}:{CAPTURE_HEIGHT}:0:{top},scale={width}:{height},format=gray",
+        "-f", "rawvideo", "-",
+    ]  # fmt: skip
+    size = width * height
+    previous: np.ndarray | None = None
+    with subprocess.Popen(pipeline, stdout=subprocess.PIPE, bufsize=size) as process:
+        assert process.stdout is not None
+        while len(raw := process.stdout.read(size)) == size:
+            frame = np.frombuffer(raw, dtype=np.uint8).astype(np.int16)
+            if previous is not None:
+                yield float(np.abs(frame - previous).mean())
+            previous = frame
+
+
+def pick_clips(
+    times: Sequence[float],
+    changes: Sequence[float],
+    seconds: float = CLIP_SECONDS,
+    grid: float = CLIP_GRID_SECONDS,
+) -> dict[str, float]:
+    """The stillest and the most-moving window, from pixel change alone.
+
+    `changes[i]` is the change into frame `times[i + 1]`. Windows start on the
+    grid and lie inside the recording; each scores its mean change. The moving
+    window is the busiest one that doesn't overlap the still one.
+    """
+    timed = list(zip(times[1:], changes, strict=False))
+    first = math.ceil(times[0] / grid) * grid
+    count = math.floor((times[-1] - seconds - first) / grid + 1e-9) + 1
+    starts = [first + index * grid for index in range(max(count, 0))]
+    if not starts:
+        raise ValueError(f"the recording is shorter than one {seconds:.0f} s clip")
+
+    def score(start: float) -> float:
+        inside = [change for at, change in timed if start <= at < start + seconds]
+        return sum(inside) / len(inside)
+
+    scores = {start: score(start) for start in starts}
+    still = min(starts, key=scores.__getitem__)
+    apart = [start for start in starts if abs(start - still) >= seconds]
+    if not apart:
+        raise ValueError("the recording is too short for two separate clips")
+    moving = max(apart, key=scores.__getitem__)
+    return {
+        "still_start": still,
+        "still_change": round(scores[still], 3),
+        "moving_start": moving,
+        "moving_change": round(scores[moving], 3),
+    }
+
+
 def frame_times(video: Path, start: float, seconds: float) -> list[float]:
     probe = subprocess.run(
         [
@@ -874,6 +936,9 @@ def _prepare_command(arguments: argparse.Namespace) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
+    pick = commands.add_parser("pick", help="choose the still and moving clips")
+    pick.add_argument("--video", type=Path, required=True)
+    pick.add_argument("--top", type=int, default=WINDOW_TOP)
     colour = commands.add_parser("colour")
     colour.add_argument("--pair", nargs=2, action="append", required=True)
     colour.add_argument("--out", type=Path, required=True)
@@ -897,7 +962,10 @@ def main() -> int:
     rate.add_argument("directory", type=Path)
     rate.add_argument("--names", nargs="+", default=list(REPORT_NAMES))
     arguments = parser.parse_args()
-    if arguments.command == "colour":
+    if arguments.command == "pick":
+        times = frame_times(arguments.video, 0, 1e9)
+        print(json.dumps(pick_clips(times, list(frame_changes(arguments.video, arguments.top)))))
+    elif arguments.command == "colour":
         _colour_command(arguments)
     elif arguments.command == "prepare":
         _prepare_command(arguments)
