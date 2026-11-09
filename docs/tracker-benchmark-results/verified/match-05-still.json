@@ -1,0 +1,32 @@
+{
+  "reviewer": "By eye, from 9-frame strips without tracker output",
+  "seed": 0,
+  "approved": [
+    "track_88",
+    "track_212",
+    "track_205",
+    "track_348",
+    "track_235",
+    "track_325",
+    "track_9",
+    "track_17",
+    "track_339_0",
+    "track_100",
+    "track_342",
+    "track_177"
+  ],
+  "rejected": {
+    "track_12_3": "a sheep in a walking flock; after its ring goes, can't tell which sheep",
+    "track_54_0": "a standing villager in frames 1-3, a crouching forager among others from frame 4",
+    "track_5_0": "frame 9 is only an outline behind a house",
+    "track_74_3": "frame 1 boxes a villager and a sheep together",
+    "track_315": "a construction post that never moves; not a unit",
+    "track_150_1": "one sheep in a flock that rearranges; can't tell which",
+    "track_250_0": "frame 9 boxes two villagers",
+    "track_217": "frame 7 boxes a sheep together with a villager",
+    "track_59_1": "from frame 6 the box covers two sheep",
+    "track_210_0": "one of several overlapping sheep; can't tell which",
+    "track_250_1": "frame 1 boxes two villagers",
+    "track_79": "moves between camp, mill and open ground; can't tell it's one villager"
+  }
+}
