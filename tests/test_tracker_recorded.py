@@ -324,3 +324,12 @@ def test_same_spot_losses_count_against_survival_and_are_reported_apart() -> Non
     assert [line.split()[0] for line in lines] == ["FAIL", "pass", "pass", "info"]
     assert lines[0] == "FAIL  survival: 90.0% against 95.0%"
     assert lines[-1] == "info  same spot, counted in survival: 10.00% against 0.00%"
+
+
+def test_new_clips_are_detected_only_with_the_fixed_model() -> None:
+    served = {"status": "ok", "model_path": "/models/aoe2_yolo_v12_nms736.mlpackage"}
+    assert recorded.served_model_problem(served) is None
+    older = {"status": "ok", "model_path": "/models/aoe2_yolo_v11.onnx"}
+    problem = recorded.served_model_problem(older)
+    assert problem is not None and "aoe2_yolo_v12_nms736" in problem
+    assert recorded.served_model_problem({}) is not None

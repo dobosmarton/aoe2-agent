@@ -48,6 +48,9 @@ CAPTURE_HEIGHT = 1672
 WINDOW_TOP = 142  # Where the game starts inside the recorded Mac display.
 JPEG_QUALITY = 85  # What the detector receives live.
 DETECTOR_SIZE = 1280
+# The model new clips are detected with, fixed before match 4 was recorded: the
+# one the agent plays with. Clips already detected keep their `dense.jsonl`.
+CLIP_DETECTOR = "aoe2_yolo_v12_nms736"
 NMS_OVERLAP = 0.5  # RemoteDetector's client-side suppression.
 COLOUR_BINS = 33
 LINK_OVERLAP = 0.3
@@ -552,7 +555,24 @@ def _frame_jpeg(table: np.ndarray | None, frame: np.ndarray) -> bytes:
     return _jpeg(frame if table is None else apply_colour(table, frame))
 
 
+def served_model_problem(health: dict[str, object]) -> str | None:
+    """Why the server's `/health` answer rules it out for new clips, or None."""
+    model_path = str(health.get("model_path", ""))
+    if Path(model_path).stem != CLIP_DETECTOR:
+        return (
+            f"the detection server serves {model_path or 'an unknown model'}, not {CLIP_DETECTOR}"
+        )
+    return None
+
+
 def _detect_clip(arguments: argparse.Namespace, directory: Path) -> None:
+    with httpx.Client(timeout=30) as client:
+        response = client.get(f"{arguments.server}/health")
+        response.raise_for_status()
+        health = cast("dict[str, object]", response.json())
+    if (problem := served_model_problem(health)) is not None:
+        raise SystemExit(problem)
+    (directory / "detector.json").write_text(json.dumps(health, indent=2) + "\n", encoding="utf-8")
     table = None if arguments.colour is None else np.load(arguments.colour)
     times = frame_times(arguments.video, arguments.start, arguments.seconds)
     pace = pace_for(times)
