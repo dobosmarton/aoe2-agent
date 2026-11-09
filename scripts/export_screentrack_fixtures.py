@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 from gameplay_agent import temporal_entities as temporal
-from gameplay_agent.camera_motion import CameraMotion
+from gameplay_agent.camera_motion import MOBILE_CLASSES, CameraMotion
 from gameplay_agent.entity_snapshot import EntitySnapshot
 
 if TYPE_CHECKING:
@@ -280,6 +280,89 @@ def _boundary_sequences() -> dict[str, list[_Frame]]:
     return sequences
 
 
+def _static_sequences() -> dict[str, list[_Frame]]:
+    """Rules that treat buildings and resources differently from units."""
+    black = np.zeros((360, 640, 3), dtype=np.uint8)
+    house: Box = (300.0, 100.0, 360.0, 160.0)
+    villager: Box = (100.0, 100.0, 120.0, 140.0)
+    both = (_entity("house", house), _entity("villager", villager))
+    gone = [
+        _Frame((), capture_id, 1.0 + 0.2 * (capture_id - 1), black) for capture_id in range(2, 11)
+    ]
+    return {
+        # A missed house keeps its ID for 5 s, while a unit is forgotten after 1 s.
+        "static_memory": [_Frame(both, 1, 1.0, black), *gone, _Frame(both, 11, 3.0, black)],
+        # A long gap between frames stretches every lifetime instead of resetting.
+        "slow_frames": [
+            _Frame((_entity("villager", villager),), 1, 1.0, black),
+            _Frame((_entity("villager", (104.0, 100.0, 124.0, 140.0)),), 2, 3.0, black),
+        ],
+        # A static track continues only on a box it touches, while a unit doesn't need
+        # to. The boxes are tall, so a side-by-side box still passes the movement gate.
+        "static_needs_overlap": [
+            _Frame(
+                (
+                    _entity("house", (100.0, 100.0, 130.0, 180.0)),
+                    _entity("villager", (300.0, 100.0, 330.0, 180.0)),
+                ),
+                1,
+                1.0,
+                black,
+            ),
+            _Frame(
+                (
+                    _entity("house", (132.0, 100.0, 162.0, 180.0)),
+                    _entity("villager", (332.0, 100.0, 362.0, 180.0)),
+                ),
+                2,
+                1.2,
+                black,
+            ),
+        ],
+        # A villager standing where a missed farm was can't take the farm's ID.
+        "unit_in_missed_farm": [
+            _Frame((_entity("farm", (100.0, 100.0, 160.0, 140.0)),), 1, 1.0, black),
+            _Frame((_entity("villager", (120.0, 104.0, 134.0, 134.0)),), 2, 1.2, black),
+        ],
+        # A new label continues a track only on a box that overlaps by half, and the
+        # same label is preferred.
+        "relabel_needs_overlap": [
+            _Frame((_entity("house", house),), 1, 1.0, black),
+            _Frame((_entity("mill", (330.0, 100.0, 390.0, 160.0)),), 2, 1.2, black),
+            _Frame((_entity("house", house),), 3, 1.4, black),
+            _Frame((_entity("mill", (302.0, 100.0, 362.0, 160.0)),), 4, 1.6, black),
+        ],
+        # Two labels on one spot keep two IDs, even when one skips a frame.
+        "second_label_same_spot": [
+            _Frame((_entity("house", house), _entity("mill", house)), 1, 1.0, black),
+            _Frame((_entity("house", house),), 2, 1.2, black),
+            _Frame((_entity("house", house), _entity("mill", house)), 3, 1.4, black),
+        ],
+        # Match 4: a farm refused its own box as ambiguous must not take the next farm's.
+        "neighbouring_farms": [
+            _Frame((_entity("farm", (190.0, 131.0, 465.0, 307.0)),), 1, 48.1, black),
+            _Frame(
+                (
+                    _entity("farm", (119.0, 106.0, 385.0, 277.0)),
+                    _entity("farm", (268.0, 170.0, 499.0, 314.0)),
+                ),
+                2,
+                48.3,
+                black,
+            ),
+            _Frame(
+                (
+                    _entity("farm", (58.0, 71.0, 318.0, 242.0)),
+                    _entity("farm", (218.0, 148.0, 484.0, 316.0)),
+                ),
+                3,
+                49.1,
+                black,
+            ),
+        ],
+    }
+
+
 def _exhaustive_reference() -> list[_Frame]:
     """Mirror test_matching_matches_exhaustive_reference_over_complete_sequences."""
     pixels = _noise(180, 320, 4)
@@ -374,6 +457,7 @@ def _export_tracker(output: Path) -> list[str]:
     sequences: dict[str, list[_Frame]] = {
         **_stream_sequences(),
         **_boundary_sequences(),
+        **_static_sequences(),
         "exhaustive_reference": _exhaustive_reference(),
         "crowded_20": _grid(20, 6, 12, 3),
         "crowded_40": _grid(40, 6, 12, 3),
@@ -494,6 +578,7 @@ def main() -> int:
         "reference_blob": _git("rev-parse", f"HEAD:{_REFERENCE}"),
         "python": ".".join(str(part) for part in sys.version_info[:3]),
         "numpy": np.__version__,
+        "mobile_labels": sorted(MOBILE_CLASSES),
         "tracker_sequences": sequences,
     }
     _write(args.output / "manifest.json", json.dumps(manifest, indent=2) + "\n")
