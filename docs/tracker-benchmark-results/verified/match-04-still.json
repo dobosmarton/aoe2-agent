@@ -1,0 +1,32 @@
+{
+  "reviewer": "By eye, from 9-frame strips without tracker output",
+  "seed": 0,
+  "approved": [
+    "track_146_6",
+    "track_555_1",
+    "track_348",
+    "track_171",
+    "track_39_2",
+    "track_21",
+    "track_20_0"
+  ],
+  "rejected": {
+    "track_427_0": "the first frame boxes two overlapping villagers",
+    "track_495": "mostly an outline behind the mill",
+    "track_32_2": "one of several overlapping foragers; can't tell which",
+    "track_52": "unchanged in every frame; a tree trunk, not a unit",
+    "track_290_4": "frames 1-4 and 5-9 may be different villagers",
+    "track_378": "one of several overlapping foragers; can't tell which",
+    "track_29": "part of a building, not a unit",
+    "track_265": "ends as an outline behind the mill",
+    "track_20_2": "a villager, then a tree stump",
+    "track_33_1": "the first and last frames can't be tied to the woodcutter between them",
+    "track_302_1": "a farmer, then an outline behind the mill",
+    "track_329": "switches between a farmer and an outline behind the mill",
+    "track_42_0": "overlaps other villagers and becomes an outline over the camp",
+    "track_468_3": "one frame boxes a faded figure",
+    "track_130": "a blue outline at the mining camp, not a clear unit",
+    "track_39_0": "one frame is at a different spot",
+    "track_377": "unchanged in every frame; a tree trunk, not a unit"
+  }
+}
