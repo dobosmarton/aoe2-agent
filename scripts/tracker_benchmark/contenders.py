@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Protocol, cast
 
 import numpy as np
 from gameplay_agent import sequence_replay, temporal_entities
+from gameplay_agent.camera_motion import MOBILE_CLASSES
 from gameplay_agent.sequence_replay import _overlap
 
 if TYPE_CHECKING:
@@ -288,7 +289,7 @@ class NativeTracker:
 
     def __init__(self) -> None:
         library = load_screentrack()
-        self._tracker = library.Tracker(library.Config.aoe2())
+        self._tracker = library.Tracker(library.Config.aoe2(), MOBILE_CLASSES)
 
     @property
     def last_ambiguous_count(self) -> int:
