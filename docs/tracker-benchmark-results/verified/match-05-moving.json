@@ -1,0 +1,32 @@
+{
+  "reviewer": "By eye, from 9-frame strips without tracker output",
+  "seed": 0,
+  "approved": [
+    "track_288",
+    "track_99",
+    "track_331",
+    "track_319_0",
+    "track_217",
+    "track_190",
+    "track_444",
+    "track_367",
+    "track_335"
+  ],
+  "rejected": {
+    "track_155_4": "only an outline behind the berry bush",
+    "track_344_0": "only an outline behind the berry bush",
+    "track_297_0": "frame 1 is a walking villager elsewhere; then a forager at the bush",
+    "track_28": "a crouched shepherd in frames 1-8, a standing villager with meat in frame 9",
+    "track_322_2": "the box covers two overlapping villagers",
+    "track_20": "frame 9 boxes a different villager carrying meat",
+    "track_430_2": "only an outline behind the berry bush",
+    "track_18": "standing away from the carcass in frames 3, 6 and 9; can't tell it's one villager",
+    "track_24": "frame 8 is a villager by the lumber camp; can't tell it's the same one",
+    "track_336": "frames 1 and 9 box two villagers",
+    "track_379": "frame 3 is a villager by the lumber camp; can't tell it's the same one",
+    "track_372_2": "the box covers two overlapping foragers",
+    "track_155_1": "only an outline behind the berry bush",
+    "track_23": "a crouched forager in frames 1-4, a walking villager elsewhere in 5-9",
+    "track_195_1": "frames 7-9 box other villagers too"
+  }
+}
