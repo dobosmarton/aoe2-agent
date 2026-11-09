@@ -751,3 +751,134 @@ def test_dark_badge_publishes_zero_idle_even_when_the_digit_reader_misfires(
 
     readings = ocr.read_resource_bar(shot, calib, backend="template")
     assert readings["idle_count"] == 0
+
+
+def test_extra_template_samples_join_their_character(tmp_path: Path) -> None:
+    from gameplay_agent.resource_ocr import load_templates
+
+    glyph = np.zeros((20, 12), dtype=np.uint8)
+    glyph[2:18, 3:9] = 255
+    for name in [*(str(d) for d in range(10)), "slash", "0_mac_wood"]:
+        Image.fromarray(glyph).save(tmp_path / f"{name}.png")
+    bank = load_templates(tmp_path, include_slash=True)
+    assert len(bank["0"]) == 2
+    assert len(bank["1"]) == 1
+    assert len(bank["/"]) == 1
+
+
+def test_two_touching_digits_split_at_their_thinnest_column() -> None:
+    from gameplay_agent.resource_ocr import _split_pair
+
+    pair = np.zeros((15, 22), dtype=np.uint8)
+    pair[:, 0:10] = 255  # Left digit.
+    pair[7, 10:12] = 255  # One-pixel bridge: the touch.
+    pair[:, 12:22] = 255  # Right digit.
+    halves = _split_pair(pair)
+    assert halves is not None
+    assert [half.shape[1] for half in halves] == [10, 10]
+
+
+def test_a_single_digit_is_not_split() -> None:
+    from gameplay_agent.resource_ocr import _split_pair
+
+    assert _split_pair(np.full((15, 10), 255, dtype=np.uint8)) is None
+
+
+def test_the_mac_calibration_loads_with_its_own_count_threshold() -> None:
+    from gameplay_agent.resource_ocr import calibration_for, load_templates
+
+    mac, vm = calibration_for(3024, 1898), calibration_for(3024, 1672)
+    assert mac is not None and vm is not None
+    assert (mac.count_white_threshold, vm.count_white_threshold) == (160, 185)
+    assert set(load_templates(mac.template_dir, include_slash=True)) == {*"0123456789/"}
+
+
+class _Engine:
+    """RapidOCR stand-in: records whether text detection was asked for."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def __call__(self, image: np.ndarray, **options: object) -> tuple[object, None]:
+        del image
+        self.calls.append(options)
+        if options.get("use_det") is False:
+            return [("Town Center", 0.99)], None
+        return [([[0, 0], [1, 0], [1, 1], [0, 1]], "Villager", 0.99)], None
+
+
+def _selection_calibration(*, name_line: bool) -> Calibration:
+    from gameplay_agent.resource_ocr import FieldBox
+
+    fields = {"selection": FieldBox(0, 0, 40, 20)}
+    if name_line:
+        fields["selection_name"] = FieldBox(0, 0, 40, 10)
+    return Calibration(width=40, height=20, fields=fields, template_dir=Path())
+
+
+@pytest.mark.parametrize(
+    ("name_line", "expected", "detection"),
+    [(True, "town_center", False), (False, "villager", None)],
+)
+def test_a_name_line_box_is_read_without_text_detection(
+    monkeypatch: pytest.MonkeyPatch, name_line: bool, expected: str, detection: object
+) -> None:
+    from gameplay_agent import resource_ocr
+
+    engine = _Engine()
+    monkeypatch.setattr(resource_ocr, "_field_engine", lambda: engine)
+    frame = np.full((20, 40, 3), 200, dtype=np.uint8)
+    calibration = _selection_calibration(name_line=name_line)
+    assert resource_ocr.read_selected_unit_pixels(frame, calibration) == expected
+    assert engine.calls[0].get("use_det") is detection
+
+
+def test_the_mac_idle_count_uses_the_calibrations_count_threshold(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from gameplay_agent import resource_ocr
+
+    seen: list[int] = []
+
+    def fake_idle(
+        _rgb: object, _pop: object, _box: object, white: int = 0, _extra: object = None
+    ) -> int:
+        seen.append(white)
+        return 16
+
+    monkeypatch.setattr(resource_ocr, "read_idle_count", fake_idle)
+    monkeypatch.setattr(resource_ocr, "detect_idle_present", lambda *_: True)
+    calibration = resource_ocr.calibration_for(3024, 1898)
+    assert calibration is not None
+    frame = np.zeros((1898, 3024, 3), dtype=np.uint8)
+    hud = resource_ocr.prepare_hud_pixels(frame, (3024, 1898))
+    readings = resource_ocr.read_resource_bar_pixels(hud, calibration, backend="template")
+    assert readings["idle_count"] == 16
+    assert seen == [160]
+
+
+def test_a_calibrations_extra_digit_samples_join_the_shared_bank(tmp_path: Path) -> None:
+    from gameplay_agent.resource_ocr import _load_hud_digit_bank, calibration_for
+
+    shared = _load_hud_digit_bank()
+    glyph = np.zeros((28, 20), dtype=np.uint8)
+    glyph[4:24, 8:12] = 255
+    Image.fromarray(glyph).save(tmp_path / "9_mac_sample_0.png")
+    merged = _load_hud_digit_bank(tmp_path)
+    assert len(merged["9"]) == len(shared["9"]) + 1
+    assert len(merged["1"]) == len(shared["1"])
+    assert len(_load_hud_digit_bank()["9"]) == len(shared["9"])  # The shared bank is untouched.
+    mac, vm = calibration_for(3024, 1898), calibration_for(3024, 1672)
+    assert mac is not None and vm is not None
+    assert mac.count_template_dir is not None and mac.count_template_dir.is_dir()
+    assert vm.count_template_dir is None
+
+
+@pytest.mark.parametrize(("strokes", "expected"), [((24,), 1), ((24, 40), 11)])
+def test_narrow_glyphs_are_read_as_ones(strokes: tuple[int, ...], expected: int) -> None:
+    from gameplay_agent.resource_ocr import FieldBox, read_hud_count
+
+    frame = np.zeros((40, 80, 3), dtype=np.uint8)
+    for x in strokes:
+        frame[10:24, x : x + 5] = 255  # 5 wide, 14 tall: the Mac's lone 1.
+    assert read_hud_count(frame, FieldBox(0, 0, 80, 40), 160) == expected

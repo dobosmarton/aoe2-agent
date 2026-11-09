@@ -136,6 +136,7 @@ ValueError: unknown AOE2_LLM_WIRE='zzz'; expected one of 'anthropic', 'openai', 
 | `AOE2_POLICY_MIN_CONFIDENCE` | `0.65` | Minimum confidence for applying advice |
 | `AOE2_LOOP_DELAY` | `0.3` | Seconds between iterations |
 | `AOE2_SAVE_SCREENSHOTS` | `true` | Save screenshots to logs/ |
+| `AOE2_TRACKER` | `native` | Object tracker: `native` (screentrack), `python` (the reference) or `shadow` (both, acting on Python and logging differences). Falls back to `python` where no screentrack wheel exists |
 | `AOE2_OCR_BACKEND` | `rapidocr` | Exact-resolution HUD templates run first; this backend resolves unreadable fields and age text |
 | `AOE2_GAME_PROFILE` | — | Path to a declared Arabia or Highland 4v4 profile; recorded scores require verified roster, hotkeys, and ownership colors. The map is metadata only. |
 | `AOE2_DETECTION_HOST` | — | Remote detection server URL (e.g., `http://192.168.64.1:8420`) |

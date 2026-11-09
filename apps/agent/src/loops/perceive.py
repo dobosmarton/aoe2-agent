@@ -25,6 +25,7 @@ from ..executor import (
     observe_hud,
     record_observed_buildings,
     set_detected_entities,
+    set_ground_frame,
     villagers_ordered,
 )
 from ..goals import THREAT_CLASSES
@@ -206,9 +207,13 @@ async def _refresh_spatial_once(ctx: LoopContext, request: asyncio.Future[Spatia
     """Service an input-triggered capture before starting another full OCR pass."""
     timings = TickTimings()
     try:
-        refresh = await ctx.source.capture_spatial(
-            timings, selection_only=ctx.frames.selection_only(request)
-        )
+        skip_selection = ctx.frames.skip_selection(request)
+        if skip_selection:
+            refresh = await ctx.source.capture_spatial(timings, skip_selection=True)
+        else:
+            refresh = await ctx.source.capture_spatial(
+                timings, selection_only=ctx.frames.selection_only(request)
+            )
         if refresh.spatial_valid and refresh.sighting is not None:
             _publish_spatial(ctx, refresh.sighting.frame.tick, refresh.sighting)
         elif (
@@ -217,6 +222,7 @@ async def _refresh_spatial_once(ctx: LoopContext, request: asyncio.Future[Spatia
             and snapshot_entities(get_detected_entities()) != refresh.entities
         ):
             set_detected_entities(refresh.entities)
+            set_ground_frame(refresh.screenshot)
         if refresh.spatial_valid and refresh.hud_readings and refresh.sighting is None:
             sync_world_state(
                 ctx.memory,
@@ -226,7 +232,7 @@ async def _refresh_spatial_once(ctx: LoopContext, request: asyncio.Future[Spatia
             )
             if ctx.ledger is not None:
                 save_action_evidence(ctx, refresh.screenshot)
-        if ctx.ledger is not None:
+        if ctx.ledger is not None and not skip_selection:  # It didn't read the selection.
             ctx.ledger.selected_unit = refresh.selected_unit
             ctx.ledger.selected_at_revision = refresh.input_revision
         ctx.frames.complete_spatial_refresh(request, refresh)
@@ -382,6 +388,7 @@ def _publish_spatial(ctx: LoopContext, tick: int, sighting: Sighting) -> None:
         for entity_id, (owner, confidence) in sighting.ownership.items()
     )
     set_detected_entities(frame.entities)
+    set_ground_frame(frame.screenshot)
     ctx.frames.put_spatial(replace(frame, alarm=alarm, world=world, ownership=ownership))
 
 

@@ -933,8 +933,14 @@ dependencies = [
     { name = "pyautogui" },
     { name = "pydantic" },
     { name = "pygetwindow" },
+    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-framework-quartz", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-framework-screencapturekit", marker = "sys_platform == 'darwin'" },
     { name = "pyyaml" },
     { name = "rapidocr-onnxruntime" },
+    { name = "screentrack", version = "0.1.0", source = { url = "https://github.com/dobosmarton/screentrack/releases/download/v0.1.0/screentrack-0.1.0-cp311-abi3-macosx_11_0_arm64.whl" }, marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
+    { name = "screentrack", version = "0.1.0", source = { url = "https://github.com/dobosmarton/screentrack/releases/download/v0.1.0/screentrack-0.1.0-cp311-abi3-manylinux_2_28_x86_64.whl" }, marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "screentrack", version = "0.1.0", source = { url = "https://github.com/dobosmarton/screentrack/releases/download/v0.1.0/screentrack-0.1.0-cp311-abi3-win_amd64.whl" }, marker = "platform_machine == 'AMD64' and sys_platform == 'win32'" },
     { name = "structlog" },
     { name = "typesafe-sdk" },
 ]
@@ -952,8 +958,14 @@ requires-dist = [
     { name = "pyautogui", specifier = ">=0.9.54" },
     { name = "pydantic", specifier = ">=2.5.0" },
     { name = "pygetwindow", specifier = ">=0.0.9" },
+    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'", specifier = ">=12.1" },
+    { name = "pyobjc-framework-quartz", marker = "sys_platform == 'darwin'", specifier = ">=12.1" },
+    { name = "pyobjc-framework-screencapturekit", marker = "sys_platform == 'darwin'", specifier = ">=12.1" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "rapidocr-onnxruntime", specifier = ">=1.4.0" },
+    { name = "screentrack", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'", url = "https://github.com/dobosmarton/screentrack/releases/download/v0.1.0/screentrack-0.1.0-cp311-abi3-macosx_11_0_arm64.whl" },
+    { name = "screentrack", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", url = "https://github.com/dobosmarton/screentrack/releases/download/v0.1.0/screentrack-0.1.0-cp311-abi3-manylinux_2_28_x86_64.whl" },
+    { name = "screentrack", marker = "platform_machine == 'AMD64' and sys_platform == 'win32'", url = "https://github.com/dobosmarton/screentrack/releases/download/v0.1.0/screentrack-0.1.0-cp311-abi3-win_amd64.whl" },
     { name = "structlog", specifier = ">=24.1.0" },
     { name = "typesafe-sdk", specifier = ">=0.7.0" },
 ]
@@ -2240,6 +2252,24 @@ wheels = [
 ]
 
 [[package]]
+name = "pyobjc-framework-coremedia"
+version = "12.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyobjc-core", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/da/7d/5ad600ff7aedfef8ba8f51b11d9aaacdf247b870bd14045d6e6f232e3df9/pyobjc_framework_coremedia-12.1.tar.gz", hash = "sha256:166c66a9c01e7a70103f3ca44c571431d124b9070612ef63a1511a4e6d9d84a7", size = 89566, upload-time = "2025-11-14T10:13:49.788Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c8/bc/e66de468b3777d8fece69279cf6d2af51d2263e9a1ccad21b90c35c74b1b/pyobjc_framework_coremedia-12.1-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:ee7b822c9bb674b5b0a70bfb133410acae354e9241b6983f075395f3562f3c46", size = 29503, upload-time = "2025-11-14T09:44:54.716Z" },
+    { url = "https://files.pythonhosted.org/packages/c8/ae/f773cdc33c34a3f9ce6db829dbf72661b65c28ea9efaec8940364185b977/pyobjc_framework_coremedia-12.1-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:161a627f5c8cd30a5ebb935189f740e21e6cd94871a9afd463efdb5d51e255fa", size = 29396, upload-time = "2025-11-14T09:44:57.563Z" },
+    { url = "https://files.pythonhosted.org/packages/a5/ea/aee26a475b4af8ed4152d3c50b1b8955241b8e95ae789aa9ee296953bc6a/pyobjc_framework_coremedia-12.1-cp313-cp313-macosx_10_13_universal2.whl", hash = "sha256:98e885b7a092083fceaef0a7fc406a01ba7bcd3318fb927e59e055931c99cac8", size = 29414, upload-time = "2025-11-14T09:45:01.336Z" },
+    { url = "https://files.pythonhosted.org/packages/db/9d/5ff10ee0ff539e125c96b8cff005457558766f942919814c968c3367cc32/pyobjc_framework_coremedia-12.1-cp313-cp313t-macosx_10_13_universal2.whl", hash = "sha256:d2b84149c1b3e65ec9050a3e5b617e6c0b4cdad2ab622c2d8c5747a20f013e16", size = 29477, upload-time = "2025-11-14T09:45:04.218Z" },
+    { url = "https://files.pythonhosted.org/packages/08/e2/b890658face1290c8b6b6b53a1159c822bece248f883e42302548bef38da/pyobjc_framework_coremedia-12.1-cp314-cp314-macosx_10_15_universal2.whl", hash = "sha256:737ec6e0b63414f42f7188030c85975d6d2124fbf6b15b52c99b6cc20250af4d", size = 29447, upload-time = "2025-11-14T09:45:07.17Z" },
+    { url = "https://files.pythonhosted.org/packages/a4/9e/16981d0ee04b182481ce1e497b5e0326bad6d698fe0265bb7db72b1b26b5/pyobjc_framework_coremedia-12.1-cp314-cp314t-macosx_10_15_universal2.whl", hash = "sha256:6a9419e0d143df16a1562520a13a389417386e2a53031530af6da60c34058ced", size = 29500, upload-time = "2025-11-14T09:45:10.506Z" },
+]
+
+[[package]]
 name = "pyobjc-framework-quartz"
 version = "12.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2255,6 +2285,25 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/67/43/b1f0ad3b842ab150a7e6b7d97f6257eab6af241b4c7d14cb8e7fde9214b8/pyobjc_framework_quartz-12.1-cp313-cp313t-macosx_10_13_universal2.whl", hash = "sha256:53b84e880c358ba1ddcd7e8d5ea0407d760eca58b96f0d344829162cda5f37b3", size = 224317, upload-time = "2025-11-14T10:00:30.703Z" },
     { url = "https://files.pythonhosted.org/packages/4a/00/96249c5c7e5aaca5f688ca18b8d8ad05cd7886ebd639b3c71a6a4cadbe75/pyobjc_framework_quartz-12.1-cp314-cp314-macosx_10_15_universal2.whl", hash = "sha256:42d306b07f05ae7d155984503e0fb1b701fecd31dcc5c79fe8ab9790ff7e0de0", size = 219558, upload-time = "2025-11-14T10:00:45.476Z" },
     { url = "https://files.pythonhosted.org/packages/4d/a6/708a55f3ff7a18c403b30a29a11dccfed0410485a7548c60a4b6d4cc0676/pyobjc_framework_quartz-12.1-cp314-cp314t-macosx_10_15_universal2.whl", hash = "sha256:0cc08fddb339b2760df60dea1057453557588908e42bdc62184b6396ce2d6e9a", size = 224580, upload-time = "2025-11-14T10:01:00.091Z" },
+]
+
+[[package]]
+name = "pyobjc-framework-screencapturekit"
+version = "12.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyobjc-core", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-framework-coremedia", marker = "sys_platform == 'darwin'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2d/7f/73458db1361d2cb408f43821a1e3819318a0f81885f833d78d93bdc698e0/pyobjc_framework_screencapturekit-12.1.tar.gz", hash = "sha256:50992c6128b35ab45d9e336f0993ddd112f58b8c8c8f0892a9cb42d61bd1f4c9", size = 32573, upload-time = "2025-11-14T10:21:44.497Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/79/92/fe66408f4bd74f6b6da75977d534a7091efe988301d13da4f009bf54ab71/pyobjc_framework_screencapturekit-12.1-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:ae412d397eedf189e763defe3497fcb8dffa5e0b54f62390cb33bf9b1cfb864a", size = 11473, upload-time = "2025-11-14T10:02:09.177Z" },
+    { url = "https://files.pythonhosted.org/packages/05/a8/533acdbf26e0a908ff640d3a445481f3c948682ca887be6711b5fcf82682/pyobjc_framework_screencapturekit-12.1-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:27df138ce2dfa9d4aae5106d4877e9ed694b5a174643c058f1c48678ffc7001a", size = 11504, upload-time = "2025-11-14T10:02:11.36Z" },
+    { url = "https://files.pythonhosted.org/packages/45/f9/ff713b8c4659f9ef1c4dbb8ca4b59c4b22d9df48471230979d620709e3b4/pyobjc_framework_screencapturekit-12.1-cp313-cp313-macosx_10_13_universal2.whl", hash = "sha256:168125388fb35c6909bec93b259508156e89b9e30fec5748d4a04fd0157f0e0d", size = 11523, upload-time = "2025-11-14T10:02:13.494Z" },
+    { url = "https://files.pythonhosted.org/packages/f0/26/8bf1bacdb2892cf26d043c7f6e8788a613bbb2ccb313a5ea0634612cfc24/pyobjc_framework_screencapturekit-12.1-cp313-cp313t-macosx_10_13_universal2.whl", hash = "sha256:4fc2fe72c1da5ac1b8898a7b2082ed69803e6d9c11f414bb5a5ec94422a5f74f", size = 11701, upload-time = "2025-11-14T10:02:15.634Z" },
+    { url = "https://files.pythonhosted.org/packages/be/b4/881e2ff0e11e7d705716f01f1bfd10232f7d21bda38d630c3fbe409b13a9/pyobjc_framework_screencapturekit-12.1-cp314-cp314-macosx_10_15_universal2.whl", hash = "sha256:be210ea5df36c1392425c026c59c5e0797b0d6e07ee9551d032e40bed95d2833", size = 11581, upload-time = "2025-11-14T10:02:17.467Z" },
+    { url = "https://files.pythonhosted.org/packages/24/d0/69f295412d5dfacb6e6890ee128b9c80c8f4f584c20842c576ee154bfc0b/pyobjc_framework_screencapturekit-12.1-cp314-cp314t-macosx_10_15_universal2.whl", hash = "sha256:534f3a433edf6417c3dd58ac52a69360e5a19c924d1cb389495c4d6cc13a875d", size = 11783, upload-time = "2025-11-14T10:02:19.257Z" },
 ]
 
 [[package]]
@@ -2593,6 +2642,60 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/11/2f/b29eafe4a3fbc3d6de9662b36e028d5f039e72d345e05c250e121a230dd4/scipy-1.17.1-cp314-cp314t-win_amd64.whl", hash = "sha256:eb092099205ef62cd1782b006658db09e2fed75bffcae7cc0d44052d8aa0f484", size = 37345327, upload-time = "2026-02-23T00:22:24.442Z" },
     { url = "https://files.pythonhosted.org/packages/07/39/338d9219c4e87f3e708f18857ecd24d22a0c3094752393319553096b98af/scipy-1.17.1-cp314-cp314t-win_arm64.whl", hash = "sha256:200e1050faffacc162be6a486a984a0497866ec54149a01270adc8a59b7c7d21", size = 25489165, upload-time = "2026-02-23T00:22:29.563Z" },
 ]
+
+[[package]]
+name = "screentrack"
+version = "0.1.0"
+source = { url = "https://github.com/dobosmarton/screentrack/releases/download/v0.1.0/screentrack-0.1.0-cp311-abi3-macosx_11_0_arm64.whl" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'darwin'",
+    "python_full_version < '3.12' and sys_platform == 'darwin'",
+]
+dependencies = [
+    { name = "numpy", marker = "sys_platform == 'darwin'" },
+]
+wheels = [
+    { url = "https://github.com/dobosmarton/screentrack/releases/download/v0.1.0/screentrack-0.1.0-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:20b06f5d66e82baf4351d895e91d8f65ed7dbbcc0020aa2d0de003c67d9a4539" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "numpy", specifier = ">=1.24" }]
+
+[[package]]
+name = "screentrack"
+version = "0.1.0"
+source = { url = "https://github.com/dobosmarton/screentrack/releases/download/v0.1.0/screentrack-0.1.0-cp311-abi3-manylinux_2_28_x86_64.whl" }
+resolution-markers = [
+    "(python_full_version >= '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version >= '3.12' and sys_platform != 'darwin' and sys_platform != 'linux' and sys_platform != 'win32')",
+    "(python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.12' and sys_platform != 'darwin' and sys_platform != 'linux' and sys_platform != 'win32')",
+]
+dependencies = [
+    { name = "numpy", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux' and sys_platform != 'win32')" },
+]
+wheels = [
+    { url = "https://github.com/dobosmarton/screentrack/releases/download/v0.1.0/screentrack-0.1.0-cp311-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:424f0eabd81d876cf2371927ea397bf3104295cec16379ace51d26b1e12b745d" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "numpy", specifier = ">=1.24" }]
+
+[[package]]
+name = "screentrack"
+version = "0.1.0"
+source = { url = "https://github.com/dobosmarton/screentrack/releases/download/v0.1.0/screentrack-0.1.0-cp311-abi3-win_amd64.whl" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'win32'",
+    "python_full_version < '3.12' and sys_platform == 'win32'",
+]
+dependencies = [
+    { name = "numpy", marker = "sys_platform == 'win32'" },
+]
+wheels = [
+    { url = "https://github.com/dobosmarton/screentrack/releases/download/v0.1.0/screentrack-0.1.0-cp311-abi3-win_amd64.whl", hash = "sha256:26fc36d432adfa900feea2ec657126820c21d73118dd8a4f553485ba7d04165d" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "numpy", specifier = ">=1.24" }]
 
 [[package]]
 name = "setuptools"

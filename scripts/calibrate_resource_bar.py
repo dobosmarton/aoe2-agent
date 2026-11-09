@@ -41,11 +41,11 @@ try:
     from gameplay_agent.resource_ocr import (
         Box,
         _assign,
+        _band_engine,
         _binarize_digits,
         _column_centers,
         _detect,
         _extract,
-        _rapidocr_engine,
     )
 except ImportError as exc:  # pragma: no cover
     sys.stderr.write(f"run with the project venv (need gameplay_agent + cv2): {exc}\n")
@@ -155,7 +155,7 @@ def main() -> int:
     )
 
     print(f"Calibrating {w}x{h} from {len(paths)} screenshot(s)...")
-    engine = _rapidocr_engine()
+    engine = _band_engine()
     raw = [
         _extract(_detect(engine, np.asarray(Image.open(p).convert("RGB")), args.top_frac))
         for p in paths

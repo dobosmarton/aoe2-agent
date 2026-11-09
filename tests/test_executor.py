@@ -123,6 +123,7 @@ def fake_pyautogui(monkeypatch: pytest.MonkeyPatch, clock: _Clock) -> _FakePyaut
     ex._rescan_fn = None
     ex._rescan_full_fn = None
     ex._selection_refresh_fn = None
+    ex._placement_refresh_fn = None
     ex.reset_build_gates()
     original_observe_hud = ex.observe_hud
 
@@ -743,6 +744,47 @@ def test_selection_refresh_does_not_authorize_spatial_click(
     assert result.success
     assert selected == 1
     assert not ex.current_ledger().spatial_valid
+
+
+def test_a_build_detects_again_just_before_placing(
+    fake_pyautogui: _FakePyautogui, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[str] = []
+
+    async def selection_only() -> bool:
+        calls.append("selection refresh")
+        return True
+
+    async def detect() -> bool:
+        calls.append("detect")
+        return True
+
+    async def execute(step: dict[str, object]) -> ex.ActionResult:
+        calls.append(f"step {step.get('key') or step['type']}")
+        return ex.ActionResult(True, "ok")
+
+    steps = [
+        {"type": "press", "key": ".", "intent": "select builder"},
+        {"type": "press", "key": "q", "intent": "economic menu"},
+        {"type": "press", "key": "q", "intent": "house"},
+        {"type": "click", "auto_placement": True, "intent": "place"},
+        {"type": "press", "key": "h", "intent": "clear"},
+    ]
+
+    async def full_refresh() -> bool:
+        pytest.fail("placement needs positions, not another HUD read")
+
+    ex.set_selection_refresh_fn(selection_only)
+    ex.set_rescan_fn(full_refresh)
+    ex.set_placement_refresh_fn(detect)
+    monkeypatch.setattr(ex, "build_rejection", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(ex, "build_steps", lambda *_args, **_kwargs: [dict(s) for s in steps])
+    monkeypatch.setattr(ex, "execute_action", execute)
+    monkeypatch.setattr(ex, "_selection_rejection", lambda _expected: None)
+    result = _run(ex._handle_build({"building_key": "q", "menu": "q"}, "house"))
+    assert result.success
+    # The placement is resolved from detections at click time: they must be fresh.
+    assert calls == ["step .", "step q", "step q", "detect", "step click", "step h"]
 
 
 # ---------------------------------------------------------------------------
@@ -1843,3 +1885,72 @@ def test_nothing_pending_leaves_the_old_message(fake_pyautogui: _FakePyautogui) 
     ex.observe_hud(10, 20, {"wood": 30})
     reason = ex.build_rejection("w")
     assert reason == "mill unavailable: costs 100 wood, you have 30"
+
+
+def test_a_spot_inside_a_large_forest_box_is_not_open_ground(
+    fake_pyautogui: _FakePyautogui,
+) -> None:
+    # The detector boxes a whole forest as one "tree"; its centre is far from the
+    # spot, but the spot is inside the box.
+    forest = {
+        "id": "tree_0",
+        "class": "tree",
+        "bbox": (0, 0, 1000, 600),
+        "center": (500, 300),
+        "confidence": 0.9,
+    }
+    ex.set_detected_entities([forest])
+    assert ex._clutter_score((900, 550)) == ex._BLOCKED_CLUTTER  # Inside, far from the centre.
+    assert ex._clutter_score((1100, 550)) == 1  # 100 px from the edge: crowded, not blocked.
+    assert ex._clutter_score((1300, 550)) == 0  # Open ground.
+
+
+def _ground_jpeg(dark: tuple[int, int, int, int] | None) -> bytes:
+    """A fogged-ground frame (luma 100), with an optional black unexplored box."""
+    import io
+
+    from PIL import Image, ImageDraw
+
+    width, height = ex._DEFAULT_SCREEN
+    image = Image.new("RGB", (width, height), (100, 100, 100))
+    if dark is not None:
+        ImageDraw.Draw(image).rectangle(dark, fill=(30, 30, 30))
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG", quality=85)
+    return buffer.getvalue()
+
+
+def test_unexplored_ground_is_never_a_building_spot(fake_pyautogui: _FakePyautogui) -> None:
+    # Live, a mill was placed in black unexplored ground and refused.
+    anchor = (1500, 800)
+    ex.set_detected_entities([])
+    everywhere = ex._open_ground_candidates(anchor)
+    ex.set_ground_frame(_ground_jpeg(dark=(1500, 0, 3024, 1672)))  # The east is black.
+    try:
+        explored = ex._open_ground_candidates(anchor)
+    finally:
+        ex.clear_detected_entities()
+    assert explored
+    assert all(x < 1500 - 50 for x, _ in explored)
+    assert len(explored) < len(everywhere)
+
+
+def test_without_a_frame_every_spot_counts_as_explored(fake_pyautogui: _FakePyautogui) -> None:
+    ex.clear_detected_entities()
+    assert ex._explored((2000, 800))
+
+
+def test_fogged_ground_counts_as_explored(fake_pyautogui: _FakePyautogui) -> None:
+    ex.set_ground_frame(_ground_jpeg(dark=None))
+    try:
+        assert ex._explored((2000, 800))
+    finally:
+        ex.clear_detected_entities()
+
+
+def test_an_unreadable_frame_filters_nothing(fake_pyautogui: _FakePyautogui) -> None:
+    ex.set_ground_frame(b"not a jpeg")
+    try:
+        assert ex._explored((2000, 800))
+    finally:
+        ex.clear_detected_entities()

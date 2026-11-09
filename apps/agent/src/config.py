@@ -156,6 +156,9 @@ class Config(BaseModel):
     # The actor and deliberate loop consume published frames; only perception
     # has a time-based cadence.
     perceive_interval: float = 0.1  # AOE2_PERCEIVE_INTERVAL — capture cadence
+    # How frames are grabbed: auto (a ScreenCaptureKit stream on macOS, mss
+    # elsewhere), stream, window or mss. See capture.py.
+    capture_method: str = "auto"  # AOE2_CAPTURE_METHOD
 
     # Logging
     log_dir: Path = Path("logs")
@@ -185,6 +188,7 @@ class Config(BaseModel):
                 Path(path) if (path := os.environ.get("AOE2_GAME_PROFILE")) else None
             ),
             perceive_interval=float(os.environ.get("AOE2_PERCEIVE_INTERVAL", "0.1")),
+            capture_method=os.environ.get("AOE2_CAPTURE_METHOD", "auto"),
             save_screenshots=os.environ.get("AOE2_SAVE_SCREENSHOTS", "true").lower() == "true",
             detection_host=os.environ.get("AOE2_DETECTION_HOST", ""),
             detection_model=os.environ.get("AOE2_DETECTION_MODEL", "aoe2_yolo_v12_nms736"),

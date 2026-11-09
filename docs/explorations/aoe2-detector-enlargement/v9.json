@@ -1,0 +1,834 @@
+{
+  "model": "packages/detection/src/inference/models/aoe2_yolo_v9.onnx",
+  "model_sha256": "515a018bc2190fdf5427a01ff21e294331324929c8603d870c18255626cee8fd",
+  "data": "tmp/test_data_independent_20261030",
+  "dataset_manifest_sha256": "863d088576d8e7e37e349cea6e6d60d65f5d498993553f3ba278cdf7f463a2bb",
+  "evaluator_sha256": "b480fb519aff37c0e6f6a2fbbc9a83c831f881a0b91dd1f1bcd2cd2ea7292e01",
+  "runtime": {
+    "python": "3.11.9",
+    "onnxruntime": "1.26.0",
+    "pillow": "12.2.0"
+  },
+  "frames": 40,
+  "matching_iou": 0.5,
+  "ignore_cover": 0.5,
+  "bootstrap": {
+    "rounds": 10000,
+    "seed": 20261103,
+    "unit": "frame"
+  },
+  "baseline": {
+    "hits": 934,
+    "false": 36,
+    "missed": 314,
+    "precision": 0.9628865979381444,
+    "recall": 0.7483974358974359,
+    "f1": 0.842200180342651
+  },
+  "scales": {
+    "1.25": {
+      "crops_per_frame": 4,
+      "truths": 1248,
+      "unscored_truths": 0,
+      "full": {
+        "hits": 934,
+        "false": 36,
+        "missed": 314,
+        "precision": 0.9628865979381444,
+        "recall": 0.7483974358974359,
+        "f1": 0.842200180342651
+      },
+      "masked": {
+        "hits": 922,
+        "false": 48,
+        "missed": 326,
+        "precision": 0.9505154639175257,
+        "recall": 0.7387820512820513,
+        "f1": 0.8313796212804329
+      },
+      "enlarged": {
+        "hits": 923,
+        "false": 90,
+        "missed": 325,
+        "precision": 0.9111549851924975,
+        "recall": 0.7395833333333334,
+        "f1": 0.816452896948253
+      },
+      "f1_gap_90": {
+        "size (enlarged - masked)": [
+          -0.030259558730095115,
+          0.000544482357443532
+        ],
+        "crop (masked - full)": [
+          -0.017683698642522283,
+          -0.003949879235111253
+        ],
+        "zoom (enlarged - full)": [
+          -0.041088401302228905,
+          -0.010179210900971958
+        ]
+      },
+      "class_recall": {
+        "full": {
+          "tree": {
+            "truths": 405,
+            "recall": 0.9209876543209876,
+            "false": 9
+          },
+          "gold_mine": {
+            "truths": 71,
+            "recall": 0.8169014084507042,
+            "false": 1
+          },
+          "stone_mine": {
+            "truths": 49,
+            "recall": 0.7755102040816326,
+            "false": 3
+          },
+          "berry_bush": {
+            "truths": 40,
+            "recall": 0.5,
+            "false": 0
+          },
+          "deer": {
+            "truths": 62,
+            "recall": 0.20967741935483872,
+            "false": 1
+          },
+          "boar": {
+            "truths": 55,
+            "recall": 0.5818181818181818,
+            "false": 3
+          },
+          "sheep": {
+            "truths": 66,
+            "recall": 0.45454545454545453,
+            "false": 6
+          },
+          "town_center": {
+            "truths": 39,
+            "recall": 1.0,
+            "false": 0
+          },
+          "house": {
+            "truths": 101,
+            "recall": 0.900990099009901,
+            "false": 0
+          },
+          "villager": {
+            "truths": 335,
+            "recall": 0.6567164179104478,
+            "false": 12
+          }
+        },
+        "masked": {
+          "tree": {
+            "truths": 405,
+            "recall": 0.891358024691358,
+            "false": 14
+          },
+          "gold_mine": {
+            "truths": 71,
+            "recall": 0.7887323943661971,
+            "false": 7
+          },
+          "stone_mine": {
+            "truths": 49,
+            "recall": 0.7551020408163265,
+            "false": 6
+          },
+          "berry_bush": {
+            "truths": 40,
+            "recall": 0.45,
+            "false": 0
+          },
+          "deer": {
+            "truths": 62,
+            "recall": 0.22580645161290322,
+            "false": 0
+          },
+          "boar": {
+            "truths": 55,
+            "recall": 0.6181818181818182,
+            "false": 3
+          },
+          "sheep": {
+            "truths": 66,
+            "recall": 0.48484848484848486,
+            "false": 5
+          },
+          "town_center": {
+            "truths": 39,
+            "recall": 0.9743589743589743,
+            "false": 0
+          },
+          "house": {
+            "truths": 101,
+            "recall": 0.8910891089108911,
+            "false": 0
+          },
+          "villager": {
+            "truths": 335,
+            "recall": 0.6626865671641791,
+            "false": 12
+          }
+        },
+        "enlarged": {
+          "tree": {
+            "truths": 405,
+            "recall": 0.8962962962962963,
+            "false": 28
+          },
+          "gold_mine": {
+            "truths": 71,
+            "recall": 0.7887323943661971,
+            "false": 12
+          },
+          "stone_mine": {
+            "truths": 49,
+            "recall": 0.7142857142857143,
+            "false": 7
+          },
+          "berry_bush": {
+            "truths": 40,
+            "recall": 0.425,
+            "false": 2
+          },
+          "deer": {
+            "truths": 62,
+            "recall": 0.20967741935483872,
+            "false": 3
+          },
+          "boar": {
+            "truths": 55,
+            "recall": 0.7272727272727273,
+            "false": 5
+          },
+          "sheep": {
+            "truths": 66,
+            "recall": 0.4090909090909091,
+            "false": 7
+          },
+          "town_center": {
+            "truths": 39,
+            "recall": 1.0,
+            "false": 0
+          },
+          "house": {
+            "truths": 101,
+            "recall": 0.9306930693069307,
+            "false": 0
+          },
+          "villager": {
+            "truths": 335,
+            "recall": 0.6417910447761194,
+            "false": 20
+          }
+        }
+      }
+    },
+    "1.5": {
+      "crops_per_frame": 4,
+      "truths": 1248,
+      "unscored_truths": 0,
+      "full": {
+        "hits": 934,
+        "false": 36,
+        "missed": 314,
+        "precision": 0.9628865979381444,
+        "recall": 0.7483974358974359,
+        "f1": 0.842200180342651
+      },
+      "masked": {
+        "hits": 922,
+        "false": 72,
+        "missed": 326,
+        "precision": 0.9275653923541247,
+        "recall": 0.7387820512820513,
+        "f1": 0.8224799286351472
+      },
+      "enlarged": {
+        "hits": 887,
+        "false": 146,
+        "missed": 361,
+        "precision": 0.8586640851887706,
+        "recall": 0.7107371794871795,
+        "f1": 0.7777290661990355
+      },
+      "f1_gap_90": {
+        "size (enlarged - masked)": [
+          -0.057216884465984164,
+          -0.03165853029363386
+        ],
+        "crop (masked - full)": [
+          -0.028717349033674844,
+          -0.010621804485523079
+        ],
+        "zoom (enlarged - full)": [
+          -0.07772579344535524,
+          -0.051198227338830726
+        ]
+      },
+      "class_recall": {
+        "full": {
+          "tree": {
+            "truths": 405,
+            "recall": 0.9209876543209876,
+            "false": 9
+          },
+          "gold_mine": {
+            "truths": 71,
+            "recall": 0.8169014084507042,
+            "false": 1
+          },
+          "stone_mine": {
+            "truths": 49,
+            "recall": 0.7755102040816326,
+            "false": 3
+          },
+          "berry_bush": {
+            "truths": 40,
+            "recall": 0.5,
+            "false": 0
+          },
+          "deer": {
+            "truths": 62,
+            "recall": 0.20967741935483872,
+            "false": 1
+          },
+          "boar": {
+            "truths": 55,
+            "recall": 0.5818181818181818,
+            "false": 3
+          },
+          "sheep": {
+            "truths": 66,
+            "recall": 0.45454545454545453,
+            "false": 6
+          },
+          "town_center": {
+            "truths": 39,
+            "recall": 1.0,
+            "false": 0
+          },
+          "house": {
+            "truths": 101,
+            "recall": 0.900990099009901,
+            "false": 0
+          },
+          "villager": {
+            "truths": 335,
+            "recall": 0.6567164179104478,
+            "false": 12
+          }
+        },
+        "masked": {
+          "tree": {
+            "truths": 405,
+            "recall": 0.8962962962962963,
+            "false": 26
+          },
+          "gold_mine": {
+            "truths": 71,
+            "recall": 0.7887323943661971,
+            "false": 13
+          },
+          "stone_mine": {
+            "truths": 49,
+            "recall": 0.7551020408163265,
+            "false": 7
+          },
+          "berry_bush": {
+            "truths": 40,
+            "recall": 0.5,
+            "false": 1
+          },
+          "deer": {
+            "truths": 62,
+            "recall": 0.22580645161290322,
+            "false": 1
+          },
+          "boar": {
+            "truths": 55,
+            "recall": 0.6,
+            "false": 3
+          },
+          "sheep": {
+            "truths": 66,
+            "recall": 0.5,
+            "false": 6
+          },
+          "town_center": {
+            "truths": 39,
+            "recall": 1.0,
+            "false": 0
+          },
+          "house": {
+            "truths": 101,
+            "recall": 0.8910891089108911,
+            "false": 0
+          },
+          "villager": {
+            "truths": 335,
+            "recall": 0.6447761194029851,
+            "false": 11
+          }
+        },
+        "enlarged": {
+          "tree": {
+            "truths": 405,
+            "recall": 0.8641975308641975,
+            "false": 47
+          },
+          "gold_mine": {
+            "truths": 71,
+            "recall": 0.7323943661971831,
+            "false": 16
+          },
+          "stone_mine": {
+            "truths": 49,
+            "recall": 0.6326530612244898,
+            "false": 5
+          },
+          "berry_bush": {
+            "truths": 40,
+            "recall": 0.475,
+            "false": 8
+          },
+          "deer": {
+            "truths": 62,
+            "recall": 0.1935483870967742,
+            "false": 3
+          },
+          "boar": {
+            "truths": 55,
+            "recall": 0.7090909090909091,
+            "false": 4
+          },
+          "sheep": {
+            "truths": 66,
+            "recall": 0.5,
+            "false": 8
+          },
+          "town_center": {
+            "truths": 39,
+            "recall": 1.0,
+            "false": 1
+          },
+          "house": {
+            "truths": 101,
+            "recall": 0.8415841584158416,
+            "false": 0
+          },
+          "villager": {
+            "truths": 335,
+            "recall": 0.6179104477611941,
+            "false": 34
+          }
+        }
+      }
+    },
+    "1.7": {
+      "crops_per_frame": 9,
+      "truths": 1248,
+      "unscored_truths": 0,
+      "full": {
+        "hits": 934,
+        "false": 36,
+        "missed": 314,
+        "precision": 0.9628865979381444,
+        "recall": 0.7483974358974359,
+        "f1": 0.842200180342651
+      },
+      "masked": {
+        "hits": 919,
+        "false": 83,
+        "missed": 329,
+        "precision": 0.9171656686626747,
+        "recall": 0.7363782051282052,
+        "f1": 0.8168888888888889
+      },
+      "enlarged": {
+        "hits": 804,
+        "false": 171,
+        "missed": 444,
+        "precision": 0.8246153846153846,
+        "recall": 0.6442307692307693,
+        "f1": 0.7233468286099866
+      },
+      "f1_gap_90": {
+        "size (enlarged - masked)": [
+          -0.11259728835415805,
+          -0.07552022077736065
+        ],
+        "crop (masked - full)": [
+          -0.03479050623940194,
+          -0.015489330727852302
+        ],
+        "zoom (enlarged - full)": [
+          -0.13650213139864875,
+          -0.10120945963893291
+        ]
+      },
+      "class_recall": {
+        "full": {
+          "tree": {
+            "truths": 405,
+            "recall": 0.9209876543209876,
+            "false": 9
+          },
+          "gold_mine": {
+            "truths": 71,
+            "recall": 0.8169014084507042,
+            "false": 1
+          },
+          "stone_mine": {
+            "truths": 49,
+            "recall": 0.7755102040816326,
+            "false": 3
+          },
+          "berry_bush": {
+            "truths": 40,
+            "recall": 0.5,
+            "false": 0
+          },
+          "deer": {
+            "truths": 62,
+            "recall": 0.20967741935483872,
+            "false": 1
+          },
+          "boar": {
+            "truths": 55,
+            "recall": 0.5818181818181818,
+            "false": 3
+          },
+          "sheep": {
+            "truths": 66,
+            "recall": 0.45454545454545453,
+            "false": 6
+          },
+          "town_center": {
+            "truths": 39,
+            "recall": 1.0,
+            "false": 0
+          },
+          "house": {
+            "truths": 101,
+            "recall": 0.900990099009901,
+            "false": 0
+          },
+          "villager": {
+            "truths": 335,
+            "recall": 0.6567164179104478,
+            "false": 12
+          }
+        },
+        "masked": {
+          "tree": {
+            "truths": 405,
+            "recall": 0.8839506172839506,
+            "false": 31
+          },
+          "gold_mine": {
+            "truths": 71,
+            "recall": 0.7323943661971831,
+            "false": 16
+          },
+          "stone_mine": {
+            "truths": 49,
+            "recall": 0.7346938775510204,
+            "false": 10
+          },
+          "berry_bush": {
+            "truths": 40,
+            "recall": 0.5,
+            "false": 0
+          },
+          "deer": {
+            "truths": 62,
+            "recall": 0.22580645161290322,
+            "false": 3
+          },
+          "boar": {
+            "truths": 55,
+            "recall": 0.6,
+            "false": 3
+          },
+          "sheep": {
+            "truths": 66,
+            "recall": 0.5454545454545454,
+            "false": 6
+          },
+          "town_center": {
+            "truths": 39,
+            "recall": 1.0,
+            "false": 1
+          },
+          "house": {
+            "truths": 101,
+            "recall": 0.8811881188118812,
+            "false": 1
+          },
+          "villager": {
+            "truths": 335,
+            "recall": 0.6567164179104478,
+            "false": 11
+          }
+        },
+        "enlarged": {
+          "tree": {
+            "truths": 405,
+            "recall": 0.8395061728395061,
+            "false": 54
+          },
+          "gold_mine": {
+            "truths": 71,
+            "recall": 0.6901408450704225,
+            "false": 14
+          },
+          "stone_mine": {
+            "truths": 49,
+            "recall": 0.6938775510204082,
+            "false": 2
+          },
+          "berry_bush": {
+            "truths": 40,
+            "recall": 0.25,
+            "false": 8
+          },
+          "deer": {
+            "truths": 62,
+            "recall": 0.14516129032258066,
+            "false": 3
+          },
+          "boar": {
+            "truths": 55,
+            "recall": 0.7272727272727273,
+            "false": 6
+          },
+          "sheep": {
+            "truths": 66,
+            "recall": 0.42424242424242425,
+            "false": 5
+          },
+          "town_center": {
+            "truths": 39,
+            "recall": 0.8974358974358975,
+            "false": 3
+          },
+          "house": {
+            "truths": 101,
+            "recall": 0.6732673267326733,
+            "false": 0
+          },
+          "villager": {
+            "truths": 335,
+            "recall": 0.5492537313432836,
+            "false": 42
+          }
+        }
+      }
+    },
+    "2.0": {
+      "crops_per_frame": 9,
+      "truths": 1248,
+      "unscored_truths": 0,
+      "full": {
+        "hits": 934,
+        "false": 36,
+        "missed": 314,
+        "precision": 0.9628865979381444,
+        "recall": 0.7483974358974359,
+        "f1": 0.842200180342651
+      },
+      "masked": {
+        "hits": 914,
+        "false": 93,
+        "missed": 334,
+        "precision": 0.9076464746772592,
+        "recall": 0.7323717948717948,
+        "f1": 0.8106430155210643
+      },
+      "enlarged": {
+        "hits": 646,
+        "false": 287,
+        "missed": 602,
+        "precision": 0.692390139335477,
+        "recall": 0.5176282051282052,
+        "f1": 0.5923888124713435
+      },
+      "f1_gap_90": {
+        "size (enlarged - masked)": [
+          -0.23931172961643876,
+          -0.1980515476630904
+        ],
+        "crop (masked - full)": [
+          -0.04410726827589928,
+          -0.01826568364578096
+        ],
+        "zoom (enlarged - full)": [
+          -0.27377488191632937,
+          -0.22659727078988134
+        ]
+      },
+      "class_recall": {
+        "full": {
+          "tree": {
+            "truths": 405,
+            "recall": 0.9209876543209876,
+            "false": 9
+          },
+          "gold_mine": {
+            "truths": 71,
+            "recall": 0.8169014084507042,
+            "false": 1
+          },
+          "stone_mine": {
+            "truths": 49,
+            "recall": 0.7755102040816326,
+            "false": 3
+          },
+          "berry_bush": {
+            "truths": 40,
+            "recall": 0.5,
+            "false": 0
+          },
+          "deer": {
+            "truths": 62,
+            "recall": 0.20967741935483872,
+            "false": 1
+          },
+          "boar": {
+            "truths": 55,
+            "recall": 0.5818181818181818,
+            "false": 3
+          },
+          "sheep": {
+            "truths": 66,
+            "recall": 0.45454545454545453,
+            "false": 6
+          },
+          "town_center": {
+            "truths": 39,
+            "recall": 1.0,
+            "false": 0
+          },
+          "house": {
+            "truths": 101,
+            "recall": 0.900990099009901,
+            "false": 0
+          },
+          "villager": {
+            "truths": 335,
+            "recall": 0.6567164179104478,
+            "false": 12
+          }
+        },
+        "masked": {
+          "tree": {
+            "truths": 405,
+            "recall": 0.8839506172839506,
+            "false": 39
+          },
+          "gold_mine": {
+            "truths": 71,
+            "recall": 0.7323943661971831,
+            "false": 17
+          },
+          "stone_mine": {
+            "truths": 49,
+            "recall": 0.7346938775510204,
+            "false": 6
+          },
+          "berry_bush": {
+            "truths": 40,
+            "recall": 0.5,
+            "false": 1
+          },
+          "deer": {
+            "truths": 62,
+            "recall": 0.24193548387096775,
+            "false": 1
+          },
+          "boar": {
+            "truths": 55,
+            "recall": 0.6,
+            "false": 3
+          },
+          "sheep": {
+            "truths": 66,
+            "recall": 0.5454545454545454,
+            "false": 9
+          },
+          "town_center": {
+            "truths": 39,
+            "recall": 0.9743589743589743,
+            "false": 0
+          },
+          "house": {
+            "truths": 101,
+            "recall": 0.8811881188118812,
+            "false": 0
+          },
+          "villager": {
+            "truths": 335,
+            "recall": 0.6447761194029851,
+            "false": 10
+          }
+        },
+        "enlarged": {
+          "tree": {
+            "truths": 405,
+            "recall": 0.8024691358024691,
+            "false": 107
+          },
+          "gold_mine": {
+            "truths": 71,
+            "recall": 0.49295774647887325,
+            "false": 6
+          },
+          "stone_mine": {
+            "truths": 49,
+            "recall": 0.5714285714285714,
+            "false": 7
+          },
+          "berry_bush": {
+            "truths": 40,
+            "recall": 0.075,
+            "false": 6
+          },
+          "deer": {
+            "truths": 62,
+            "recall": 0.11290322580645161,
+            "false": 2
+          },
+          "boar": {
+            "truths": 55,
+            "recall": 0.5818181818181818,
+            "false": 5
+          },
+          "sheep": {
+            "truths": 66,
+            "recall": 0.3181818181818182,
+            "false": 4
+          },
+          "town_center": {
+            "truths": 39,
+            "recall": 0.8461538461538461,
+            "false": 2
+          },
+          "house": {
+            "truths": 101,
+            "recall": 0.39603960396039606,
+            "false": 0
+          },
+          "villager": {
+            "truths": 335,
+            "recall": 0.3492537313432836,
+            "false": 82
+          }
+        }
+      }
+    }
+  }
+}

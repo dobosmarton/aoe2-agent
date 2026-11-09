@@ -15,11 +15,18 @@ dependencies = [
     "pyautogui>=0.9.54",
     "pydantic>=2.5.0",
     "pygetwindow>=0.0.9",
+    # The native Mac game: window list, focus and full-resolution capture.
+    "pyobjc-framework-Cocoa>=12.1; sys_platform == 'darwin'",
+    "pyobjc-framework-Quartz>=12.1; sys_platform == 'darwin'",
     "pyyaml>=6.0",
     # Resource-bar OCR (pip-only, runs on the onnxruntime detection already ships):
     "rapidocr-onnxruntime>=1.4.0",
+    # Native tracker. Wheels exist for these platforms only; elsewhere the agent falls
+    # back to the Python tracker. The wheel URLs are in the root [tool.uv.sources].
+    "screentrack==0.1.0; (sys_platform == 'darwin' and platform_machine == 'arm64') or (sys_platform == 'linux' and platform_machine == 'x86_64') or (sys_platform == 'win32' and platform_machine == 'AMD64')",
     "structlog>=24.1.0",
     "typesafe-sdk>=0.7.0",
+    "pyobjc-framework-screencapturekit>=12.1 ; sys_platform == 'darwin'",
 ]
 
 [project.scripts]

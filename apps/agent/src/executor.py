@@ -4,21 +4,25 @@ Dispatches validated actions to per-type handler functions.
 """
 
 import asyncio
+import io
 import math
 import time
 from collections import Counter
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from contextvars import ContextVar, Token
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Literal, cast
 
+import numpy as np
 import pyautogui
 import structlog
+from PIL import Image
 from pydantic import BaseModel
 
+from .camera_motion import MOBILE_CLASSES
 from .config import config
-from .entity_snapshot import MAX_SPATIAL_AGE_SECONDS
+from .entity_snapshot import MAX_SPATIAL_AGE_SECONDS, STATIC_SPATIAL_AGE_SECONDS
 from .entity_utils import (
     CLASSES_BY_KIND,
     RESOURCE_KINDS,
@@ -36,7 +40,15 @@ from .policy.catalog import (
     UNITS,
 )
 from .policy.state import PolicyState
-from .window import ensure_game_focused, get_game_window_rect
+from .window import (
+    Platform,
+    ensure_game_focused,
+    game_in_front,
+    game_platform,
+    get_game_window_rect,
+    get_input_scale,
+    to_input_point,
+)
 
 log = structlog.stdlib.get_logger()
 
@@ -53,10 +65,21 @@ pyautogui.PAUSE = 0.02
 
 # Module-level state (updated per-action batch)
 _window_offset: tuple[int, int] = (0, 0)
+# Frame pixels per input unit: 2 on a Retina Mac, where the mouse moves in points.
+_input_scale: float = 1.0
+_platform: Platform = "none"
+# The catalog's modifiers mapped to the keys the Mac game binds (see GameProfile).
+_modifier_map: dict[str, str] = {}
+# The mouse button that gives units orders, from the game profile.
+_command_button: Literal["left", "right"] = "right"
 _detected_entities: list[dict] = []
+# The encoded frame those entities came from: placement reads unexplored ground from it.
+_ground_frame: bytes = b""
+_ground_luma: "tuple[bytes, _Luma] | None" = None  # The frame, decoded for `_explored`.
 _rescan_fn: Callable[[], Awaitable[bool]] | None = None
 _rescan_full_fn: Callable[[], Awaitable[bool]] | None = None
 _selection_refresh_fn: Callable[[], Awaitable[bool]] | None = None
+_placement_refresh_fn: Callable[[], Awaitable[bool]] | None = None
 
 
 @dataclass
@@ -90,16 +113,33 @@ def set_selection_refresh_fn(fn: Callable[[], Awaitable[bool]]) -> None:
     _selection_refresh_fn = fn
 
 
+def set_placement_refresh_fn(fn: Callable[[], Awaitable[bool]]) -> None:
+    """Set the pre-placement refresh: detection and the HUD, without the selection read."""
+    global _placement_refresh_fn
+    _placement_refresh_fn = fn
+
+
 def clear_refresh_callbacks() -> None:
     """Release per-game capture callbacks after all loops have stopped."""
-    global _rescan_fn, _rescan_full_fn, _selection_refresh_fn
+    global _rescan_fn, _rescan_full_fn, _selection_refresh_fn, _placement_refresh_fn
     _rescan_fn = None
     _rescan_full_fn = None
     _selection_refresh_fn = None
+    _placement_refresh_fn = None
 
 
 async def _selection_refresh() -> bool:
     callback = _selection_refresh_fn or _rescan_fn
+    return callback is not None and await callback()
+
+
+async def _spatial_refresh() -> bool:
+    """A fresh view with detection, for a click placed from detected positions.
+
+    Without the selected-unit read when that refresh is wired: it adds nothing here
+    and, being the slowest read, would age the positions.
+    """
+    callback = _placement_refresh_fn or _rescan_fn
     return callback is not None and await callback()
 
 
@@ -135,6 +175,12 @@ def set_detected_entities(entities: Sequence[object]) -> None:
     log.debug("detected_entities_set", count=len(_detected_entities))
 
 
+def set_ground_frame(screenshot: bytes) -> None:
+    """The encoded frame the detected entities came from (see `_explored`)."""
+    global _ground_frame
+    _ground_frame = screenshot
+
+
 def get_detected_entities() -> list[dict]:
     """Return the current detected entity list."""
     return _detected_entities
@@ -142,8 +188,9 @@ def get_detected_entities() -> list[dict]:
 
 def clear_detected_entities() -> None:
     """Clear the cached detected entities."""
-    global _detected_entities
+    global _detected_entities, _ground_frame
     _detected_entities = []
+    _ground_frame = b""
 
 
 # ---------------------------------------------------------------------------
@@ -162,6 +209,18 @@ _HOUSE_CAP_STEP = 5  # cap gained per completed house
 # Houses need more grace than the wood path: a house takes ~25 s to CONSTRUCT
 # before the cap moves, and OCR lag sits on top of that.
 _HOUSE_SETTLE_SECONDS = 50.0
+# A placement still undecided this long after its deadline never happened (its
+# wood never left): drop it so the building can be tried again. Live, an
+# undecided house blocked every later house.
+_PLACEMENT_ABANDON_SECONDS = 40.0
+# A placement's payment shows within a reading or two. After this many fresh
+# readings without it, a wood drop belongs to some later purchase: live, a lumber
+# camp's 100 wood "confirmed" a house that had sat unpaid for two minutes.
+_PLACEMENT_WOOD_READINGS = 20
+# A paid building not seen complete in this time is dropped from the purchases
+# that block a rebuild. A house takes about 25 s with one builder.
+_HOUSE_COMPLETION_SECONDS = 120.0
+_BUILDING_COMPLETION_SECONDS = 240.0
 # Distinct detection frames before a building class is REPORTED as sighted
 # (context line only — sightings never gate builds: run 9, F-36, a persistent
 # phantom mill beat any count threshold and 14 outposts got built through the
@@ -341,6 +400,8 @@ class _PendingPlacement:
     point: tuple[int, int] = (0, 0)
     # Monotonic instant after which an undecided reading is judged anyway.
     settle_deadline: float = 0.0
+    # Fresh wood readings this placement has been judged against so far.
+    wood_readings: int = 0
 
     @property
     def is_house(self) -> bool:
@@ -352,6 +413,7 @@ class _PurchasedBuilding:
     operation_id: int
     preexisting_entity_ids: frozenset[str]
     cap_before: int = 0
+    purchased_at: float = 0.0  # Monotonic; 0 means unknown and never expires.
 
 
 @dataclass
@@ -749,6 +811,7 @@ def observe_hud(
         and population_cap >= purchased_house.cap_before + _HOUSE_CAP_STEP
     ):
         record_confirmed_buildings([_HOUSE_CLASS])
+    _expire_unfinished_purchases()
     _settle_pending_research(fresh_resources, claimed_spend, input_revision=input_revision)
     _settle_pending_training(
         fresh_resources,
@@ -991,15 +1054,42 @@ def _settle_pending_placements(
         completed_house = (
             pending.is_house and _house_verdict(pending, cap_now, claimed_cap) == "confirmed"
         )
+        # Only the first readings after the click can show its payment; a later
+        # drop belongs to a later purchase. Completion evidence still counts.
+        wood_judged = wood_now is not None and pending.wood_readings < _PLACEMENT_WOOD_READINGS
         verdict = (
             "confirmed"
             if completed_house
             else _wood_verdict(pending, wood_now, spent)
-            if wood_now is not None
+            if wood_now is not None and wood_judged
             else "undecided"
         )
+        if verdict == "undecided" and _now() >= (
+            pending.settle_deadline + _PLACEMENT_ABANDON_SECONDS
+        ):
+            _note_missing_settlement(pending.building_class)
+            outcomes.append(
+                ActionOutcome(
+                    pending.operation_id,
+                    f"build_{pending.building_class}",
+                    "failed",
+                    "placement never seen: no wood spent and no building completed",
+                )
+            )
+            log.warning(
+                "build_placement_abandoned",
+                building=pending.building_class,
+                selected_by=pending.selected_by,
+                x=pending.point[0],
+                y=pending.point[1],
+            )
+            continue
         if verdict == "undecided":
-            still_pending.append(pending)
+            still_pending.append(
+                replace(pending, wood_readings=pending.wood_readings + 1)
+                if wood_judged
+                else pending
+            )
             if (
                 _now() >= pending.settle_deadline
                 and pending.operation_id not in current_ledger().uncertain_operations
@@ -1026,7 +1116,10 @@ def _settle_pending_placements(
                     # another farm can be started while the first is building.
                     current_ledger().building_purchases[pending.building_class] = (
                         _PurchasedBuilding(
-                            pending.operation_id, pending.preexisting_entity_ids, pending.cap_before
+                            pending.operation_id,
+                            pending.preexisting_entity_ids,
+                            pending.cap_before,
+                            _now(),
                         )
                     )
                 _clear_missing_streak(pending.building_class)
@@ -1059,6 +1152,25 @@ def _settle_pending_placements(
     current_ledger().pending_placements = still_pending
     for outcome in outcomes:
         current_ledger().record_outcome(outcome)
+
+
+def _expire_unfinished_purchases() -> None:
+    """Drop paid buildings never seen complete, so they stop blocking a rebuild."""
+    ledger = current_ledger()
+    for cls, purchased in list(ledger.building_purchases.items()):
+        limit = _HOUSE_COMPLETION_SECONDS if cls == _HOUSE_CLASS else _BUILDING_COMPLETION_SECONDS
+        if not purchased.purchased_at or _now() - purchased.purchased_at < limit:
+            continue
+        del ledger.building_purchases[cls]
+        ledger.record_outcome(
+            ActionOutcome(
+                purchased.operation_id,
+                f"build_{cls}",
+                "failed",
+                f"completion never observed within {round(limit)} s; purchase dropped",
+            )
+        )
+        log.warning("build_completion_never_observed", building=cls, seconds=round(limit))
 
 
 def _house_verdict(
@@ -1776,19 +1888,38 @@ def _resolve_target_class(target_class: str) -> tuple[int, int] | None:
 _MIN_BUILDER_CONFIDENCE = 0.65
 
 
-def _fresh_spatial_cache() -> bool:
-    """Tracked boxes are click evidence only briefly after native capture."""
+def _fresh_spatial_cache(*, static_target: bool = False) -> bool:
+    """Tracked boxes are click evidence only briefly after native capture.
+
+    A click on something that doesn't move may use boxes up to
+    STATIC_SPATIAL_AGE_SECONDS old, but only boxes seen at the current camera
+    position; anything else keeps MAX_SPATIAL_AGE_SECONDS.
+    """
     now = time.monotonic()
+    camera = current_ledger().camera_revision
     for entity in _detected_entities:
         capture_id = entity.get("capture_id")
         if not isinstance(capture_id, int) or capture_id < 0:
             continue  # Scripted scenarios and legacy test values have no capture clock.
         captured_at = entity.get("captured_at")
-        if not isinstance(captured_at, (int, float)):
+        if not isinstance(captured_at, (int, float)) or captured_at > now + 0.1:
             return False
-        if now - captured_at > MAX_SPATIAL_AGE_SECONDS or captured_at > now + 0.1:
+        age = now - captured_at
+        if age <= MAX_SPATIAL_AGE_SECONDS:
+            continue
+        if not static_target or age > STATIC_SPATIAL_AGE_SECONDS:
+            return False
+        if entity.get("camera_revision", camera) != camera:
             return False
     return True
+
+
+def _static_click(action_dict: dict[str, object]) -> bool:
+    """A building placement, or a click on a target class that doesn't move."""
+    if action_dict.get("auto_placement"):
+        return True
+    target = action_dict.get("expected_class") or action_dict.get("target_class")
+    return isinstance(target, str) and bool(target) and target not in MOBILE_CLASSES
 
 
 def _verified_villager_center() -> tuple[int, int] | None:
@@ -1796,11 +1927,34 @@ def _verified_villager_center() -> tuple[int, int] | None:
     return None if target is None else target[1]
 
 
+def _over_building(point: tuple[int, int]) -> bool:
+    """Whether `point` lies on a detected building, where a click selects the building."""
+    x, y = point
+    for entity in _detected_entities:
+        cls = entity.get("class")
+        bbox = entity.get("bbox")
+        if (
+            isinstance(cls, str)
+            and cls in _CLICK_OCCLUDING_CLASSES
+            and isinstance(bbox, (list, tuple))
+            and len(bbox) == 4
+            and bbox[0] <= x <= bbox[2]
+            and bbox[1] <= y <= bbox[3]
+        ):
+            return True
+    return False
+
+
 def _verified_villager_target() -> tuple[str, tuple[int, int]] | None:
-    """Bind the strongest boxed villager, never an unbounded class guess."""
+    """Bind the strongest boxed villager, never an unbounded class guess.
+
+    A villager clear of buildings is preferred: live, the click meant for one in
+    front of the Town Center selected the Town Center (twice). One standing on a
+    building is still used when it is the only choice.
+    """
     if not _fresh_spatial_cache():
         return None
-    candidates: list[tuple[float, str, tuple[int, int]]] = []
+    candidates: list[tuple[bool, float, str, tuple[int, int]]] = []
     for entity in _detected_entities:
         if entity.get("class") != "villager":
             continue
@@ -1826,10 +1980,11 @@ def _verified_villager_target() -> tuple[str, tuple[int, int]] | None:
             continue
         x, y = int(center[0]), int(center[1])
         if bbox[0] <= x <= bbox[2] and bbox[1] <= y <= bbox[3]:
-            candidates.append((float(confidence), identifier, (x, y)))
+            clear = not _over_building((x, y))
+            candidates.append((clear, float(confidence), identifier, (x, y)))
     if not candidates:
         return None
-    _, identifier, center = max(candidates, key=lambda item: item[0])
+    _, _, identifier, center = max(candidates, key=lambda item: (item[0], item[1]))
     return identifier, center
 
 
@@ -1854,7 +2009,7 @@ def _resolve_coords(action_dict: dict[str, object]) -> tuple[str, tuple[int, int
     """
     if not current_ledger().spatial_valid:
         return ("spatial observation invalid after camera movement; refresh required", None)
-    if not _fresh_spatial_cache():
+    if not _fresh_spatial_cache(static_target=_static_click(action_dict)):
         return ("spatial observation is too old for a dependent click", None)
     if action_dict.get("auto_placement"):
         key = str(action_dict.get("building_key", ""))
@@ -1963,8 +2118,135 @@ def can_resolve(action_dict: dict[str, object]) -> bool:
 
 
 def _translate(x: int, y: int) -> tuple[int, int]:
-    """Translate screenshot-relative coords to screen-absolute."""
-    return (x + _window_offset[0], y + _window_offset[1])
+    """Translate screenshot-relative coords to screen-absolute input units."""
+    return to_input_point(x, y, _window_offset[0], _window_offset[1], _input_scale)
+
+
+# ---------------------------------------------------------------------------
+# macOS input
+# ---------------------------------------------------------------------------
+
+# The button is held this long, so the game sees a press and a release, not one instant.
+MAC_CLICK_HOLD_S = 0.04
+# Zoom goes as separate one-step scroll events, so each one counts as one zoom step.
+MAC_SCROLL_GAP_S = 0.03
+# Enough one-step zoom-outs to reach full zoom-out from any zoom.
+MAC_FULL_ZOOM_OUT_STEPS = 30
+# The scroll direction that zooms in. Flip it if the probe's zoom ladder runs backwards.
+MAC_ZOOM_IN_DIRECTION = 1
+GAME_NOT_IN_FRONT = "the game is not the front window, so no input was sent"
+MAC_ZOOM_FIXED = "zoom is fixed on macOS so the detector always sees one scale; scroll is disabled"
+
+_MAC_MODIFIER_NAMES: dict[str, str] = {
+    "cmd": "command",
+    "control": "ctrl",
+    "alt": "option",
+    "opt": "option",
+}
+# macOS shortcuts that quit, hide or leave the game. A chord containing one is refused.
+_MAC_BLOCKED_CHORDS: tuple[frozenset[str], ...] = tuple(
+    frozenset(chord)
+    for chord in (
+        {"command", "q"},
+        {"command", "w"},
+        {"command", "h"},
+        {"command", "m"},
+        {"command", "tab"},
+        {"command", "space"},
+        {"command", "option", "escape"},
+        {"ctrl", "command", "f"},
+        {"ctrl", "command", "q"},
+        {"ctrl", "up"},
+        {"ctrl", "down"},
+        {"ctrl", "left"},
+        {"ctrl", "right"},
+        {"ctrl", "space"},
+    )
+)
+_MAC_BLOCKED_KEYS: frozenset[str] = frozenset({"f11"})  # Show Desktop.
+
+
+def set_command_button(button: Literal["left", "right"]) -> None:
+    """The button that orders units: right by default, left in the Mac game's default."""
+    global _command_button
+    _command_button = button
+
+
+def set_modifier_map(pairs: Iterable[tuple[str, str]]) -> None:
+    """Map the catalog's modifiers to the Mac game's, e.g. ("ctrl", "command")."""
+    global _modifier_map
+    _modifier_map = dict(pairs)
+
+
+def _mac_chord(modifiers: Sequence[str], key: str) -> tuple[list[str], str | None]:
+    """The Mac modifiers for a press, and a refusal if the chord is a system shortcut."""
+    names = [_MAC_MODIFIER_NAMES.get(name.lower(), name.lower()) for name in modifiers]
+    mapped = [_modifier_map.get(name, name) for name in names]
+    chord = frozenset([*mapped, key.lower()])
+    if key.lower() in _MAC_BLOCKED_KEYS or any(blocked <= chord for blocked in _MAC_BLOCKED_CHORDS):
+        return mapped, f"{'+'.join([*mapped, key])} is a macOS system shortcut, so it was not sent"
+    return mapped, None
+
+
+async def _mouse_click(x: int, y: int, button: Literal["left", "right"]) -> None:
+    if _platform != "macos":
+        if button == "left":
+            pyautogui.click(x, y)
+        else:
+            pyautogui.rightClick(x, y)
+        return
+    pyautogui.mouseDown(x, y, button=button)
+    try:
+        await asyncio.sleep(MAC_CLICK_HOLD_S)
+    finally:
+        pyautogui.mouseUp(x, y, button=button)  # Never leave the button held.
+
+
+def _refresh_input_geometry() -> tuple[int, int, int, int] | None:
+    """Read the window's offset, scale and platform once before an input."""
+    global _window_offset, _input_scale, _platform
+    rect = get_game_window_rect()
+    if rect:
+        _window_offset = (rect[0], rect[1])
+    _input_scale = get_input_scale()
+    _platform = game_platform()
+    return rect
+
+
+def _withheld_input() -> ActionResult | None:
+    """On macOS, input goes only to the game in front. Cmd+Tab away to stop the agent."""
+    if _platform == "macos" and not game_in_front():
+        log.warning("input_withheld", reason="game_not_in_front")
+        return ActionResult(False, GAME_NOT_IN_FRONT)
+    return None
+
+
+async def set_absolute_zoom(zoom_steps: int) -> ActionResult:
+    """macOS: zoom all the way out, then `zoom_steps` in, so every game starts at one zoom.
+
+    The detector was trained at one scale. A relative zoom from wherever the last game
+    ended would give it a different one.
+    """
+    rect = _refresh_input_geometry()
+    if withheld := _withheld_input():
+        return withheld
+    if rect is None:
+        return ActionResult(False, "game window not found")
+    width, height = _size_of(rect)
+    pyautogui.moveTo(*_translate(width // 2, height // 2))  # Scroll over the map, not the HUD.
+    current_ledger().note_camera_input()
+    current_ledger().spatial_valid = False
+    for direction, steps in (
+        (-MAC_ZOOM_IN_DIRECTION, MAC_FULL_ZOOM_OUT_STEPS),
+        (MAC_ZOOM_IN_DIRECTION, zoom_steps),
+    ):
+        for _ in range(steps):
+            if withheld := _withheld_input():
+                return withheld
+            pyautogui.scroll(direction)
+            await asyncio.sleep(MAC_SCROLL_GAP_S)
+    log.info("zoom_set", zoom_out_steps=MAC_FULL_ZOOM_OUT_STEPS, zoom_in_steps=zoom_steps)
+    return ActionResult(True, "ok")
 
 
 # ---------------------------------------------------------------------------
@@ -1991,6 +2273,7 @@ BUILD_RING_RADII: tuple[int, ...] = (280, 400, 520)
 RESOURCE_RING_RADII: tuple[int, ...] = (150, 210, 270)
 BUILD_RING_DIRECTIONS: int = 8
 BUILD_CLUTTER_RADIUS: int = 160  # entities within this of a candidate = clutter
+_BLOCKED_CLUTTER = 10  # A candidate inside an entity's box counts as this much clutter.
 
 # Play-area margins (screenshot px). The HUD occupies the top resource bar and the
 # bottom command panel; those regions have no entities, so an emptiness score would
@@ -2020,6 +2303,9 @@ _RESOURCE_REQUIRED_KEYS: frozenset[str] = frozenset(_BUILD_ANCHOR_CLASSES) - _AN
 GATE_BUILDING_CLASSES: frozenset[str] = frozenset(
     cls for menu in _MENU_BUILDINGS.values() for cls in menu.values()
 )
+
+# Buildings a click lands on instead of a unit standing in front of them.
+_CLICK_OCCLUDING_CLASSES: frozenset[str] = GATE_BUILDING_CLASSES | {"town_center"}
 
 # Wood cost per building class (every one of these is wood-only). Literals on
 # purpose: packages/data's aoe2.db holds the full cost table, but the build gate
@@ -2064,12 +2350,16 @@ _MIN_WINDOW_DIM: int = 320
 
 
 def _window_size() -> tuple[int, int]:
-    """(width, height) of the game window, or ``_DEFAULT_SCREEN`` when unavailable.
+    """(width, height) of the game window, or ``_DEFAULT_SCREEN`` when unavailable."""
+    return _size_of(get_game_window_rect())
+
+
+def _size_of(rect: tuple[int, int, int, int] | None) -> tuple[int, int]:
+    """(width, height) of a window rect, or ``_DEFAULT_SCREEN`` when unavailable.
 
     Defensive against ``get_game_window_rect`` returning ``None`` or a malformed
     rect whose dimensions are absent, non-numeric, or implausibly small.
     """
-    rect = get_game_window_rect()
     if rect is not None:
         try:
             width, height = int(rect[2]), int(rect[3])
@@ -2108,20 +2398,95 @@ def _clutter_score(point: tuple[int, int]) -> int:
     Lower = emptier ground = more likely a valid building spot. Counting the
     resource itself is deliberate: on a camp's tight ring it makes the emptiest
     candidate the open ground at the forest's edge.
+
+    Distance is to an entity's box (zero inside it), not its centre: the detector
+    draws a forest as one large "tree" box whose centre can be hundreds of pixels
+    from its edge, and live a house was placed inside such a forest and refused.
+    A point inside a box is blocked ground, so it outweighs any amount of nearby
+    clutter (_BLOCKED_CLUTTER).
     """
     px, py = point
     r2 = BUILD_CLUTTER_RADIUS * BUILD_CLUTTER_RADIUS
-    return sum(
-        1
-        for entity in _detected_entities
-        if (center := entity.get("center")) and (px - center[0]) ** 2 + (py - center[1]) ** 2 <= r2
-    )
+    score = 0
+    for entity in _detected_entities:
+        bbox = entity.get("bbox")
+        if isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+            x0, y0, x1, y1 = (float(value) for value in bbox)
+            dx = max(x0 - px, 0.0, px - x1)
+            dy = max(y0 - py, 0.0, py - y1)
+        elif (center := entity.get("center")) and isinstance(center, (list, tuple)):
+            dx, dy = px - float(center[0]), py - float(center[1])
+        else:
+            continue
+        if dx == 0.0 and dy == 0.0:
+            score += _BLOCKED_CLUTTER
+        elif dx * dx + dy * dy <= r2:
+            score += 1
+    return score
+
+
+_UNEXPLORED_BRIGHTNESS = 70.0  # Mean luma of the ground around a candidate, 0-255.
+_GROUND_PATCH = (120, 80)  # Frame pixels measured around a candidate.
+_LUMA_SHRINK = 4  # The frame is decoded at a quarter size: a patch mean needs no more.
+
+
+@dataclass(frozen=True, slots=True)
+class _Luma:
+    pixels: np.ndarray  # Luma, 0-255, at reduced size.
+    width: int
+    height: int
+    scale: float  # Frame pixels per luma pixel.
+
+
+def _ground_luma_image() -> _Luma | None:
+    """The ground frame's luma at reduced size, decoded once per frame."""
+    global _ground_luma
+    frame = _ground_frame
+    if not frame:
+        return None
+    if _ground_luma is not None and _ground_luma[0] is frame:
+        return _ground_luma[1]
+    try:
+        with Image.open(io.BytesIO(frame)) as image:
+            full_width = image.width
+            image.draft("L", (image.width // _LUMA_SHRINK, image.height // _LUMA_SHRINK))
+            gray = image.convert("L")
+            luma = _Luma(
+                np.asarray(gray, dtype=np.float32), gray.width, gray.height, full_width / gray.width
+            )
+    except (OSError, ValueError) as error:
+        log.warning("ground_frame_unreadable", error=str(error))
+        return None
+    _ground_luma = (frame, luma)
+    return luma
+
+
+def _explored(point: tuple[int, int]) -> bool:
+    """Whether the ground around `point` is explored, judged by its brightness.
+
+    Unexplored map is black, and the game refuses a building there; detections
+    can't show it, since black ground holds no objects. Live, a mill was placed
+    in black ground (patch mean 45) and refused. Measured patch means: unexplored
+    21-49, explored but fogged 86-118, in sight 122-141. Without a frame every
+    point counts as explored.
+    """
+    luma = _ground_luma_image()
+    if luma is None:
+        return True
+    half_w, half_h = _GROUND_PATCH[0] / 2 / luma.scale, _GROUND_PATCH[1] / 2 / luma.scale
+    x, y = point[0] / luma.scale, point[1] / luma.scale
+    x0, x1 = max(0, int(x - half_w)), min(luma.width, int(x + half_w) + 1)
+    y0, y1 = max(0, int(y - half_h)), min(luma.height, int(y + half_h) + 1)
+    if x0 >= x1 or y0 >= y1:
+        return True
+    patch: np.ndarray = luma.pixels[y0:y1, x0:x1]
+    return float(np.mean(patch)) >= _UNEXPLORED_BRIGHTNESS
 
 
 def _open_ground_candidates(
     anchor: tuple[int, int], radii: tuple[int, ...] = BUILD_RING_RADII
 ) -> list[tuple[int, int]]:
-    """Ring points around `anchor` that lie in the play area, emptiest-first."""
+    """Explored ring points around `anchor` in the play area, emptiest-first."""
     ax, ay = anchor
     min_x, min_y, max_x, max_y = _play_area_bounds()
     candidates: list[tuple[int, int]] = []
@@ -2130,7 +2495,7 @@ def _open_ground_candidates(
             angle = 2.0 * math.pi * i / BUILD_RING_DIRECTIONS
             cx = int(ax + radius * math.cos(angle))
             cy = int(ay + radius * math.sin(angle))
-            if min_x <= cx <= max_x and min_y <= cy <= max_y:
+            if min_x <= cx <= max_x and min_y <= cy <= max_y and _explored((cx, cy)):
                 candidates.append((cx, cy))
     candidates.sort(key=_clutter_score)
     return candidates
@@ -2372,7 +2737,7 @@ async def _handle_click(action_dict: dict[str, object], intent: str) -> ActionRe
             current_ledger().note_economic_input()
         else:
             current_ledger().note_selection_input()
-        pyautogui.click(screen_x, screen_y)
+        await _mouse_click(screen_x, screen_y, "left")
         log.info(
             "click",
             x=x,
@@ -2420,7 +2785,7 @@ async def _handle_right_click(action_dict: dict[str, object], intent: str) -> Ac
 
     screen_x, screen_y = _translate(x, y)
     current_ledger().note_input()
-    pyautogui.rightClick(screen_x, screen_y)
+    await _mouse_click(screen_x, screen_y, _command_button)  # The order, on either button.
     log.info(
         "right_click",
         x=x,
@@ -2437,6 +2802,14 @@ async def _handle_press(action_dict: dict[str, object], intent: str) -> ActionRe
     key = str(action_dict["key"])
     raw_modifiers = action_dict.get("modifiers", [])
     modifiers: list[str] = list(raw_modifiers) if isinstance(raw_modifiers, list) else []
+    if _platform == "macos":
+        modifiers, refusal = _mac_chord(modifiers, key)
+        if refusal is not None:
+            log.warning("system_chord_refused", key=key, modifiers=modifiers, intent=intent)
+            return ActionResult(False, refusal)
+        from . import keyboard_macos
+
+        keyboard_macos.release_stuck_modifiers()  # A held flag would change the key sent.
     if key.lower() in CAMERA_KEYS or action_dict.get("rescan"):
         current_ledger().note_camera_input()
         current_ledger().spatial_valid = False
@@ -2484,6 +2857,9 @@ async def _handle_drag(action_dict: dict[str, object], intent: str) -> ActionRes
 
 async def _handle_scroll(action_dict: dict[str, object], intent: str) -> ActionResult:
     clicks = _to_int(action_dict["clicks"])
+    if _platform == "macos":
+        log.warning("scroll_refused", clicks=clicks, intent=intent)
+        return ActionResult(False, MAC_ZOOM_FIXED)
     x, y = action_dict.get("x"), action_dict.get("y")
     current_ledger().note_camera_input()
     current_ledger().spatial_valid = False
@@ -2579,12 +2955,15 @@ async def _handle_build(action_dict: dict[str, object], intent: str) -> ActionRe
                         action_id, _BUILD_REFRESH_RETRY_DELAY, "villager selection unverified"
                     )
                 return ActionResult(False, rejection)
-        if index == selection_index + 2 and not await _selection_refresh():
+        # The placement is resolved from detected positions at click time. The
+        # menu keys don't move the camera, but by now the builder's view is about
+        # 3 s old and click evidence must be under 1 s, so detect again.
+        if index == selection_index + 2 and not await _spatial_refresh():
             if action_id:
                 current_ledger().defer_action(
                     action_id, _BUILD_REFRESH_RETRY_DELAY, "pre-placement refresh failed"
                 )
-            return ActionResult(False, "pre-placement HUD refresh unavailable")
+            return ActionResult(False, "pre-placement refresh unavailable")
     return ActionResult(True, f"placement input issued ({intent}); awaiting evidence")
 
 
@@ -2920,18 +3299,18 @@ async def execute_action(action: dict[str, object] | Action) -> ActionResult:
         return ActionResult(False, f"unknown action type '{action_type}'")
 
     try:
-        # Refresh window offset before each action
-        global _window_offset
-        rect = get_game_window_rect()
-        if rect:
-            _window_offset = (rect[0], rect[1])
+        # Refresh window offset, input scale and platform before each action
+        rect = _refresh_input_geometry()
+        if withheld := _withheld_input():
+            return withheld
 
         result = await handler(action_dict, intent)
 
         # Move cursor to window center to prevent AoE2 edge-scrolling.
         # Leaving the cursor near screen edges causes camera drift during delays.
         if rect:
-            pyautogui.moveTo(rect[0] + 1512, rect[1] + 836)
+            width, height = _size_of(rect)
+            pyautogui.moveTo(*_translate(width // 2, height // 2))
 
         # Small delay between actions for stability
         await asyncio.sleep(config.action_delay)
@@ -2976,8 +3355,15 @@ async def execute_actions(actions: Sequence[dict[str, object] | Action]) -> list
     refused instead of executed: its x/y were computed from the pre-move frame
     and land on arbitrary terrain (run 8, F-33 — villagers walked to nothing).
     The failure detail teaches the LLM to name targets instead.
+
+    On macOS the game is never pulled back to the front here: switching away is how
+    a person stops the agent, so the batch is refused instead.
     """
-    if not ensure_game_focused():
+    if game_platform() == "macos":
+        if not game_in_front():
+            log.warning("input_withheld", reason="game_not_in_front", actions=len(actions))
+            return [ActionResult(False, GAME_NOT_IN_FRONT)]
+    elif not ensure_game_focused():
         log.warning("could_not_focus_before_actions")
         await asyncio.sleep(0.5)
         ensure_game_focused()

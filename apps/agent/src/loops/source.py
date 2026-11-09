@@ -24,14 +24,15 @@ from ..camera_motion import (
     estimate_motion,
 )
 from ..config import config
-from ..detection_phase import DetectionBusyError, detect_frame, summarize_frame
+from ..detection_phase import DetectionBusyError, detect_frame, summarize_frame, takes_pixels
+from ..detector_scale import DetectorScale, frame_image, restore, shrunk_jpeg
 from ..entity_snapshot import snapshot_entities
 from ..entity_utils import build_entity_summary
 from ..executor import execute_actions
 from ..providers.strategist import read_hud_pixels
 from ..resource_ocr import calibration_for, read_selected_unit_pixels
 from ..screen import NativeCapture, capture_native
-from ..temporal_entities import PreparedDetection, TemporalEntities, prepare_detections
+from ..tracking import Tracking, make_tracking
 from ..turn_timing import TickTimings
 from ..window import get_game_window_rect
 from .snapshot import FramePipe, Perception, SpatialRefresh
@@ -51,6 +52,7 @@ if TYPE_CHECKING:
     from ..models import Action
     from ..overlay import DetectionOverlay
     from ..resource_ocr import ResourceReadings
+    from ..temporal_entities import PreparedDetection
 
     # Mirrors `detection_phase.Detector` — local weights or the remote server.
     Detector: TypeAlias = EntityDetector | RemoteDetector
@@ -65,13 +67,15 @@ _REFRESH_TIMEOUT = 3.0
 
 
 def frame_refresh(
-    frames: FramePipe, *, selection_only: bool = False
+    frames: FramePipe, *, selection_only: bool = False, skip_selection: bool = False
 ) -> Callable[[], Awaitable[bool]]:
-    """Wait for a post-input view, optionally skipping expensive detection."""
+    """Wait for a post-input view, optionally skipping detection or the selection read."""
 
     async def refresh() -> bool:
         asked = time.monotonic()
-        request = frames.request_spatial_refresh(selection_only=selection_only)
+        request = frames.request_spatial_refresh(
+            selection_only=selection_only, skip_selection=skip_selection
+        )
         try:
             result = await asyncio.wait_for(request, timeout=_REFRESH_TIMEOUT)
         except TimeoutError:
@@ -149,9 +153,9 @@ class FrameSource(Protocol):
         ...
 
     async def capture_spatial(
-        self, timings: TickTimings, *, selection_only: bool = False
+        self, timings: TickTimings, *, selection_only: bool = False, skip_selection: bool = False
     ) -> SpatialRefresh:
-        """Capture after input; skip detection when only selection/HUD is needed."""
+        """Capture after input; skip detection, or the selected-unit read."""
         ...
 
     def close(self) -> None:
@@ -168,20 +172,27 @@ class Actuator(Protocol):
 
 
 def _prepare_spatial(
-    capture: NativeCapture, entities: tuple[EntitySnapshot, ...]
+    capture: NativeCapture, entities: tuple[EntitySnapshot, ...], tracking: Tracking
 ) -> tuple[bytes, tuple[PreparedDetection, ...], float, float]:
     """Prepare camera and appearance evidence off the event loop."""
     pixels = capture.pixels()
     analysis_started = time.perf_counter()
     analysis = analysis_pixels(capture.rgb, capture.width, capture.height, MotionLimits())
     appearance_started = time.perf_counter()
-    prepared = prepare_detections(entities, pixels)
+    prepared = tracking.prepare(entities, pixels)
     return (
         analysis.tobytes(),
         prepared,
         (appearance_started - analysis_started) * 1000,
         (time.perf_counter() - appearance_started) * 1000,
     )
+
+
+async def _timed_jpeg(pixels: NativeCapture) -> tuple[bytes, float]:
+    """The capture's JPEG, and how long encoding it took in milliseconds."""
+    started = time.monotonic()
+    jpeg = await asyncio.to_thread(pixels.jpeg)
+    return jpeg, (time.monotonic() - started) * 1000
 
 
 class GameSource:
@@ -204,7 +215,9 @@ class GameSource:
         self._writer = writer
         self._inference_lock = asyncio.Lock()
         self._overlay_lock = asyncio.Lock()
-        self._history = TemporalEntities()
+        self._tracking = make_tracking()
+        self._history = self._tracking.tracker
+        self._scale = DetectorScale()
         self._last_analysis: np.ndarray | None = None
         self._last_camera_command_revision = -1
         self._last_geometry: tuple[int, int, tuple[int, int, int, int] | None] | None = None
@@ -276,19 +289,22 @@ class GameSource:
         """Retain the request JPEG even when the detector is temporarily busy."""
         del tick
         async with self._inference_lock:
-            started_at = time.monotonic()
-            screenshot = await asyncio.to_thread(capture.pixels.jpeg)
-            encoded_at = time.monotonic()
+            pixels = capture.pixels
+            # The JPEG is kept for samples and evidence. An in-process detector reads
+            # pixels, so it is encoded alongside detection; the HTTP detector sends it.
+            encoding = asyncio.create_task(_timed_jpeg(pixels))
+            request = None if takes_pixels(self._detector) else (await encoding)[0]
+            detect_started = time.monotonic()
             try:
-                entities = await detect_frame(self._detector, screenshot) if self._detector else ()
+                entities = await self._detect(request, pixels.pixels())
             except DetectionBusyError:
                 self._discarded_busy += 1
                 log.info("spatial_result_discarded", capture_id=capture.capture_id, reason="busy")
-                return None, screenshot
-            detected_at = time.monotonic()
-            pixels = capture.pixels
+                return None, (await encoding)[0]
+            detector_ms = (time.monotonic() - detect_started) * 1000
+            screenshot, encode_ms = await encoding
             analysis, prepared, analysis_ms, appearance_ms = await asyncio.to_thread(
-                _prepare_spatial, pixels, entities
+                _prepare_spatial, pixels, entities, self._tracking
             )
             analyzed_at = time.monotonic()
             _summary, ownership = await summarize_frame(
@@ -297,8 +313,8 @@ class GameSource:
             log.info(
                 "spatial_worker_latency",
                 capture_id=capture.capture_id,
-                encode_ms=round((encoded_at - started_at) * 1000, 1),
-                detector_ms=round((detected_at - encoded_at) * 1000, 1),
+                encode_ms=round(encode_ms, 1),
+                detector_ms=round(detector_ms, 1),
                 analysis_ms=round(analysis_ms, 1),
                 appearance_ms=round(appearance_ms, 1),
                 ownership_ms=round((time.monotonic() - analyzed_at) * 1000, 1),
@@ -480,9 +496,14 @@ class GameSource:
         )
 
     async def capture_spatial(
-        self, timings: TickTimings, *, selection_only: bool = False
+        self, timings: TickTimings, *, selection_only: bool = False, skip_selection: bool = False
     ) -> SpatialRefresh:
-        """One native post-input capture; a requested detector refresh has priority."""
+        """One native post-input capture; a requested detector refresh has priority.
+
+        `skip_selection` skips the selected-unit read (RapidOCR): published boxes are
+        as old as the slowest lane, and it spiked to 947 ms live. The resource bar
+        is still read; a placement needs its wood baseline.
+        """
         capture = await self.capture_stream()
         pixels = capture.pixels
         calibration = calibration_for(pixels.width, pixels.height)
@@ -500,12 +521,18 @@ class GameSource:
             sighting: Sighting | None = None
             observed_camera_revision = capture.camera_revision
         else:
-            hud_readings, selected_unit, detected = await asyncio.gather(
-                self._hud(pixels, 0, timings),
-                selected(),
-                self._detect_with_screenshot(capture, 0),
-            )
-            raw, screenshot = detected
+            if skip_selection:
+                selected_unit = None
+                hud_readings, (raw, screenshot) = await asyncio.gather(
+                    self._hud(pixels, 0, timings), self._detect_with_screenshot(capture, 0)
+                )
+            else:
+                hud_readings, selected_unit, detected = await asyncio.gather(
+                    self._hud(pixels, 0, timings),
+                    selected(),
+                    self._detect_with_screenshot(capture, 0),
+                )
+                raw, screenshot = detected
             sighting = await self.integrate_spatial(raw) if raw is not None else None
             entities = snapshot_entities(sighting.frame.entities) if sighting is not None else None
             if sighting is not None:
@@ -575,23 +602,41 @@ class GameSource:
     ) -> tuple[list[EntitySnapshot], str, Mapping[str, tuple[Owner, float]]]:
         """Detect, then tag ownership. Empty without a detector."""
         with timings.phase("detect"):
-            entities = await self._detect_entities(screenshot)
+            entities = await self._detect_entities(screenshot, pixels)
             entity_summary, ownership = await summarize_frame(
                 entities, screenshot, profile=self._profile, rgb_pixels=pixels
             )
         return entities, entity_summary, ownership
 
-    async def _detect_entities(self, screenshot: bytes) -> list[EntitySnapshot]:
-        entities: list[EntitySnapshot] = []
-        if self._detector:
-            entities = list(
-                await detect_frame(
-                    self._detector,
-                    screenshot,
-                )
-            )
+    async def _detect_entities(self, screenshot: bytes, pixels: np.ndarray) -> list[EntitySnapshot]:
+        entities = list(await self._detect(screenshot, pixels))
         if self._overlay is not None:
             self._overlay.show(entities, get_game_window_rect())
+        return entities
+
+    async def _detect(
+        self, screenshot: bytes | None, pixels: np.ndarray
+    ) -> tuple[EntitySnapshot, ...]:
+        """Detect at the object size the detector learned; boxes come back in frame pixels.
+
+        An in-process detector gets the pixels. The HTTP detector gets `screenshot`,
+        or a freshly encoded frame when there is none or the frame must shrink.
+        """
+        detector = self._detector
+        if not detector:
+            return ()
+        scale = self._scale.scale
+        if takes_pixels(detector):
+            image = await asyncio.to_thread(frame_image, pixels, scale)
+            entities = await detect_frame(detector, image)
+        elif scale == 1.0 and screenshot is not None:
+            entities = await detect_frame(detector, screenshot)
+        else:
+            request = await asyncio.to_thread(shrunk_jpeg, pixels, scale, config.screenshot_quality)
+            entities = await detect_frame(detector, request)
+        if scale != 1.0:
+            entities = restore(entities, scale)
+        self._scale.observe(entities, (pixels.shape[1], pixels.shape[0]))
         return entities
 
     def _save_sample(self, screenshot: bytes, tick: int) -> None:

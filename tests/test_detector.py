@@ -409,3 +409,27 @@ def test_population_15_yields_seven_more_villagers_than_population_8(contract_sc
     villagers_8 = sum(1 for e in entities_8 if e.class_name == "villager")
     villagers_15 = sum(1 for e in entities_15 if e.class_name == "villager")
     assert villagers_15 - villagers_8 == 7
+
+
+@pytest.mark.parametrize(
+    ("available", "expected"),
+    [
+        (
+            ["CoreMLExecutionProvider", "CPUExecutionProvider"],
+            [("CoreMLExecutionProvider", {"ModelFormat": "MLProgram"}), "CPUExecutionProvider"],
+        ),
+        (
+            ["DmlExecutionProvider", "CPUExecutionProvider"],
+            ["DmlExecutionProvider", "CPUExecutionProvider"],
+        ),
+        (["CPUExecutionProvider"], ["CPUExecutionProvider"]),
+    ],
+)
+def test_each_platform_gets_its_fastest_onnx_provider(
+    available: list[str], expected: list[object]
+) -> None:
+    assert detector_mod.onnx_providers(available) == expected
+
+
+def test_the_in_process_detector_reads_pixels() -> None:
+    assert EntityDetector.takes_pixels is True

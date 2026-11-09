@@ -201,3 +201,44 @@ def test_sample_uses_the_tenth_published_spatial_jpeg(
     assert source._published_spatial == 10
     assert len(writer.saved) == 1
     assert writer.saved[0][1] == b"already-encoded"
+
+
+class _PixelDetector:
+    """An in-process detector: it reads the capture's pixels, never a JPEG."""
+
+    takes_pixels = True
+
+    def __init__(self) -> None:
+        self.seen: list[object] = []
+
+    def detect_fast(self, image: object) -> list[object]:
+        self.seen.append(image)
+        return []
+
+
+def test_an_in_process_detector_gets_pixels_and_the_jpeg_is_still_kept(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    rgb = np.random.default_rng(3).integers(0, 256, (60, 80, 3), dtype=np.uint8)
+    pixels = NativeCapture(rgb.tobytes(), 80, 60, 1.0, (0, 0, 80, 60))
+    detector = _PixelDetector()
+    source = GameSource(detector=detector)  # type: ignore[arg-type]
+    encodings = 0
+    original_jpeg = NativeCapture.jpeg
+
+    def counted_jpeg(capture: NativeCapture) -> bytes:
+        nonlocal encodings
+        encodings += 1
+        return original_jpeg(capture)
+
+    monkeypatch.setattr(NativeCapture, "jpeg", counted_jpeg)
+    raw, screenshot = asyncio.run(
+        source._detect_with_screenshot(StreamCapture(pixels, 1, 0, 0, 0, 0, 0), 0)
+    )
+
+    (image,) = detector.seen
+    assert isinstance(image, Image.Image)
+    assert np.array_equal(np.asarray(image), rgb)  # Lossless: no JPEG on the way.
+    assert raw is not None and raw.screenshot == screenshot
+    assert Image.open(io.BytesIO(screenshot)).size == (80, 60)
+    assert encodings == 1

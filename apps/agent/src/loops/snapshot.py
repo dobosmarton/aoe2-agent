@@ -106,6 +106,7 @@ class FramePipe:
         "_hud_version",
         "_publication_version",
         "_selection_only",
+        "_skip_selection",
         "_spatial_arrived",
         "_spatial_request",
         "_spatial_version",
@@ -123,6 +124,7 @@ class FramePipe:
         self._publication_version = 0
         self._spatial_request: asyncio.Future[SpatialRefresh] | None = None
         self._selection_only = False
+        self._skip_selection = False
         self._spatial_arrived = asyncio.Event()
         self._urgent = asyncio.Event()
 
@@ -307,14 +309,19 @@ class FramePipe:
         self._urgent.set()
 
     def request_spatial_refresh(
-        self, *, selection_only: bool = False
+        self, *, selection_only: bool = False, skip_selection: bool = False
     ) -> asyncio.Future[SpatialRefresh]:
-        """Ask perception for a new view; input ownership allows one waiter."""
+        """Ask perception for a new view; input ownership allows one waiter.
+
+        `selection_only` skips detection; `skip_selection` skips the selected-unit
+        read, for a click placed from fresh positions and HUD readings.
+        """
         if self.pending_spatial_refresh() is not None:
             raise RuntimeError("a spatial refresh is already pending")
         request: asyncio.Future[SpatialRefresh] = asyncio.get_running_loop().create_future()
         self._spatial_request = request
         self._selection_only = selection_only
+        self._skip_selection = skip_selection and not selection_only
         self._spatial_arrived.set()
         self.request_now()
         return request
@@ -322,6 +329,10 @@ class FramePipe:
     def selection_only(self, request: asyncio.Future[SpatialRefresh]) -> bool:
         """Whether this exact pending request needs HUD/selection, not detection."""
         return self._spatial_request is request and self._selection_only
+
+    def skip_selection(self, request: asyncio.Future[SpatialRefresh]) -> bool:
+        """Whether this exact pending request skips the selected-unit read."""
+        return self._spatial_request is request and self._skip_selection
 
     async def wait_for_spatial_request(self) -> asyncio.Future[SpatialRefresh]:
         """Wake perception immediately when an input-dependent view is needed."""
@@ -350,6 +361,7 @@ class FramePipe:
         if self._spatial_request is request:
             self._spatial_request = None
             self._selection_only = False
+            self._skip_selection = False
 
     async def wait_for_due(self, interval: float) -> None:
         """Hold the perceive cadence, cut short by a `request_now`."""

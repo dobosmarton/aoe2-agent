@@ -295,6 +295,7 @@ The remote detector logs `remote_detector_unavailable` and falls back to local O
 | `AOE2_STRATEGIST_INTERVAL` | `10` | VM | Run strategist every N turns |
 | `AOE2_LOOP_DELAY` | `0.3` | VM | Seconds between game loop iterations |
 | `AOE2_SAVE_SCREENSHOTS` | `true` | VM | Save screenshots to `logs/` |
+| `AOE2_TRACKER` | `native` | VM | Object tracker: `native` (screentrack), `python` or `shadow`. Falls back to `python` where no screentrack wheel exists |
 
 The 3 model defaults follow `AOE2_LLM_WIRE`, because a model name belongs to its vendor. `AOE2_LLM_WIRE=anthropic` defaults the executor to `claude-haiku-4-5` and the strategist to `claude-sonnet-5`. `config._MODELS_BY_WIRE` holds the table.
 

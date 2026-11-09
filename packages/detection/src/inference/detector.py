@@ -33,6 +33,8 @@ from .sahi import (
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from PIL import Image
 
     from .._classes_schema import ClassesYaml
@@ -122,12 +124,35 @@ def _load_default_classes() -> list[str]:
 DEFAULT_CLASSES = _load_default_classes()
 
 
+def onnx_providers(available: Sequence[str]) -> list[str | tuple[str, dict[str, str]]]:
+    """The fastest onnxruntime providers on this machine: DirectML on Windows, CoreML
+    on macOS, then the CPU.
+
+    CoreML must compile to MLProgram. Its default NeuralNetwork format stores
+    integer tensors as floats, so the YOLO26 end-to-end head picks the wrong top-k
+    anchors: on the independent test set v9 fell from F1 0.842 (CPU) to 0.282. The
+    detection server sets the same option.
+    """
+    providers: list[str | tuple[str, dict[str, str]]] = []
+    if "DmlExecutionProvider" in available:
+        providers.append("DmlExecutionProvider")
+    if "CoreMLExecutionProvider" in available:
+        providers.append(("CoreMLExecutionProvider", {"ModelFormat": "MLProgram"}))
+    if "CPUExecutionProvider" in available:
+        providers.append("CPUExecutionProvider")
+    return providers
+
+
 class EntityDetector:
     """YOLO-based entity detector for AoE2 screenshots.
 
     Supports PyTorch (.pt), ONNX (.onnx) models, and mock mode for testing.
-    ONNX mode uses onnxruntime and works on Windows ARM64.
+    ONNX mode uses onnxruntime: DirectML on Windows, CoreML on macOS.
     """
+
+    # Runs in the agent's process, so it reads the capture's pixels directly; only
+    # the HTTP detector needs an encoded image.
+    takes_pixels = True
 
     def __init__(
         self,
@@ -231,11 +256,7 @@ class EntityDetector:
             num_threads = min(os.cpu_count() or 4, 8)
             sess_options.intra_op_num_threads = num_threads
             sess_options.inter_op_num_threads = max(1, num_threads // 2)
-            # Auto-detect best available provider
-            available = ort.get_available_providers()
-            providers = [
-                p for p in ["DmlExecutionProvider", "CPUExecutionProvider"] if p in available
-            ]
+            providers = onnx_providers(ort.get_available_providers())
             self.onnx_session = ort.InferenceSession(model_path, sess_options, providers=providers)
             self.backend = "onnx"
             self.use_mock = False

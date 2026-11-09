@@ -1,0 +1,27 @@
+# Native Mac game (3024x1898: full screen below the notch band, bar at top). The
+# Mac draws the HUD where the 3024x1672 VM capture does, but the resource boxes
+# are tighter: on the Mac the VM's boxes took in the bar's bottom edge (rows
+# 64-68) and, for gold, stone and population, the icon frame's left edge, which
+# segmented as extra digits. The digits' cores sit at rows 38-53. The selected-
+# unit panel sits on the bottom edge, so its box moves down by the 226 extra rows.
+# Templates and every box were checked on lossless probe frames (logs/mac-probe).
+width: 3024
+height: 1898
+template_dir: templates/3024x1898
+count_white_threshold: 160
+count_template_dir: templates/3024x1898_counts  # Mac samples beside the shared digit bank.
+fields:
+  wood: [80, 28, 158, 62]
+  food: [236, 28, 314, 62]
+  gold: [396, 28, 466, 62]
+  stone: [552, 28, 624, 62]
+  population: [710, 28, 800, 62]
+  wood_workers: [46, 55, 78, 79]
+  food_workers: [202, 55, 234, 79]
+  gold_workers: [357, 55, 389, 79]
+  stone_workers: [512, 55, 545, 79]
+  villagers: [657, 55, 701, 79]
+  idle_count: [838, 43, 875, 68]  # Wide enough for two digits (16 idle was read as 1).
+  selection: [420, 1636, 760, 1716]
+  selection_name: [450, 1645, 760, 1695]  # The name line alone: read without text detection.
+  age: [1000, 18, 1360, 74]
