@@ -7,15 +7,13 @@ Each contender replaces `TemporalEntities` and `prepare_detections` inside
 from __future__ import annotations
 
 import json
-import math
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Protocol, cast
 
 import numpy as np
-from gameplay_agent import sequence_replay, temporal_entities
-from gameplay_agent.camera_motion import MOBILE_CLASSES
+from gameplay_agent import sequence_replay, temporal_entities, tracking
 from gameplay_agent.sequence_replay import _overlap
 
 if TYPE_CHECKING:
@@ -34,7 +32,6 @@ IOU_MATCH = 0.3
 ORACLE_MATCH = 0.5
 SLOWDOWN_SECONDS = 0.03
 NATIVE_BOX_LENGTH = 4
-NATIVE_SIGNATURE_LENGTH = 6
 
 
 @dataclass(frozen=True, slots=True)
@@ -284,69 +281,7 @@ def load_screentrack() -> ModuleType:
     return screentrack
 
 
-class NativeTracker:
-    """Translates between agent snapshots and screentrack arrays, as the adapter will."""
-
-    def __init__(self) -> None:
-        library = load_screentrack()
-        self._tracker = library.Tracker(library.Config.aoe2(), MOBILE_CLASSES)
-
-    @property
-    def last_ambiguous_count(self) -> int:
-        return self._tracker.ambiguous_count
-
-    @property
-    def last_candidate_ms(self) -> float:
-        return self._tracker.candidate_ms
-
-    @property
-    def last_matching_ms(self) -> float:
-        return self._tracker.matching_ms
-
-    def accepts(self, capture_id: int, captured_at: float) -> bool:
-        return self._tracker.accepts(capture_id, captured_at)
-
-    def observe(
-        self,
-        detections: tuple[Prepared, ...],
-        *,
-        capture_id: int,
-        captured_at: float,
-        camera_revision: int,
-        motion: CameraMotion,
-    ) -> tuple[EntitySnapshot, ...]:
-        fresh = [item.entity for item in detections]
-        shift = ("pan", motion.shift[0], motion.shift[1]) if motion.kind == "pan" else motion.kind
-        result = self._tracker.observe(
-            capture_id=capture_id,
-            captured_at=captured_at,
-            motion=shift,
-            boxes=np.array([item.bbox for item in fresh], dtype=np.float64).reshape(
-                -1, NATIVE_BOX_LENGTH
-            ),
-            labels=[item.class_name for item in fresh],
-            confidences=np.array([item.confidence for item in fresh], dtype=np.float64),
-            signatures=np.array([item.appearance for item in detections], dtype=np.float64).reshape(
-                -1, NATIVE_SIGNATURE_LENGTH
-            ),
-        )
-        if result is None:
-            return ()
-        track_ids, labels, agreements = result
-        return tuple(
-            _stamp(
-                item,
-                f"track_{track_id}",
-                label,
-                None if math.isnan(agreement) else agreement,
-                capture_id,
-                camera_revision,
-                captured_at,
-            )
-            for item, track_id, label, agreement in zip(
-                fresh, track_ids.tolist(), labels, agreements.tolist(), strict=True
-            )
-        )
+NativeTracker = tracking.NativeTemporalEntities
 
 
 class _SlowedTracker(NativeTracker):
@@ -490,15 +425,13 @@ class _Recorder:
 
 @contextmanager
 def _patched(recorder: _Recorder) -> Iterator[None]:
-    tracker = sequence_replay.TemporalEntities
-    prepare = sequence_replay.prepare_detections
-    sequence_replay.TemporalEntities = lambda: recorder
-    sequence_replay.prepare_detections = recorder.prepare
+    """Make the replay use this contender instead of the agent's chosen backend."""
+    chosen = sequence_replay.make_tracking
+    sequence_replay.make_tracking = lambda: tracking.Tracking("python", recorder.prepare, recorder)
     try:
         yield
     finally:
-        sequence_replay.TemporalEntities = tracker
-        sequence_replay.prepare_detections = prepare
+        sequence_replay.make_tracking = chosen
 
 
 def replay(entrant: Contender, directory: Path) -> tuple[list[FrameRecord], dict[str, object]]:
