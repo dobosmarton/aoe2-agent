@@ -681,3 +681,21 @@ def _enemy_owner():
     from detection.inference.ownership import Owner
 
     return Owner.ENEMY
+
+
+def test_a_slow_frame_with_a_still_camera_keeps_its_history() -> None:
+    """Game 2: 58 of 137 camera resets followed a gap over 1 s with no camera input."""
+    import numpy as np
+
+    source = GameSource()
+    texture = np.random.default_rng(0).random((180, 320), dtype=np.float32).tobytes()
+
+    def raw(capture_id: int, at: float) -> RawSpatial:
+        pixels = NativeCapture(bytes(64 * 36 * 3), 64, 36, at, (0, 0, 64, 36))
+        return RawSpatial(
+            StreamCapture(pixels, capture_id, 0, 0, 0, 0, 0), b"jpeg", (), texture, {}
+        )
+
+    asyncio.run(source.integrate_spatial(raw(1, 10.0)))
+    asyncio.run(source.integrate_spatial(raw(2, 12.5)))
+    assert source._camera_resets == 1  # Only the first frame, which has nothing before it.

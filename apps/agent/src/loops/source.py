@@ -347,10 +347,13 @@ class GameSource:
                 self._discarded_camera += 1
                 return None
             geometry = (pixels.width, pixels.height, pixels.window_rect)
+            # A slow frame is no reason to reset: the motion estimate compares the
+            # two views and resets when they don't align, and the tracker stretches
+            # its lifetimes over slow frames. Resetting on any gap over 1 s cost
+            # every track ID 58 times in a 6-minute Mac game, with the camera still.
             reset = (
                 self._last_geometry != geometry
                 or self._last_camera_command_revision != capture.camera_command_revision
-                or (self._last_spatial_at >= 0 and pixels.captured_at - self._last_spatial_at > 1.0)
             )
             previous = None if reset else self._last_analysis
             limits = MotionLimits()
