@@ -385,7 +385,8 @@ async def run_scenario_async(path: Path) -> ScenarioResult:
     initial = _mapping(fixture.get("initial"), "initial")
     steps = _steps(fixture.get("steps"))
     world = _ScriptedWorld(initial)
-    ledger = executor.ActionLedger()
+    # A scripted building stands complete the moment it is placed.
+    ledger = executor.ActionLedger(min_construction_seconds=0.0)
     initial_buildings = initial.get("buildings", [])
     if not isinstance(initial_buildings, list) or not all(
         isinstance(item, str) for item in initial_buildings

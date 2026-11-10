@@ -42,6 +42,11 @@ ANSWER_SECONDS = 5.0  # For ScreenCaptureKit's completion handlers and the first
 # takes one window capture instead, so a frame's time is always when the screen
 # looked like that.
 STREAM_MAX_AGE_SECONDS = 0.25
+# How long a grab waits for a frame newer than its `after`. The stream hands out the
+# newest frame it has, which was drawn before an input that was just sent: live, 17
+# of 63 actions failed on a post-input view older than the input.
+FRESH_FRAME_WAIT_SECONDS = 0.2
+_FRESH_FRAME_POLL_SECONDS = 0.005
 
 # Best resolution gives pixels, not points; without it the frame comes back half size.
 IMAGE_OPTIONS = (
@@ -96,8 +101,10 @@ def _game_area(geometry: GameGeometry | None) -> GameGeometry:
 class WindowGrabber:
     """One Quartz window capture per call."""
 
-    def grab(self, geometry: GameGeometry | None, monitor: int) -> Frame:
-        del monitor  # The window is always known on macOS.
+    def grab(
+        self, geometry: GameGeometry | None, monitor: int, *, after: float | None = None
+    ) -> Frame:
+        del monitor, after  # The window is always known, and every grab is taken now.
         area = _game_area(geometry)
         stamped = time.monotonic()
         pixels = grab_game_area(area)
@@ -271,17 +278,21 @@ class StreamGrabber:
         to_rgb: Callable[[object, int], np.ndarray] = pixel_buffer_to_rgb,
         still: Callable[[GameGeometry], Frame] | None = None,
         clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._open_stream = open_stream
         self._to_rgb = to_rgb
         self._still = still or (lambda area: WindowGrabber().grab(area, 0))
         self._clock = clock
+        self._sleep = sleep
         self._lock = threading.Lock()
         self._stream: Stream | None = None
         self._key: tuple[int | None, int, int] | None = None
         self._stills = False  # Whether the last grab fell back to a still capture.
 
-    def grab(self, geometry: GameGeometry | None, monitor: int) -> Frame:
+    def grab(
+        self, geometry: GameGeometry | None, monitor: int, *, after: float | None = None
+    ) -> Frame:
         del monitor  # The window is always known on macOS.
         area = _game_area(geometry)
         key = (area.window_id, area.width, area.height)
@@ -290,8 +301,9 @@ class StreamGrabber:
                 self._stop()
                 self._stream, self._key = self._open_stream(area), key
             stream = self._stream
-        buffer, captured_at = stream.take()
-        if self._clock() - captured_at > STREAM_MAX_AGE_SECONDS:
+        buffer, captured_at = self._take_after(stream, after)
+        too_early = after is not None and captured_at <= after
+        if too_early or self._clock() - captured_at > STREAM_MAX_AGE_SECONDS:
             self._note_stills(True, captured_at)
             return self._still(area)
         self._note_stills(False, captured_at)
@@ -302,6 +314,17 @@ class StreamGrabber:
                 f"is {area.width}x{area.height}"
             )
         return Frame(pixels.tobytes(), area.width, area.height, captured_at)
+
+    def _take_after(self, stream: Stream, after: float | None) -> tuple[object, float]:
+        """The newest frame, waiting briefly for one drawn after `after`."""
+        buffer, captured_at = stream.take()
+        if after is None:
+            return buffer, captured_at
+        deadline = self._clock() + FRESH_FRAME_WAIT_SECONDS
+        while captured_at <= after and self._clock() < deadline:
+            self._sleep(_FRESH_FRAME_POLL_SECONDS)
+            buffer, captured_at = stream.take()
+        return buffer, captured_at
 
     def _note_stills(self, stills: bool, captured_at: float) -> None:
         """Log when the screen stops and starts changing, not on every grab."""

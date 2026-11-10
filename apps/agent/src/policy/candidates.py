@@ -24,6 +24,9 @@ if TYPE_CHECKING:
 
 CandidateId: TypeAlias = str
 _HOUSE_HEADROOM = 2
+# Villagers ordered but not yet delivered. With one, the Town Center idled between
+# a villager's arrival and the next order: 2-3 s of every 16 s cycle live.
+_VILLAGER_QUEUE_DEPTH = 2
 
 
 def housing_needed(state: PolicyState) -> bool:
@@ -108,7 +111,7 @@ def eligible(spec: ActionSpec, state: PolicyState) -> bool:
         or state.population + state.pending_population >= state.population_cap
     ):
         return False
-    if spec.id == "queue_villager" and state.pending_villagers > 0:
+    if spec.id == "queue_villager" and state.pending_villagers >= _VILLAGER_QUEUE_DEPTH:
         return False
     if spec.kind == "assign":
         if not state.spatial_valid or not state.idle_present or state.assignment_pending:

@@ -302,3 +302,118 @@ def test_bound_target_movement_aborts_click(ledger: ex.ActionLedger) -> None:
     )
     assert "moved" in error
     assert point is None
+
+
+def test_population_growth_proves_an_order_the_food_reading_cannot(
+    ledger: ex.ActionLedger,
+) -> None:
+    """Game 2: gathering hid the 50-food spend and the villager digit misread, so
+    the order stayed pending and no villager was queued for two minutes."""
+    ex.observe_hud(10, 15, {"food": 113}, villagers=9)
+    pending = ex._note_pending_training("villager")
+    assert pending is not None
+    ledger.note_input()
+    ex.observe_hud(10, 15, {"food": 133}, villagers=9, input_revision=ledger.input_revision)
+    assert ledger.pending_training == [pending]
+
+    ex.observe_hud(11, 15, {"food": 189}, villagers=None, input_revision=ledger.input_revision)
+
+    assert ledger.pending_training == []
+    assert ex.ledger_policy_state().pending_villagers == 0
+    assert pending.operation_id in ledger.confirmed_economic_ids
+
+
+def test_an_unproven_training_order_is_dropped_after_its_grace(
+    ledger: ex.ActionLedger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = [100.0]
+    monkeypatch.setattr(ex, "_now", lambda: clock[0])
+    ex.observe_hud(4, 10, {"food": 200}, villagers=3)
+    pending = ex._note_pending_training("villager")
+    assert pending is not None
+    ledger.note_input()
+
+    clock[0] += ex._RESEARCH_SETTLE_SECONDS + 1
+    ex.observe_hud(4, 10, {"food": 230}, villagers=None, input_revision=ledger.input_revision)
+    assert ledger.pending_training == [pending]
+    assert pending.operation_id in ledger.uncertain_operations
+
+    clock[0] += ex._TRAINING_ABANDON_SECONDS
+    ex.observe_hud(4, 10, {"food": 260}, villagers=None, input_revision=ledger.input_revision)
+    assert ledger.pending_training == []
+    assert ex.ledger_policy_state().pending_villagers == 0
+    assert ledger.reservations().get("food", 0) == 0
+    assert sum(outcome.operation_id == pending.operation_id for outcome in ledger.outcomes) == 2
+
+
+def test_rising_food_is_progress_while_a_spend_is_unsettled(
+    ledger: ex.ActionLedger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = [100.0]
+    monkeypatch.setattr(ex, "_now", lambda: clock[0])
+    ex.observe_hud(4, 10, {"food": 200}, villagers=3)
+    pending = ex._note_pending_training("villager")
+    assert pending is not None
+    ledger.note_input()
+
+    clock[0] += ex._FOOD_STALL_SECONDS
+    ex.observe_hud(4, 10, {"food": 210}, villagers=3, input_revision=ledger.input_revision)
+    assert ledger.food_progress_at == clock[0]
+    assert ex.ledger_policy_state().food_stalled is False
+
+    clock[0] += ex._FOOD_STALL_SECONDS
+    ex.observe_hud(4, 10, {"food": 205}, villagers=3, input_revision=ledger.input_revision)
+    assert ex.ledger_policy_state().food_stalled is True
+
+
+def _placed_house(ledger: ex.ActionLedger) -> ex._PendingPlacement:
+    ex.observe_hud(5, 5, {"wood": 120}, villagers=4)
+    pending = ex._note_pending_placement("q", point=(900, 600))
+    assert pending is not None
+    ledger.note_input()
+    return pending
+
+
+def test_a_placement_whose_wood_never_falls_is_refused_within_seconds(
+    ledger: ex.ActionLedger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Game 2: two placements the game refused blocked a house for 90 s at 5/5."""
+    clock = [100.0]
+    monkeypatch.setattr(ex, "_now", lambda: clock[0])
+    pending = _placed_house(ledger)
+    for wood in (120, 124, 128):
+        clock[0] += 2.5
+        ex.observe_hud(5, 5, {"wood": wood}, villagers=4, input_revision=ledger.input_revision)
+    assert ledger.pending_placements == []
+    assert [o.status for o in ledger.outcomes if o.operation_id == pending.operation_id] == [
+        "pending",
+        "failed",
+    ]
+    assert "build_house" not in ex.ledger_policy_state().pending_actions
+
+
+def test_a_partial_wood_drop_is_not_judged_refused(
+    ledger: ex.ActionLedger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = [100.0]
+    monkeypatch.setattr(ex, "_now", lambda: clock[0])
+    pending = _placed_house(ledger)
+    for wood in (110, 115, 118):  # Gathering hid part of the 25-wood payment.
+        clock[0] += 2.5
+        ex.observe_hud(5, 5, {"wood": wood}, villagers=4, input_revision=ledger.input_revision)
+    assert [p.operation_id for p in ledger.pending_placements] == [pending.operation_id]
+
+
+def test_refused_ground_is_tried_last(
+    ledger: ex.ActionLedger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ex.set_detected_entities(
+        [{"id": "tc", "class": "town_center", "bbox": (500, 400, 700, 600), "center": (600, 500)}]
+    )
+    monkeypatch.setattr(ex, "_explored", lambda _point: True)
+    first = ex._open_ground_candidates((600, 500))[0]
+    ledger.refused_offsets.append((first[0] - 600, first[1] - 500))
+    candidates = ex._open_ground_candidates((600, 500))
+    assert candidates[0] != first
+    assert candidates[-1] == first
+    ex.clear_detected_entities()

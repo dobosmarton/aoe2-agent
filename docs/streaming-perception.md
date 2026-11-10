@@ -19,9 +19,11 @@ successfully published spatial frame is sampled, rather than every tenth
 capture; encoding and diagnostic writing do not run on the capture lane.
 
 Every spatial publication contains **fresh detector boxes**. The per-game
-temporal component associates at most three observations per entity for at most
-one second. It may stabilize an ID or class label, but it never publishes a
-predicted-only box or treats historical agreement as a calibrated probability.
+tracker (screentrack by default, see `apps/agent/src/tracking.py`) keeps at most
+three observations per entity. A unit's track lives `max(1 s, 3 × frame gap)`
+without a box, and a building's or resource's at least 5 s. It may stabilize an
+ID or class label, but it never publishes a predicted-only box or treats
+historical agreement as a calibrated probability.
 Appearance descriptors are prepared once per detection off the event loop.
 Association uses horizontal movement bounds to prune candidate pairs, then
 the same distance/appearance cost, ambiguity threshold, deterministic order,
@@ -35,8 +37,9 @@ Camera motion is translation-only. The HUD/minimap are excluded, and known
 mobile-object boxes plus the sampled cursor position are masked. Six
 downsampled terrain regions are checked;
 at least three must agree within two analysis pixels, with at least 60% aligned
-overlap. A jump, zoom, geometry change, gap over one second, or failed alignment
-resets tracks. The first fresh post-reset detection publishes immediately.
+overlap. A jump, zoom, geometry change, camera command, or failed alignment
+resets tracks. A slow frame alone does not: the alignment check compares it with
+the last analysed view, however old. The first fresh post-reset detection publishes immediately.
 
 The detection server admits one inference at a time across its regular and
 tiled endpoints. Excess requests return a typed `detector_busy` response; a

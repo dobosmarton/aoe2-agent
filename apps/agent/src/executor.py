@@ -217,10 +217,26 @@ _PLACEMENT_ABANDON_SECONDS = 40.0
 # readings without it, a wood drop belongs to some later purchase: live, a lumber
 # camp's 100 wood "confirmed" a house that had sat unpaid for two minutes.
 _PLACEMENT_WOOD_READINGS = 20
+# A paid placement shows its wood leave within 3 s (all 6 paid placements in a Mac
+# game: 1.3-2.8 s). One whose wood never fell at all after this long, over several
+# readings, was refused by the game. Live, two such placements blocked a house for
+# 90 s while the population was capped.
+_PLACEMENT_PAYMENT_SECONDS = 6.0
+_PLACEMENT_PAYMENT_READINGS = 3
+# Ground the game refused, kept as offsets from the Town Center, so the next
+# placement tries other ground. A point this close to one is avoided.
+_REFUSED_PLACEMENT_RADIUS = 100
+_REFUSED_PLACEMENTS_KEPT = 6
+# A placement noted without the point it was clicked at.
+_NO_POINT = (0, 0)
 # A paid building not seen complete in this time is dropped from the purchases
 # that block a rebuild. A house takes about 25 s with one builder.
 _HOUSE_COMPLETION_SECONDS = 120.0
 _BUILDING_COMPLETION_SECONDS = 240.0
+# A building's foundation is detected as the finished class, so a sighting proves
+# completion only once the building could have been built: a house takes 25 s
+# with one builder, a mill or lumber camp 35 s.
+_MIN_CONSTRUCTION_SECONDS = 25.0
 # Distinct detection frames before a building class is REPORTED as sighted
 # (context line only — sightings never gate builds: run 9, F-36, a persistent
 # phantom mill beat any count threshold and 14 outposts got built through the
@@ -272,6 +288,10 @@ _ASSIGNMENT_RETRY_DELAY = 20.0
 _ASSIGNMENT_REFRESH_RETRY_DELAY = 5.0
 _BUILD_REFRESH_RETRY_DELAY = 5.0
 _FOOD_STALL_SECONDS = 30.0
+# A training order still unproven this long after its settle deadline is dropped,
+# so it stops blocking the next one. Live, one order the HUD couldn't confirm kept
+# the Town Center idle for the last two minutes of a game.
+_TRAINING_ABANDON_SECONDS = 15.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -402,6 +422,12 @@ class _PendingPlacement:
     settle_deadline: float = 0.0
     # Fresh wood readings this placement has been judged against so far.
     wood_readings: int = 0
+    # Monotonic instant of the placement click, None when unknown.
+    noted_at: float | None = None
+    # The lowest wood reading since the click, None before the first.
+    lowest_wood: int | None = None
+    # The click's offset from the Town Center, when the Town Center was in view.
+    home_offset: tuple[int, int] | None = None
 
     @property
     def is_house(self) -> bool:
@@ -451,6 +477,10 @@ class ActionLedger:
     # _SIGHTING_MIN_FRAMES as unverified sightings).
     building_sightings: dict[str, int] = field(default_factory=dict)
     pending_placements: list[_PendingPlacement] = field(default_factory=list)
+    # Offsets from the Town Center of placements the game refused, newest last.
+    refused_offsets: list[tuple[int, int]] = field(default_factory=list)
+    # How long after payment a sighted building may count as finished.
+    min_construction_seconds: float = _MIN_CONSTRUCTION_SECONDS
     # Circuit breaker (T-530): consecutive missing settlements per class, and
     # the monotonic instant until which a repeatedly-missing class stays blocked.
     missing_streaks: dict[str, int] = field(default_factory=dict)
@@ -833,11 +863,17 @@ def observe_hud(
     ambiguous_food = any(
         any(kind == "food" for kind, _ in pending.cost) for pending in ledger.pending_training
     ) or any(pending.tech.food for pending in ledger.pending_research)
-    if food_now is not None and food_before is not None and not ambiguous_food:
-        income = food_now - food_before + food_claimed_after - food_claimed_before
-        if 0 < income <= 300:
-            ledger.food_gathered += income
-            ledger.food_progress_at = _now()
+    if food_now is not None and food_before is not None:
+        if ambiguous_food:
+            # A spend can hide income but never fake it: food that rose was gathered.
+            # Live, an unsettled villager order froze this clock until the run stopped.
+            if food_now > food_before:
+                ledger.food_progress_at = _now()
+        else:
+            income = food_now - food_before + food_claimed_after - food_claimed_before
+            if 0 < income <= 300:
+                ledger.food_gathered += income
+                ledger.food_progress_at = _now()
     active_snapshots = (
         [p.noted_at_snapshot for p in current_ledger().pending_placements]
         + [p.noted_at_snapshot for p in current_ledger().pending_research]
@@ -978,7 +1014,7 @@ def _note_pending_placement(
     building_key: str,
     *,
     menu: str = ECON_MENU,
-    point: tuple[int, int] = (0, 0),
+    point: tuple[int, int] = _NO_POINT,
     wood_before: int | None = None,
     cap_before: int | None = None,
     noted_at_snapshot: int | None = None,
@@ -1013,6 +1049,8 @@ def _note_pending_placement(
         selected_by=current_ledger().selected_by,
         point=point,
         settle_deadline=_now() + (_HOUSE_SETTLE_SECONDS if is_house else _PLACEMENT_SETTLE_SECONDS),
+        noted_at=_now(),
+        home_offset=_home_offset(point),
         operation_id=current_ledger().new_operation_id(),
         preexisting_entity_ids=frozenset(
             entity_id
@@ -1064,6 +1102,11 @@ def _settle_pending_placements(
             if wood_now is not None and wood_judged
             else "undecided"
         )
+        if wood_now is not None and wood_judged:
+            pending = _with_wood_reading(pending, wood_now)
+        if verdict == "undecided" and _never_paid(pending):
+            outcomes.append(_refuse_placement(pending))
+            continue
         if verdict == "undecided" and _now() >= (
             pending.settle_deadline + _PLACEMENT_ABANDON_SECONDS
         ):
@@ -1085,11 +1128,7 @@ def _settle_pending_placements(
             )
             continue
         if verdict == "undecided":
-            still_pending.append(
-                replace(pending, wood_readings=pending.wood_readings + 1)
-                if wood_judged
-                else pending
-            )
+            still_pending.append(pending)
             if (
                 _now() >= pending.settle_deadline
                 and pending.operation_id not in current_ledger().uncertain_operations
@@ -1189,6 +1228,74 @@ def _house_verdict(
         return "undecided"
     claimed[pending.cap_before] = already + _HOUSE_CAP_STEP
     return "confirmed"
+
+
+def _with_wood_reading(pending: _PendingPlacement, wood_now: int) -> _PendingPlacement:
+    """The placement after one more wood reading it can be judged against."""
+    lowest = wood_now if pending.lowest_wood is None else min(pending.lowest_wood, wood_now)
+    return replace(pending, wood_readings=pending.wood_readings + 1, lowest_wood=lowest)
+
+
+def _never_paid(pending: _PendingPlacement) -> bool:
+    """Whether a placement's wood has had time to leave and never fell at all.
+
+    A partial drop stays undecided: gathering can hide part of a payment, never
+    all of it within the few seconds a payment takes to show.
+    """
+    return (
+        pending.noted_at is not None
+        and _now() - pending.noted_at >= _PLACEMENT_PAYMENT_SECONDS
+        and pending.wood_readings >= _PLACEMENT_PAYMENT_READINGS
+        and pending.lowest_wood is not None
+        and pending.lowest_wood >= pending.wood_before
+    )
+
+
+def _refuse_placement(pending: _PendingPlacement) -> ActionOutcome:
+    """Fail a placement the game refused, and steer the next one off its ground."""
+    _note_missing_settlement(pending.building_class)
+    _remember_refused(pending)
+    log.warning(
+        "build_placement_refused",
+        building=pending.building_class,
+        wood_before=pending.wood_before,
+        lowest_wood=pending.lowest_wood,
+        readings=pending.wood_readings,
+        x=pending.point[0],
+        y=pending.point[1],
+    )
+    return ActionOutcome(
+        pending.operation_id,
+        f"build_{pending.building_class}",
+        "failed",
+        "placement refused: no wood left after the click",
+    )
+
+
+def _home_offset(point: tuple[int, int]) -> tuple[int, int] | None:
+    """`point` relative to the detected Town Center, or None without one in view."""
+    tc = _resolve_target_class("town_center")
+    if tc is None or point == _NO_POINT:
+        return None
+    return (point[0] - tc[0], point[1] - tc[1])
+
+
+def _remember_refused(pending: _PendingPlacement) -> None:
+    if pending.home_offset is None:
+        return
+    refused = current_ledger().refused_offsets
+    refused.append(pending.home_offset)
+    del refused[:-_REFUSED_PLACEMENTS_KEPT]
+
+
+def _near_refused(point: tuple[int, int], home: tuple[int, int] | None) -> bool:
+    """Whether `point` is ground the game refused before, judged from the Town Center."""
+    if home is None:
+        return False
+    return any(
+        math.dist(point, (home[0] + dx, home[1] + dy)) <= _REFUSED_PLACEMENT_RADIUS
+        for dx, dy in current_ledger().refused_offsets
+    )
 
 
 def _wood_verdict(
@@ -1383,6 +1490,10 @@ def _settle_pending_training(
         if population_now is not None and ledger.last_known_population is not None
         else 0
     )
+    # As in `_reconcile_queued_training`: with the villager digit unreadable, a
+    # population gain is a villager unless military production could explain it.
+    if villagers_now is None and not _military_in_production(ledger):
+        villager_gain = population_gain
     available_villagers = max(
         villager_gain - sum(queued.unit == "villager" for queued in ledger.queued_training), 0
     )
@@ -1413,7 +1524,16 @@ def _settle_pending_training(
                     claimed[key] = claimed.get(key, 0) + price
             verdict = "confirmed"
         if verdict == "undecided":
-            still_pending.append(pending)
+            overdue = _now() - pending.settle_deadline
+            if overdue >= _TRAINING_ABANDON_SECONDS:
+                log.warning(
+                    "training_pending_abandoned",
+                    action_id=pending.operation_id,
+                    unit=pending.unit,
+                    overdue_s=round(overdue),
+                )
+            else:
+                still_pending.append(pending)
             if (
                 _now() >= pending.settle_deadline
                 and pending.operation_id not in current_ledger().uncertain_operations
@@ -1447,6 +1567,13 @@ def _settle_pending_training(
         current_ledger().record_outcome(outcome)
 
 
+def _military_in_production(ledger: ActionLedger) -> bool:
+    """Whether any ordered unit that isn't a villager might still arrive."""
+    return any(
+        item.unit != "villager" for item in (*ledger.queued_training, *ledger.pending_training)
+    )
+
+
 def _reconcile_queued_training(
     population_now: int | None, villagers_now: int | None = None
 ) -> None:
@@ -1468,9 +1595,7 @@ def _reconcile_queued_training(
     # The small-HUD villager digit can be unreadable while population remains
     # legible. A population gain then proves delivery of a paid villager if the
     # ledger has no competing military production to which to attribute it.
-    if villagers_now is None and not any(
-        item.unit != "villager" for item in (*ledger.queued_training, *ledger.pending_training)
-    ):
+    if villagers_now is None and not _military_in_production(ledger):
         villager_gain = population_gain
         military_gain = 0
     delivered: list[_QueuedTraining] = []
@@ -1642,10 +1767,11 @@ def record_confirmed_buildings(classes: Iterable[str]) -> None:
 
 
 def record_observed_buildings(entities: Iterable[tuple[str, str]]) -> None:
-    """Promote a paid placement only when a matching building ID is new.
+    """Promote a paid placement only when a matching building ID is new, and the
+    building has had time to be built.
 
-    Ownership classification currently covers military units, not buildings.
-    The caller excludes any entity explicitly identified as enemy-owned.
+    Ownership classification rarely covers buildings. The caller excludes any
+    entity identified as another player's.
     """
     ledger = current_ledger()
     observed = tuple(entities)
@@ -1656,12 +1782,14 @@ def record_observed_buildings(entities: Iterable[tuple[str, str]]) -> None:
         if cls != _HOUSE_CLASS
         and cls in purchased
         and entity_id not in purchased[cls].preexisting_entity_ids
+        and _could_be_built(purchased[cls].purchased_at or None)
     }
     record_confirmed_buildings(completed)
     directly_completed = [
         pending
         for pending in ledger.pending_placements
-        if any(
+        if _could_be_built(pending.noted_at)
+        and any(
             cls == pending.building_class
             and cls != _HOUSE_CLASS
             and entity_id not in pending.preexisting_entity_ids
@@ -1682,6 +1810,16 @@ def record_observed_buildings(entities: Iterable[tuple[str, str]]) -> None:
                     "new building entity observed",
                 )
             )
+
+
+def _could_be_built(started_at: float | None) -> bool:
+    """Whether a building started at `started_at` could be finished by now.
+
+    An unknown start can't rule completion out.
+    """
+    if started_at is None:
+        return True
+    return _now() - started_at >= current_ledger().min_construction_seconds
 
 
 def confirmed_buildings() -> frozenset[str]:
@@ -1927,15 +2065,40 @@ def _verified_villager_center() -> tuple[int, int] | None:
     return None if target is None else target[1]
 
 
+# Animals a click meant for a villager can select instead: live, 3 of 10 builder
+# clicks selected a cow, the carcass at the feet of a villager taking food from it.
+_CLICK_STEALING_ANIMALS = frozenset(
+    {"sheep", "goat", "cow", "buffalo", "horse", "rhinoceros", "deer", "boar", "wolf", "goose"}
+)
+# Where to click on a villager's box, as a share of its height from the top: on the
+# body, above an animal or carcass at its feet.
+_VILLAGER_AIM = 0.35
+
+
+def _villager_click_point(bbox: Sequence[float]) -> tuple[int, int]:
+    """A point on a villager's body rather than the centre of its box."""
+    x0, y0, x1, y1 = bbox
+    return (int((x0 + x1) / 2), int(y0 + (y1 - y0) * _VILLAGER_AIM))
+
+
 def _over_building(point: tuple[int, int]) -> bool:
     """Whether `point` lies on a detected building, where a click selects the building."""
+    return _over_class(point, _CLICK_OCCLUDING_CLASSES)
+
+
+def _over_animal(point: tuple[int, int]) -> bool:
+    """Whether `point` lies on a detected animal, which a click could select."""
+    return _over_class(point, _CLICK_STEALING_ANIMALS)
+
+
+def _over_class(point: tuple[int, int], classes: frozenset[str]) -> bool:
     x, y = point
     for entity in _detected_entities:
         cls = entity.get("class")
         bbox = entity.get("bbox")
         if (
             isinstance(cls, str)
-            and cls in _CLICK_OCCLUDING_CLASSES
+            and cls in classes
             and isinstance(bbox, (list, tuple))
             and len(bbox) == 4
             and bbox[0] <= x <= bbox[2]
@@ -1948,9 +2111,10 @@ def _over_building(point: tuple[int, int]) -> bool:
 def _verified_villager_target() -> tuple[str, tuple[int, int]] | None:
     """Bind the strongest boxed villager, never an unbounded class guess.
 
-    A villager clear of buildings is preferred: live, the click meant for one in
-    front of the Town Center selected the Town Center (twice). One standing on a
-    building is still used when it is the only choice.
+    The click lands on the villager's body (`_villager_click_point`). A villager
+    whose click point is clear of buildings and animals is preferred: live, clicks
+    meant for villagers selected the Town Center twice and a cow three times. One
+    with a covered click point is still used when it is the only choice.
     """
     if not _fresh_spatial_cache():
         return None
@@ -1980,7 +2144,8 @@ def _verified_villager_target() -> tuple[str, tuple[int, int]] | None:
             continue
         x, y = int(center[0]), int(center[1])
         if bbox[0] <= x <= bbox[2] and bbox[1] <= y <= bbox[3]:
-            clear = not _over_building((x, y))
+            aim = _villager_click_point(bbox)
+            clear = not _over_building(aim) and not _over_animal(aim)
             candidates.append((clear, float(confidence), identifier, (x, y)))
     if not candidates:
         return None
@@ -2061,6 +2226,9 @@ def _resolve_coords(action_dict: dict[str, object]) -> tuple[str, tuple[int, int
                     return ("invalid bound target coordinates", None)
                 if (int(expected_coords[0]), int(expected_coords[1])) != coords:
                     return ("target moved after binding", None)
+            bbox = entity.get("bbox")
+            if expected_class == "villager" and isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+                return ("", _villager_click_point(bbox))
             return ("", coords)
         log.warning("target_id_not_found", target_id=target_id)
         return (f"target_id '{target_id}' not found in detected entities", None)
@@ -2497,7 +2665,8 @@ def _open_ground_candidates(
             cy = int(ay + radius * math.sin(angle))
             if min_x <= cx <= max_x and min_y <= cy <= max_y and _explored((cx, cy)):
                 candidates.append((cx, cy))
-    candidates.sort(key=_clutter_score)
+    home = _resolve_target_class("town_center") if current_ledger().refused_offsets else None
+    candidates.sort(key=lambda point: (_near_refused(point, home), _clutter_score(point)))
     return candidates
 
 

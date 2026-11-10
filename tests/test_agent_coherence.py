@@ -41,8 +41,20 @@ def ledger() -> executor.ActionLedger:
         executor.unbind_ledger(token)
 
 
+@pytest.fixture
+def clock(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """The executor's clock, which a test moves on to let a building be built."""
+    now = [1000.0]
+    monkeypatch.setattr(executor, "_now", lambda: now[0])
+    return now
+
+
+def _construction_passes(clock: list[float]) -> None:
+    clock[0] += executor._MIN_CONSTRUCTION_SECONDS
+
+
 def test_purchase_baseline_survives_a_pre_spend_observation(
-    ledger: executor.ActionLedger,
+    ledger: executor.ActionLedger, clock: list[float]
 ) -> None:
     executor.observe_hud(4, 10, {"wood": 250}, idle_present=True, input_revision=0)
     pending = executor._note_pending_placement("w")
@@ -67,12 +79,15 @@ def test_purchase_baseline_survives_a_pre_spend_observation(
     assert sum(outcome.status == "purchased" for outcome in ledger.outcomes) == 1
     assert "mill" not in ledger.buildings_confirmed
     executor.record_observed_buildings([("mill_new", "mill")])
+    assert "mill" not in ledger.buildings_confirmed  # the foundation, seen at once
+    _construction_passes(clock)
+    executor.record_observed_buildings([("mill_new", "mill")])
     assert "mill" in ledger.buildings_confirmed
     assert sum(outcome.status == "confirmed" for outcome in ledger.outcomes) == 1
 
 
 def test_new_building_observation_completes_a_paid_placement(
-    ledger: executor.ActionLedger, tmp_path: Path
+    ledger: executor.ActionLedger, tmp_path: Path, clock: list[float]
 ) -> None:
     executor.observe_hud(4, 10, {"wood": 250}, input_revision=0)
     pending = executor._note_pending_placement("w")
@@ -100,10 +115,14 @@ def test_new_building_observation_completes_a_paid_placement(
     asyncio.run(perceive_once(ctx, 1))
     assert "mill" in ledger.building_purchases
     assert "mill" not in ledger.buildings_confirmed
-    # A matching detector ID alone is insufficient; the next frame must
-    # positively identify this as our building, not an ally's or an enemy's.
-    source.ownership = {"mill_1": (Owner.OWN, 0.95)}
+    # Another player's mill never completes ours. Buildings are rarely classified
+    # at all, so one that isn't classified as another player's counts, once it
+    # has had time to be built.
+    _construction_passes(clock)
     asyncio.run(perceive_once(ctx, 2))
+    assert "mill" not in ledger.buildings_confirmed
+    source.ownership = {}
+    asyncio.run(perceive_once(ctx, 3))
 
     assert ctx.frames.latest() is not None
     assert "mill" in ctx.frames.latest().world.buildings_seen
@@ -116,7 +135,7 @@ def test_new_building_observation_completes_a_paid_placement(
 
 
 def test_existing_building_cannot_complete_a_new_purchase(
-    ledger: executor.ActionLedger,
+    ledger: executor.ActionLedger, clock: list[float]
 ) -> None:
     executor.set_detected_entities([{"id": "mill_old", "class": "mill", "center": (500, 500)}])
     executor.observe_hud(4, 10, {"wood": 200}, input_revision=0)
@@ -125,6 +144,7 @@ def test_existing_building_cannot_complete_a_new_purchase(
     ledger.note_input()
     executor.observe_hud(4, 10, {"wood": 100}, input_revision=1)
 
+    _construction_passes(clock)
     executor.record_observed_buildings([("mill_old", "mill")])
     assert "mill" in ledger.building_purchases
     assert "mill" not in ledger.buildings_confirmed

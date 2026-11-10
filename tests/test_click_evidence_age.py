@@ -112,3 +112,23 @@ def test_a_villager_on_a_building_is_used_when_it_is_the_only_one(
     ex.set_detected_entities([_TC, _villager("on_tc", (600, 500), 0.95)])
     target = ex._verified_villager_target()
     assert target is not None and target[0] == "on_tc"
+
+
+def test_a_villager_over_an_animal_is_not_clicked(ledger: ex.ActionLedger) -> None:
+    # Game 2: a builder click on a shepherd selected the cow carcass at its feet.
+    cow = {"id": "cow", "class": "cow", "bbox": (985, 690, 1030, 720), "center": (1007, 705)}
+    ex.set_detected_entities(
+        [cow, _villager("shepherd", (1000, 700), 0.95), _villager("lumberjack", (300, 700), 0.8)]
+    )
+    target = ex._verified_villager_target()
+    assert target is not None and target[0] == "lumberjack"
+
+
+def test_a_villager_click_lands_on_its_body(ledger: ex.ActionLedger) -> None:
+    ex.set_detected_entities([_villager("worker", (1000, 700), 0.9)])
+    detail, coords = ex._resolve_coords(
+        {"target_id": "worker", "expected_class": "villager", "expected_coords": (1000, 700)}
+    )
+    assert detail == ""
+    # 35% of the way down the 30-pixel box (685-715), above its centre.
+    assert coords == (1000, 695)

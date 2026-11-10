@@ -231,12 +231,12 @@ class GameSource:
         self._camera_resets = 0
         self._camera_pans = 0
 
-    async def capture_stream(self) -> StreamCapture:
+    async def capture_stream(self, *, after: float | None = None) -> StreamCapture:
         started_at = time.monotonic()
         async with self._overlay_lock:
             if self._overlay:
                 self._overlay.hide()
-            pixels = await asyncio.to_thread(capture_native)
+            pixels = await asyncio.to_thread(capture_native, after=after)
         log.debug(
             "native_capture_completed",
             capture_ms=round((time.monotonic() - started_at) * 1000, 1),
@@ -347,10 +347,13 @@ class GameSource:
                 self._discarded_camera += 1
                 return None
             geometry = (pixels.width, pixels.height, pixels.window_rect)
+            # A slow frame is no reason to reset: the motion estimate compares the
+            # two views and resets when they don't align, and the tracker stretches
+            # its lifetimes over slow frames. Resetting on any gap over 1 s cost
+            # every track ID 58 times in a 6-minute Mac game, with the camera still.
             reset = (
                 self._last_geometry != geometry
                 or self._last_camera_command_revision != capture.camera_command_revision
-                or (self._last_spatial_at >= 0 and pixels.captured_at - self._last_spatial_at > 1.0)
             )
             previous = None if reset else self._last_analysis
             limits = MotionLimits()
@@ -502,9 +505,10 @@ class GameSource:
 
         `skip_selection` skips the selected-unit read (RapidOCR): published boxes are
         as old as the slowest lane, and it spiked to 947 ms live. The resource bar
-        is still read; a placement needs its wood baseline.
+        is still read; a placement needs its wood baseline. The frame is drawn after
+        this call starts, so after the input that asked for it.
         """
-        capture = await self.capture_stream()
+        capture = await self.capture_stream(after=time.monotonic())
         pixels = capture.pixels
         calibration = calibration_for(pixels.width, pixels.height)
 

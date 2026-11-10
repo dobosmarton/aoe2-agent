@@ -102,10 +102,13 @@ def _capture_image(monitor: int) -> Image.Image:
     return Image.frombytes("RGB", (frame.width, frame.height), frame.rgb)
 
 
-def capture_native(monitor: int = 1) -> NativeCapture:
-    """Keep native pixels so detection, HUD and camera estimation share a view."""
+def capture_native(monitor: int = 1, *, after: float | None = None) -> NativeCapture:
+    """Keep native pixels so detection, HUD and camera estimation share a view.
+
+    With `after`, the frame shows the screen later than that monotonic instant.
+    """
     geometry = _game_geometry()
-    frame = frame_grabber().grab(geometry, monitor)
+    frame = frame_grabber().grab(geometry, monitor, after=after)
     rect = geometry.rect if geometry is not None else None
     return NativeCapture(
         frame.rgb, frame.width, frame.height, frame.captured_at, rect, _cursor_in(rect)

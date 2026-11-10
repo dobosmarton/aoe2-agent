@@ -6,6 +6,7 @@ import asyncio
 import time
 from typing import TYPE_CHECKING
 
+import numpy as np
 import pytest
 from gameplay_agent import executor as ex
 from gameplay_agent.entity_snapshot import snapshot_entity
@@ -43,7 +44,8 @@ def _run(coro: Awaitable[object]) -> object:
 def _install_stream_capture(
     monkeypatch: MonkeyPatch, source: GameSource, width: int, height: int
 ) -> None:
-    async def capture() -> StreamCapture:
+    async def capture(*, after: float | None = None) -> StreamCapture:
+        del after
         ledger = source._ledger
         pixels = NativeCapture(
             rgb=bytes(width * height * 3),
@@ -450,7 +452,8 @@ def test_stream_spatial_publications_continue_while_hud_is_slow(
     release_hud = asyncio.Event()
     captures = 0
 
-    async def capture() -> StreamCapture:
+    async def capture(*, after: float | None = None) -> StreamCapture:
+        del after
         nonlocal captures
         captures += 1
         pixels = NativeCapture(bytes(64 * 36 * 3), 64, 36, time.monotonic(), (0, 0, 64, 36))
@@ -516,7 +519,8 @@ def test_stream_shutdown_drains_started_inference(tmp_path: Path, monkeypatch: M
     release = asyncio.Event()
     captures = 0
 
-    async def capture() -> StreamCapture:
+    async def capture(*, after: float | None = None) -> StreamCapture:
+        del after
         nonlocal captures
         captures += 1
         pixels = NativeCapture(bytes(64 * 36 * 3), 64, 36, time.monotonic(), (0, 0, 64, 36))
@@ -678,3 +682,19 @@ def _enemy_owner():
     from detection.inference.ownership import Owner
 
     return Owner.ENEMY
+
+
+def test_a_slow_frame_with_a_still_camera_keeps_its_history() -> None:
+    """Game 2: 58 of 137 camera resets followed a gap over 1 s with no camera input."""
+    source = GameSource()
+    texture = np.random.default_rng(0).random((180, 320), dtype=np.float32).tobytes()
+
+    def raw(capture_id: int, at: float) -> RawSpatial:
+        pixels = NativeCapture(bytes(64 * 36 * 3), 64, 36, at, (0, 0, 64, 36))
+        return RawSpatial(
+            StreamCapture(pixels, capture_id, 0, 0, 0, 0, 0), b"jpeg", (), texture, {}
+        )
+
+    asyncio.run(source.integrate_spatial(raw(1, 10.0)))
+    asyncio.run(source.integrate_spatial(raw(2, 12.5)))
+    assert source._camera_resets == 1  # Only the first frame, which has nothing before it.

@@ -6,7 +6,7 @@ import time
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from ..entity_snapshot import MAX_SPATIAL_AGE_SECONDS
+from ..entity_snapshot import POLICY_SPATIAL_AGE_SECONDS
 from ..entity_utils import extract_attrs
 from ..executor import pending_placement_counts
 from .advice import PolicyGoal, PolicyRequest
@@ -73,7 +73,7 @@ def state_for_frame(ctx: LoopContext, frame: Perception) -> PolicyState:
         frame.capture_id < 0
         or (
             frame.spatial_captured_at is not None
-            and time.monotonic() - frame.spatial_captured_at <= MAX_SPATIAL_AGE_SECONDS
+            and time.monotonic() - frame.spatial_captured_at <= POLICY_SPATIAL_AGE_SECONDS
         )
     )
     if frame.world is not None:

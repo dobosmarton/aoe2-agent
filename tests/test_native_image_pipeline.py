@@ -94,7 +94,8 @@ def test_full_refresh_encodes_one_jpeg_and_no_internal_png(monkeypatch: MonkeyPa
     pixels = NativeCapture(bytes(800 * 600 * 3), 800, 600, 1.0, (0, 0, 800, 600))
     source = GameSource()
 
-    async def capture() -> StreamCapture:
+    async def capture(*, after: float | None = None) -> StreamCapture:
+        del after
         return StreamCapture(pixels, 1, 0, 0, 0, 0, 0)
 
     async def hud(*_args: object) -> dict[str, int]:
@@ -125,7 +126,8 @@ def test_busy_full_refresh_reuses_its_request_jpeg(monkeypatch: MonkeyPatch) -> 
     source = GameSource()
     monkeypatch.setattr(source, "_detector", object())
 
-    async def capture() -> StreamCapture:
+    async def capture(*, after: float | None = None) -> StreamCapture:
+        del after
         return StreamCapture(pixels, 1, 0, 0, 0, 0, 0)
 
     async def hud(*_args: object) -> dict[str, int]:
@@ -160,7 +162,7 @@ def test_background_capture_does_not_encode_diagnostics(monkeypatch: MonkeyPatch
     def forbidden_jpeg(_capture: NativeCapture) -> bytes:
         raise AssertionError("capture lane must not encode")
 
-    monkeypatch.setattr("gameplay_agent.loops.source.capture_native", lambda: pixels)
+    monkeypatch.setattr("gameplay_agent.loops.source.capture_native", lambda after=None: pixels)
     monkeypatch.setattr(NativeCapture, "jpeg", forbidden_jpeg)
     captured = asyncio.run(source.capture_stream())
     assert captured.pixels is pixels

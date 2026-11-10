@@ -43,8 +43,10 @@ class FakeWindowBackend:
 class NoScreen:
     """A grabber that fails: tests must say what the screen shows."""
 
-    def grab(self, geometry: GameGeometry | None, monitor: int) -> Frame:
-        del geometry, monitor
+    def grab(
+        self, geometry: GameGeometry | None, monitor: int, *, after: float | None = None
+    ) -> Frame:
+        del geometry, monitor, after
         raise AssertionError("a test reached real screen capture; install a FakeGrabber")
 
     def close(self) -> None:
@@ -59,8 +61,10 @@ class FakeGrabber:
     grabs: list[GameGeometry | None] = field(default_factory=list)
     closed: bool = False
 
-    def grab(self, geometry: GameGeometry | None, monitor: int) -> Frame:
-        del monitor
+    def grab(
+        self, geometry: GameGeometry | None, monitor: int, *, after: float | None = None
+    ) -> Frame:
+        del monitor, after
         self.grabs.append(geometry)
         width, height = (geometry.width, geometry.height) if geometry else (64, 48)
         return Frame(bytes(width * height * 3), width, height, self.at)

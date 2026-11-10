@@ -82,8 +82,8 @@ class _Broken:
         self.grabs = 0
         self.closed = False
 
-    def grab(self, geometry: object, monitor: int) -> object:
-        del geometry, monitor
+    def grab(self, geometry: object, monitor: int, *, after: float | None = None) -> object:
+        del geometry, monitor, after
         self.grabs += 1
         raise RuntimeError("ScreenCaptureKit refused")
 
