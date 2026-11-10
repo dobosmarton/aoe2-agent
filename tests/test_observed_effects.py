@@ -366,7 +366,7 @@ def test_rising_food_is_progress_while_a_spend_is_unsettled(
     assert ex.ledger_policy_state().food_stalled is True
 
 
-def _placed_house(ledger: ex.ActionLedger, clock: list[float]) -> ex._PendingPlacement:
+def _placed_house(ledger: ex.ActionLedger) -> ex._PendingPlacement:
     ex.observe_hud(5, 5, {"wood": 120}, villagers=4)
     pending = ex._note_pending_placement("q", point=(900, 600))
     assert pending is not None
@@ -380,7 +380,7 @@ def test_a_placement_whose_wood_never_falls_is_refused_within_seconds(
     """Game 2: two placements the game refused blocked a house for 90 s at 5/5."""
     clock = [100.0]
     monkeypatch.setattr(ex, "_now", lambda: clock[0])
-    pending = _placed_house(ledger, clock)
+    pending = _placed_house(ledger)
     for wood in (120, 124, 128):
         clock[0] += 2.5
         ex.observe_hud(5, 5, {"wood": wood}, villagers=4, input_revision=ledger.input_revision)
@@ -397,7 +397,7 @@ def test_a_partial_wood_drop_is_not_judged_refused(
 ) -> None:
     clock = [100.0]
     monkeypatch.setattr(ex, "_now", lambda: clock[0])
-    pending = _placed_house(ledger, clock)
+    pending = _placed_house(ledger)
     for wood in (110, 115, 118):  # Gathering hid part of the 25-wood payment.
         clock[0] += 2.5
         ex.observe_hud(5, 5, {"wood": wood}, villagers=4, input_revision=ledger.input_revision)

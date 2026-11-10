@@ -6,6 +6,7 @@ import asyncio
 import time
 from typing import TYPE_CHECKING
 
+import numpy as np
 import pytest
 from gameplay_agent import executor as ex
 from gameplay_agent.entity_snapshot import snapshot_entity
@@ -685,8 +686,6 @@ def _enemy_owner():
 
 def test_a_slow_frame_with_a_still_camera_keeps_its_history() -> None:
     """Game 2: 58 of 137 camera resets followed a gap over 1 s with no camera input."""
-    import numpy as np
-
     source = GameSource()
     texture = np.random.default_rng(0).random((180, 320), dtype=np.float32).tobytes()
 

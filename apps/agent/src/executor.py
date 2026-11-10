@@ -227,6 +227,8 @@ _PLACEMENT_PAYMENT_READINGS = 3
 # placement tries other ground. A point this close to one is avoided.
 _REFUSED_PLACEMENT_RADIUS = 100
 _REFUSED_PLACEMENTS_KEPT = 6
+# A placement noted without the point it was clicked at.
+_NO_POINT = (0, 0)
 # A paid building not seen complete in this time is dropped from the purchases
 # that block a rebuild. A house takes about 25 s with one builder.
 _HOUSE_COMPLETION_SECONDS = 120.0
@@ -420,8 +422,8 @@ class _PendingPlacement:
     settle_deadline: float = 0.0
     # Fresh wood readings this placement has been judged against so far.
     wood_readings: int = 0
-    # Monotonic instant of the placement click; 0 means unknown.
-    noted_at: float = 0.0
+    # Monotonic instant of the placement click, None when unknown.
+    noted_at: float | None = None
     # The lowest wood reading since the click, None before the first.
     lowest_wood: int | None = None
     # The click's offset from the Town Center, when the Town Center was in view.
@@ -477,6 +479,8 @@ class ActionLedger:
     pending_placements: list[_PendingPlacement] = field(default_factory=list)
     # Offsets from the Town Center of placements the game refused, newest last.
     refused_offsets: list[tuple[int, int]] = field(default_factory=list)
+    # How long after payment a sighted building may count as finished.
+    min_construction_seconds: float = _MIN_CONSTRUCTION_SECONDS
     # Circuit breaker (T-530): consecutive missing settlements per class, and
     # the monotonic instant until which a repeatedly-missing class stays blocked.
     missing_streaks: dict[str, int] = field(default_factory=dict)
@@ -859,15 +863,17 @@ def observe_hud(
     ambiguous_food = any(
         any(kind == "food" for kind, _ in pending.cost) for pending in ledger.pending_training
     ) or any(pending.tech.food for pending in ledger.pending_research)
-    if food_now is not None and food_before is not None and not ambiguous_food:
-        income = food_now - food_before + food_claimed_after - food_claimed_before
-        if 0 < income <= 300:
-            ledger.food_gathered += income
-            ledger.food_progress_at = _now()
-    elif food_now is not None and food_before is not None and food_now > food_before:
-        # A spend can hide income but never fake it: food that rose was gathered.
-        # Live, an unsettled villager order froze this clock until the run stopped.
-        ledger.food_progress_at = _now()
+    if food_now is not None and food_before is not None:
+        if ambiguous_food:
+            # A spend can hide income but never fake it: food that rose was gathered.
+            # Live, an unsettled villager order froze this clock until the run stopped.
+            if food_now > food_before:
+                ledger.food_progress_at = _now()
+        else:
+            income = food_now - food_before + food_claimed_after - food_claimed_before
+            if 0 < income <= 300:
+                ledger.food_gathered += income
+                ledger.food_progress_at = _now()
     active_snapshots = (
         [p.noted_at_snapshot for p in current_ledger().pending_placements]
         + [p.noted_at_snapshot for p in current_ledger().pending_research]
@@ -1008,7 +1014,7 @@ def _note_pending_placement(
     building_key: str,
     *,
     menu: str = ECON_MENU,
-    point: tuple[int, int] = (0, 0),
+    point: tuple[int, int] = _NO_POINT,
     wood_before: int | None = None,
     cap_before: int | None = None,
     noted_at_snapshot: int | None = None,
@@ -1097,28 +1103,9 @@ def _settle_pending_placements(
             else "undecided"
         )
         if wood_now is not None and wood_judged:
-            lowest = wood_now if pending.lowest_wood is None else min(pending.lowest_wood, wood_now)
-            pending = replace(pending, lowest_wood=lowest)
-        if verdict == "undecided" and _never_paid(pending, counting=wood_judged):
-            _note_missing_settlement(pending.building_class)
-            _remember_refused(pending)
-            outcomes.append(
-                ActionOutcome(
-                    pending.operation_id,
-                    f"build_{pending.building_class}",
-                    "failed",
-                    "placement refused: no wood left after the click",
-                )
-            )
-            log.warning(
-                "build_placement_refused",
-                building=pending.building_class,
-                wood_before=pending.wood_before,
-                lowest_wood=pending.lowest_wood,
-                readings=pending.wood_readings + 1,
-                x=pending.point[0],
-                y=pending.point[1],
-            )
+            pending = _with_wood_reading(pending, wood_now)
+        if verdict == "undecided" and _never_paid(pending):
+            outcomes.append(_refuse_placement(pending))
             continue
         if verdict == "undecided" and _now() >= (
             pending.settle_deadline + _PLACEMENT_ABANDON_SECONDS
@@ -1141,11 +1128,7 @@ def _settle_pending_placements(
             )
             continue
         if verdict == "undecided":
-            still_pending.append(
-                replace(pending, wood_readings=pending.wood_readings + 1)
-                if wood_judged
-                else pending
-            )
+            still_pending.append(pending)
             if (
                 _now() >= pending.settle_deadline
                 and pending.operation_id not in current_ledger().uncertain_operations
@@ -1247,26 +1230,52 @@ def _house_verdict(
     return "confirmed"
 
 
-def _never_paid(pending: _PendingPlacement, *, counting: bool) -> bool:
+def _with_wood_reading(pending: _PendingPlacement, wood_now: int) -> _PendingPlacement:
+    """The placement after one more wood reading it can be judged against."""
+    lowest = wood_now if pending.lowest_wood is None else min(pending.lowest_wood, wood_now)
+    return replace(pending, wood_readings=pending.wood_readings + 1, lowest_wood=lowest)
+
+
+def _never_paid(pending: _PendingPlacement) -> bool:
     """Whether a placement's wood has had time to leave and never fell at all.
 
     A partial drop stays undecided: gathering can hide part of a payment, never
     all of it within the few seconds a payment takes to show.
     """
-    readings = pending.wood_readings + (1 if counting else 0)
     return (
-        pending.noted_at > 0
+        pending.noted_at is not None
         and _now() - pending.noted_at >= _PLACEMENT_PAYMENT_SECONDS
-        and readings >= _PLACEMENT_PAYMENT_READINGS
+        and pending.wood_readings >= _PLACEMENT_PAYMENT_READINGS
         and pending.lowest_wood is not None
         and pending.lowest_wood >= pending.wood_before
+    )
+
+
+def _refuse_placement(pending: _PendingPlacement) -> ActionOutcome:
+    """Fail a placement the game refused, and steer the next one off its ground."""
+    _note_missing_settlement(pending.building_class)
+    _remember_refused(pending)
+    log.warning(
+        "build_placement_refused",
+        building=pending.building_class,
+        wood_before=pending.wood_before,
+        lowest_wood=pending.lowest_wood,
+        readings=pending.wood_readings,
+        x=pending.point[0],
+        y=pending.point[1],
+    )
+    return ActionOutcome(
+        pending.operation_id,
+        f"build_{pending.building_class}",
+        "failed",
+        "placement refused: no wood left after the click",
     )
 
 
 def _home_offset(point: tuple[int, int]) -> tuple[int, int] | None:
     """`point` relative to the detected Town Center, or None without one in view."""
     tc = _resolve_target_class("town_center")
-    if tc is None or point == (0, 0):
+    if tc is None or point == _NO_POINT:
         return None
     return (point[0] - tc[0], point[1] - tc[1])
 
@@ -1515,16 +1524,16 @@ def _settle_pending_training(
                     claimed[key] = claimed.get(key, 0) + price
             verdict = "confirmed"
         if verdict == "undecided":
-            abandoned = _now() >= pending.settle_deadline + _TRAINING_ABANDON_SECONDS
-            if not abandoned:
-                still_pending.append(pending)
-            else:
+            overdue = _now() - pending.settle_deadline
+            if overdue >= _TRAINING_ABANDON_SECONDS:
                 log.warning(
                     "training_pending_abandoned",
                     action_id=pending.operation_id,
                     unit=pending.unit,
-                    waited_s=round(_now() - pending.settle_deadline + _RESEARCH_SETTLE_SECONDS),
+                    overdue_s=round(overdue),
                 )
+            else:
+                still_pending.append(pending)
             if (
                 _now() >= pending.settle_deadline
                 and pending.operation_id not in current_ledger().uncertain_operations
@@ -1773,13 +1782,13 @@ def record_observed_buildings(entities: Iterable[tuple[str, str]]) -> None:
         if cls != _HOUSE_CLASS
         and cls in purchased
         and entity_id not in purchased[cls].preexisting_entity_ids
-        and _could_be_built(purchased[cls].purchased_at)
+        and _could_be_built(purchased[cls].purchased_at or None)
     }
     record_confirmed_buildings(completed)
     directly_completed = [
         pending
         for pending in ledger.pending_placements
-        if _could_be_built(pending.settle_deadline - _PLACEMENT_SETTLE_SECONDS)
+        if _could_be_built(pending.noted_at)
         and any(
             cls == pending.building_class
             and cls != _HOUSE_CLASS
@@ -1803,9 +1812,14 @@ def record_observed_buildings(entities: Iterable[tuple[str, str]]) -> None:
             )
 
 
-def _could_be_built(started_at: float) -> bool:
-    """Whether a building placed at `started_at` could be finished by now; 0 is unknown."""
-    return not started_at or _now() - started_at >= _MIN_CONSTRUCTION_SECONDS
+def _could_be_built(started_at: float | None) -> bool:
+    """Whether a building started at `started_at` could be finished by now.
+
+    An unknown start can't rule completion out.
+    """
+    if started_at is None:
+        return True
+    return _now() - started_at >= current_ledger().min_construction_seconds
 
 
 def confirmed_buildings() -> frozenset[str]:
@@ -2212,8 +2226,9 @@ def _resolve_coords(action_dict: dict[str, object]) -> tuple[str, tuple[int, int
                     return ("invalid bound target coordinates", None)
                 if (int(expected_coords[0]), int(expected_coords[1])) != coords:
                     return ("target moved after binding", None)
-            if expected_class == "villager":
-                return ("", _villager_click_point(entity["bbox"]))
+            bbox = entity.get("bbox")
+            if expected_class == "villager" and isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+                return ("", _villager_click_point(bbox))
             return ("", coords)
         log.warning("target_id_not_found", target_id=target_id)
         return (f"target_id '{target_id}' not found in detected entities", None)

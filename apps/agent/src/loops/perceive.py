@@ -213,7 +213,7 @@ async def _stream_perceive_loop(ctx: LoopContext, source: GameSource) -> None:
 _FOREIGN_OWNERS = frozenset({"ally", "enemy"})
 
 
-def _not_foreign(
+def _possibly_ours(
     entities: Iterable[object], ownership: Mapping[str, tuple[Owner, float]]
 ) -> frozenset[tuple[str, str]]:
     """IDs and classes of entities not classified as another player's."""
@@ -381,7 +381,7 @@ def _publish_spatial(ctx: LoopContext, tick: int, sighting: Sighting) -> None:
         if (attrs := extract_attrs(entity)).entity_id in sighting.ownership
         and sighting.ownership[attrs.entity_id][0].value == "own"
     )
-    record_observed_buildings(_not_foreign(entities, sighting.ownership))
+    record_observed_buildings(_possibly_ours(entities, sighting.ownership))
     ctx.memory.game_state.buildings_seen = confirmed_buildings()
     latest = ctx.frames.latest()
     world = (
