@@ -67,3 +67,14 @@ def test_pending_house_is_part_of_policy_state_and_not_a_candidate(tmp_path: Pat
 
     assert request.state.pending_buildings == frozenset({"house"})
     assert "build_house" not in {candidate.id for candidate in request.candidates}
+
+
+@pytest.mark.parametrize(("age", "valid"), [(2.5, True), (6.0, False)])
+def test_a_view_seconds_old_still_offers_spatial_actions(
+    tmp_path: Path, age: float, valid: bool
+) -> None:
+    """Game 2: a 1 s limit hid build and assign actions at 61% of decisions."""
+    import time
+
+    frame = Perception(tick=1, capture_id=4, spatial_captured_at=time.monotonic() - age)
+    assert policy_request(_context(tmp_path), frame).state.spatial_valid is valid
