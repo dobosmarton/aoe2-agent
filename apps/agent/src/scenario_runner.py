@@ -408,6 +408,7 @@ async def run_scenario_async(path: Path) -> ScenarioResult:
         executor._selection_refresh_fn,
         executor._rescan_full_fn,
     )
+    construction_seconds = executor._MIN_CONSTRUCTION_SECONDS
     try:
         # No real window: on a Mac with the game open, the real backend would switch
         # the executor to point-scaled input and its in-front check.
@@ -427,6 +428,8 @@ async def run_scenario_async(path: Path) -> ScenarioResult:
             ctx.memory.action_ledger = ledger
             executor.get_game_window_rect = lambda: (0, 0, 1920, 1080)
             executor.ensure_game_focused = lambda: True
+            # A scripted building stands complete the moment it is placed.
+            executor._MIN_CONSTRUCTION_SECONDS = 0.0
             tick = 0
 
             async def refresh() -> bool:
@@ -468,6 +471,7 @@ async def run_scenario_async(path: Path) -> ScenarioResult:
         executor._rescan_fn = original[3]
         executor._selection_refresh_fn = original[4]
         executor._rescan_full_fn = original[5]
+        executor._MIN_CONSTRUCTION_SECONDS = construction_seconds
         executor.clear_detected_entities()
         executor.unbind_ledger(token)
     return ScenarioResult(path.stem, not failures, failures, actions, inputs, world.age)

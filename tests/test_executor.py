@@ -1005,7 +1005,9 @@ def test_place_click_preexisting_building_does_not_vouch(
     assert [p.building_class for p in ex._build_gates.pending_placements] == ["farm"]  # unconfirmed
 
 
-def test_pending_placement_purchase_needs_visual_completion(fake_pyautogui: _FakePyautogui) -> None:
+def test_pending_placement_purchase_needs_visual_completion(
+    fake_pyautogui: _FakePyautogui, clock: _Clock
+) -> None:
     ex.observe_hud(10, 15, {"wood": 200})
     ex._note_pending_placement("w")  # mill, 100 wood
     # Next snapshot: wood dropped by ~the cost → the purchase happened.
@@ -1013,6 +1015,9 @@ def test_pending_placement_purchase_needs_visual_completion(fake_pyautogui: _Fak
     assert ex._build_gates.pending_placements == []
     assert "mill" in ex._build_gates.building_purchases
     assert ex.build_rejection("a") is not None  # purchase is not construction
+    ex.record_observed_buildings([("mill_new", "mill")])
+    assert ex.build_rejection("a") is not None  # a fresh sighting is the foundation
+    clock.advance(ex._MIN_CONSTRUCTION_SECONDS)
     ex.record_observed_buildings([("mill_new", "mill")])
     assert ex.build_rejection("a") is None
 

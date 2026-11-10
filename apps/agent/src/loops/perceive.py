@@ -35,6 +35,10 @@ from ..turn_timing import PERCEIVE_LOOP, TickTimings
 from ..window import ensure_game_focused, is_game_running
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping
+
+    from detection.inference.ownership import Owner
+
     from ..goals import GoalManager
     from ..memory import AgentMemory
     from ..resource_ocr import ResourceReadings
@@ -203,6 +207,25 @@ async def _stream_perceive_loop(ctx: LoopContext, source: GameSource) -> None:
                 log.warning("detector_shutdown_failed", error=repr(exc))
 
 
+# Owners that rule out a building being ours. Buildings are almost never classified
+# "own": live, a finished lumber camp read own in 0 of 332 frames, so it was never
+# confirmed and its purchase expired.
+_FOREIGN_OWNERS = frozenset({"ally", "enemy"})
+
+
+def _not_foreign(
+    entities: Iterable[object], ownership: Mapping[str, tuple[Owner, float]]
+) -> frozenset[tuple[str, str]]:
+    """IDs and classes of entities not classified as another player's."""
+    found: set[tuple[str, str]] = set()
+    for entity in entities:
+        attrs = extract_attrs(entity)
+        owner = ownership.get(attrs.entity_id)
+        if owner is None or owner[0].value not in _FOREIGN_OWNERS:
+            found.add((attrs.entity_id, attrs.class_name))
+    return frozenset(found)
+
+
 async def _refresh_spatial_once(ctx: LoopContext, request: asyncio.Future[SpatialRefresh]) -> None:
     """Service an input-triggered capture before starting another full OCR pass."""
     timings = TickTimings()
@@ -358,7 +381,7 @@ def _publish_spatial(ctx: LoopContext, tick: int, sighting: Sighting) -> None:
         if (attrs := extract_attrs(entity)).entity_id in sighting.ownership
         and sighting.ownership[attrs.entity_id][0].value == "own"
     )
-    record_observed_buildings(owned_entities)
+    record_observed_buildings(_not_foreign(entities, sighting.ownership))
     ctx.memory.game_state.buildings_seen = confirmed_buildings()
     latest = ctx.frames.latest()
     world = (

@@ -221,6 +221,10 @@ _PLACEMENT_WOOD_READINGS = 20
 # that block a rebuild. A house takes about 25 s with one builder.
 _HOUSE_COMPLETION_SECONDS = 120.0
 _BUILDING_COMPLETION_SECONDS = 240.0
+# A building's foundation is detected as the finished class, so a sighting proves
+# completion only once the building could have been built: a house takes 25 s
+# with one builder, a mill or lumber camp 35 s.
+_MIN_CONSTRUCTION_SECONDS = 25.0
 # Distinct detection frames before a building class is REPORTED as sighted
 # (context line only — sightings never gate builds: run 9, F-36, a persistent
 # phantom mill beat any count threshold and 14 outposts got built through the
@@ -1668,10 +1672,11 @@ def record_confirmed_buildings(classes: Iterable[str]) -> None:
 
 
 def record_observed_buildings(entities: Iterable[tuple[str, str]]) -> None:
-    """Promote a paid placement only when a matching building ID is new.
+    """Promote a paid placement only when a matching building ID is new, and the
+    building has had time to be built.
 
-    Ownership classification currently covers military units, not buildings.
-    The caller excludes any entity explicitly identified as enemy-owned.
+    Ownership classification rarely covers buildings. The caller excludes any
+    entity identified as another player's.
     """
     ledger = current_ledger()
     observed = tuple(entities)
@@ -1682,12 +1687,14 @@ def record_observed_buildings(entities: Iterable[tuple[str, str]]) -> None:
         if cls != _HOUSE_CLASS
         and cls in purchased
         and entity_id not in purchased[cls].preexisting_entity_ids
+        and _could_be_built(purchased[cls].purchased_at)
     }
     record_confirmed_buildings(completed)
     directly_completed = [
         pending
         for pending in ledger.pending_placements
-        if any(
+        if _could_be_built(pending.settle_deadline - _PLACEMENT_SETTLE_SECONDS)
+        and any(
             cls == pending.building_class
             and cls != _HOUSE_CLASS
             and entity_id not in pending.preexisting_entity_ids
@@ -1708,6 +1715,11 @@ def record_observed_buildings(entities: Iterable[tuple[str, str]]) -> None:
                     "new building entity observed",
                 )
             )
+
+
+def _could_be_built(started_at: float) -> bool:
+    """Whether a building placed at `started_at` could be finished by now; 0 is unknown."""
+    return not started_at or _now() - started_at >= _MIN_CONSTRUCTION_SECONDS
 
 
 def confirmed_buildings() -> frozenset[str]:
