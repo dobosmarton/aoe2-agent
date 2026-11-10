@@ -9,6 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from .window import Platform as RunningPlatform
+
 Relationship = Literal["own", "ally", "enemy"]
 PlayerColor = Literal["blue", "red", "green", "yellow", "cyan", "purple", "gray", "orange"]
 Platform = Literal["windows", "macos"]
@@ -101,18 +103,20 @@ def load_profile(path: Path) -> GameProfile:
     return GameProfile.model_validate_json(path.read_text(encoding="utf-8"))
 
 
-def platform_problem(profile: GameProfile | None, platform: str) -> str | None:
+def platform_problem(profile: GameProfile | None, platform: RunningPlatform) -> str | None:
     """Why `profile` can't drive the game on `platform`, or None when it can.
 
-    The Mac game needs its profile: without one, orders went out on the right
-    mouse button, which deselects in a game that orders with the left, and the
-    camera stayed fully zoomed out. Two live games lost every villager order so.
+    The Mac game needs its profile. Without one, the agent orders with the right
+    mouse button, which deselects in a game that orders with the left, and keeps
+    the camera fully zoomed out.
     """
+    if platform == "none":
+        return None
     if profile is None:
         if platform == "macos":
             return "no game profile is set, and the Mac game needs one (AOE2_GAME_PROFILE)"
         return None
-    if platform in ("windows", "macos") and profile.platform != platform:
+    if profile.platform != platform:
         return f"the game profile is for {profile.platform}, but the game runs on {platform}"
     return None
 

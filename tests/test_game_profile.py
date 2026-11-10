@@ -11,6 +11,7 @@ from gameplay_agent.game_profile import (
     recording_qualification,
 )
 from gameplay_agent.preflight import inspect_capture, run_preflight
+from gameplay_agent.window import Platform
 from pydantic import ValidationError
 
 _EXAMPLE = Path(__file__).parents[1] / "apps/agent/profiles/magyars_arabia_4v4.example.json"
@@ -145,7 +146,7 @@ def test_a_mac_profile_is_refused_on_windows() -> None:
     ids=["mac", "windows", "windows-without-profile", "no-window"],
 )
 def test_a_matching_or_optional_profile_is_accepted(
-    profile_path: Path | None, platform: str
+    profile_path: Path | None, platform: Platform
 ) -> None:
     profile = load_profile(profile_path) if profile_path is not None else None
     assert platform_problem(profile, platform) is None

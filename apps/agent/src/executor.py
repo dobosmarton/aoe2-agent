@@ -2057,6 +2057,7 @@ def _fresh_spatial_cache(*, static_target: bool = False) -> bool:
 # refused at the 1 s limit, though the view had been taken after the villager
 # was selected and the sheep hadn't moved.
 _STILL_ANIMALS = frozenset({"sheep", "goat", "cow", "buffalo"})
+_MOVING_TARGETS = MOBILE_CLASSES - _STILL_ANIMALS
 
 
 def _static_click(action_dict: dict[str, object]) -> bool:
@@ -2064,9 +2065,7 @@ def _static_click(action_dict: dict[str, object]) -> bool:
     if action_dict.get("auto_placement"):
         return True
     target = action_dict.get("expected_class") or action_dict.get("target_class")
-    if not isinstance(target, str) or not target:
-        return False
-    return target in _STILL_ANIMALS or target not in MOBILE_CLASSES
+    return isinstance(target, str) and bool(target) and target not in _MOVING_TARGETS
 
 
 def _verified_villager_center() -> tuple[int, int] | None:

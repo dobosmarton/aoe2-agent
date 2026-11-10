@@ -301,14 +301,7 @@ async def game_loop(
             log.error("game_profile_unusable", problem=problem)
             _request_stop(ctx, memory, "game_profile")
             return memory
-        set_command_button(profile.command_button if profile is not None else "right")
-        log.info(
-            "game_profile_loaded",
-            path=str(config.game_profile_path) if config.game_profile_path else None,
-            platform=profile.platform if profile is not None else None,
-            command_button=profile.command_button if profile is not None else "right",
-            zoom_steps=profile.zoom_steps if profile is not None else 0,
-        )
+        _use_profile(profile)
         ctx = _build_context(
             memory,
             use_detection=use_detection,
@@ -417,6 +410,19 @@ async def _stop_warm_ups(warm_ups: list[asyncio.Task[None]]) -> None:
     for warm_up in warm_ups:
         warm_up.cancel()
     await asyncio.gather(*warm_ups, return_exceptions=True)
+
+
+def _use_profile(profile: GameProfile | None) -> None:
+    """Order units with the profile's mouse button, and log what the run uses."""
+    command_button = profile.command_button if profile is not None else "right"
+    set_command_button(command_button)
+    log.info(
+        "game_profile_loaded",
+        path=str(config.game_profile_path) if config.game_profile_path else None,
+        platform=profile.platform if profile is not None else None,
+        command_button=command_button,
+        zoom_steps=profile.zoom_steps if profile is not None else 0,
+    )
 
 
 def _request_stop(ctx: LoopContext | None, memory: AgentMemory, reason: str) -> None:
