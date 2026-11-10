@@ -272,6 +272,10 @@ _ASSIGNMENT_RETRY_DELAY = 20.0
 _ASSIGNMENT_REFRESH_RETRY_DELAY = 5.0
 _BUILD_REFRESH_RETRY_DELAY = 5.0
 _FOOD_STALL_SECONDS = 30.0
+# A training order still unproven this long after its settle deadline is dropped,
+# so it stops blocking the next one. Live, one order the HUD couldn't confirm kept
+# the Town Center idle for the last two minutes of a game.
+_TRAINING_ABANDON_SECONDS = 15.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -838,6 +842,10 @@ def observe_hud(
         if 0 < income <= 300:
             ledger.food_gathered += income
             ledger.food_progress_at = _now()
+    elif food_now is not None and food_before is not None and food_now > food_before:
+        # A spend can hide income but never fake it: food that rose was gathered.
+        # Live, an unsettled villager order froze this clock until the run stopped.
+        ledger.food_progress_at = _now()
     active_snapshots = (
         [p.noted_at_snapshot for p in current_ledger().pending_placements]
         + [p.noted_at_snapshot for p in current_ledger().pending_research]
@@ -1383,6 +1391,10 @@ def _settle_pending_training(
         if population_now is not None and ledger.last_known_population is not None
         else 0
     )
+    # As in `_reconcile_queued_training`: with the villager digit unreadable, a
+    # population gain is a villager unless military production could explain it.
+    if villagers_now is None and not _military_in_production(ledger):
+        villager_gain = population_gain
     available_villagers = max(
         villager_gain - sum(queued.unit == "villager" for queued in ledger.queued_training), 0
     )
@@ -1413,7 +1425,16 @@ def _settle_pending_training(
                     claimed[key] = claimed.get(key, 0) + price
             verdict = "confirmed"
         if verdict == "undecided":
-            still_pending.append(pending)
+            abandoned = _now() >= pending.settle_deadline + _TRAINING_ABANDON_SECONDS
+            if not abandoned:
+                still_pending.append(pending)
+            else:
+                log.warning(
+                    "training_pending_abandoned",
+                    action_id=pending.operation_id,
+                    unit=pending.unit,
+                    waited_s=round(_now() - pending.settle_deadline + _RESEARCH_SETTLE_SECONDS),
+                )
             if (
                 _now() >= pending.settle_deadline
                 and pending.operation_id not in current_ledger().uncertain_operations
@@ -1447,6 +1468,13 @@ def _settle_pending_training(
         current_ledger().record_outcome(outcome)
 
 
+def _military_in_production(ledger: ActionLedger) -> bool:
+    """Whether any ordered unit that isn't a villager might still arrive."""
+    return any(
+        item.unit != "villager" for item in (*ledger.queued_training, *ledger.pending_training)
+    )
+
+
 def _reconcile_queued_training(
     population_now: int | None, villagers_now: int | None = None
 ) -> None:
@@ -1468,9 +1496,7 @@ def _reconcile_queued_training(
     # The small-HUD villager digit can be unreadable while population remains
     # legible. A population gain then proves delivery of a paid villager if the
     # ledger has no competing military production to which to attribute it.
-    if villagers_now is None and not any(
-        item.unit != "villager" for item in (*ledger.queued_training, *ledger.pending_training)
-    ):
+    if villagers_now is None and not _military_in_production(ledger):
         villager_gain = population_gain
         military_gain = 0
     delivered: list[_QueuedTraining] = []

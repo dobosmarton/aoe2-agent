@@ -149,15 +149,18 @@ def test_pending_idle_assignment_hides_other_idle_assignments() -> None:
     assert not {"assign_food", "assign_wood"} & _ids(state)
 
 
-def test_shallow_tc_queue_hides_second_villager_purchase() -> None:
-    state = PolicyState(
-        food=200,
-        population=4,
-        population_cap=10,
-        pending_population=1,
-        pending_villagers=1,
-    )
-    assert "queue_villager" not in _ids(state)
+def test_tc_queue_keeps_two_villagers_ordered() -> None:
+    def state(pending: int) -> PolicyState:
+        return PolicyState(
+            food=200,
+            population=4,
+            population_cap=10,
+            pending_population=pending,
+            pending_villagers=pending,
+        )
+
+    assert "queue_villager" in _ids(state(1))
+    assert "queue_villager" not in _ids(state(2))
 
 
 def test_render_returns_fresh_mutable_action_dictionaries() -> None:
