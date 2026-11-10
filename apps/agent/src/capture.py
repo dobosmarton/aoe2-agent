@@ -42,8 +42,14 @@ class Frame:
 
 
 class FrameGrabber(Protocol):
-    def grab(self, geometry: GameGeometry | None, monitor: int) -> Frame:
-        """The game area, or the whole monitor when the window is unknown."""
+    def grab(
+        self, geometry: GameGeometry | None, monitor: int, *, after: float | None = None
+    ) -> Frame:
+        """The game area, or the whole monitor when the window is unknown.
+
+        With `after`, the frame shows the screen later than that `time.monotonic()`
+        instant, so an input sent before it can be in the picture.
+        """
         ...
 
     def close(self) -> None:
@@ -54,7 +60,10 @@ class FrameGrabber(Protocol):
 class MssGrabber:
     """One `mss` grab per call: the Windows capture, unchanged."""
 
-    def grab(self, geometry: GameGeometry | None, monitor: int) -> Frame:
+    def grab(
+        self, geometry: GameGeometry | None, monitor: int, *, after: float | None = None
+    ) -> Frame:
+        del after  # Every grab is taken now.
         stamped = time.monotonic()
         with mss.MSS() as sct:
             if geometry is not None:
@@ -104,11 +113,13 @@ class FallbackGrabber:
         self._primary: FrameGrabber | None = primary
         self._fallback = fallback
 
-    def grab(self, geometry: GameGeometry | None, monitor: int) -> Frame:
+    def grab(
+        self, geometry: GameGeometry | None, monitor: int, *, after: float | None = None
+    ) -> Frame:
         primary = self._primary
         if primary is not None:
             try:
-                return primary.grab(geometry, monitor)
+                return primary.grab(geometry, monitor, after=after)
             except Exception as error:
                 log.warning(
                     "capture_fell_back",
@@ -118,7 +129,7 @@ class FallbackGrabber:
                 )
                 primary.close()
                 self._primary = None
-        return self._fallback.grab(geometry, monitor)
+        return self._fallback.grab(geometry, monitor, after=after)
 
     def close(self) -> None:
         if self._primary is not None:

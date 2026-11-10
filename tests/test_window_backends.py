@@ -343,3 +343,59 @@ def test_an_old_stream_frame_is_replaced_by_a_still_capture() -> None:
     frame = grabber.grab(MAC_GAME, 1)
     assert stills == [MAC_GAME]
     assert frame.captured_at == 9.0  # The still's own time, not the old frame's.
+
+
+class _ArrivingStream(_FakeStream):
+    """Frames that arrive at the given times, one per take."""
+
+    def __init__(self, geometry: GameGeometry, times: list[float]) -> None:
+        super().__init__(geometry, [])
+        self.times = times
+
+    def take(self) -> tuple[object, float]:
+        at = self.times.pop(0) if len(self.times) > 1 else self.times[0]
+        return "buffer", at
+
+
+def _waiting_grabber(
+    times: list[float], stills: list[GameGeometry]
+) -> tuple[screen_macos.StreamGrabber, list[float]]:
+    now = [7.6]
+
+    def sleep(seconds: float) -> None:
+        now[0] += seconds
+
+    def still(area: GameGeometry) -> Frame:
+        stills.append(area)
+        return Frame(b"", area.width, area.height, now[0])
+
+    def to_rgb(_buffer: object, _top: int) -> np.ndarray:
+        return np.zeros((MAC_GAME.height, MAC_GAME.width, 3), dtype=np.uint8)
+
+    grabber = screen_macos.StreamGrabber(
+        lambda g: _ArrivingStream(g, times), to_rgb, still=still, clock=lambda: now[0], sleep=sleep
+    )
+    return grabber, now
+
+
+def test_a_grab_after_an_input_waits_for_a_newer_frame() -> None:
+    stills: list[GameGeometry] = []
+    # The newest frame predates the request at 7.55; the next one arrives at 7.58.
+    grabber, _now = _waiting_grabber([7.5, 7.5, 7.58], stills)
+    frame = grabber.grab(MAC_GAME, 1, after=7.55)
+    assert frame.captured_at == 7.58
+    assert stills == []
+
+
+def test_a_grab_after_an_input_takes_a_still_when_no_newer_frame_comes() -> None:
+    stills: list[GameGeometry] = []
+    grabber, now = _waiting_grabber([7.5], stills)
+    frame = grabber.grab(MAC_GAME, 1, after=7.55)
+    assert stills == [MAC_GAME]
+    assert frame.captured_at == now[0]
+    assert frame.captured_at > 7.55
+
+
+def test_a_grab_without_after_takes_the_newest_frame_at_once() -> None:
+    grabber, _now = _waiting_grabber([7.5, 7.58], [])
+    assert grabber.grab(MAC_GAME, 1).captured_at == 7.5

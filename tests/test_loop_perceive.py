@@ -43,7 +43,8 @@ def _run(coro: Awaitable[object]) -> object:
 def _install_stream_capture(
     monkeypatch: MonkeyPatch, source: GameSource, width: int, height: int
 ) -> None:
-    async def capture() -> StreamCapture:
+    async def capture(*, after: float | None = None) -> StreamCapture:
+        del after
         ledger = source._ledger
         pixels = NativeCapture(
             rgb=bytes(width * height * 3),
@@ -450,7 +451,8 @@ def test_stream_spatial_publications_continue_while_hud_is_slow(
     release_hud = asyncio.Event()
     captures = 0
 
-    async def capture() -> StreamCapture:
+    async def capture(*, after: float | None = None) -> StreamCapture:
+        del after
         nonlocal captures
         captures += 1
         pixels = NativeCapture(bytes(64 * 36 * 3), 64, 36, time.monotonic(), (0, 0, 64, 36))
@@ -516,7 +518,8 @@ def test_stream_shutdown_drains_started_inference(tmp_path: Path, monkeypatch: M
     release = asyncio.Event()
     captures = 0
 
-    async def capture() -> StreamCapture:
+    async def capture(*, after: float | None = None) -> StreamCapture:
+        del after
         nonlocal captures
         captures += 1
         pixels = NativeCapture(bytes(64 * 36 * 3), 64, 36, time.monotonic(), (0, 0, 64, 36))
