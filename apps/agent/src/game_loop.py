@@ -294,10 +294,21 @@ async def game_loop(
         if game_platform() == "macos" and _untypeable_agent_keys():
             _request_stop(ctx, memory, "keyboard_layout")
             return memory
-        from .game_profile import load_profile
+        from .game_profile import load_profile, platform_problem
 
         profile = load_profile(config.game_profile_path) if config.game_profile_path else None
+        if (problem := platform_problem(profile, game_platform())) is not None:
+            log.error("game_profile_unusable", problem=problem)
+            _request_stop(ctx, memory, "game_profile")
+            return memory
         set_command_button(profile.command_button if profile is not None else "right")
+        log.info(
+            "game_profile_loaded",
+            path=str(config.game_profile_path) if config.game_profile_path else None,
+            platform=profile.platform if profile is not None else None,
+            command_button=profile.command_button if profile is not None else "right",
+            zoom_steps=profile.zoom_steps if profile is not None else 0,
+        )
         ctx = _build_context(
             memory,
             use_detection=use_detection,

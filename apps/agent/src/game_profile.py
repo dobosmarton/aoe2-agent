@@ -101,6 +101,22 @@ def load_profile(path: Path) -> GameProfile:
     return GameProfile.model_validate_json(path.read_text(encoding="utf-8"))
 
 
+def platform_problem(profile: GameProfile | None, platform: str) -> str | None:
+    """Why `profile` can't drive the game on `platform`, or None when it can.
+
+    The Mac game needs its profile: without one, orders went out on the right
+    mouse button, which deselects in a game that orders with the left, and the
+    camera stayed fully zoomed out. Two live games lost every villager order so.
+    """
+    if profile is None:
+        if platform == "macos":
+            return "no game profile is set, and the Mac game needs one (AOE2_GAME_PROFILE)"
+        return None
+    if platform in ("windows", "macos") and profile.platform != platform:
+        return f"the game profile is for {profile.platform}, but the game runs on {platform}"
+    return None
+
+
 def recording_qualification(profile: GameProfile | None) -> tuple[str, ...]:
     """Missing declarations that make a screen-controlled run comparable."""
     if profile is None:
@@ -118,5 +134,6 @@ __all__ = [
     "GameProfile",
     "PlayerSlot",
     "load_profile",
+    "platform_problem",
     "recording_qualification",
 ]
