@@ -1965,15 +1965,40 @@ def _verified_villager_center() -> tuple[int, int] | None:
     return None if target is None else target[1]
 
 
+# Animals a click meant for a villager can select instead: live, 3 of 10 builder
+# clicks selected a cow, the carcass at the feet of a villager taking food from it.
+_CLICK_STEALING_ANIMALS = frozenset(
+    {"sheep", "goat", "cow", "buffalo", "horse", "rhinoceros", "deer", "boar", "wolf", "goose"}
+)
+# Where to click on a villager's box, as a share of its height from the top: on the
+# body, above an animal or carcass at its feet.
+_VILLAGER_AIM = 0.35
+
+
+def _villager_click_point(bbox: Sequence[float]) -> tuple[int, int]:
+    """A point on a villager's body rather than the centre of its box."""
+    x0, y0, x1, y1 = bbox
+    return (int((x0 + x1) / 2), int(y0 + (y1 - y0) * _VILLAGER_AIM))
+
+
 def _over_building(point: tuple[int, int]) -> bool:
     """Whether `point` lies on a detected building, where a click selects the building."""
+    return _over_class(point, _CLICK_OCCLUDING_CLASSES)
+
+
+def _over_animal(point: tuple[int, int]) -> bool:
+    """Whether `point` lies on a detected animal, which a click could select."""
+    return _over_class(point, _CLICK_STEALING_ANIMALS)
+
+
+def _over_class(point: tuple[int, int], classes: frozenset[str]) -> bool:
     x, y = point
     for entity in _detected_entities:
         cls = entity.get("class")
         bbox = entity.get("bbox")
         if (
             isinstance(cls, str)
-            and cls in _CLICK_OCCLUDING_CLASSES
+            and cls in classes
             and isinstance(bbox, (list, tuple))
             and len(bbox) == 4
             and bbox[0] <= x <= bbox[2]
@@ -1986,9 +2011,10 @@ def _over_building(point: tuple[int, int]) -> bool:
 def _verified_villager_target() -> tuple[str, tuple[int, int]] | None:
     """Bind the strongest boxed villager, never an unbounded class guess.
 
-    A villager clear of buildings is preferred: live, the click meant for one in
-    front of the Town Center selected the Town Center (twice). One standing on a
-    building is still used when it is the only choice.
+    The click lands on the villager's body (`_villager_click_point`). A villager
+    whose click point is clear of buildings and animals is preferred: live, clicks
+    meant for villagers selected the Town Center twice and a cow three times. One
+    with a covered click point is still used when it is the only choice.
     """
     if not _fresh_spatial_cache():
         return None
@@ -2018,7 +2044,8 @@ def _verified_villager_target() -> tuple[str, tuple[int, int]] | None:
             continue
         x, y = int(center[0]), int(center[1])
         if bbox[0] <= x <= bbox[2] and bbox[1] <= y <= bbox[3]:
-            clear = not _over_building((x, y))
+            aim = _villager_click_point(bbox)
+            clear = not _over_building(aim) and not _over_animal(aim)
             candidates.append((clear, float(confidence), identifier, (x, y)))
     if not candidates:
         return None
@@ -2099,6 +2126,8 @@ def _resolve_coords(action_dict: dict[str, object]) -> tuple[str, tuple[int, int
                     return ("invalid bound target coordinates", None)
                 if (int(expected_coords[0]), int(expected_coords[1])) != coords:
                     return ("target moved after binding", None)
+            if expected_class == "villager":
+                return ("", _villager_click_point(entity["bbox"]))
             return ("", coords)
         log.warning("target_id_not_found", target_id=target_id)
         return (f"target_id '{target_id}' not found in detected entities", None)
