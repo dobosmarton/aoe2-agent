@@ -217,6 +217,16 @@ _PLACEMENT_ABANDON_SECONDS = 40.0
 # readings without it, a wood drop belongs to some later purchase: live, a lumber
 # camp's 100 wood "confirmed" a house that had sat unpaid for two minutes.
 _PLACEMENT_WOOD_READINGS = 20
+# A paid placement shows its wood leave within 3 s (all 6 paid placements in a Mac
+# game: 1.3-2.8 s). One whose wood never fell at all after this long, over several
+# readings, was refused by the game. Live, two such placements blocked a house for
+# 90 s while the population was capped.
+_PLACEMENT_PAYMENT_SECONDS = 6.0
+_PLACEMENT_PAYMENT_READINGS = 3
+# Ground the game refused, kept as offsets from the Town Center, so the next
+# placement tries other ground. A point this close to one is avoided.
+_REFUSED_PLACEMENT_RADIUS = 100
+_REFUSED_PLACEMENTS_KEPT = 6
 # A paid building not seen complete in this time is dropped from the purchases
 # that block a rebuild. A house takes about 25 s with one builder.
 _HOUSE_COMPLETION_SECONDS = 120.0
@@ -410,6 +420,12 @@ class _PendingPlacement:
     settle_deadline: float = 0.0
     # Fresh wood readings this placement has been judged against so far.
     wood_readings: int = 0
+    # Monotonic instant of the placement click; 0 means unknown.
+    noted_at: float = 0.0
+    # The lowest wood reading since the click, None before the first.
+    lowest_wood: int | None = None
+    # The click's offset from the Town Center, when the Town Center was in view.
+    home_offset: tuple[int, int] | None = None
 
     @property
     def is_house(self) -> bool:
@@ -459,6 +475,8 @@ class ActionLedger:
     # _SIGHTING_MIN_FRAMES as unverified sightings).
     building_sightings: dict[str, int] = field(default_factory=dict)
     pending_placements: list[_PendingPlacement] = field(default_factory=list)
+    # Offsets from the Town Center of placements the game refused, newest last.
+    refused_offsets: list[tuple[int, int]] = field(default_factory=list)
     # Circuit breaker (T-530): consecutive missing settlements per class, and
     # the monotonic instant until which a repeatedly-missing class stays blocked.
     missing_streaks: dict[str, int] = field(default_factory=dict)
@@ -1025,6 +1043,8 @@ def _note_pending_placement(
         selected_by=current_ledger().selected_by,
         point=point,
         settle_deadline=_now() + (_HOUSE_SETTLE_SECONDS if is_house else _PLACEMENT_SETTLE_SECONDS),
+        noted_at=_now(),
+        home_offset=_home_offset(point),
         operation_id=current_ledger().new_operation_id(),
         preexisting_entity_ids=frozenset(
             entity_id
@@ -1076,6 +1096,30 @@ def _settle_pending_placements(
             if wood_now is not None and wood_judged
             else "undecided"
         )
+        if wood_now is not None and wood_judged:
+            lowest = wood_now if pending.lowest_wood is None else min(pending.lowest_wood, wood_now)
+            pending = replace(pending, lowest_wood=lowest)
+        if verdict == "undecided" and _never_paid(pending, counting=wood_judged):
+            _note_missing_settlement(pending.building_class)
+            _remember_refused(pending)
+            outcomes.append(
+                ActionOutcome(
+                    pending.operation_id,
+                    f"build_{pending.building_class}",
+                    "failed",
+                    "placement refused: no wood left after the click",
+                )
+            )
+            log.warning(
+                "build_placement_refused",
+                building=pending.building_class,
+                wood_before=pending.wood_before,
+                lowest_wood=pending.lowest_wood,
+                readings=pending.wood_readings + 1,
+                x=pending.point[0],
+                y=pending.point[1],
+            )
+            continue
         if verdict == "undecided" and _now() >= (
             pending.settle_deadline + _PLACEMENT_ABANDON_SECONDS
         ):
@@ -1201,6 +1245,48 @@ def _house_verdict(
         return "undecided"
     claimed[pending.cap_before] = already + _HOUSE_CAP_STEP
     return "confirmed"
+
+
+def _never_paid(pending: _PendingPlacement, *, counting: bool) -> bool:
+    """Whether a placement's wood has had time to leave and never fell at all.
+
+    A partial drop stays undecided: gathering can hide part of a payment, never
+    all of it within the few seconds a payment takes to show.
+    """
+    readings = pending.wood_readings + (1 if counting else 0)
+    return (
+        pending.noted_at > 0
+        and _now() - pending.noted_at >= _PLACEMENT_PAYMENT_SECONDS
+        and readings >= _PLACEMENT_PAYMENT_READINGS
+        and pending.lowest_wood is not None
+        and pending.lowest_wood >= pending.wood_before
+    )
+
+
+def _home_offset(point: tuple[int, int]) -> tuple[int, int] | None:
+    """`point` relative to the detected Town Center, or None without one in view."""
+    tc = _resolve_target_class("town_center")
+    if tc is None or point == (0, 0):
+        return None
+    return (point[0] - tc[0], point[1] - tc[1])
+
+
+def _remember_refused(pending: _PendingPlacement) -> None:
+    if pending.home_offset is None:
+        return
+    refused = current_ledger().refused_offsets
+    refused.append(pending.home_offset)
+    del refused[:-_REFUSED_PLACEMENTS_KEPT]
+
+
+def _near_refused(point: tuple[int, int], home: tuple[int, int] | None) -> bool:
+    """Whether `point` is ground the game refused before, judged from the Town Center."""
+    if home is None:
+        return False
+    return any(
+        math.dist(point, (home[0] + dx, home[1] + dy)) <= _REFUSED_PLACEMENT_RADIUS
+        for dx, dy in current_ledger().refused_offsets
+    )
 
 
 def _wood_verdict(
@@ -2564,7 +2650,8 @@ def _open_ground_candidates(
             cy = int(ay + radius * math.sin(angle))
             if min_x <= cx <= max_x and min_y <= cy <= max_y and _explored((cx, cy)):
                 candidates.append((cx, cy))
-    candidates.sort(key=_clutter_score)
+    home = _resolve_target_class("town_center") if current_ledger().refused_offsets else None
+    candidates.sort(key=lambda point: (_near_refused(point, home), _clutter_score(point)))
     return candidates
 
 

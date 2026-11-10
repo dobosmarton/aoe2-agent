@@ -1643,10 +1643,11 @@ def test_fast_snapshots_do_not_expire_a_placement(
     _place_house(cap=20)
     for _ in range(50):
         clock.advance(0.5)
-        ex.observe_hud(10, 20, {"wood": 400})  # cap unmoved: undecided every time
+        # Cap unmoved and a partial drop gathering could explain: undecided every time.
+        ex.observe_hud(10, 20, {"wood": 190})
     assert ex._build_gates.pending_placements  # 25 s of readings, still waiting
     clock.advance(ex._HOUSE_SETTLE_SECONDS)
-    ex.observe_hud(10, 20, {"wood": 400})
+    ex.observe_hud(10, 20, {"wood": 190})
     assert ex._build_gates.pending_placements  # unknown spend keeps duplicate protection
     assert ex._build_gates.outcomes[-1].status == "uncertain"
 
