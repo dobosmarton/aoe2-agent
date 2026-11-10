@@ -49,11 +49,9 @@ def letterbox(image: Image.Image | np.ndarray, target_size: int | tuple[int, int
     preprocessing. Returns the CHW float32 tensor and the scale/pad needed to map
     detections back (see ``Letterboxed``).
 
-    The resize averages the source pixels each output pixel covers (OpenCV's area
-    filter), as PIL's default resize did. It is about twice as fast on a 3024-wide
-    Mac frame, and kept 99% of PIL's detections on 58 Mac frames, with the same
-    validation F1. A bilinear resize was faster still, but skips pixels at that
-    ratio and changed a tenth of the detections.
+    The resize averages the pixels each output pixel covers, as PIL's default
+    resize did, at about twice its speed. Don't switch to bilinear: it skips
+    pixels at a Mac frame's 2.6x shrink and changed a tenth of the detections.
     """
     pixels = np.asarray(image)
     target_h, target_w = (target_size, target_size) if isinstance(target_size, int) else target_size

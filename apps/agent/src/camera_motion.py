@@ -92,23 +92,28 @@ def cursor_exclusions(
 def analysis_pixels(rgb: bytes, width: int, height: int, limits: MotionLimits) -> np.ndarray:
     """Return a small grayscale view of the *native* pixels, before JPEG.
 
-    Grey first, then halved while the result stays at least twice the target, then
-    one last averaging step: 1.7 ms for a 3024x1898 frame, where PIL's resize took
-    16 ms idle and 33-47 ms in a running game. Each step averages, so fine terrain
-    doesn't alias. On Mac frames it found every synthetic camera shift PIL found.
+    Converting to grey first leaves a third of the data to shrink. Every step
+    averages, so fine terrain doesn't alias. It takes 1.7 ms for a 3024x1898 frame,
+    where PIL's resize took 16 ms idle and 33-47 ms in a running game.
     """
+    target = (limits.analysis_width, limits.analysis_height)
     pixels = np.frombuffer(rgb, dtype=np.uint8).reshape(height, width, 3)
     gray = cv2.cvtColor(pixels, cv2.COLOR_RGB2GRAY)
-    while (
-        gray.shape[1] >= 2 * limits.analysis_width and gray.shape[0] >= 2 * limits.analysis_height
-    ):
-        gray = cv2.resize(
-            gray, (gray.shape[1] // 2, gray.shape[0] // 2), interpolation=cv2.INTER_AREA
-        )
-    small = cv2.resize(
-        gray, (limits.analysis_width, limits.analysis_height), interpolation=cv2.INTER_AREA
-    )
+    small = cv2.resize(_halve_near(gray, target), target, interpolation=cv2.INTER_AREA)
     return small.astype(np.float32) / 255.0
+
+
+def _halve_near(gray: np.ndarray, size: tuple[int, int]) -> np.ndarray:
+    """`gray` halved with area averaging while it stays at least twice `size` (w, h).
+
+    Halving takes OpenCV's fast path; one area resize at 9.5x was slower than PIL.
+    """
+    width, height = size
+    shrunk = gray
+    while shrunk.shape[1] >= 2 * width and shrunk.shape[0] >= 2 * height:
+        half = (shrunk.shape[1] // 2, shrunk.shape[0] // 2)
+        shrunk = cv2.resize(shrunk, half, interpolation=cv2.INTER_AREA)
+    return shrunk
 
 
 def _shift(previous: np.ndarray, current: np.ndarray, excluded: np.ndarray) -> tuple[float, float]:

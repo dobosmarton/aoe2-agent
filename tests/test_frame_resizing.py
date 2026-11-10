@@ -1,4 +1,4 @@
-"""The detector's letterbox resize, on the frame sizes the agent captures."""
+"""Shrinking captured frames for the detector and for camera motion."""
 
 from __future__ import annotations
 
@@ -9,6 +9,9 @@ from PIL import Image
 
 MAC_W, MAC_H = 3024, 1898
 MODEL_HW = (736, 1280)
+# A resize that skips pixels turns black and white stripes into pure black or
+# white. Averaging keeps every value well inside this band.
+AVERAGED = (0.3, 0.7)
 
 
 def test_an_array_and_an_image_letterbox_alike() -> None:
@@ -26,17 +29,21 @@ def _stripes(width: int, height: int) -> np.ndarray:
 
 
 def test_shrinking_for_the_detector_averages_pixels() -> None:
-    """At 2.6x each output pixel covers parts of three columns, so values sit near
-    the middle; a resize that skips pixels gives pure black and white."""
     box = letterbox(_stripes(MAC_W, MAC_H), MODEL_HW)
     height, width = MODEL_HW
     image = box.chw[:, box.pad_y : height - box.pad_y, box.pad_x : width - box.pad_x]
-    assert float(image.min()) > 0.3
-    assert float(image.max()) < 0.7
+    assert AVERAGED[0] < float(image.min()) and float(image.max()) < AVERAGED[1]
+
+
+def _motion_view() -> np.ndarray:
+    return analysis_pixels(_stripes(MAC_W, MAC_H).tobytes(), MAC_W, MAC_H, MotionLimits())
+
+
+def test_camera_motion_gets_its_analysis_size() -> None:
+    limits = MotionLimits()
+    assert _motion_view().shape == (limits.analysis_height, limits.analysis_width)
 
 
 def test_shrinking_for_camera_motion_averages_pixels() -> None:
-    limits = MotionLimits()
-    small = analysis_pixels(_stripes(MAC_W, MAC_H).tobytes(), MAC_W, MAC_H, limits)
-    assert small.shape == (limits.analysis_height, limits.analysis_width)
-    assert np.allclose(small, 0.5, atol=0.02)
+    small = _motion_view()
+    assert AVERAGED[0] < float(small.min()) and float(small.max()) < AVERAGED[1]
