@@ -2052,12 +2052,21 @@ def _fresh_spatial_cache(*, static_target: bool = False) -> bool:
     return True
 
 
+# Herdable animals stand where they are until someone moves them, so a click may
+# use their box as long as a building's. Live, 18 sheep clicks in one game were
+# refused at the 1 s limit, though the view had been taken after the villager
+# was selected and the sheep hadn't moved.
+_STILL_ANIMALS = frozenset({"sheep", "goat", "cow", "buffalo"})
+
+
 def _static_click(action_dict: dict[str, object]) -> bool:
-    """A building placement, or a click on a target class that doesn't move."""
+    """A building placement, or a click on a target that stays where it is."""
     if action_dict.get("auto_placement"):
         return True
     target = action_dict.get("expected_class") or action_dict.get("target_class")
-    return isinstance(target, str) and bool(target) and target not in MOBILE_CLASSES
+    if not isinstance(target, str) or not target:
+        return False
+    return target in _STILL_ANIMALS or target not in MOBILE_CLASSES
 
 
 def _verified_villager_center() -> tuple[int, int] | None:

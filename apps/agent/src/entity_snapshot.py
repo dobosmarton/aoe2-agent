@@ -8,10 +8,11 @@ from math import isfinite
 from typing import Protocol, runtime_checkable
 
 MAX_SPATIAL_AGE_SECONDS = 1.0
-# Things that don't move (trees, mines, buildings, a building's placement) may be
-# clicked from evidence this old while the camera hasn't moved since. On the Mac
-# with the game running, a post-input view took 0.6-1.5 s, so the 1 s limit
-# refused every house placement and about a third of assignment clicks.
+# Things that stay where they are (trees, mines, buildings, a building's placement,
+# herdable animals) may be clicked from evidence this old while the camera hasn't
+# moved since. On the Mac with the game running, a post-input view took 0.6-1.5 s,
+# so the 1 s limit refused every house placement and about a third of assignment
+# clicks.
 STATIC_SPATIAL_AGE_SECONDS = 2.0
 # How old a view may be for the policy to offer actions that need it. The executor
 # takes a fresh view before it clicks, so this only asks whether the view still
