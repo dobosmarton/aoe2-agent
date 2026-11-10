@@ -197,7 +197,7 @@ The `_nms()` method sorts entities by confidence (highest first) and removes low
 
 ## 7.9 Camera-aware temporal association
 
-The live detector returns stateless single-frame boxes. `apps/agent/src/temporal_entities.py` associates fresh detections across captures for up to one second using camera-aligned geometry and short-term class evidence. It rejects ambiguous identity matches; predicted positions never become new sightings or click targets. See [streaming perception](../streaming-perception.md) for the full observation contract.
+The live detector returns stateless single-frame boxes. `apps/agent/src/tracking.py` associates fresh detections across captures with screentrack, a Rust port of the Python reference in `apps/agent/src/temporal_entities.py`, using camera-aligned geometry and short-term class evidence. It rejects ambiguous identity matches; predicted positions never become new sightings or click targets. See [streaming perception](../streaming-perception.md) for the full observation contract.
 
 ## 7.10 Singleton Access
 

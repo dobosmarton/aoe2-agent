@@ -102,7 +102,7 @@ The detector labels whole farms `villager`, at about 0.8 confidence. Boxes over 
 ### How far to trust this
 
 - **Colour:** the recording passes through a colour table fitted on paused frame pairs. The rule set before that check failed even for the VM's own frame moved by 1 px, so it was replaced by "no worse than harmless changes". The corrected recording meets that on five of six measures and misses the sixth by one object.
-- **Scope:** one match, played by a person, at the 5 Hz target. The agent reached about 0.08 fresh detections per second on the VM on 2026-11-01, and `apps/agent/src/loops/source.py` still resets at gaps over 1 s, so the agent won't see this until perception is faster.
+- **Scope:** one match, played by a person, at the 5 Hz target. The agent reached about 0.08 fresh detections per second on the VM on 2026-11-01, and until 2026-11-10 `apps/agent/src/loops/source.py` also reset tracks at any gap over 1 s, so the agent saw little of this.
 
 ### Held-out result
 
