@@ -46,7 +46,7 @@ def _resolve(cls: str) -> str:
     return detail
 
 
-@pytest.mark.parametrize("cls", ["tree", "gold_mine", "stone_mine", "house"])
+@pytest.mark.parametrize("cls", ["tree", "gold_mine", "stone_mine", "house", "sheep", "cow"])
 def test_a_resource_or_building_may_be_clicked_from_1_5_s_old_evidence(
     ledger: ex.ActionLedger, cls: str
 ) -> None:
@@ -54,7 +54,7 @@ def test_a_resource_or_building_may_be_clicked_from_1_5_s_old_evidence(
     assert _resolve(cls) == ""
 
 
-@pytest.mark.parametrize("cls", ["sheep", "villager", "deer"])
+@pytest.mark.parametrize("cls", ["villager", "deer", "boar"])
 def test_a_moving_target_keeps_the_one_second_limit(ledger: ex.ActionLedger, cls: str) -> None:
     _seen(cls, 1.5)
     assert "too old" in _resolve(cls)

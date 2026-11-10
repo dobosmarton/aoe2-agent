@@ -4,12 +4,19 @@ import json
 from pathlib import Path
 
 import pytest
-from gameplay_agent.game_profile import GameProfile, load_profile, recording_qualification
+from gameplay_agent.game_profile import (
+    GameProfile,
+    load_profile,
+    platform_problem,
+    recording_qualification,
+)
 from gameplay_agent.preflight import inspect_capture, run_preflight
+from gameplay_agent.window import Platform
 from pydantic import ValidationError
 
 _EXAMPLE = Path(__file__).parents[1] / "apps/agent/profiles/magyars_arabia_4v4.example.json"
 _HIGHLAND = Path(__file__).parents[1] / "apps/agent/profiles/magyars_highland_4v4.example.json"
+_MAC = Path(__file__).parents[1] / "apps/agent/profiles/magyars_arabia_4v4.macos.example.json"
 
 
 def test_example_is_structurally_valid_but_not_qualified() -> None:
@@ -118,3 +125,28 @@ def test_a_mac_profile_takes_a_zoom_and_a_modifier_map() -> None:
     profile = GameProfile.model_validate_json(json.dumps(data))
     assert profile.zoom_steps == 6
     assert profile.modifier_map == {"ctrl": "command"}
+
+
+def test_the_mac_game_needs_a_profile() -> None:
+    """Without one, games 3 and 4 ordered with the right button and every order failed."""
+    assert platform_problem(None, "macos") is not None
+
+
+def test_the_mac_game_refuses_a_windows_profile() -> None:
+    assert platform_problem(load_profile(_EXAMPLE), "macos") is not None
+
+
+def test_a_mac_profile_is_refused_on_windows() -> None:
+    assert platform_problem(load_profile(_MAC), "windows") is not None
+
+
+@pytest.mark.parametrize(
+    ("profile_path", "platform"),
+    [(_MAC, "macos"), (_EXAMPLE, "windows"), (None, "windows"), (None, "none")],
+    ids=["mac", "windows", "windows-without-profile", "no-window"],
+)
+def test_a_matching_or_optional_profile_is_accepted(
+    profile_path: Path | None, platform: Platform
+) -> None:
+    profile = load_profile(profile_path) if profile_path is not None else None
+    assert platform_problem(profile, platform) is None
