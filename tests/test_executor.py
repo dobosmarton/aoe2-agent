@@ -1379,6 +1379,20 @@ async def _refresh_known_hud() -> bool:
     return True
 
 
+async def _refresh_while_the_hud_lags() -> bool:
+    return True  # The view refreshed, but no HUD reading after the press came in.
+
+
+def test_queue_villager_needs_no_hud_reading_after_selecting_the_tc(
+    fake_pyautogui: _FakePyautogui,
+) -> None:
+    ex.observe_hud(10, 15, {"wood": 200, "food": 200}, villagers=3)
+
+    ex.set_rescan_fn(_refresh_while_the_hud_lags)
+    result = _run(ex.execute_action({"type": "queue_villager", "intent": "grow"}))
+    assert result.success, result.detail
+
+
 def test_queue_villager_reserves_then_confirms_order(fake_pyautogui: _FakePyautogui) -> None:
     ex.observe_hud(10, 15, {"wood": 200, "food": 200}, villagers=3)
 

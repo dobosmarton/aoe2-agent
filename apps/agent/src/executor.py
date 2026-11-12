@@ -510,6 +510,8 @@ class ActionLedger:
     camera_command_revision: int = 0
     selection_revision: int = 0
     economic_revision: int = 0
+    # The last input that may have spent resources; a HUD read after it is a baseline.
+    spending_input_revision: int = 0
     hud_revision: int = -1
     failure_streak: int = 0
     failure_count: int = 0
@@ -647,12 +649,30 @@ class ActionLedger:
         log.info("action_retry_deferred", action=action, seconds=seconds, reason=reason)
 
     def note_input(self) -> None:
+        """Note an input that may spend resources, such as a hotkey or a click."""
         self.input_revision += 1
+        self.spending_input_revision = self.input_revision
 
     def note_camera_input(self) -> None:
         self.note_input()
+        self._advance_camera()
+
+    def note_view_key(self) -> None:
+        """Note a key that only selects and moves the camera, so it spends nothing.
+
+        Live, treating `h` as a possible spend refused 31 of 56 villager orders:
+        the HUD lagged 1.7 s and no reading after the press came in time.
+        """
+        self.input_revision += 1
+        self._advance_camera()
+
+    def _advance_camera(self) -> None:
         self.camera_revision += 1
         self.camera_command_revision += 1
+
+    def resources_current(self) -> bool:
+        """Whether the HUD was read after the last input that may have spent resources."""
+        return self.hud_revision >= self.spending_input_revision
 
     def note_selection_input(self) -> None:
         self.note_input()
@@ -1028,7 +1048,7 @@ def _note_pending_placement(
         cls is None
         or cost is None
         or wood_before is None
-        or current_ledger().hud_revision != current_ledger().input_revision
+        or not current_ledger().resources_current()
         or "wood" not in current_ledger().known_resources
     ):
         # No wood baseline to settle against — the placement stays unconfirmed
@@ -1340,7 +1360,7 @@ def _note_pending_research(name: str, tech: Tech) -> _PendingResearch | None:
     before = current_ledger().resources
     if (
         before is None
-        or current_ledger().hud_revision != current_ledger().input_revision
+        or not current_ledger().resources_current()
         or any(kind not in current_ledger().known_resources for kind in _research_costs(tech))
     ):
         log.debug("research_pending_dropped", tech=name)
@@ -1448,7 +1468,7 @@ def _note_pending_training(unit: str) -> _PendingTraining | None:
     spec = UNITS[unit]
     if (
         before is None
-        or current_ledger().hud_revision != current_ledger().input_revision
+        or not current_ledger().resources_current()
         or any(kind not in current_ledger().known_resources for kind, _ in spec.cost)
     ):
         return None
@@ -2430,8 +2450,8 @@ async def set_absolute_zoom(zoom_steps: int) -> ActionResult:
 # ---------------------------------------------------------------------------
 
 BUILD_PLACEMENT_KEYWORDS = ("place", "build")
-# Hotkeys that re-center the camera — coordinates computed before one of these
-# no longer point at the same terrain (run 8, F-33).
+# Hotkeys that select and re-center the camera. Coordinates computed before one
+# of these no longer point at the same terrain (run 8, F-33). They spend nothing.
 CAMERA_KEYS: frozenset[str] = frozenset({"h", ".", ","})
 STALE_COORDS_DETAIL = (
     "raw x/y coordinates go stale once the camera moves (a '.'/'h'/',' press "
@@ -2987,7 +3007,10 @@ async def _handle_press(action_dict: dict[str, object], intent: str) -> ActionRe
         from . import keyboard_macos
 
         keyboard_macos.release_stuck_modifiers()  # A held flag would change the key sent.
-    if key.lower() in CAMERA_KEYS or action_dict.get("rescan"):
+    if key.lower() in CAMERA_KEYS and not modifiers:
+        current_ledger().note_view_key()
+        current_ledger().spatial_valid = False
+    elif key.lower() in CAMERA_KEYS or action_dict.get("rescan"):
         current_ledger().note_camera_input()
         current_ledger().spatial_valid = False
     elif action_dict.get("economic_input") is True:

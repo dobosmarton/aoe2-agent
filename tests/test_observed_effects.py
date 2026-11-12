@@ -104,6 +104,19 @@ def test_navigation_requires_new_hud_baseline_before_spending(ledger: ex.ActionL
     assert ex._note_pending_training("villager") is not None
 
 
+def test_a_view_key_keeps_the_hud_baseline(ledger: ex.ActionLedger) -> None:
+    ex.observe_hud(4, 5, {"food": 200}, villagers=3)
+    ledger.note_view_key()  # `h` selects the Town Center and spends nothing.
+    assert ex._note_pending_training("villager") is not None
+
+
+def test_a_view_key_does_not_hide_an_earlier_spend(ledger: ex.ActionLedger) -> None:
+    ex.observe_hud(4, 5, {"food": 200}, villagers=3)
+    ledger.note_input()
+    ledger.note_view_key()
+    assert ex._note_pending_training("villager") is None
+
+
 def test_military_population_does_not_deliver_villager(ledger: ex.ActionLedger) -> None:
     ex.observe_hud(4, 10, {"food": 200}, villagers=3)
     pending = ex._note_pending_training("villager")
