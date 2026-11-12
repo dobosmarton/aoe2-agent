@@ -129,7 +129,7 @@ ValueError: unknown AOE2_LLM_WIRE='zzz'; expected one of 'anthropic', 'openai', 
 | `AOE2_MODEL` | `gpt-5.6-luna` | Executor model (fast; runs every turn) |
 | `AOE2_EXECUTOR_EFFORT` | `low` | Executor effort (`low`/`medium`/`high`) |
 | `AOE2_STRATEGIST_MODEL` | `gpt-5.6-terra` | Strategist model (strong; runs every 3-10 turns) |
-| `AOE2_STRATEGIST_INTERVAL` | `10` | Run strategist every N turns |
+| `AOE2_STRATEGIST_PERIOD` | `25` | Seconds between strategist runs (it also runs on a new age or an alarm) |
 | `TYPESAFE_API_KEY` | — | TypeSafe credential for the required routine policy |
 | `AOE2_TYPESAFE_MODEL` | `jev-1.13.0` | TypeSafe System One model |
 | `AOE2_POLICY_TIMEOUT` | `2.0` | Maximum seconds the actor waits before revalidating advice on the latest frame |

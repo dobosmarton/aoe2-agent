@@ -121,6 +121,7 @@ async def act_once(
                     reason,
                     action=selected.id,
                     model=advice.model if advice is not None else None,
+                    **_advice_details(advice),
                 )
                 if selected.id == "tactical_handoff":
                     ctx.tactical_requested.set()
@@ -296,6 +297,22 @@ def _choose_action(
         "rejected",
         reason,
     )
+
+
+_RANKED_IN_LOG = 3
+
+
+def _advice_details(advice: PolicyAdvice | None) -> dict[str, object]:
+    """Jev's own answer, so a run review can see what it ranked, not just what ran."""
+    if advice is None:
+        return {}
+    ranked = sorted(advice.action_probabilities.items(), key=lambda item: -item[1])
+    return {
+        "advised": advice.action_choice,
+        "advised_confidence": round(advice.action_confidence, 2),
+        "advised_ranking": {action: round(p, 2) for action, p in ranked[:_RANKED_IN_LOG]},
+        "allocation_focus": advice.allocation_focus,
+    }
 
 
 def _log_outcome(

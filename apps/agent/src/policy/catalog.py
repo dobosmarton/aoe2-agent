@@ -345,3 +345,19 @@ AGE_ORDER = ("Dark Age", "Feudal Age", "Castle Age", "Imperial Age")
 DARK_BUILDINGS = frozenset({"mill", "lumber_camp", "mining_camp", "barracks"})
 FEUDAL_BUILDINGS = frozenset({"archery_range", "stable", "blacksmith", "market"})
 CASTLE_BUILDINGS = frozenset({"siege_workshop", "monastery", "university", "castle"})
+
+
+@dataclass(frozen=True, slots=True)
+class AgeUp:
+    """The research that leaves an age, and the buildings it asks for first."""
+
+    action_id: str
+    buildings: frozenset[str]
+    buildings_needed: int = 2
+
+
+AGE_UPS: dict[str, AgeUp] = {
+    "Dark Age": AgeUp("advance_to_feudal", DARK_BUILDINGS),
+    "Feudal Age": AgeUp("advance_to_castle", FEUDAL_BUILDINGS),
+    "Castle Age": AgeUp("advance_to_imperial", CASTLE_BUILDINGS),
+}

@@ -66,7 +66,7 @@ AOE2_DETECTION_HOST=http://192.168.64.1:8420
 ```
 
 `.env` is gitignored, and an exported variable still beats it — so
-`set AOE2_STRATEGIST_INTERVAL=3` overrides the file for that one window.
+`set AOE2_STRATEGIST_PERIOD=15` overrides the file for that one window.
 
 Every session after that:
 
@@ -154,7 +154,7 @@ These are accumulated failure modes from many bring-up attempts:
 | `AOE2_MODEL` | `gpt-5.6-luna` | Executor: fast, runs every turn. Pin to a dated snapshot for reproducibility (autoresearch runs). |
 | `AOE2_EXECUTOR_EFFORT` | `low` | `medium`/`high` for deeper executor reasoning at higher latency. |
 | `AOE2_STRATEGIST_MODEL` | `gpt-5.6-terra` | Strategist: strong, runs every 3-10 turns. Same pinning advice. |
-| `AOE2_STRATEGIST_INTERVAL` | `10` | Lower (e.g. 5) for tighter goal updates; higher (20+) to save strategist cost. |
+| `AOE2_STRATEGIST_PERIOD` | `25` | Seconds between strategist runs. Lower for tighter goal updates; higher to save strategist cost. |
 | `AOE2_LOOP_DELAY` | `0.3` | Slow CPU? Bump to 1.0. Fast CPU and you want more turns/min? 0.1. |
 | `AOE2_SAVE_SCREENSHOTS` | `true` | `false` if disk is filling up. |
 | `AOE2_TEMPERATURE` | `0.0` | Raise for output diversity at reproducibility cost. |

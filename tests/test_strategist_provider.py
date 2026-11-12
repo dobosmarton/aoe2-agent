@@ -12,11 +12,13 @@ import pytest
 from gameplay_agent.memory import GameState
 from gameplay_agent.providers import strategist as strat_mod
 from gameplay_agent.providers.strategist import (
+    StrategistGoal,
     StrategistProvider,
     StrategistResponse,
     VillagerTargets,
     as_allocation,
 )
+from pydantic import ValidationError
 
 
 class _RecordingApi:
@@ -111,3 +113,52 @@ def test_a_declared_target_becomes_an_allocation() -> None:
 def test_a_zero_resource_is_left_out_rather_than_targeted_at_zero() -> None:
     """`share()` divides by the total, so a 0 entry would only add noise."""
     assert "stone" not in as_allocation(VillagerTargets(food=6)).targets
+
+
+# ---------------------------------------------------------------------------
+# Planning inputs and cadence
+# ---------------------------------------------------------------------------
+
+
+def test_the_brief_reaches_the_prompt(provider: StrategistProvider, api: _RecordingApi) -> None:
+    brief = "## Next age\nFeudal Age costs 500 food (have 411)."
+    asyncio.run(provider.generate_goals(GameState(), "", "", turn=1, readings={}, brief=brief))
+    assert brief in _prompt_text(api)
+
+
+def test_a_goal_metric_the_agent_cannot_measure_is_refused() -> None:
+    with pytest.raises(ValidationError):
+        StrategistGoal(name="Farms", type="local", metric="farm", target="8", priority=9)
+
+
+def _planned(provider: StrategistProvider, age: str = "Dark Age") -> StrategistProvider:
+    asyncio.run(provider.generate_goals(GameState(), "", "", turn=1, readings={"age": age}))
+    provider._has_run = True  # The recording API skips the success path.
+    return provider
+
+
+def test_goals_are_not_replanned_within_the_period(provider: StrategistProvider) -> None:
+    planned = _planned(provider)
+    assert planned._last_run_at is not None
+    assert not planned.should_run(age="Dark Age", now=planned._last_run_at + 5)
+
+
+def test_goals_are_replanned_after_the_period(provider: StrategistProvider) -> None:
+    planned = _planned(provider)
+    assert planned._last_run_at is not None
+    due = planned._last_run_at + planned.period_seconds
+    assert planned.should_run(age="Dark Age", now=due)
+
+
+def test_a_new_age_replans_at_once(provider: StrategistProvider) -> None:
+    planned = _planned(provider)
+    assert planned._last_run_at is not None
+    assert planned.should_run(age="Feudal Age", now=planned._last_run_at + 1)
+
+
+def test_a_lasting_alarm_replans_only_after_its_cooldown(provider: StrategistProvider) -> None:
+    planned = _planned(provider)
+    assert planned._last_run_at is not None
+    start = planned._last_run_at + 1
+    assert planned.should_run(alarm=True, age="Dark Age", now=start)
+    assert not planned.should_run(alarm=True, age="Dark Age", now=start + 2)

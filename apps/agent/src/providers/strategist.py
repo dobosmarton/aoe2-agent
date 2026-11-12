@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import time
 from pathlib import Path
 from typing import ClassVar, Literal, cast
 
@@ -33,6 +34,25 @@ log = structlog.stdlib.get_logger()
 
 # Load strategist prompt
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
+# An alarm replans at once, but a lasting alarm only this often.
+_ALARM_COOLDOWN_SECONDS = 10.0
+
+
+# The metrics `GoalManager` can measure. A free-form metric ("farm", "lumber camp")
+# could never show progress, so the schema refuses it.
+GoalMetric = Literal[
+    "villagers",
+    "population",
+    "food_workers",
+    "wood_workers",
+    "gold_workers",
+    "stone_workers",
+    "food",
+    "wood",
+    "gold",
+    "stone",
+    "age",
+]
 
 
 class StrategistGoal(BaseModel):
@@ -40,7 +60,7 @@ class StrategistGoal(BaseModel):
 
     name: str
     type: str = Field(description="'local' or 'global'")
-    metric: str
+    metric: GoalMetric
     target: str = Field(description="Target value as string, e.g. '10', '200', 'Feudal Age'")
     priority: int = Field(ge=1, le=10)
 
@@ -310,9 +330,10 @@ def get_default_goals(turn: int = 0) -> list[Goal]:
 class StrategistProvider:
     """Sonnet-powered strategist that creates/updates goals.
 
-    Uses a stronger model for deeper reasoning about strategy.
-    Runs every N turns (configured via config.strategist_interval),
-    or immediately when an alarm is triggered (e.g. enemy attack).
+    Uses a stronger model for deeper reasoning about strategy. Runs every
+    `config.strategist_period` seconds, and sooner when the age changes or an
+    alarm starts. Replanning every few seconds discarded the policy's answers in
+    flight: 99 of 155 goal updates in one 12-minute game changed the goals.
     """
 
     def __init__(self, model: str | None = None, wire: ChatWire | None = None) -> None:
@@ -324,9 +345,11 @@ class StrategistProvider:
             base_url=config.llm_base_url,
             max_retries=2,
         )
-        self.refresh_interval = config.strategist_interval
+        self.period_seconds = config.strategist_period
+        self._last_run_at: float | None = None
+        self._planned_age: str | None = None
         self._system_prompt: str | None = None
-        self._last_alarm_turn: int = 0  # Cooldown tracking
+        self._last_alarm_at: float | None = None
         self._has_run: bool = False  # Track first successful run
         # Latest parsed allocation; None until the model supplies one.
         self.last_allocation: Allocation | None = None
@@ -347,25 +370,23 @@ class StrategistProvider:
         return self._system_prompt
 
     # Age-dependent refresh intervals for fresher readings in early game
-    _AGE_INTERVALS: ClassVar[dict[str, int]] = {
-        "Dark Age": 3,
-        "Feudal Age": 5,
-    }
-
-    def should_run(self, turn: int, alarm: bool = False, age: str = "") -> bool:
-        """Check if the strategist should run this turn."""
-        if not self._has_run:
-            return True  # Keep trying every turn until first success
-        interval = self._AGE_INTERVALS.get(age, self.refresh_interval)
-        if turn % interval == 0:
+    def should_run(self, *, alarm: bool = False, age: str = "", now: float | None = None) -> bool:
+        """Whether the goals are due: first run, a new age, an alarm, or the period."""
+        instant = time.monotonic() if now is None else now
+        if not self._has_run or self._last_run_at is None:
+            return True  # Keep trying until the first success.
+        if age and age != self._planned_age:
             return True
-        if alarm and (turn - self._last_alarm_turn) >= 3:
-            self._last_alarm_turn = turn
+        if alarm and (
+            self._last_alarm_at is None or instant - self._last_alarm_at >= _ALARM_COOLDOWN_SECONDS
+        ):
+            self._last_alarm_at = instant
             return True
-        return False
+        return instant - self._last_run_at >= self.period_seconds
 
     # Goals, not tool calls: one structured call is the whole interaction.
-    _MAX_TOKENS: ClassVar[int] = 768
+    # Answers with the full situation ran to 685 output tokens.
+    _MAX_TOKENS: ClassVar[int] = 1024
 
     async def _call_api(self, content: list[dict]) -> StrategistResponse:
         """Call the strategist model with structured output parsing.
@@ -401,6 +422,7 @@ class StrategistProvider:
         alarm: bool = False,
         readings: ResourceReadings | None = None,
         known_buildings: str = "",
+        brief: str = "",
     ) -> tuple[list[Goal], ResourceReadings]:
         """Ask the LLM (text-only) for goals from a HUD reading.
 
@@ -430,6 +452,8 @@ class StrategistProvider:
             "population", f"{game_state.population}/{game_state.population_cap}"
         )
         age = readings.get("age", game_state.current_age)
+        self._last_run_at = time.monotonic()
+        self._planned_age = str(age)
 
         alarm_banner = ""
         if alarm:
@@ -447,10 +471,12 @@ class StrategistProvider:
 ## Detected Entities on Screen
 {detected_entities_summary or "No entities detected"}
 {known_buildings}
+{brief}
+
 ## Current Goals
 {current_goals_summary}
 
-Create 3-5 prioritized goals based on the state above. Keep goals that are still relevant, replace completed or irrelevant ones."""
+Set 3-5 prioritized goals for what is holding the objective back now. Keep goals that are still right; replace completed or wrong ones."""
 
         content: list[dict] = [{"type": "text", "text": prompt_text}]
 
@@ -458,8 +484,13 @@ Create 3-5 prioritized goals based on the state above. Keep goals that are still
             result = await self._call_api(content)
             log.info(
                 "strategist_response",
-                reasoning=result.reasoning[:150],
+                reasoning=result.reasoning[:300],
                 goal_count=len(result.goals),
+                goals=[
+                    f"P{goal.priority} {goal.name} [{goal.metric} -> {goal.target}]"
+                    for goal in result.goals
+                ],
+                allocation=result.allocation.per_kind(),
             )
 
             # Convert to Goal objects

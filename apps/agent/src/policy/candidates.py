@@ -7,15 +7,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, TypeAlias, cast
 
 from ..entity_utils import GATHER_CLASSES_BY_KIND, RESOURCE_KINDS, ResourceKind
-from .catalog import (
-    AGE_ORDER,
-    BY_ID,
-    CASTLE_BUILDINGS,
-    DARK_BUILDINGS,
-    FEUDAL_BUILDINGS,
-    SPECS,
-    ActionSpec,
-)
+from .catalog import AGE_ORDER, AGE_UPS, BY_ID, SPECS, ActionSpec
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -93,17 +85,7 @@ def eligible(spec: ActionSpec, state: PolicyState) -> bool:
             or spec.subject in state.research_purchases
         ):
             return False
-        if spec.subject == "feudal_age" and (
-            state.age != "Dark Age" or len(state.buildings_seen & DARK_BUILDINGS) < 2
-        ):
-            return False
-        if spec.subject == "castle_age" and (
-            state.age != "Feudal Age" or len(state.buildings_seen & FEUDAL_BUILDINGS) < 2
-        ):
-            return False
-        if spec.subject == "imperial_age" and (
-            state.age != "Castle Age" or len(state.buildings_seen & CASTLE_BUILDINGS) < 2
-        ):
+        if spec.id in _AGE_UP_IDS and not _age_up_ready(spec.id, state):
             return False
     if spec.kind == "train" and (
         not state.population_known
@@ -123,6 +105,19 @@ def eligible(spec: ActionSpec, state: PolicyState) -> bool:
         if not GATHER_CLASSES_BY_KIND[cast("ResourceKind", spec.subject)] & state.visible_classes:
             return False
     return spec.kind != "handoff" or state.own_army_present
+
+
+_AGE_UP_IDS = frozenset(age_up.action_id for age_up in AGE_UPS.values())
+
+
+def _age_up_ready(action_id: str, state: PolicyState) -> bool:
+    """Whether this is the current age's age-up and its buildings stand."""
+    age_up = AGE_UPS.get(state.age)
+    return (
+        age_up is not None
+        and age_up.action_id == action_id
+        and len(state.buildings_seen & age_up.buildings) >= age_up.buildings_needed
+    )
 
 
 def feasible_candidates(state: PolicyState) -> tuple[ActionCandidate, ...]:

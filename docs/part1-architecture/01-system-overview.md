@@ -87,7 +87,7 @@ Configuration uses a Pydantic `BaseModel` with environment variable overrides (`
 | `model` | `AOE2_MODEL` | `gpt-5.6-luna` | Executor model (fast; runs every turn) |
 | `executor_effort` | `AOE2_EXECUTOR_EFFORT` | `low` | Executor `output_config` effort (`low`/`medium`/`high`) |
 | `strategist_model` | `AOE2_STRATEGIST_MODEL` | `gpt-5.6-terra` | Strategist model (strong; deeper reasoning) |
-| `strategist_interval` | `AOE2_STRATEGIST_INTERVAL` | `10` | Run strategist every N turns |
+| `strategist_period` | `AOE2_STRATEGIST_PERIOD` | `25` | Seconds between strategist runs (it also runs on a new age or an alarm) |
 | `max_tokens` | — | `1536` | Max response tokens per executor call |
 | `max_tool_iterations` | — | `7` | Max tool roundtrips per turn (tool-loop path) |
 | `detection_imgsz` | — | `1280` | YOLO inference resolution (matches v9's training resolution) |
