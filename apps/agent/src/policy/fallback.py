@@ -97,14 +97,14 @@ def select_fallback(
         if candidate := by_id.get(action_id):
             return candidate
     target = _VILLAGER_PREFERENCE.get(state.age)
-    economy_growing = target is not None and state.villagers_ordered < target
-    if (target is None or economy_growing) and (villager := by_id.get("queue_villager")):
+    if (target is None or state.villagers_ordered < target) and (
+        villager := by_id.get("queue_villager")
+    ):
         return villager
-    # Dark Age wood goes to the economy first. Live, a barracks took the last
-    # 175 wood at 4 villagers while the Town Center waited for a house.
-    holds_military = state.age == "Dark Age" and economy_growing
-    military = () if holds_military else (*_MILITARY_PATH, *_TRAINING.get(state.age, ()))
-    for action_id in military:
+    for action_id in _MILITARY_PATH:
+        if candidate := by_id.get(action_id):
+            return candidate
+    for action_id in _TRAINING.get(state.age, ()):
         if candidate := by_id.get(action_id):
             return candidate
     for action_id in (
