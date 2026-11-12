@@ -17,6 +17,10 @@ from gameplay_agent.loops.snapshot import Perception, SpatialRefresh
 from gameplay_agent.loops.source import frame_refresh
 from gameplay_agent.memory import AgentMemory
 from gameplay_agent.policy.advice import PolicyAdvice, PolicyRequest, readonly_probabilities
+from gameplay_agent.policy.candidates import candidate_for
+from gameplay_agent.policy.catalog import BY_ID
+from gameplay_agent.policy.controller import AgentController
+from gameplay_agent.policy.request import build_policy_request
 from gameplay_agent.policy.state import PolicyState
 from gameplay_agent.providers.policy import PolicyAdvisorError
 from gameplay_agent.turn_timing import ACT_LOOP
@@ -178,26 +182,6 @@ def test_overdue_opening_food_obligation_bypasses_model_wait(tmp_path, gates) ->
     _run(act.act_once(ctx, advisor, frame, tick=1))
     assert advisor.requests == []
     assert ctx.actuator.actions[0]["type"] == "assign_idle"
-
-
-def test_overdue_idle_tc_obligation_queues_one_villager(tmp_path, gates) -> None:
-    ctx = _context(tmp_path)
-    advisor = _HouseAdvisor(action="wait")
-    captured_at = time.monotonic() - 6.0
-    frame = Perception(
-        captured_at=captured_at,
-        world=PolicyState(
-            food=100,
-            population=4,
-            population_cap=5,
-            villagers=3,
-            idle_present=False,
-            captured_at=captured_at,
-        ),
-    )
-    _run(act.act_once(ctx, advisor, frame, tick=1))
-    assert advisor.requests == []
-    assert ctx.actuator.actions[0]["type"] == "queue_villager"
 
 
 def test_hud_only_frame_can_service_tc_without_authorizing_spatial_clicks(tmp_path, gates) -> None:
@@ -844,3 +828,82 @@ def test_the_decision_log_keeps_jevs_top_three() -> None:
         "build_farm": 0.28,
         "wait": 0.12,
     }
+
+
+def _farm_frame() -> Perception:
+    """Wood for a farm, nothing the fallback list would buy, no idle villager."""
+    return Perception(
+        entities=(_ent("town_center", (0.0, 0.0)), _ent("villager", (10.0, 10.0))),
+        world=PolicyState(
+            food=0,
+            wood=100,
+            population=10,
+            population_cap=30,
+            villagers=10,
+            buildings_seen=frozenset({"mill", "lumber_camp"}),
+            idle_present=False,
+        ),
+        tick=1,
+    )
+
+
+def _overdue_villager_frame() -> Perception:
+    """The Town Center has idled long enough for its obligation to be due."""
+    return Perception(
+        entities=(_ent("town_center", (0.0, 0.0)),),
+        world=PolicyState(
+            food=500,
+            population=10,
+            population_cap=30,
+            villagers=10,
+            buildings_seen=frozenset({"mill", "lumber_camp"}),
+            idle_present=False,
+            captured_at=time.monotonic() - 10,
+        ),
+        tick=1,
+    )
+
+
+def test_an_unsure_pick_beats_a_fallback_that_would_only_wait(tmp_path, gates) -> None:
+    actuator = FakeActuator()
+    ctx = _context(tmp_path, actuator)
+
+    _run(
+        act.act_once(ctx, _HouseAdvisor(action="build_farm", confidence=0.3), _farm_frame(), tick=1)
+    )
+
+    assert [action["type"] for action in actuator.actions] == ["build"]
+
+
+def test_a_confident_choice_may_skip_queueing_a_villager(tmp_path, gates) -> None:
+    actuator = FakeActuator()
+    ctx = _context(tmp_path, actuator)
+
+    _run(act.act_once(ctx, _HouseAdvisor(action="wait"), _overdue_villager_frame(), tick=1))
+
+    assert actuator.actions == []
+
+
+def test_an_unsure_advisor_leaves_the_villager_obligation_in_force(tmp_path, gates) -> None:
+    actuator = FakeActuator()
+    ctx = _context(tmp_path, actuator)
+
+    _run(
+        act.act_once(
+            ctx, _HouseAdvisor(action="wait", confidence=0.3), _overdue_villager_frame(), tick=1
+        )
+    )
+
+    assert [action["type"] for action in actuator.actions] == ["queue_villager"]
+
+
+def test_a_wait_without_a_villager_on_offer_does_not_skip_one() -> None:
+    no_food = build_policy_request(
+        source_tick=1,
+        source_captured_at=0.0,
+        state=PolicyState(population=10, population_cap=30),
+        goals=(),
+    )
+    villager = candidate_for(BY_ID["queue_villager"])
+    wait = candidate_for(BY_ID["wait"])
+    assert not act._declines(AgentController(), villager, wait, no_food)
