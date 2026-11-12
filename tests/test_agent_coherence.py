@@ -296,6 +296,33 @@ def test_food_shortage_without_a_mill_sends_idle_worker_to_wood() -> None:
     assert choice.id == "assign_wood"
 
 
+def _housed_dark_age(villagers_ordered: int) -> PolicyState:
+    return PolicyState(
+        food=40,
+        wood=200,
+        population=5,
+        population_cap=5,
+        villagers=4,
+        villagers_ordered=villagers_ordered,
+        idle_present=False,
+        visible_classes=frozenset({"villager"}),
+        buildings_seen=frozenset({"house", "mill", "lumber_camp"}),
+        pending_buildings=frozenset({"house"}),
+    )
+
+
+def test_dark_age_wood_is_not_spent_on_a_barracks_while_villagers_are_wanted() -> None:
+    state = _housed_dark_age(villagers_ordered=5)
+    choice = select_fallback(feasible_candidates(state), state, None)
+    assert choice.id != "build_barracks"
+
+
+def test_dark_age_barracks_follows_the_villager_target() -> None:
+    state = _housed_dark_age(villagers_ordered=30)
+    choice = select_fallback(feasible_candidates(state), state, None)
+    assert choice.id == "build_barracks"
+
+
 def test_empty_workforce_respects_wood_only_allocation() -> None:
     state = PolicyState(
         food=100,

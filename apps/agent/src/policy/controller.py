@@ -17,10 +17,14 @@ if TYPE_CHECKING:
 _SERVICE_DEADLINE_SECONDS = 5.0
 _IDLE_WORKER = "idle_worker"
 _TC_PRODUCTION = "tc_production"
+# An idle villager wanted on food builds a farm when no food source is in view.
+# Live, those villagers went to wood instead: 6 on food and 18 on wood after
+# 12 minutes, with 800 wood banked and food short of the Feudal Age.
+_FARM = "build_farm"
 
 
 def _obligation_for(action_id: str) -> str | None:
-    if action_id.startswith("assign_"):
+    if action_id.startswith("assign_") or action_id == _FARM:
         return _IDLE_WORKER
     if action_id == "queue_villager":
         return _TC_PRODUCTION
@@ -35,16 +39,29 @@ def essential_intentions(
     """Named actions needed for basic growth; feasibility stays in the catalog."""
     available = {candidate.id for candidate in candidates}
     due: list[str] = []
-    if state.idle_present and not state.assignment_pending:
-        preferred = next_kind(for_state(state, allocation), state.villager_jobs)
-        for kind in (preferred, "food", "wood", "gold", "stone"):
-            action_id = f"assign_{kind}"
-            if action_id in available:
-                due.append(action_id)
-                break
+    idle = state.idle_present and not state.assignment_pending
+    if idle and (idle_work := _idle_worker_action(state, available, allocation)):
+        due.append(idle_work)
     if state.pending_villagers == 0 and "queue_villager" in available:
         due.append("queue_villager")
     return tuple(due)
+
+
+def _idle_worker_action(
+    state: PolicyState, available: set[str], allocation: Allocation | None
+) -> str | None:
+    """The job for an idle villager: the most wanted resource, or a farm for food."""
+    preferred = next_kind(for_state(state, allocation), state.villager_jobs)
+    if preferred == "food" and "assign_food" not in available and _FARM in available:
+        return _FARM
+    return next(
+        (
+            f"assign_{kind}"
+            for kind in (preferred, "food", "wood", "gold", "stone")
+            if f"assign_{kind}" in available
+        ),
+        None,
+    )
 
 
 @dataclass(slots=True)

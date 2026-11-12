@@ -176,3 +176,24 @@ def test_render_returns_fresh_mutable_action_dictionaries() -> None:
     first[0]["intent"] = "changed"
 
     assert house.render()[0]["intent"] == "Build house (TypeSafe)"
+
+
+def test_idle_food_worker_builds_a_farm_when_no_food_is_in_view() -> None:
+    controller = AgentController()
+    state = PolicyState(
+        food=100,
+        wood=300,
+        population=20,
+        population_cap=30,
+        villagers=19,
+        idle_present=True,
+        visible_classes=frozenset({"villager", "tree"}),
+        buildings_seen=frozenset({"mill"}),
+        villager_jobs={"food": 4, "wood": 14},
+        captured_at=0.0,
+    )
+    candidates = feasible_candidates(state)
+    assert controller.overdue(state, candidates, None, now=0.0) is None
+    overdue = controller.overdue(state, candidates, None, now=5.1)
+    assert overdue is not None
+    assert overdue.id == "build_farm"
