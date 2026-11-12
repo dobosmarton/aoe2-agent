@@ -9,15 +9,17 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .entity_utils import GATHER_CLASSES_BY_KIND, RESOURCE_KINDS
+from .policy.allocation import gatherable_kinds
 from .policy.catalog import AGE_ORDER, AGE_UPS, BY_ID, SPECS
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from .policy.catalog import ActionSpec
+    from .policy.catalog import ActionSpec, Resource
     from .policy.state import PolicyState
 
 _PLANNED_KINDS = frozenset({"build", "train", "research"})
+_UNREAD = "not read"
 
 
 def strategist_brief(state: PolicyState, recent_failures: Sequence[str]) -> str:
@@ -40,10 +42,14 @@ def _situation_lines(state: PolicyState, recent_failures: Sequence[str]) -> list
     lines.append(f"Buildings standing: {_names(state.buildings_seen)}.")
     if state.building_purchases:
         lines.append(f"Paid for, not yet seen finished: {_names(state.building_purchases)}.")
-    if state.pending_buildings:
-        lines.append(f"Placed, payment not yet seen: {_names(state.pending_buildings)}.")
+    unpaid = state.pending_buildings - state.building_purchases
+    if unpaid:
+        lines.append(f"Placed, payment not yet seen: {_names(unpaid)}.")
     food_in_view = state.visible_classes & GATHER_CLASSES_BY_KIND["food"]
     lines.append(f"Natural food in view (sheep, berries, ...): {_names(food_in_view)}.")
+    lines.append(
+        f"Resources the agent gathers in this age: {', '.join(gatherable_kinds(state.age))}."
+    )
     if recent_failures:
         lines.append("Recent failed actions: " + "; ".join(recent_failures) + ".")
     return lines
@@ -52,7 +58,7 @@ def _situation_lines(state: PolicyState, recent_failures: Sequence[str]) -> list
 def _villager_line(state: PolicyState) -> str:
     if state.villagers is None:
         return "Villagers: count not read."
-    jobs = ", ".join(f"{kind} {state.villager_jobs.get(kind, 0)}" for kind in RESOURCE_KINDS)
+    jobs = ", ".join(f"{kind} {state.villager_jobs.get(kind, _UNREAD)}" for kind in RESOURCE_KINDS)
     idle = "unknown" if state.idle_count is None else str(state.idle_count)
     return f"Villagers: {state.villagers} ({jobs}, idle {idle})."
 
@@ -71,12 +77,18 @@ def _age_gap_line(state: PolicyState) -> str:
     if not state.age_known or age_up is None:
         return "No further age to reach." if state.age_known else "Current age not read."
     spec = BY_ID[age_up.action_id]
-    costs = ", ".join(f"{price} {kind} (have {getattr(state, kind)})" for kind, price in spec.cost)
+    costs = ", ".join(f"{price} {kind} (have {_banked(state, kind)})" for kind, price in spec.cost)
     standing = state.buildings_seen & age_up.buildings
+    missing = max(age_up.buildings_needed - len(standing), 0)
+    verdict = "requirement met" if missing == 0 else f"{missing} more needed"
     return (
-        f"{_next_age(state.age)} costs {costs}, and needs {age_up.buildings_needed} of "
-        f"{_names(age_up.buildings)} (standing: {_names(standing)})."
+        f"{_next_age(state.age)} costs {costs}. It also needs any {age_up.buildings_needed} of "
+        f"{_names(age_up.buildings)}: {len(standing)} standing ({_names(standing)}), {verdict}."
     )
+
+
+def _banked(state: PolicyState, kind: Resource) -> int | str:
+    return getattr(state, kind) if kind in state.known_resources else _UNREAD
 
 
 def _next_age(age: str) -> str:

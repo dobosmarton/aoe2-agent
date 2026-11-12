@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 
+from gameplay_agent.policy.allocation import Allocation
 from gameplay_agent.policy.candidates import feasible_candidates
 from gameplay_agent.policy.controller import AgentController
 from gameplay_agent.policy.state import PolicyState
@@ -195,5 +196,27 @@ def test_idle_food_worker_builds_a_farm_when_no_food_is_in_view() -> None:
     candidates = feasible_candidates(state)
     assert controller.overdue(state, candidates, None, now=0.0) is None
     overdue = controller.overdue(state, candidates, None, now=5.1)
+    assert overdue is not None
+    assert overdue.id == "build_farm"
+
+
+def test_a_dark_age_gold_target_does_not_route_idle_villagers_past_farms() -> None:
+    controller = AgentController()
+    state = PolicyState(
+        food=100,
+        wood=300,
+        population=20,
+        population_cap=30,
+        villagers=19,
+        idle_present=True,
+        visible_classes=frozenset({"villager", "tree"}),
+        buildings_seen=frozenset({"mill"}),
+        villager_jobs={"food": 13, "wood": 5},
+        captured_at=0.0,
+    )
+    with_gold = Allocation(targets={"food": 16, "wood": 5, "gold": 5})
+    candidates = feasible_candidates(state)
+    controller.overdue(state, candidates, with_gold, now=0.0)
+    overdue = controller.overdue(state, candidates, with_gold, now=5.1)
     assert overdue is not None
     assert overdue.id == "build_farm"

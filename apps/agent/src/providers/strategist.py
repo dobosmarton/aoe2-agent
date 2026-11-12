@@ -36,6 +36,8 @@ log = structlog.stdlib.get_logger()
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 # An alarm replans at once, but a lasting alarm only this often.
 _ALARM_COOLDOWN_SECONDS = 10.0
+# How soon to plan again after a failed run, or once every goal is met.
+_RETRY_SECONDS = 5.0
 
 
 # The metrics `GoalManager` can measure. A free-form metric ("farm", "lumber camp")
@@ -331,9 +333,10 @@ class StrategistProvider:
     """Sonnet-powered strategist that creates/updates goals.
 
     Uses a stronger model for deeper reasoning about strategy. Runs every
-    `config.strategist_period` seconds, and sooner when the age changes or an
-    alarm starts. Replanning every few seconds discarded the policy's answers in
-    flight: 99 of 155 goal updates in one 12-minute game changed the goals.
+    `config.strategist_period` seconds, and sooner when the age changes, an
+    alarm starts, every goal is met or the last run failed. Replanning every
+    few seconds discarded the policy's answers in flight: 99 of 155 goal
+    updates in one 12-minute game changed the goals.
     """
 
     def __init__(self, model: str | None = None, wire: ChatWire | None = None) -> None:
@@ -347,6 +350,7 @@ class StrategistProvider:
         )
         self.period_seconds = config.strategist_period
         self._last_run_at: float | None = None
+        self._last_run_succeeded = False
         self._planned_age: str | None = None
         self._system_prompt: str | None = None
         self._last_alarm_at: float | None = None
@@ -369,12 +373,23 @@ class StrategistProvider:
                 self._system_prompt = "You are a strategic advisor for an AoE2 AI. Create 3-5 prioritized goals as JSON."
         return self._system_prompt
 
-    # Age-dependent refresh intervals for fresher readings in early game
-    def should_run(self, *, alarm: bool = False, age: str = "", now: float | None = None) -> bool:
-        """Whether the goals are due: first run, a new age, an alarm, or the period."""
+    def should_run(
+        self,
+        *,
+        alarm: bool = False,
+        age: str = "",
+        goals_left: bool = True,
+        now: float | None = None,
+    ) -> bool:
+        """Whether the goals are due.
+
+        A new age or an alarm replans at once. A failed run, or one whose goals
+        are all met, is followed up after `_RETRY_SECONDS`; otherwise the goals
+        stand for the period.
+        """
         instant = time.monotonic() if now is None else now
-        if not self._has_run or self._last_run_at is None:
-            return True  # Keep trying until the first success.
+        if self._last_run_at is None:
+            return True
         if age and age != self._planned_age:
             return True
         if alarm and (
@@ -382,11 +397,14 @@ class StrategistProvider:
         ):
             self._last_alarm_at = instant
             return True
-        return instant - self._last_run_at >= self.period_seconds
+        settled = self._last_run_succeeded and goals_left
+        wait = self.period_seconds if settled else _RETRY_SECONDS
+        return instant - self._last_run_at >= wait
 
     # Goals, not tool calls: one structured call is the whole interaction.
-    # Answers with the full situation ran to 685 output tokens.
-    _MAX_TOKENS: ClassVar[int] = 1024
+    # Answers with the full situation ran to 685 tokens, reasoning included. A
+    # cut-off answer is a failed run, so the limit leaves room.
+    _MAX_TOKENS: ClassVar[int] = 2048
 
     async def _call_api(self, content: list[dict]) -> StrategistResponse:
         """Call the strategist model with structured output parsing.
@@ -453,7 +471,9 @@ class StrategistProvider:
         )
         age = readings.get("age", game_state.current_age)
         self._last_run_at = time.monotonic()
-        self._planned_age = str(age)
+        self._last_run_succeeded = False
+        # The age `should_run` is asked about, so the two can't disagree.
+        self._planned_age = game_state.current_age
 
         alarm_banner = ""
         if alarm:
@@ -517,9 +537,14 @@ Set 3-5 prioritized goals for what is holding the objective back now. Keep goals
                 )
             self.last_allocation = as_allocation(result.allocation)
             self._has_run = True
+            self._last_run_succeeded = True
             return goals, readings
 
         except Exception as e:
-            # OCR already succeeded — return its readings even if goal-gen failed.
             log.error("strategist_error", error=str(e))
+            if self._has_run:
+                # The caller keeps the goals it has: the defaults would replace a
+                # real plan for a whole period.
+                raise
+            # OCR already succeeded — return its readings even if goal-gen failed.
             return get_default_goals(turn), readings

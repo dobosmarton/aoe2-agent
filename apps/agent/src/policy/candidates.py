@@ -7,6 +7,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, TypeAlias, cast
 
 from ..entity_utils import GATHER_CLASSES_BY_KIND, RESOURCE_KINDS, ResourceKind
+from .allocation import gatherable_kinds
 from .catalog import AGE_ORDER, AGE_UPS, BY_ID, SPECS, ActionSpec
 
 if TYPE_CHECKING:
@@ -100,7 +101,7 @@ def eligible(spec: ActionSpec, state: PolicyState) -> bool:
             return False
         if spec.subject not in RESOURCE_KINDS:
             return False
-        if state.age == "Dark Age" and spec.subject in {"gold", "stone"}:
+        if spec.subject not in gatherable_kinds(state.age):
             return False
         if not GATHER_CLASSES_BY_KIND[cast("ResourceKind", spec.subject)] & state.visible_classes:
             return False

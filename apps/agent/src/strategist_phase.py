@@ -88,7 +88,11 @@ def maybe_launch_strategist(
 
     Returns the new task, or the existing pending task if one is still running.
     """
-    if not strategist.should_run(alarm=view.alarm, age=memory.game_state.current_age):
+    if not strategist.should_run(
+        alarm=view.alarm,
+        age=memory.game_state.current_age,
+        goals_left=bool(goal_manager.active_goals),
+    ):
         return pending_task
 
     if pending_task is not None and not pending_task.done():

@@ -17,6 +17,7 @@ from gameplay_agent.providers.strategist import (
     StrategistResponse,
     VillagerTargets,
     as_allocation,
+    get_default_goals,
 )
 from pydantic import ValidationError
 
@@ -131,10 +132,13 @@ def test_a_goal_metric_the_agent_cannot_measure_is_refused() -> None:
         StrategistGoal(name="Farms", type="local", metric="farm", target="8", priority=9)
 
 
-def _planned(provider: StrategistProvider, age: str = "Dark Age") -> StrategistProvider:
-    asyncio.run(provider.generate_goals(GameState(), "", "", turn=1, readings={"age": age}))
-    provider._has_run = True  # The recording API skips the success path.
+def _planned(provider: StrategistProvider) -> StrategistProvider:
+    asyncio.run(provider.generate_goals(GameState(), "", "", turn=1, readings={}))
     return provider
+
+
+async def _failing_api(_content: list[dict]) -> StrategistResponse:
+    raise RuntimeError("model unavailable")
 
 
 def test_goals_are_not_replanned_within_the_period(provider: StrategistProvider) -> None:
@@ -162,3 +166,41 @@ def test_a_lasting_alarm_replans_only_after_its_cooldown(provider: StrategistPro
     start = planned._last_run_at + 1
     assert planned.should_run(alarm=True, age="Dark Age", now=start)
     assert not planned.should_run(alarm=True, age="Dark Age", now=start + 2)
+
+
+def test_met_goals_are_replaced_without_waiting_for_the_period(
+    provider: StrategistProvider,
+) -> None:
+    planned = _planned(provider)
+    assert planned._last_run_at is not None
+    soon = planned._last_run_at + strat_mod._RETRY_SECONDS
+    assert planned.should_run(age="Dark Age", goals_left=False, now=soon)
+
+
+def test_a_failed_first_run_falls_back_to_the_default_goals(
+    provider: StrategistProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(provider, "_call_api", _failing_api)
+    goals, _readings = asyncio.run(provider.generate_goals(GameState(), "", "", turn=1))
+    assert [goal.name for goal in goals] == [goal.name for goal in get_default_goals()]
+
+
+def test_a_failed_later_run_leaves_the_goals_to_the_caller(
+    provider: StrategistProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    planned = _planned(provider)
+    monkeypatch.setattr(planned, "_call_api", _failing_api)
+    with pytest.raises(RuntimeError):
+        asyncio.run(planned.generate_goals(GameState(), "", "", turn=2, readings={}))
+
+
+def test_a_failed_run_is_retried_before_the_period(
+    provider: StrategistProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    planned = _planned(provider)
+    monkeypatch.setattr(planned, "_call_api", _failing_api)
+    with pytest.raises(RuntimeError):
+        asyncio.run(planned.generate_goals(GameState(), "", "", turn=2, readings={}))
+    assert planned._last_run_at is not None
+    soon = planned._last_run_at + strat_mod._RETRY_SECONDS
+    assert planned.should_run(age="Dark Age", now=soon)

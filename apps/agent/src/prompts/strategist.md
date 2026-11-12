@@ -10,8 +10,8 @@ never gets capped. When enemies attack, defending the economy comes first.
 
 A fast executor picks one action at a time and ranks the actions by your goals. It
 follows them literally, so anything your goals leave out gets neglected, including
-houses and villager production. You run again every 20 to 30 seconds, or sooner when
-the age changes or an attack starts.
+houses and villager production. You run again a few times a minute, and sooner when
+the age changes, an attack starts or every goal is met.
 
 From the situation you are given, work out what is holding the objective back right
 now, and set 3 to 5 goals that remove it, most urgent first. Keep a goal while it is
