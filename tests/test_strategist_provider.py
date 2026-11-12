@@ -7,6 +7,8 @@ reading and only self-OCRs on the standalone/eval path (readings=None).
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import time
 
 import pytest
 from gameplay_agent.memory import GameState
@@ -137,43 +139,62 @@ def _planned(provider: StrategistProvider) -> StrategistProvider:
     return provider
 
 
+def _failed_after_planning(
+    provider: StrategistProvider, monkeypatch: pytest.MonkeyPatch
+) -> StrategistProvider:
+    planned = _planned(provider)
+    monkeypatch.setattr(planned, "_call_api", _failing_api)
+    with contextlib.suppress(RuntimeError):
+        asyncio.run(planned.generate_goals(GameState(), "", "", turn=2, readings={}))
+    return planned
+
+
 async def _failing_api(_content: list[dict]) -> StrategistResponse:
     raise RuntimeError("model unavailable")
 
 
+def _seconds_from_now(seconds: float) -> float:
+    return time.monotonic() + seconds
+
+
 def test_goals_are_not_replanned_within_the_period(provider: StrategistProvider) -> None:
     planned = _planned(provider)
-    assert planned._last_run_at is not None
-    assert not planned.should_run(age="Dark Age", now=planned._last_run_at + 5)
+    assert not planned.should_run(age="Dark Age", now=_seconds_from_now(5))
 
 
 def test_goals_are_replanned_after_the_period(provider: StrategistProvider) -> None:
     planned = _planned(provider)
-    assert planned._last_run_at is not None
-    due = planned._last_run_at + planned.period_seconds
-    assert planned.should_run(age="Dark Age", now=due)
+    assert planned.should_run(age="Dark Age", now=_seconds_from_now(planned.period_seconds))
 
 
 def test_a_new_age_replans_at_once(provider: StrategistProvider) -> None:
     planned = _planned(provider)
-    assert planned._last_run_at is not None
-    assert planned.should_run(age="Feudal Age", now=planned._last_run_at + 1)
+    assert planned.should_run(age="Feudal Age", now=_seconds_from_now(1))
 
 
-def test_a_lasting_alarm_replans_only_after_its_cooldown(provider: StrategistProvider) -> None:
+def test_an_alarm_replans_at_once(provider: StrategistProvider) -> None:
     planned = _planned(provider)
-    assert planned._last_run_at is not None
-    start = planned._last_run_at + 1
-    assert planned.should_run(alarm=True, age="Dark Age", now=start)
-    assert not planned.should_run(alarm=True, age="Dark Age", now=start + 2)
+    assert planned.should_run(alarm=True, age="Dark Age", now=_seconds_from_now(1))
+
+
+def test_a_lasting_alarm_waits_for_its_cooldown(provider: StrategistProvider) -> None:
+    planned = _planned(provider)
+    asyncio.run(planned.generate_goals(GameState(), "", "", turn=2, alarm=True, readings={}))
+    assert not planned.should_run(alarm=True, age="Dark Age", now=_seconds_from_now(2))
+
+
+def test_asking_whether_to_run_changes_nothing(provider: StrategistProvider) -> None:
+    planned = _planned(provider)
+    soon = _seconds_from_now(1)
+    planned.should_run(alarm=True, age="Dark Age", now=soon)
+    assert planned.should_run(alarm=True, age="Dark Age", now=soon)
 
 
 def test_met_goals_are_replaced_without_waiting_for_the_period(
     provider: StrategistProvider,
 ) -> None:
     planned = _planned(provider)
-    assert planned._last_run_at is not None
-    soon = planned._last_run_at + strat_mod._RETRY_SECONDS
+    soon = _seconds_from_now(strat_mod._RETRY_SECONDS)
     assert planned.should_run(age="Dark Age", goals_left=False, now=soon)
 
 
@@ -197,10 +218,6 @@ def test_a_failed_later_run_leaves_the_goals_to_the_caller(
 def test_a_failed_run_is_retried_before_the_period(
     provider: StrategistProvider, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    planned = _planned(provider)
-    monkeypatch.setattr(planned, "_call_api", _failing_api)
-    with pytest.raises(RuntimeError):
-        asyncio.run(planned.generate_goals(GameState(), "", "", turn=2, readings={}))
-    assert planned._last_run_at is not None
-    soon = planned._last_run_at + strat_mod._RETRY_SECONDS
-    assert planned.should_run(age="Dark Age", now=soon)
+    failed = _failed_after_planning(provider, monkeypatch)
+    soon = _seconds_from_now(strat_mod._RETRY_SECONDS)
+    assert failed.should_run(age="Dark Age", now=soon)

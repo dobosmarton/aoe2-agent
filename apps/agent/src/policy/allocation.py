@@ -28,8 +28,8 @@ _FOOD_CRISIS_THRESHOLD = 60
 _FARM_AFFORDABLE_WOOD = 80
 _CASTLE_GOLD_COST = 200
 
-# The agent doesn't send villagers to these before the Feudal Age.
-_NOT_GATHERED_IN_DARK_AGE: frozenset[ResourceKind] = frozenset({"gold", "stone"})
+# Gold and stone wait for the Feudal Age.
+_DARK_AGE_GATHERING: tuple[ResourceKind, ...] = ("food", "wood")
 
 AllocationFocus = Literal["balanced", "food", "wood", "gold", "stone"]
 ALLOCATION_FOCI: tuple[AllocationFocus, ...] = ("balanced", "food", "wood", "gold", "stone")
@@ -52,9 +52,7 @@ class Allocation:
 
 def gatherable_kinds(age: str) -> tuple[ResourceKind, ...]:
     """The resources the agent sends idle villagers to in this age."""
-    if age != "Dark Age":
-        return RESOURCE_KINDS
-    return tuple(kind for kind in RESOURCE_KINDS if kind not in _NOT_GATHERED_IN_DARK_AGE)
+    return _DARK_AGE_GATHERING if age == "Dark Age" else RESOURCE_KINDS
 
 
 def _gatherable(allocation: Allocation, age: str) -> Allocation:
@@ -106,7 +104,7 @@ def for_state(
             return Allocation(targets={"food": 2, "wood": 1, "gold": 0, "stone": 0})
         return Allocation(targets={"food": 1, "wood": 0, "gold": 0, "stone": 0})
 
-    base = _gatherable(strategist, state.age) if strategist else seeded(state.age)
+    base = seeded(state.age) if strategist is None else _gatherable(strategist, state.age)
     if wood_target is not None and "wood" in state.known_resources and state.wood < wood_target:
         base = _with_extra(base, "wood")
     if state.age == "Feudal Age" and state.gold < _CASTLE_GOLD_COST:

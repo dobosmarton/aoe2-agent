@@ -24,26 +24,26 @@ class _FailingStrategist:
         raise RuntimeError("model unavailable")
 
 
+async def _launch_and_wait(goals: GoalManager, log_dir: Path) -> None:
+    view = StrategistView(alarm=False, entity_summary="", hud_readings={}, known_buildings="")
+    task = maybe_launch_strategist(
+        _FailingStrategist(),  # pyright: ignore[reportArgumentType]
+        1,
+        view,
+        AgentMemory(),
+        goals,
+        GoalLogger(log_dir),
+        None,
+    )
+    if task is not None:
+        await task
+
+
 def test_a_failed_run_keeps_the_current_goals(tmp_path: Path) -> None:
     goals = GoalManager()
     plan = Goal(
         name="Bank food", type="local", metric="food", target=500, priority=9, created_turn=0
     )
     goals.set_goals([plan])
-    view = StrategistView(alarm=False, entity_summary="", hud_readings={}, known_buildings="")
-
-    async def run() -> None:
-        task = maybe_launch_strategist(
-            _FailingStrategist(),  # pyright: ignore[reportArgumentType]
-            1,
-            view,
-            AgentMemory(),
-            goals,
-            GoalLogger(tmp_path),
-            None,
-        )
-        assert task is not None
-        await task
-
-    asyncio.run(run())
+    asyncio.run(_launch_and_wait(goals, tmp_path))
     assert goals.active_goals == [plan]

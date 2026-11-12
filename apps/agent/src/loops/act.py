@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from operator import itemgetter
 from typing import TYPE_CHECKING
 
 import structlog
@@ -306,7 +307,7 @@ def _advice_details(advice: PolicyAdvice | None) -> dict[str, object]:
     """Jev's own answer, so a run review can see what it ranked, not just what ran."""
     if advice is None:
         return {}
-    ranked = sorted(advice.action_probabilities.items(), key=lambda item: -item[1])
+    ranked = sorted(advice.action_probabilities.items(), key=itemgetter(1), reverse=True)
     return {
         "advised": advice.action_choice,
         "advised_confidence": round(advice.action_confidence, 2),

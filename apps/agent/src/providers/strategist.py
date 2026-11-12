@@ -330,7 +330,7 @@ def get_default_goals(turn: int = 0) -> list[Goal]:
 
 
 class StrategistProvider:
-    """Sonnet-powered strategist that creates/updates goals.
+    """The LLM strategist that sets the agent's goals.
 
     Uses a stronger model for deeper reasoning about strategy. Runs every
     `config.strategist_period` seconds, and sooner when the age changes, an
@@ -354,7 +354,7 @@ class StrategistProvider:
         self._planned_age: str | None = None
         self._system_prompt: str | None = None
         self._last_alarm_at: float | None = None
-        self._has_run: bool = False  # Track first successful run
+        self._has_planned = False  # A run has succeeded, so the caller holds real goals.
         # Latest parsed allocation; None until the model supplies one.
         self.last_allocation: Allocation | None = None
 
@@ -395,7 +395,6 @@ class StrategistProvider:
         if alarm and (
             self._last_alarm_at is None or instant - self._last_alarm_at >= _ALARM_COOLDOWN_SECONDS
         ):
-            self._last_alarm_at = instant
             return True
         settled = self._last_run_succeeded and goals_left
         wait = self.period_seconds if settled else _RETRY_SECONDS
@@ -444,11 +443,16 @@ class StrategistProvider:
     ) -> tuple[list[Goal], ResourceReadings]:
         """Ask the LLM (text-only) for goals from a HUD reading.
 
-        Claude vision is not used: resources/population/age come from
+        Vision is not used: resources/population/age come from
         ``read_resource_bar``; the model only reasons over them to set goals.
 
         Returns:
-            Tuple of (goals, resource_readings)
+            Tuple of (goals, resource_readings). Until a run has succeeded, a
+            failed run returns the default goals, so the caller has a plan.
+
+        Raises:
+            Exception: the model failed after a plan exists. The caller keeps
+            its goals; the defaults would replace a real plan.
         """
         # 1. Perception — the game loop passes its per-turn HUD reading (one OCR
         #    pass per frame); only the standalone/eval path (readings=None) OCRs
@@ -472,6 +476,8 @@ class StrategistProvider:
         age = readings.get("age", game_state.current_age)
         self._last_run_at = time.monotonic()
         self._last_run_succeeded = False
+        if alarm:
+            self._last_alarm_at = self._last_run_at
         # The age `should_run` is asked about, so the two can't disagree.
         self._planned_age = game_state.current_age
 
@@ -536,13 +542,13 @@ Set 3-5 prioritized goals for what is holding the objective back now. Keep goals
                     )
                 )
             self.last_allocation = as_allocation(result.allocation)
-            self._has_run = True
+            self._has_planned = True
             self._last_run_succeeded = True
             return goals, readings
 
         except Exception as e:
             log.error("strategist_error", error=str(e))
-            if self._has_run:
+            if self._has_planned:
                 # The caller keeps the goals it has: the defaults would replace a
                 # real plan for a whole period.
                 raise
