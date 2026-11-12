@@ -230,8 +230,10 @@ _REFUSED_PLACEMENTS_KEPT = 6
 # A placement noted without the point it was clicked at.
 _NO_POINT = (0, 0)
 # A paid building not seen complete in this time is dropped from the purchases
-# that block a rebuild. A house takes about 25 s with one builder.
-_HOUSE_COMPLETION_SECONDS = 120.0
+# that block a rebuild. A house takes about 25 s with one builder. Live, a paid
+# house never got built and held the population at 5/5 for the full 120 s the
+# limit used to be, so a stalled house is replaced after 60 s.
+_HOUSE_COMPLETION_SECONDS = 60.0
 _BUILDING_COMPLETION_SECONDS = 240.0
 # A building's foundation is detected as the finished class, so a sighting proves
 # completion only once the building could have been built: a house takes 25 s
