@@ -103,7 +103,7 @@ class Config(BaseModel):
     max_tool_iterations: int = 7  # Max tool calls per game turn in agentic loop
     executor_effort: EffortLevel = "low"  # reasoning effort for the executor tool loop
     strategist_model: str = _GPT_MODELS.strategist  # AOE2_STRATEGIST_MODEL
-    strategist_interval: int = 10  # Run strategist every N turns
+    strategist_period: float = Field(default=25.0, gt=0)  # Seconds between strategist runs
     memory_model: str = _GPT_MODELS.memory  # AOE2_MEMORY_MODEL
     # TypeSafe drives routine policy; exact game mechanics remain code-owned.
     typesafe_api_key: str = ""
@@ -177,7 +177,7 @@ class Config(BaseModel):
             model=os.environ.get("AOE2_MODEL") or models.executor,
             executor_effort=_parse_effort(os.environ.get("AOE2_EXECUTOR_EFFORT")),
             strategist_model=os.environ.get("AOE2_STRATEGIST_MODEL") or models.strategist,
-            strategist_interval=int(os.environ.get("AOE2_STRATEGIST_INTERVAL", "10")),
+            strategist_period=float(os.environ.get("AOE2_STRATEGIST_PERIOD", "25")),
             memory_model=os.environ.get("AOE2_MEMORY_MODEL") or models.memory,
             typesafe_api_key=os.environ.get(TYPESAFE_KEY_ENV, ""),
             typesafe_model=os.environ.get("AOE2_TYPESAFE_MODEL") or "jev-1.13.0",

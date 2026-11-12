@@ -13,6 +13,7 @@ executor so the executor never waits on it. Two responsibilities:
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import structlog
@@ -27,15 +28,23 @@ if TYPE_CHECKING:
 log = structlog.stdlib.get_logger()
 
 
+@dataclass(frozen=True, slots=True)
+class StrategistView:
+    """What one frame gives the strategist to plan from."""
+
+    alarm: bool
+    entity_summary: str
+    hud_readings: ResourceReadings
+    known_buildings: str
+    brief: str = ""
+
+
 async def _run_strategist_async(
     strategist: StrategistProvider,
     iteration: int,
-    alarm: bool,
+    view: StrategistView,
     memory: AgentMemory,
     goal_manager: GoalManager,
-    entity_summary: str,
-    hud_readings: ResourceReadings,
-    known_buildings: str,
     goal_logger: GoalLogger,
 ) -> None:
     """Invoke the strategist to create/update goals (runs as background task)."""
@@ -47,18 +56,21 @@ async def _run_strategist_async(
         new_goals, _readings = await strategist.generate_goals(
             memory.game_state,
             goal_manager.get_goals_summary(),
-            entity_summary,
+            view.entity_summary,
             iteration,
-            alarm=alarm,
-            readings=hud_readings,
-            known_buildings=known_buildings,
+            alarm=view.alarm,
+            readings=view.hud_readings,
+            known_buildings=view.known_buildings,
+            brief=view.brief,
         )
         goal_manager.set_goals(new_goals)
         goal_manager.set_allocation(strategist.last_allocation)
         goal_logger.log_goals_created(iteration, new_goals)
         if prev_goals:
             goal_logger.log_strategist_update(iteration, prev_goals, new_goals)
-        log.info("strategist_goals_updated", turn=iteration, goal_count=len(new_goals), alarm=alarm)
+        log.info(
+            "strategist_goals_updated", turn=iteration, goal_count=len(new_goals), alarm=view.alarm
+        )
     except Exception as e:
         log.warning("strategist_failed", error=str(e))
 
@@ -66,20 +78,21 @@ async def _run_strategist_async(
 def maybe_launch_strategist(
     strategist: StrategistProvider,
     iteration: int,
-    alarm: bool,
+    view: StrategistView,
     memory: AgentMemory,
     goal_manager: GoalManager,
-    entity_summary: str,
-    hud_readings: ResourceReadings,
-    known_buildings: str,
     goal_logger: GoalLogger,
     pending_task: asyncio.Task | None,
 ) -> asyncio.Task | None:
-    """Launch the strategist as a background task if it should run this turn.
+    """Launch the strategist as a background task if its goals are due.
 
     Returns the new task, or the existing pending task if one is still running.
     """
-    if not strategist.should_run(iteration, alarm=alarm, age=memory.game_state.current_age):
+    if not strategist.should_run(
+        alarm=view.alarm,
+        age=memory.game_state.current_age,
+        goals_left=bool(goal_manager.active_goals),
+    ):
         return pending_task
 
     if pending_task is not None and not pending_task.done():
@@ -87,21 +100,11 @@ def maybe_launch_strategist(
         return pending_task
 
     task = asyncio.create_task(
-        _run_strategist_async(
-            strategist,
-            iteration,
-            alarm,
-            memory,
-            goal_manager,
-            entity_summary,
-            hud_readings,
-            known_buildings,
-            goal_logger,
-        ),
+        _run_strategist_async(strategist, iteration, view, memory, goal_manager, goal_logger),
         name=f"strategist_turn_{iteration}",
     )
-    log.info("strategist_launched_async", turn=iteration, alarm=alarm)
+    log.info("strategist_launched_async", turn=iteration, alarm=view.alarm)
     return task
 
 
-__all__ = ["maybe_launch_strategist"]
+__all__ = ["StrategistView", "maybe_launch_strategist"]

@@ -183,7 +183,7 @@ Optional tuning:
 set AOE2_LLM_WIRE=openai
 set AOE2_LOOP_DELAY=0.3
 set AOE2_EXECUTOR_EFFORT=low
-set AOE2_STRATEGIST_INTERVAL=10
+set AOE2_STRATEGIST_PERIOD=25
 set AOE2_SAVE_SCREENSHOTS=true
 ```
 
@@ -292,7 +292,7 @@ The remote detector logs `remote_detector_unavailable` and falls back to local O
 | `AOE2_MODEL` | `gpt-5.6-luna` | VM | Executor LLM model (fast; runs every turn) |
 | `AOE2_EXECUTOR_EFFORT` | `low` | VM | Executor effort (`low`/`medium`/`high`) |
 | `AOE2_STRATEGIST_MODEL` | `gpt-5.6-terra` | VM | Strategist LLM model (strong; runs every 3-10 turns) |
-| `AOE2_STRATEGIST_INTERVAL` | `10` | VM | Run strategist every N turns |
+| `AOE2_STRATEGIST_PERIOD` | `25` | VM | Seconds between strategist runs (it also runs on a new age or an alarm) |
 | `AOE2_LOOP_DELAY` | `0.3` | VM | Seconds between game loop iterations |
 | `AOE2_SAVE_SCREENSHOTS` | `true` | VM | Save screenshots to `logs/` |
 | `AOE2_TRACKER` | `native` | VM | Object tracker: `native` (screentrack), `python` or `shadow`. Falls back to `python` where no screentrack wheel exists |

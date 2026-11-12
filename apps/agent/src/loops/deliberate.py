@@ -9,8 +9,10 @@ from typing import TYPE_CHECKING, Literal
 
 import structlog
 
+from ..policy.request import state_for_frame
 from ..providers.executor_provider import ToolExecutionGate
-from ..strategist_phase import maybe_launch_strategist
+from ..strategist_brief import strategist_brief
+from ..strategist_phase import StrategistView, maybe_launch_strategist
 from ..turn_phases import (
     build_llm_context,
     known_buildings_line,
@@ -53,6 +55,17 @@ class RecoveryBudget:
         return True
 
 
+def _strategist_view(ctx: LoopContext, frame: Perception) -> StrategistView:
+    recent_failures = tuple(ctx.ledger.recent_failures) if ctx.ledger is not None else ()
+    return StrategistView(
+        alarm=frame.alarm,
+        entity_summary=frame.entity_summary,
+        hud_readings=frame.hud_readings,
+        known_buildings=known_buildings_line(list(frame.entities)),
+        brief=strategist_brief(state_for_frame(ctx, frame), recent_failures),
+    )
+
+
 async def deliberate_loop(
     ctx: LoopContext,
     strategist: StrategistProvider,
@@ -78,12 +91,9 @@ async def deliberate_loop(
             strategist_task = maybe_launch_strategist(
                 strategist,
                 tick,
-                frame.alarm,
+                _strategist_view(ctx, frame),
                 ctx.memory,
                 ctx.goal_manager,
-                frame.entity_summary,
-                frame.hud_readings,
-                known_buildings_line(list(frame.entities)),
                 ctx.goal_logger,
                 strategist_task,
             )

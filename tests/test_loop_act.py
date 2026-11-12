@@ -823,3 +823,24 @@ def test_a_late_refresh_cannot_satisfy_the_next_request(tmp_path, gates, monkeyp
         return await second
 
     assert _run(drive()) is True
+
+
+def test_the_decision_log_keeps_jevs_top_three() -> None:
+    advice = PolicyAdvice(
+        source_tick=1,
+        source_captured_at=0.0,
+        model="jev",
+        action_choice="queue_villager",
+        action_confidence=0.41,
+        action_probabilities=readonly_probabilities(
+            {"queue_villager": 0.53, "build_farm": 0.28, "wait": 0.12, "assign_wood": 0.07}
+        ),
+        allocation_focus="food",
+        allocation_confidence=0.8,
+        allocation_probabilities=readonly_probabilities({"food": 0.9}),
+    )
+    assert act._advice_details(advice)["advised_ranking"] == {
+        "queue_villager": 0.53,
+        "build_farm": 0.28,
+        "wait": 0.12,
+    }
