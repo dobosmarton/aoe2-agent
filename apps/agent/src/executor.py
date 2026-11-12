@@ -988,6 +988,13 @@ def _settle_pending_assignment(
     )
 
 
+_AGE_REACHED_BY: dict[str, str] = {
+    "feudal_age": "Feudal Age",
+    "castle_age": "Castle Age",
+    "imperial_age": "Imperial Age",
+}
+
+
 def observe_age(age: str | None, *, input_revision: int | None = None) -> None:
     """Sync the observed age; a completed advancement supersedes HUD settlement.
 
@@ -997,46 +1004,33 @@ def observe_age(age: str | None, *, input_revision: int | None = None) -> None:
     """
     if not age:
         return
-    current_ledger().age_known = True
     ledger = current_ledger()
+    ledger.age_known = True
     ledger.current_age = age
-    result_ages = {
-        "feudal_age": "Feudal Age",
-        "castle_age": "Castle Age",
-        "imperial_age": "Imperial Age",
-    }
     completed = [
         pending
         for pending in ledger.pending_research
-        if result_ages.get(pending.name) == age
+        if _AGE_REACHED_BY.get(pending.name) == age
         and (input_revision is None or input_revision >= pending.spend_revision)
     ]
-    if completed:
-        ledger.pending_research = [
-            pending for pending in ledger.pending_research if pending not in completed
-        ]
-        for pending in completed:
-            ledger.researched.add(pending.name)
-            ledger.record_outcome(
-                ActionOutcome(
-                    pending.operation_id,
-                    _research_action_id(pending.name),
-                    "confirmed",
-                    "age advancement observed",
-                )
-            )
-    for name, target_age in result_ages.items():
+    ledger.pending_research = [
+        pending for pending in ledger.pending_research if pending not in completed
+    ]
+    for pending in completed:
+        _confirm_age_reached(ledger, pending.operation_id, pending.name)
+    for name, target_age in _AGE_REACHED_BY.items():
         operation_id = ledger.age_up_paid.pop(name, None) if target_age == age else None
         if operation_id is not None:
-            ledger.researched.add(name)
-            ledger.record_outcome(
-                ActionOutcome(
-                    operation_id,
-                    _research_action_id(name),
-                    "confirmed",
-                    "age advancement observed",
-                )
-            )
+            _confirm_age_reached(ledger, operation_id, name)
+
+
+def _confirm_age_reached(ledger: ActionLedger, operation_id: int, name: str) -> None:
+    ledger.researched.add(name)
+    ledger.record_outcome(
+        ActionOutcome(
+            operation_id, _research_action_id(name), "confirmed", "age advancement observed"
+        )
+    )
 
 
 def _note_pending_placement(
@@ -2498,6 +2492,26 @@ _FOOTPRINT_TILES: dict[str, int] = {
 }
 _DEFAULT_FOOTPRINT_TILES = 3
 _TOWN_CENTER_TILES = 4
+
+
+@dataclass(frozen=True, slots=True)
+class _Footprint:
+    """A building's ground around its placement point, in frame pixels."""
+
+    half_width: float
+    half_height: float
+
+    def overlaps(self, point: tuple[int, int], box: tuple[float, float, float, float]) -> bool:
+        px, py = point
+        x0, y0, x1, y1 = box
+        return (
+            px - self.half_width < x1
+            and x0 < px + self.half_width
+            and py - self.half_height < y1
+            and y0 < py + self.half_height
+        )
+
+
 _BLOCKED_CLUTTER = 10  # A candidate inside an entity's box counts as this much clutter.
 
 # Play-area margins (screenshot px). The HUD occupies the top resource bar and the
@@ -2711,13 +2725,13 @@ def _explored(point: tuple[int, int]) -> bool:
 def _open_ground_candidates(
     anchor: tuple[int, int],
     radii: tuple[int, ...] = BUILD_RING_RADII,
-    footprint: tuple[float, float] = (0.0, 0.0),
+    footprint: _Footprint | None = None,
 ) -> list[tuple[int, int]]:
     """Explored ring points around `anchor` in the play area, emptiest-first.
 
-    `footprint` is the half width and half height of the building's ground. A
-    point whose footprint overlaps a building, tree or mine ranks below every
-    clear one; units walk out of the way, so they never block.
+    With a `footprint`, a point whose ground overlaps a building, tree or mine
+    ranks below every clear one; units walk out of the way, so they never block.
+    Without one, only the point itself is judged.
     """
     ax, ay = anchor
     min_x, min_y, max_x, max_y = _play_area_bounds()
@@ -2740,42 +2754,43 @@ def _open_ground_candidates(
     return candidates
 
 
-def _footprint(building: str | None) -> tuple[float, float]:
-    """Half width and half height, in frame pixels, of `building`'s ground diamond."""
+def _footprint(building: str | None) -> _Footprint:
+    """`building`'s ground diamond, scaled from the Town Center's width."""
     tiles = _FOOTPRINT_TILES.get(building or "", _DEFAULT_FOOTPRINT_TILES)
     width = _town_center_width() * tiles / _TOWN_CENTER_TILES
-    return (width / 2, width / 4)  # An isometric tile is half as tall as it is wide.
+    return _Footprint(width / 2, width / 4)  # An isometric tile is half as tall as wide.
 
 
 def _town_center_width() -> float:
     """The detected Town Center's width, or the reference share of the frame."""
     for entity in _detected_entities:
-        bbox = entity.get("bbox")
-        if entity.get("class") == "town_center" and isinstance(bbox, (list, tuple)):
-            return float(bbox[2]) - float(bbox[0])
+        box = _box_of(entity)
+        if entity.get("class") == "town_center" and box is not None:
+            return box[2] - box[0]
     width, _height = _window_size()
     return REFERENCE_TC_WIDTH * width
 
 
-def _footprint_blocked(point: tuple[int, int], footprint: tuple[float, float]) -> bool:
+def _footprint_blocked(point: tuple[int, int], footprint: _Footprint | None) -> bool:
     """Whether a footprint centred on `point` overlaps a static object's box."""
-    half_width, half_height = footprint
-    if half_width <= 0 or half_height <= 0:
+    if footprint is None:
         return False
-    px, py = point
-    for entity in _detected_entities:
-        bbox = entity.get("bbox")
-        if entity.get("class") in MOBILE_CLASSES or not isinstance(bbox, (list, tuple)):
-            continue
-        x0, y0, x1, y1 = (float(value) for value in bbox)
-        if (
-            px - half_width < x1
-            and x0 < px + half_width
-            and py - half_height < y1
-            and y0 < py + half_height
-        ):
-            return True
-    return False
+    return any(
+        footprint.overlaps(point, box)
+        for entity in _detected_entities
+        if entity.get("class") not in MOBILE_CLASSES and (box := _box_of(entity)) is not None
+    )
+
+
+def _box_of(entity: Mapping[str, object]) -> tuple[float, float, float, float] | None:
+    """An entity's (x0, y0, x1, y1) box, or None if it has no usable one."""
+    bbox = entity.get("bbox")
+    if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
+        return None
+    if not all(isinstance(value, (int, float)) for value in bbox):
+        return None
+    x0, y0, x1, y1 = (float(value) for value in bbox)
+    return (x0, y0, x1, y1)
 
 
 def _home_anchor() -> tuple[int, int]:

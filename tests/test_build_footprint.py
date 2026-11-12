@@ -30,7 +30,7 @@ def _with_town_center(*others: dict[str, object]) -> None:
 
 def test_a_farm_is_three_quarters_of_the_town_center_wide() -> None:
     _with_town_center()
-    assert ex._footprint("farm") == (150.0, 75.0)
+    assert ex._footprint("farm") == ex._Footprint(half_width=150.0, half_height=75.0)
 
 
 def test_a_clear_centre_next_to_a_mill_is_blocked_for_a_farm() -> None:

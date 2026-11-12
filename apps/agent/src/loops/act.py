@@ -348,12 +348,12 @@ def _stale_reason(
 
 def _judge(
     advice: PolicyAdvice | None,
-    unusable: str | None,
+    unusable_reason: str | None,
     candidates: tuple[ActionCandidate, ...],
 ) -> _Judgment:
     """Jev's pick on the latest frame, and whether it was sure enough to act on."""
-    if advice is None or unusable is not None:
-        return _Judgment(unusable or "no_advice")
+    if advice is None or unusable_reason is not None:
+        return _Judgment(unusable_reason or "no_advice")
     choice = find_candidate(candidates, advice.action_choice)
     if choice is None:
         return _Judgment("candidate_unavailable")
