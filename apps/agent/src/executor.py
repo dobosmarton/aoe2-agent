@@ -22,6 +22,7 @@ from pydantic import BaseModel
 
 from .camera_motion import MOBILE_CLASSES
 from .config import config
+from .detector_scale import REFERENCE_TC_WIDTH
 from .entity_snapshot import MAX_SPATIAL_AGE_SECONDS, STATIC_SPATIAL_AGE_SECONDS
 from .entity_utils import (
     CLASSES_BY_KIND,
@@ -988,48 +989,54 @@ def _settle_pending_assignment(
 
 
 def observe_age(age: str | None, *, input_revision: int | None = None) -> None:
-    """Sync the observed age; a completed advancement supersedes HUD settlement."""
-    current_ledger().age_known = bool(age)
-    if age:
-        ledger = current_ledger()
-        ledger.current_age = age
-        result_ages = {
-            "feudal_age": "Feudal Age",
-            "castle_age": "Castle Age",
-            "imperial_age": "Imperial Age",
-        }
-        completed = [
-            pending
-            for pending in ledger.pending_research
-            if result_ages.get(pending.name) == age
-            and (input_revision is None or input_revision >= pending.spend_revision)
+    """Sync the observed age; a completed advancement supersedes HUD settlement.
+
+    A reading without the age keeps the last one: the age is read on one HUD
+    pass in five. Clearing it there made the age-up and every research
+    ineligible on 86% of frames, and refused the Feudal Age at 554 food.
+    """
+    if not age:
+        return
+    current_ledger().age_known = True
+    ledger = current_ledger()
+    ledger.current_age = age
+    result_ages = {
+        "feudal_age": "Feudal Age",
+        "castle_age": "Castle Age",
+        "imperial_age": "Imperial Age",
+    }
+    completed = [
+        pending
+        for pending in ledger.pending_research
+        if result_ages.get(pending.name) == age
+        and (input_revision is None or input_revision >= pending.spend_revision)
+    ]
+    if completed:
+        ledger.pending_research = [
+            pending for pending in ledger.pending_research if pending not in completed
         ]
-        if completed:
-            ledger.pending_research = [
-                pending for pending in ledger.pending_research if pending not in completed
-            ]
-            for pending in completed:
-                ledger.researched.add(pending.name)
-                ledger.record_outcome(
-                    ActionOutcome(
-                        pending.operation_id,
-                        _research_action_id(pending.name),
-                        "confirmed",
-                        "age advancement observed",
-                    )
+        for pending in completed:
+            ledger.researched.add(pending.name)
+            ledger.record_outcome(
+                ActionOutcome(
+                    pending.operation_id,
+                    _research_action_id(pending.name),
+                    "confirmed",
+                    "age advancement observed",
                 )
-        for name, target_age in result_ages.items():
-            operation_id = ledger.age_up_paid.pop(name, None) if target_age == age else None
-            if operation_id is not None:
-                ledger.researched.add(name)
-                ledger.record_outcome(
-                    ActionOutcome(
-                        operation_id,
-                        _research_action_id(name),
-                        "confirmed",
-                        "age advancement observed",
-                    )
+            )
+    for name, target_age in result_ages.items():
+        operation_id = ledger.age_up_paid.pop(name, None) if target_age == age else None
+        if operation_id is not None:
+            ledger.researched.add(name)
+            ledger.record_outcome(
+                ActionOutcome(
+                    operation_id,
+                    _research_action_id(name),
+                    "confirmed",
+                    "age advancement observed",
                 )
+            )
 
 
 def _note_pending_placement(
@@ -2464,13 +2471,33 @@ DEFAULT_WAIT_MS = 100
 
 # Ring geometry for picking open build ground around the town centre. The base
 # clusters on the TC, so the emptiest ring point is almost always valid ground.
-BUILD_RING_RADII: tuple[int, ...] = (280, 400, 520)
+BUILD_RING_RADII: tuple[int, ...] = (280, 400, 520, 640)
 # Ring for a drop-off camp, measured from the RESOURCE. It has to land adjacent,
 # so these hug far tighter than the TC ring above (a tile is ~130px at the
 # deployment capture size).
 RESOURCE_RING_RADII: tuple[int, ...] = (150, 210, 270)
 BUILD_RING_DIRECTIONS: int = 8
 BUILD_CLUTTER_RADIUS: int = 160  # entities within this of a candidate = clutter
+# Footprint edges in tiles. A building's ground is scaled from the Town Center's
+# detected width (4 tiles), so it follows the zoom. Live, 7 farms were refused in
+# two minutes: their centres were clear, but a 3x3 farm overlapped the mill.
+_FOOTPRINT_TILES: dict[str, int] = {
+    "house": 2,
+    "mill": 2,
+    "lumber_camp": 2,
+    "mining_camp": 2,
+    "farm": 3,
+    "barracks": 3,
+    "archery_range": 3,
+    "stable": 3,
+    "blacksmith": 3,
+    "monastery": 3,
+    "market": 4,
+    "university": 4,
+    "siege_workshop": 4,
+}
+_DEFAULT_FOOTPRINT_TILES = 3
+_TOWN_CENTER_TILES = 4
 _BLOCKED_CLUTTER = 10  # A candidate inside an entity's box counts as this much clutter.
 
 # Play-area margins (screenshot px). The HUD occupies the top resource bar and the
@@ -2682,9 +2709,16 @@ def _explored(point: tuple[int, int]) -> bool:
 
 
 def _open_ground_candidates(
-    anchor: tuple[int, int], radii: tuple[int, ...] = BUILD_RING_RADII
+    anchor: tuple[int, int],
+    radii: tuple[int, ...] = BUILD_RING_RADII,
+    footprint: tuple[float, float] = (0.0, 0.0),
 ) -> list[tuple[int, int]]:
-    """Explored ring points around `anchor` in the play area, emptiest-first."""
+    """Explored ring points around `anchor` in the play area, emptiest-first.
+
+    `footprint` is the half width and half height of the building's ground. A
+    point whose footprint overlaps a building, tree or mine ranks below every
+    clear one; units walk out of the way, so they never block.
+    """
     ax, ay = anchor
     min_x, min_y, max_x, max_y = _play_area_bounds()
     candidates: list[tuple[int, int]] = []
@@ -2696,8 +2730,52 @@ def _open_ground_candidates(
             if min_x <= cx <= max_x and min_y <= cy <= max_y and _explored((cx, cy)):
                 candidates.append((cx, cy))
     home = _resolve_target_class("town_center") if current_ledger().refused_offsets else None
-    candidates.sort(key=lambda point: (_near_refused(point, home), _clutter_score(point)))
+    candidates.sort(
+        key=lambda point: (
+            _near_refused(point, home),
+            _footprint_blocked(point, footprint),
+            _clutter_score(point),
+        )
+    )
     return candidates
+
+
+def _footprint(building: str | None) -> tuple[float, float]:
+    """Half width and half height, in frame pixels, of `building`'s ground diamond."""
+    tiles = _FOOTPRINT_TILES.get(building or "", _DEFAULT_FOOTPRINT_TILES)
+    width = _town_center_width() * tiles / _TOWN_CENTER_TILES
+    return (width / 2, width / 4)  # An isometric tile is half as tall as it is wide.
+
+
+def _town_center_width() -> float:
+    """The detected Town Center's width, or the reference share of the frame."""
+    for entity in _detected_entities:
+        bbox = entity.get("bbox")
+        if entity.get("class") == "town_center" and isinstance(bbox, (list, tuple)):
+            return float(bbox[2]) - float(bbox[0])
+    width, _height = _window_size()
+    return REFERENCE_TC_WIDTH * width
+
+
+def _footprint_blocked(point: tuple[int, int], footprint: tuple[float, float]) -> bool:
+    """Whether a footprint centred on `point` overlaps a static object's box."""
+    half_width, half_height = footprint
+    if half_width <= 0 or half_height <= 0:
+        return False
+    px, py = point
+    for entity in _detected_entities:
+        bbox = entity.get("bbox")
+        if entity.get("class") in MOBILE_CLASSES or not isinstance(bbox, (list, tuple)):
+            continue
+        x0, y0, x1, y1 = (float(value) for value in bbox)
+        if (
+            px - half_width < x1
+            and x0 < px + half_width
+            and py - half_height < y1
+            and y0 < py + half_height
+        ):
+            return True
+    return False
 
 
 def _home_anchor() -> tuple[int, int]:
@@ -2750,7 +2828,9 @@ def default_build_placement(building_key: str, *, menu: str = ECON_MENU) -> tupl
     if menu == ECON_MENU and building_key in _RESOURCE_REQUIRED_KEYS:
         return None
     anchor = _home_anchor()
-    candidates = _open_ground_candidates(anchor)
+    candidates = _open_ground_candidates(
+        anchor, footprint=_footprint(building_class(menu, building_key))
+    )
     return candidates[0] if candidates else anchor
 
 

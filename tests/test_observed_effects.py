@@ -430,3 +430,9 @@ def test_refused_ground_is_tried_last(
     assert candidates[0] != first
     assert candidates[-1] == first
     ex.clear_detected_entities()
+
+
+def test_a_reading_without_the_age_keeps_the_last_age(ledger: ex.ActionLedger) -> None:
+    ex.observe_age("Dark Age")
+    ex.observe_age(None)  # The age is read on one HUD pass in five.
+    assert ledger.age_known
