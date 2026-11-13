@@ -1094,13 +1094,38 @@ def read_resource_bar_pixels(
     # Age is text ("Dark/Feudal/Castle/Imperial Age") — OCR it and keyword-map.
     # The pure-template backend has no OCR engine, so age is left "" there.
     age_box = calibration.fields.get("age")
-    if age_box is not None and backend != "template":
+    if age_box is not None and backend != "template" and not age_up_in_progress(rgb, age_box):
         # Age is large text — OCR the raw crop (binarize corrupts the bigger letters).
         out["age"] = _map_age(ocr(age_box.crop(gray), _LETTERS, binarize=False))
     else:
         out["age"] = ""
 
     return out
+
+
+# While an age-up researches, the age field shows the NEXT age's name over a red
+# progress bar that starts left of the calibrated box and grows ~2 px/s. Live, the
+# agent read "Feudal Age" from it two minutes before the age arrived. The strip
+# the bar starts in turns red within a second; across 406 Mac frames it held
+# 0.89-0.90 red during the research and 0.00 otherwise.
+_AGE_BAR_LEAD = 0.033  # The bar starts this share of the box width left of it.
+_AGE_BAR_ROWS = (0.25, 0.75)  # The bar's rows, as shares of the box height.
+_AGE_BAR_RED_SHARE = 0.3
+_BAR_RED_MIN = 120  # A bar pixel's red channel, 0-255.
+
+
+def age_up_in_progress(rgb: np.ndarray, age_box: FieldBox) -> bool:
+    """Whether the age field shows an age-up's progress bar, not the current age."""
+    width, height = age_box.x1 - age_box.x0, age_box.y1 - age_box.y0
+    lead = max(1, round(width * _AGE_BAR_LEAD))
+    top = age_box.y0 + int(height * _AGE_BAR_ROWS[0])
+    bottom = age_box.y0 + int(height * _AGE_BAR_ROWS[1])
+    strip = rgb[top:bottom, max(0, age_box.x0 - lead) : age_box.x0].astype(np.int16)
+    if strip.size == 0:
+        return False
+    red, green, blue = strip[..., 0], strip[..., 1], strip[..., 2]
+    bar = (red > _BAR_RED_MIN) & (red > 2 * green) & (red > 2 * blue)
+    return float(bar.mean()) >= _AGE_BAR_RED_SHARE
 
 
 def read_age(screenshot_bytes: bytes, calibration: Calibration) -> str:
@@ -1118,7 +1143,7 @@ def read_age(screenshot_bytes: bytes, calibration: Calibration) -> str:
 def read_age_pixels(hud: HudPixels, calibration: Calibration) -> str:
     """Read the age text from the already prepared HUD grayscale band."""
     age_box = calibration.fields.get("age")
-    if age_box is None:
+    if age_box is None or age_up_in_progress(hud.rgb, age_box):
         return ""
     crop = age_box.crop(hud.gray)
     # Age is large text — OCR the raw crop (binarize corrupts the bigger letters).

@@ -109,14 +109,6 @@ class AgentController:
         order = {action_id: index for index, action_id in enumerate(essential)}
         return min(due, key=lambda item: (item[1], order[item[0].id]))[0]
 
-    def advisor_may_decline(self, action_id: str) -> bool:
-        """Whether a confident advisor may skip this obligation.
-
-        Keeping the Town Center busy is a default, not a law: banking food for an
-        age-up means not queueing. An idle villager is never worth leaving idle.
-        """
-        return _obligation_for(action_id) == _TC_PRODUCTION
-
     def record_attempt(self, action_id: str) -> None:
         """A handled action receives a new deadline if it stays eligible."""
         obligation = _obligation_for(action_id)
