@@ -32,7 +32,7 @@ from .entity_utils import (
     safe_gather_target,
 )
 from .models import Action, validate_action
-from .placement_preview import PreviewRegion, preview_drawn, preview_refused
+from .placement_preview import PreviewRegion, changed_share, preview_refused, red_share
 from .policy.candidates import eligible
 from .policy.catalog import (
     BUILDINGS,
@@ -443,8 +443,9 @@ class _PendingPlacement:
     wood_readings: int = 0
     # Monotonic instant of the placement click, None when unknown.
     noted_at: float | None = None
-    # The lowest wood reading since the click, None before the first.
+    # The lowest and highest wood readings since the click, None before the first.
     lowest_wood: int | None = None
+    highest_wood: int | None = None
     # The click's offset from the Town Center, when the Town Center was in view.
     home_offset: tuple[int, int] | None = None
 
@@ -1284,22 +1285,30 @@ def _house_verdict(
 def _with_wood_reading(pending: _PendingPlacement, wood_now: int) -> _PendingPlacement:
     """The placement after one more wood reading it can be judged against."""
     lowest = wood_now if pending.lowest_wood is None else min(pending.lowest_wood, wood_now)
-    return replace(pending, wood_readings=pending.wood_readings + 1, lowest_wood=lowest)
+    highest = wood_now if pending.highest_wood is None else max(pending.highest_wood, wood_now)
+    return replace(
+        pending,
+        wood_readings=pending.wood_readings + 1,
+        lowest_wood=lowest,
+        highest_wood=highest,
+    )
 
 
 def _never_paid(pending: _PendingPlacement) -> bool:
-    """Whether a placement's wood has had time to leave and never fell at all.
+    """Whether a placement's wood has had time to leave, never fell, and can't be hidden.
 
-    A partial drop stays undecided: gathering can hide part of a payment, never
-    all of it within the few seconds a payment takes to show.
+    A partial drop stays undecided. So does wood that rose by the building's
+    cost or more: gathering that fast can hide the whole payment. Live, with 14
+    villagers on wood (about 8 wood a second), two 25-wood houses read as
+    "never paid" and were recorded as refused; both stood 25 s later.
     """
-    return (
-        pending.noted_at is not None
-        and _now() - pending.noted_at >= _PLACEMENT_PAYMENT_SECONDS
-        and pending.wood_readings >= _PLACEMENT_PAYMENT_READINGS
-        and pending.lowest_wood is not None
-        and pending.lowest_wood >= pending.wood_before
-    )
+    if pending.noted_at is None or pending.lowest_wood is None or pending.highest_wood is None:
+        return False
+    waited = _now() - pending.noted_at >= _PLACEMENT_PAYMENT_SECONDS
+    enough_readings = pending.wood_readings >= _PLACEMENT_PAYMENT_READINGS
+    never_fell = pending.lowest_wood >= pending.wood_before
+    income_could_hide_it = pending.highest_wood - pending.wood_before >= pending.wood_cost
+    return waited and enough_readings and never_fell and not income_could_hide_it
 
 
 def _refuse_placement(pending: _PendingPlacement) -> ActionOutcome:
@@ -2250,52 +2259,47 @@ async def _previewed_placement(
     candidates = placement_candidates(key, menu=menu)[:_PREVIEW_HOVER_LIMIT]
     if not candidates:
         return (f"no visible resource or ground for the {name}", None)
-    hover = await _hover_candidates(candidates, _footprint(name), capture)
-    if hover.accepted is not None:
-        log.info(
-            "placement_preview_accepted", building=name, point=hover.accepted, tried=hover.tried
+    point = await _first_accepted(candidates, _footprint(name), capture)
+    if point is None:
+        log.warning("placement_preview_refused_all", building=name, tried=len(candidates))
+        return (
+            f"no valid ground in view for the {name}: "
+            f"the preview was red at {len(candidates)} spots",
+            None,
         )
-        return ("", hover.accepted)
-    if not hover.any_drawn:
-        log.warning("placement_preview_missing", building=name, tried=hover.tried)
-        return (f"no {name} on the cursor: the build menu didn't take", None)
-    log.warning("placement_preview_refused_all", building=name, tried=hover.tried)
-    return (
-        f"no valid ground in view for the {name}: the preview was red at {hover.tried} spots",
-        None,
+    log.info(
+        "placement_preview_accepted",
+        building=name,
+        point=point,
+        tried=candidates.index(point) + 1,
     )
+    return ("", point)
 
 
-@dataclass(frozen=True, slots=True)
-class _Hover:
-    """What hovering the candidates showed."""
-
-    accepted: tuple[int, int] | None
-    tried: int
-    any_drawn: bool
-
-
-async def _hover_candidates(
+async def _first_accepted(
     candidates: Sequence[tuple[int, int]], footprint: "_Footprint", capture: PreviewCapture
-) -> _Hover:
-    """Hover each candidate until the game draws its preview in normal colours.
+) -> tuple[int, int] | None:
+    """Hover each candidate in turn; the first whose preview isn't red, or None.
 
     The comparison frame is taken with the cursor over the command panel, where
-    the game draws no preview. A spot counts only where a preview appeared: with
-    nothing on the cursor no spot is ever red, so "not red" alone proves nothing.
+    the game draws no preview.
     """
     size = _window_size()
     without = await _capture_hovering(_command_panel_point(), capture)
-    any_drawn = False
-    for tried, point in enumerate(candidates, start=1):
+    for point in candidates:
         with_preview = await _capture_hovering(point, capture)
         region = footprint.preview_region(point, size)
-        if not preview_drawn(without, with_preview, region):
-            continue
-        any_drawn = True
-        if not preview_refused(without, with_preview, region):
-            return _Hover(point, tried, any_drawn)
-    return _Hover(None, len(candidates), any_drawn)
+        refused = preview_refused(without, with_preview, region)
+        log.debug(
+            "placement_preview_hover",
+            point=point,
+            refused=refused,
+            red=round(red_share(with_preview, region), 3),
+            changed=round(changed_share(without, with_preview, region), 3),
+        )
+        if not refused:
+            return point
+    return None
 
 
 async def _capture_hovering(point: tuple[int, int], capture: PreviewCapture) -> np.ndarray:

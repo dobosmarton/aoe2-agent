@@ -417,6 +417,19 @@ def test_a_partial_wood_drop_is_not_judged_refused(
     assert [p.operation_id for p in ledger.pending_placements] == [pending.operation_id]
 
 
+def test_wood_rising_faster_than_the_cost_is_not_judged_refused(
+    ledger: ex.ActionLedger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Game 10: 14 lumberjacks hid two 25-wood house payments; both houses stood."""
+    clock = [100.0]
+    monkeypatch.setattr(ex, "_now", lambda: clock[0])
+    pending = _placed_house(ledger)
+    for wood in (121, 140, 160):  # Never below the 120 before the click.
+        clock[0] += 2.5
+        ex.observe_hud(5, 5, {"wood": wood}, villagers=4, input_revision=ledger.input_revision)
+    assert [p.operation_id for p in ledger.pending_placements] == [pending.operation_id]
+
+
 def test_refused_ground_is_tried_last(
     ledger: ex.ActionLedger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
