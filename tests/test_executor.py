@@ -1714,16 +1714,29 @@ def _research(tech: str, before: dict[str, int]) -> None:
     ex._note_pending_research(tech, ex._TECHS[tech])
 
 
-def test_a_matching_resource_drop_starts_age_research(fake_pyautogui: _FakePyautogui) -> None:
+def test_a_matching_resource_drop_starts_age_research(
+    fake_pyautogui: _FakePyautogui, clock: _Clock
+) -> None:
     _research("castle_age", {"food": 900, "gold": 300})
     ex.observe_hud(10, 30, {"food": 100, "gold": 100})
     assert "castle_age" not in ex._build_gates.researched
     assert "castle_age" in ex._build_gates.age_up_paid
     assert ex._build_gates.reservations().get("food", 0) == 0
     assert ex.research_rejection("castle_age") is not None
+    clock.advance(ex._MIN_AGE_UP_SECONDS)
     ex.observe_age("Castle Age")
     assert "castle_age" in ex._build_gates.researched
     assert "castle_age" not in ex._build_gates.age_up_paid
+
+
+def test_the_next_age_read_right_after_the_press_is_its_label(
+    fake_pyautogui: _FakePyautogui, clock: _Clock
+) -> None:
+    _research("castle_age", {"food": 900, "gold": 300})
+    ex.observe_hud(10, 30, {"food": 100, "gold": 100})
+    clock.advance(5)  # The HUD already names the Castle Age over its progress bar.
+    ex.observe_age("Castle Age")
+    assert "castle_age" not in ex._build_gates.researched
 
 
 def test_no_resource_drop_keeps_research_uncertain(
@@ -1974,3 +1987,23 @@ def test_an_unreadable_frame_filters_nothing(fake_pyautogui: _FakePyautogui) -> 
         assert ex._explored((2000, 800))
     finally:
         ex.clear_detected_entities()
+
+
+def test_a_build_with_no_ground_to_place_on_closes_the_build_menu(
+    fake_pyautogui: _FakePyautogui, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ex.observe_hud(4, 5, {"wood": 200})
+    monkeypatch.setattr(ex, "RESCAN_SETTLE_DELAY", 0.0)
+    monkeypatch.setattr(ex, "default_build_placement", lambda _key="", *, menu="q": None)
+
+    async def refreshed() -> bool:
+        ledger = ex.current_ledger()
+        ex.observe_hud(4, 5, {"wood": 200})
+        ledger.spatial_valid = True
+        return True
+
+    ex.set_rescan_fn(_publishing_refresh(refreshed))
+    ex.set_rescan_full_fn(_publishing_refresh(refreshed))
+    result = _run(ex.execute_action({"type": "build", "building_key": "q", "intent": "house"}))
+    presses = [call[1][0] for call in fake_pyautogui.calls if call[0] == "press"]
+    assert (result.success, presses) == (False, [".", "q", "q", "h"]), result.detail

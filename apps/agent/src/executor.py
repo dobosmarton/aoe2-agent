@@ -240,6 +240,10 @@ _BUILDING_COMPLETION_SECONDS = 240.0
 # completion only once the building could have been built: a house takes 25 s
 # with one builder, a mill or lumber camp 35 s.
 _MIN_CONSTRUCTION_SECONDS = 25.0
+# The HUD names the next age the moment an age-up starts, and the progress bar
+# that marks it takes a second or two to show. No age-up finishes this fast: the
+# quickest in the game (Malay, to Feudal) takes 78 s.
+_MIN_AGE_UP_SECONDS = 60.0
 # Distinct detection frames before a building class is REPORTED as sighted
 # (context line only — sightings never gate builds: run 9, F-36, a persistent
 # phantom mill beat any count threshold and 14 outposts got built through the
@@ -484,6 +488,7 @@ class ActionLedger:
     refused_offsets: list[tuple[int, int]] = field(default_factory=list)
     # How long after payment a sighted building may count as finished.
     min_construction_seconds: float = _MIN_CONSTRUCTION_SECONDS
+    min_age_up_seconds: float = _MIN_AGE_UP_SECONDS
     # Circuit breaker (T-530): consecutive missing settlements per class, and
     # the monotonic instant until which a repeatedly-missing class stays blocked.
     missing_streaks: dict[str, int] = field(default_factory=dict)
@@ -494,6 +499,8 @@ class ActionLedger:
     # A paid age-up is underway, not a completed age. Keep its action ID until
     # the age reading changes, without continuing to reserve already-spent food.
     age_up_paid: dict[str, int] = field(default_factory=dict)
+    # When each age-up research was last pressed, to tell its label from its arrival.
+    age_up_pressed_at: dict[str, float] = field(default_factory=dict)
     # Non-age technology has no completion telemetry. Payment suppresses a
     # duplicate press, but never fabricates a completed-research observation.
     research_purchases: set[str] = field(default_factory=set)
@@ -1002,9 +1009,9 @@ def observe_age(age: str | None, *, input_revision: int | None = None) -> None:
     pass in five. Clearing it there made the age-up and every research
     ineligible on 86% of frames, and refused the Feudal Age at 554 food.
     """
-    if not age:
-        return
     ledger = current_ledger()
+    if not age or _age_up_too_recent(ledger, age):
+        return
     ledger.age_known = True
     ledger.current_age = age
     completed = [
@@ -1022,6 +1029,15 @@ def observe_age(age: str | None, *, input_revision: int | None = None) -> None:
         operation_id = ledger.age_up_paid.pop(name, None) if target_age == age else None
         if operation_id is not None:
             _confirm_age_reached(ledger, operation_id, name)
+
+
+def _age_up_too_recent(ledger: ActionLedger, age: str) -> bool:
+    """Whether `age` was read too soon after its age-up was pressed to have arrived."""
+    now = _now()
+    return any(
+        _AGE_REACHED_BY[name] == age and now - pressed_at < ledger.min_age_up_seconds
+        for name, pressed_at in ledger.age_up_pressed_at.items()
+    )
 
 
 def _confirm_age_reached(ledger: ActionLedger, operation_id: int, name: str) -> None:
@@ -1378,6 +1394,8 @@ def _note_pending_research(name: str, tech: Tech) -> _PendingResearch | None:
         spend_revision=current_ledger().input_revision + 1,
     )
     current_ledger().pending_research.append(pending)
+    if name in _AGE_REACHED_BY:
+        current_ledger().age_up_pressed_at[name] = _now()
     current_ledger().record_outcome(
         ActionOutcome(
             pending.operation_id,
@@ -3246,6 +3264,8 @@ async def _handle_build(action_dict: dict[str, object], intent: str) -> ActionRe
                 current_ledger().defer_action(
                     action_id, _BUILD_REFRESH_RETRY_DELAY, "villager refresh failed"
                 )
+            elif index > selection_index:
+                await _abandon_open_build(steps, action_id, "placement step failed")
             return ActionResult(
                 False, f"build failed at: {step.get('intent', '')}: {result.detail}"
             )
@@ -3292,12 +3312,23 @@ async def _handle_build(action_dict: dict[str, object], intent: str) -> ActionRe
         # menu keys don't move the camera, but by now the builder's view is about
         # 3 s old and click evidence must be under 1 s, so detect again.
         if index == selection_index + 2 and not await _spatial_refresh():
-            if action_id:
-                current_ledger().defer_action(
-                    action_id, _BUILD_REFRESH_RETRY_DELAY, "pre-placement refresh failed"
-                )
+            await _abandon_open_build(steps, action_id, "pre-placement refresh failed")
             return ActionResult(False, "pre-placement refresh unavailable")
     return ActionResult(True, f"placement input issued ({intent}); awaiting evidence")
+
+
+async def _abandon_open_build(
+    steps: Sequence[dict[str, object]], action_id: str, reason: str
+) -> None:
+    """Close the build menu a failed placement left open, and wait before retrying.
+
+    The sequence's last step selects the Town Center, which drops the menu and
+    the building held on the cursor. Without it the next click on the map would
+    place that building wherever it landed.
+    """
+    await execute_action(dict(steps[-1]))
+    if action_id:
+        current_ledger().defer_action(action_id, _BUILD_REFRESH_RETRY_DELAY, reason)
 
 
 async def _handle_research(action_dict: dict[str, object], intent: str) -> ActionResult:
