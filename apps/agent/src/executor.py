@@ -32,7 +32,7 @@ from .entity_utils import (
     safe_gather_target,
 )
 from .models import Action, validate_action
-from .placement_preview import PreviewRegion, preview_refused
+from .placement_preview import PreviewRegion, preview_drawn, preview_refused
 from .policy.candidates import eligible
 from .policy.catalog import (
     BUILDINGS,
@@ -2250,38 +2250,52 @@ async def _previewed_placement(
     candidates = placement_candidates(key, menu=menu)[:_PREVIEW_HOVER_LIMIT]
     if not candidates:
         return (f"no visible resource or ground for the {name}", None)
-    point = await _first_accepted(candidates, _footprint(name), capture)
-    if point is None:
-        log.warning("placement_preview_refused_all", building=name, tried=len(candidates))
-        return (
-            f"no valid ground in view for the {name}: "
-            f"the preview was red at {len(candidates)} spots",
-            None,
+    hover = await _hover_candidates(candidates, _footprint(name), capture)
+    if hover.accepted is not None:
+        log.info(
+            "placement_preview_accepted", building=name, point=hover.accepted, tried=hover.tried
         )
-    log.info(
-        "placement_preview_accepted",
-        building=name,
-        point=point,
-        tried=candidates.index(point) + 1,
+        return ("", hover.accepted)
+    if not hover.any_drawn:
+        log.warning("placement_preview_missing", building=name, tried=hover.tried)
+        return (f"no {name} on the cursor: the build menu didn't take", None)
+    log.warning("placement_preview_refused_all", building=name, tried=hover.tried)
+    return (
+        f"no valid ground in view for the {name}: the preview was red at {hover.tried} spots",
+        None,
     )
-    return ("", point)
 
 
-async def _first_accepted(
+@dataclass(frozen=True, slots=True)
+class _Hover:
+    """What hovering the candidates showed."""
+
+    accepted: tuple[int, int] | None
+    tried: int
+    any_drawn: bool
+
+
+async def _hover_candidates(
     candidates: Sequence[tuple[int, int]], footprint: "_Footprint", capture: PreviewCapture
-) -> tuple[int, int] | None:
-    """Hover each candidate in turn; the first whose preview isn't red, or None.
+) -> _Hover:
+    """Hover each candidate until the game draws its preview in normal colours.
 
     The comparison frame is taken with the cursor over the command panel, where
-    the game draws no preview.
+    the game draws no preview. A spot counts only where a preview appeared: with
+    nothing on the cursor no spot is ever red, so "not red" alone proves nothing.
     """
     size = _window_size()
     without = await _capture_hovering(_command_panel_point(), capture)
-    for point in candidates:
+    any_drawn = False
+    for tried, point in enumerate(candidates, start=1):
         with_preview = await _capture_hovering(point, capture)
-        if not preview_refused(without, with_preview, footprint.preview_region(point, size)):
-            return point
-    return None
+        region = footprint.preview_region(point, size)
+        if not preview_drawn(without, with_preview, region):
+            continue
+        any_drawn = True
+        if not preview_refused(without, with_preview, region):
+            return _Hover(point, tried, any_drawn)
+    return _Hover(None, len(candidates), any_drawn)
 
 
 async def _capture_hovering(point: tuple[int, int], capture: PreviewCapture) -> np.ndarray:

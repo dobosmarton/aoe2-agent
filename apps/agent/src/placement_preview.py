@@ -19,6 +19,12 @@ _RED_MIN = 170
 _OTHER_MAX = 90
 # The red share must rise by this much over the frame without a preview.
 _REFUSED_RISE = 0.01
+# A drawn preview changes this share of the region's pixels by more than
+# _CHANGED_LEVEL in any channel. Measured: 0.22-0.44 with a house on the cursor,
+# 0.000-0.001 with nothing on it. Live, a build whose building never reached the
+# cursor read as "no red", so its spot was accepted and the click refused.
+_DRAWN_SHARE = 0.08
+_CHANGED_LEVEL = 40
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +64,16 @@ def red_share(pixels: np.ndarray, region: PreviewRegion) -> float:
     return float(strong.mean())
 
 
+def preview_drawn(without: np.ndarray, with_preview: np.ndarray, region: PreviewRegion) -> bool:
+    """Whether a building preview appeared in `region`, against a frame without one."""
+    before = region.crop(without).astype(np.int16)
+    after = region.crop(with_preview).astype(np.int16)
+    if before.size == 0 or before.shape != after.shape:
+        return False
+    changed = np.abs(after - before).max(axis=2) > _CHANGED_LEVEL
+    return float(changed.mean()) >= _DRAWN_SHARE
+
+
 def preview_refused(without: np.ndarray, with_preview: np.ndarray, region: PreviewRegion) -> bool:
     """Whether the preview at `region` turned red, against a frame without a preview.
 
@@ -67,4 +83,4 @@ def preview_refused(without: np.ndarray, with_preview: np.ndarray, region: Previ
     return red_share(with_preview, region) - red_share(without, region) >= _REFUSED_RISE
 
 
-__all__ = ["PreviewRegion", "preview_refused", "red_share"]
+__all__ = ["PreviewRegion", "preview_drawn", "preview_refused", "red_share"]

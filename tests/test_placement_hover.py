@@ -24,14 +24,21 @@ class _Cursor:
         self.moves.append((x, y))
 
 
-def _capture_red_at(cursor: _Cursor, red: set[tuple[int, int]]) -> ex.PreviewCapture:
+_NORMAL = (180, 150, 110)  # A preview in the building's own colours.
+_RED = (210, 40, 40)
+
+
+def _capture_red_at(
+    cursor: _Cursor, red: set[tuple[int, int]], *, drawn: bool = True
+) -> ex.PreviewCapture:
+    """A game that draws the preview at the cursor: red at `red`, normal elsewhere."""
     width, height = ex._window_size()
 
     async def capture(_after: float) -> np.ndarray:
         pixels = np.zeros((height, width, 3), dtype=np.uint8)
         x, y = cursor.moves[-1]
-        if (x, y) in red:
-            pixels[y - 100 : y + 20, x - 60 : x + 60] = (210, 40, 40)
+        if drawn and y < height - ex.UI_MARGIN_BOTTOM:  # No preview over the panel.
+            pixels[y - 100 : y + 20, x - 60 : x + 60] = _RED if (x, y) in red else _NORMAL
         return pixels
 
     return capture
@@ -64,3 +71,8 @@ def test_the_cursor_rests_over_the_command_panel_before_hovering(cursor: _Cursor
     _place(_capture_red_at(cursor, set()))
     _width, height = ex._window_size()
     assert cursor.moves[0][1] > height - ex.UI_MARGIN_BOTTOM
+
+
+def test_nothing_on_the_cursor_is_not_an_accepted_spot(cursor: _Cursor) -> None:
+    detail, point = _place(_capture_red_at(cursor, set(), drawn=False))
+    assert (point, "on the cursor" in detail) == (None, True)
