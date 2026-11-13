@@ -72,13 +72,45 @@ def changed_share(without: np.ndarray, with_preview: np.ndarray, region: Preview
     return float((np.abs(after - before).max(axis=2) > _CHANGED_LEVEL).mean())
 
 
+@dataclass(frozen=True, slots=True)
+class PreviewReading:
+    """What one hover showed at a candidate spot."""
+
+    red_before: float
+    red: float
+    changed: float
+
+    @property
+    def refused(self) -> bool:
+        """Whether the preview turned red.
+
+        Comparing against the frame without a preview keeps red that was already
+        there, such as a red player's units, from reading as a refusal.
+        """
+        return self.red - self.red_before >= _REFUSED_RISE
+
+
+def read_preview(
+    without: np.ndarray, with_preview: np.ndarray, region: PreviewRegion
+) -> PreviewReading:
+    """The preview at `region`, against a frame without one."""
+    return PreviewReading(
+        red_before=red_share(without, region),
+        red=red_share(with_preview, region),
+        changed=changed_share(without, with_preview, region),
+    )
+
+
 def preview_refused(without: np.ndarray, with_preview: np.ndarray, region: PreviewRegion) -> bool:
-    """Whether the preview at `region` turned red, against a frame without a preview.
-
-    Comparing against the frame without one keeps red that was already there,
-    such as a red player's units, from reading as a refusal.
-    """
-    return red_share(with_preview, region) - red_share(without, region) >= _REFUSED_RISE
+    """Whether the preview at `region` turned red, against a frame without a preview."""
+    return read_preview(without, with_preview, region).refused
 
 
-__all__ = ["PreviewRegion", "changed_share", "preview_refused", "red_share"]
+__all__ = [
+    "PreviewReading",
+    "PreviewRegion",
+    "changed_share",
+    "preview_refused",
+    "read_preview",
+    "red_share",
+]

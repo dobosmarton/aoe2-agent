@@ -32,7 +32,7 @@ from .entity_utils import (
     safe_gather_target,
 )
 from .models import Action, validate_action
-from .placement_preview import PreviewRegion, changed_share, preview_refused, red_share
+from .placement_preview import PreviewRegion, read_preview
 from .policy.candidates import eligible
 from .policy.catalog import (
     BUILDINGS,
@@ -2288,16 +2288,15 @@ async def _first_accepted(
     without = await _capture_hovering(_command_panel_point(), capture)
     for point in candidates:
         with_preview = await _capture_hovering(point, capture)
-        region = footprint.preview_region(point, size)
-        refused = preview_refused(without, with_preview, region)
+        reading = read_preview(without, with_preview, footprint.preview_region(point, size))
         log.debug(
             "placement_preview_hover",
             point=point,
-            refused=refused,
-            red=round(red_share(with_preview, region), 3),
-            changed=round(changed_share(without, with_preview, region), 3),
+            refused=reading.refused,
+            red=round(reading.red, 3),
+            changed=round(reading.changed, 3),
         )
-        if not refused:
+        if not reading.refused:
             return point
     return None
 

@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 import numpy as np
-from gameplay_agent.placement_preview import PreviewRegion, changed_share, preview_refused
+from gameplay_agent.placement_preview import (
+    PreviewReading,
+    PreviewRegion,
+    changed_share,
+    preview_refused,
+    read_preview,
+)
 
 _SIZE = (400, 300)
 _SPOT = (200, 200)
@@ -40,3 +46,8 @@ def test_a_preview_changes_its_whole_region() -> None:
 
 def test_an_unchanged_region_has_no_changed_share() -> None:
     assert changed_share(_frame(), _frame(), _REGION) == 0.0
+
+
+def test_a_reading_keeps_the_numbers_behind_its_verdict() -> None:
+    reading = read_preview(_frame(), _frame(red_at=_REGION), _REGION)
+    assert reading == PreviewReading(red_before=0.0, red=1.0, changed=1.0)
