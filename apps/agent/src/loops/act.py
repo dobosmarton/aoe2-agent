@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from dataclasses import dataclass
 from operator import itemgetter
 from typing import TYPE_CHECKING
 
@@ -23,6 +24,8 @@ from .perceive import save_action_evidence
 if TYPE_CHECKING:
     from ..policy.advice import PolicyAdvice, PolicyRequest
     from ..policy.candidates import ActionCandidate
+    from ..policy.controller import AgentController
+    from ..policy.state import PolicyState
     from ..providers.policy import PolicyAdvisor
     from .context import LoopContext
     from .snapshot import Perception
@@ -78,7 +81,7 @@ async def act_once(
     started_at = time.monotonic()
     advice: PolicyAdvice | None = None
     failure: str | None = None
-    if ctx.controller.overdue(request.state, request.candidates, ctx.goal_manager.allocation):
+    if _forced_obligation(ctx, request.state, request.candidates) is not None:
         failure = "obligation_overdue"
     with ctx.latency.tick(ACT_LOOP, tick) as timings:
         with timings.phase("policy"):
@@ -222,8 +225,7 @@ async def _await_advice(
                 if latest.input_revision != request.source_input_revision:
                     return None, "intervening_execution"
                 state = state_for_frame(ctx, latest)
-                candidates = feasible_candidates(state)
-                if ctx.controller.overdue(state, candidates, ctx.goal_manager.allocation):
+                if _forced_obligation(ctx, state, feasible_candidates(state)) is not None:
                     return None, "obligation_overdue"
                 if advice_task in done:
                     try:
@@ -244,6 +246,29 @@ async def _await_advice(
         await asyncio.gather(advice_task, stop_task, return_exceptions=True)
 
 
+def _forced_obligation(
+    ctx: LoopContext, state: PolicyState, candidates: tuple[ActionCandidate, ...]
+) -> ActionCandidate | None:
+    """An overdue obligation that runs without waiting for Jev, since it can't decline it."""
+    overdue = ctx.controller.overdue(state, candidates, ctx.goal_manager.allocation)
+    if overdue is None or ctx.controller.advisor_may_decline(overdue.id):
+        return None
+    return overdue
+
+
+@dataclass(frozen=True, slots=True)
+class _Judgment:
+    """Jev's answer, checked against the latest frame."""
+
+    reason: str
+    choice: ActionCandidate | None = None
+    confident: bool = False
+
+    @property
+    def confident_choice(self) -> ActionCandidate | None:
+        return self.choice if self.confident else None
+
+
 def _choose_action(
     ctx: LoopContext,
     request: PolicyRequest,
@@ -252,52 +277,95 @@ def _choose_action(
     latest: Perception,
     candidates: tuple[ActionCandidate, ...],
 ) -> tuple[ActionCandidate, str, str]:
-    """A newer frame is fine; a changed fact or input needs a fresh eligible choice."""
-    state = state_for_frame(ctx, latest)
-    if overdue := ctx.controller.overdue(state, candidates, ctx.goal_manager.allocation):
-        return overdue, "fallback", "obligation_overdue"
-    if failure is not None:
-        status = "timed_out" if failure == "provider_timeout" else "fallback"
-        return (
-            select_fallback(candidates, state, ctx.goal_manager.allocation, request.goals),
-            status,
-            failure,
-        )
-    if advice is None:
-        return (
-            select_fallback(candidates, state, ctx.goal_manager.allocation, request.goals),
-            "fallback",
-            "no_advice",
-        )
+    """Jev decides; the obligations and the fallback list only fill its gaps.
 
-    reason: str | None = None
+    An overdue obligation runs unless Jev confidently chose otherwise and the
+    obligation lets it (`advisor_may_decline`). Live, keeping the Town Center
+    busy queued villagers at 538 and 584 food while the goals said to bank 500
+    for the Feudal Age.
+    """
+    state = state_for_frame(ctx, latest)
+    stale = _stale_reason(request, advice, latest, state, ctx.goal_manager.revision)
+    usable = advice is not None and failure is None and stale is None
+    if usable and advice.allocation_confidence >= config.policy_min_confidence:
+        ctx.goal_manager.set_allocation(focused(state.age, advice.allocation_focus))
+    judgment = _judge(advice, failure or stale, candidates)
+    confident = judgment.confident_choice
+    overdue = ctx.controller.overdue(state, candidates, ctx.goal_manager.allocation)
+    if overdue is not None and not _declines(ctx.controller, overdue, confident, request):
+        return overdue, "fallback", "obligation_overdue"
+    if confident is not None:
+        reason = "declined_obligation" if overdue is not None else judgment.reason
+        return confident, "applied", reason
+    fallback = select_fallback(candidates, state, ctx.goal_manager.allocation, request.goals)
+    if fallback.id == "wait" and judgment.choice is not None and judgment.choice.id != "wait":
+        # The list had nothing to do; Jev's best guess beats doing nothing.
+        return judgment.choice, "applied", "fallback_had_nothing"
+    return fallback, _fallback_status(failure, advice), judgment.reason
+
+
+def _declines(
+    controller: AgentController,
+    obligation: ActionCandidate,
+    choice: ActionCandidate | None,
+    request: PolicyRequest,
+) -> bool:
+    """Whether Jev confidently chose something else with the obligation on offer.
+
+    A "wait" when the obligation wasn't among Jev's options says nothing about
+    it: in game 7 every confident "wait" before a forced villager queue came
+    from a request that didn't offer a villager.
+    """
+    if choice is None or choice.id == obligation.id:
+        return False
+    offered = any(candidate.id == obligation.id for candidate in request.candidates)
+    return offered and controller.advisor_may_decline(obligation.id)
+
+
+def _stale_reason(
+    request: PolicyRequest,
+    advice: PolicyAdvice | None,
+    latest: Perception,
+    state: PolicyState,
+    goal_revision: int,
+) -> str | None:
+    """Why Jev's answer no longer fits the latest frame, or None if it still does."""
+    if advice is None:
+        return "no_advice"
     if (
         advice.source_tick != request.source_tick
         or advice.source_captured_at != request.source_captured_at
     ):
-        reason = "source_frame_mismatch"
-    elif request.source_input_revision != latest.input_revision:
-        reason = "input_revision_changed"
-    elif request.goal_revision != ctx.goal_manager.revision:
-        reason = "goal_revision_changed"
-    elif request.state.age != state.age:
-        reason = "age_changed"
-    else:
-        if advice.allocation_confidence >= config.policy_min_confidence:
-            ctx.goal_manager.set_allocation(focused(state.age, advice.allocation_focus))
-        if advice.action_confidence < config.policy_min_confidence:
-            reason = "low_confidence"
-        else:
-            selected = find_candidate(candidates, advice.action_choice)
-            if selected is not None:
-                return selected, "applied", "eligible_on_latest_frame"
-            reason = "candidate_unavailable"
+        return "source_frame_mismatch"
+    if request.source_input_revision != latest.input_revision:
+        return "input_revision_changed"
+    if request.goal_revision != goal_revision:
+        return "goal_revision_changed"
+    if request.state.age != state.age:
+        return "age_changed"
+    return None
 
-    return (
-        select_fallback(candidates, state, ctx.goal_manager.allocation, request.goals),
-        "rejected",
-        reason,
-    )
+
+def _judge(
+    advice: PolicyAdvice | None,
+    unusable_reason: str | None,
+    candidates: tuple[ActionCandidate, ...],
+) -> _Judgment:
+    """Jev's pick on the latest frame, and whether it was sure enough to act on."""
+    if advice is None or unusable_reason is not None:
+        return _Judgment(unusable_reason or "no_advice")
+    choice = find_candidate(candidates, advice.action_choice)
+    if choice is None:
+        return _Judgment("candidate_unavailable")
+    if advice.action_confidence < config.policy_min_confidence:
+        return _Judgment("low_confidence", choice)
+    return _Judgment("eligible_on_latest_frame", choice, confident=True)
+
+
+def _fallback_status(failure: str | None, advice: PolicyAdvice | None) -> str:
+    if failure == "provider_timeout":
+        return "timed_out"
+    return "fallback" if failure is not None or advice is None else "rejected"
 
 
 _RANKED_IN_LOG = 3
