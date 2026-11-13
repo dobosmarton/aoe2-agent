@@ -60,3 +60,18 @@ def test_a_farm_placement_avoids_the_town_center() -> None:
     point = ex.default_build_placement("a")  # Farm, in the economic menu.
     assert point is not None
     assert not ex._footprint_blocked(point, ex._footprint("farm"))
+
+
+def test_a_crowded_ring_falls_back_to_clear_ground_elsewhere_in_view() -> None:
+    width, height = ex._window_size()
+    crowded = _box("farm", (0.0, 0.0, width * 0.75, float(height)))  # Every ring point.
+    _with_town_center(crowded)
+    point = ex.default_build_placement("a")
+    assert point is not None
+    assert not ex._footprint_blocked(point, ex._footprint("farm"))
+
+
+def test_no_clear_ground_in_view_means_no_placement() -> None:
+    width, height = ex._window_size()
+    _with_town_center(_box("tree", (0.0, 0.0, float(width), float(height))))
+    assert ex.default_build_placement("a") is None

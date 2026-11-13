@@ -2212,13 +2212,11 @@ def _resolve_coords(action_dict: dict[str, object]) -> tuple[str, tuple[int, int
         menu = str(action_dict.get("menu") or ECON_MENU)
         placement = default_build_placement(key, menu=menu)
         if placement is None:
-            # The camera moved since the pre-flight gate ran, so the resource that
-            # authorised this build is no longer in frame. The trailing `h` press
-            # in build_menu_steps still clears the open menu.
-            return (
-                f"no visible resource to anchor the {building_class(menu, key) or key} on",
-                None,
-            )
+            # A camp's resource left the frame after the pre-flight gate, or no
+            # ground in view fits the building. The trailing `h` press in
+            # build_menu_steps still clears the open menu.
+            name = building_class(menu, key) or key
+            return (f"no visible resource or clear ground for the {name}", None)
         return ("", placement)
 
     target_id = action_dict.get("target_id")
@@ -2492,6 +2490,7 @@ _FOOTPRINT_TILES: dict[str, int] = {
 }
 _DEFAULT_FOOTPRINT_TILES = 3
 _TOWN_CENTER_TILES = 4
+_MIN_GROUND_STEP = 24  # Frame pixels between points of the open-ground search.
 
 
 @dataclass(frozen=True, slots=True)
@@ -2743,7 +2742,7 @@ def _open_ground_candidates(
             cy = int(ay + radius * math.sin(angle))
             if min_x <= cx <= max_x and min_y <= cy <= max_y and _explored((cx, cy)):
                 candidates.append((cx, cy))
-    home = _resolve_target_class("town_center") if current_ledger().refused_offsets else None
+    home = _refusal_home()
     candidates.sort(
         key=lambda point: (
             _near_refused(point, home),
@@ -2843,10 +2842,47 @@ def default_build_placement(building_key: str, *, menu: str = ECON_MENU) -> tupl
     if menu == ECON_MENU and building_key in _RESOURCE_REQUIRED_KEYS:
         return None
     anchor = _home_anchor()
-    candidates = _open_ground_candidates(
-        anchor, footprint=_footprint(building_class(menu, building_key))
+    footprint = _footprint(building_class(menu, building_key))
+    candidates = _open_ground_candidates(anchor, footprint=footprint)
+    if candidates and _clear_ground(candidates[0], footprint, _refusal_home()):
+        return candidates[0]
+    return _nearest_clear_ground(anchor, footprint)
+
+
+def _nearest_clear_ground(anchor: tuple[int, int], footprint: _Footprint) -> tuple[int, int] | None:
+    """The clear footprint nearest `anchor` anywhere in view, or None.
+
+    The ring holds about 30 points. Live, a grown base left none of them clear
+    for a farm or a market, and placing on the least-blocked one was refused 13
+    times in one game, so the whole view is searched before giving up.
+    """
+    min_x, min_y, max_x, max_y = _play_area_bounds()
+    half_width, half_height = int(footprint.half_width), int(footprint.half_height)
+    step = max(half_height, _MIN_GROUND_STEP)
+    points = [
+        (x, y)
+        for x in range(min_x + half_width, max_x - half_width + 1, step)
+        for y in range(min_y + half_height, max_y - half_height + 1, step)
+    ]
+    points.sort(key=lambda point: math.dist(point, anchor))
+    home = _refusal_home()
+    return next((point for point in points if _clear_ground(point, footprint, home)), None)
+
+
+def _clear_ground(
+    point: tuple[int, int], footprint: _Footprint, home: tuple[int, int] | None
+) -> bool:
+    """Explored ground whose footprint is free and that the game hasn't refused."""
+    return (
+        not _footprint_blocked(point, footprint)
+        and not _near_refused(point, home)
+        and _explored(point)
     )
-    return candidates[0] if candidates else anchor
+
+
+def _refusal_home() -> tuple[int, int] | None:
+    """The Town Center refused ground is recorded against, if any was refused."""
+    return _resolve_target_class("town_center") if current_ledger().refused_offsets else None
 
 
 def build_menu_steps(
