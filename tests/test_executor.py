@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import gameplay_agent
+import numpy as np
 import pytest
 from gameplay_agent import executor as ex
 
@@ -124,6 +125,7 @@ def fake_pyautogui(monkeypatch: pytest.MonkeyPatch, clock: _Clock) -> _FakePyaut
     ex._rescan_full_fn = None
     ex._selection_refresh_fn = None
     ex._placement_refresh_fn = None
+    ex._preview_capture_fn = None
     ex.reset_build_gates()
     original_observe_hud = ex.observe_hud
 
@@ -2007,3 +2009,31 @@ def test_a_build_with_no_ground_to_place_on_closes_the_build_menu(
     result = _run(ex.execute_action({"type": "build", "building_key": "q", "intent": "house"}))
     presses = [call[1][0] for call in fake_pyautogui.calls if call[0] == "press"]
     assert (result.success, presses) == (False, [".", "q", "q", "h"]), result.detail
+
+
+def test_a_build_the_preview_refuses_everywhere_clicks_nothing_and_is_not_a_refusal(
+    fake_pyautogui: _FakePyautogui, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ex.observe_hud(4, 5, {"wood": 200})
+    monkeypatch.setattr(ex, "RESCAN_SETTLE_DELAY", 0.0)
+    monkeypatch.setattr(ex, "placement_candidates", lambda _key, *, menu="q": [(900, 700)])
+
+    async def refreshed() -> bool:
+        ex.observe_hud(4, 5, {"wood": 200})
+        ex.current_ledger().spatial_valid = True
+        return True
+
+    async def all_red(_after: float) -> np.ndarray:
+        width, height = ex._window_size()
+        pixels = np.zeros((height, width, 3), dtype=np.uint8)
+        if fake_pyautogui.calls[-1][1] == (900, 700):  # Hovering the spot, not the panel.
+            pixels[500:760, 750:1050] = (210, 40, 40)
+        return pixels
+
+    ex.set_rescan_fn(_publishing_refresh(refreshed))
+    ex.set_rescan_full_fn(_publishing_refresh(refreshed))
+    ex.set_preview_capture_fn(all_red)
+    result = _run(ex.execute_action({"type": "build", "building_key": "q", "intent": "house"}))
+    clicked_map = any(name in ("click", "mouseDown") for name, *_ in fake_pyautogui.calls)
+    outcome = (result.success, clicked_map, ex._build_gates.missing_streaks.get("house", 0))
+    assert outcome == (False, False, 0), result.detail

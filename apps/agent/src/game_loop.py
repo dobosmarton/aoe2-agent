@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 import structlog
 
 if TYPE_CHECKING:
+    import numpy as np
+
     from .game_profile import GameProfile
     from .overlay import DetectionOverlay
     from .providers.base import ChatWire
@@ -34,6 +36,7 @@ from .executor import (
     set_command_button,
     set_modifier_map,
     set_placement_refresh_fn,
+    set_preview_capture_fn,
     set_rescan_fn,
     set_rescan_full_fn,
     set_selection_refresh_fn,
@@ -50,6 +53,7 @@ from .memory import AgentMemory
 from .models import validate_actions
 from .providers.strategist import StrategistProvider, get_default_goals
 from .resource_ocr import warm_up_ocr
+from .screen import capture_pixels_after
 from .turn_phases import get_ground_commands
 from .window import ensure_game_focused, game_platform
 
@@ -319,6 +323,7 @@ async def game_loop(
         set_rescan_full_fn(refresh)
         set_selection_refresh_fn(frame_refresh(ctx.frames, selection_only=True))
         set_placement_refresh_fn(frame_refresh(ctx.frames, skip_selection=True))
+        set_preview_capture_fn(_capture_after)
 
         memory.memories_loaded = list(provider.loaded_memory_titles)
         log.info(
@@ -410,6 +415,11 @@ async def _stop_warm_ups(warm_ups: list[asyncio.Task[None]]) -> None:
     for warm_up in warm_ups:
         warm_up.cancel()
     await asyncio.gather(*warm_ups, return_exceptions=True)
+
+
+async def _capture_after(after: float) -> np.ndarray:
+    """A frame drawn after `after`, captured off the event loop for the placement preview."""
+    return await asyncio.to_thread(capture_pixels_after, after)
 
 
 def _use_profile(profile: GameProfile | None) -> None:

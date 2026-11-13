@@ -32,6 +32,7 @@ from .entity_utils import (
     safe_gather_target,
 )
 from .models import Action, validate_action
+from .placement_preview import PreviewRegion, preview_refused
 from .policy.candidates import eligible
 from .policy.catalog import (
     BUILDINGS,
@@ -81,6 +82,9 @@ _rescan_fn: Callable[[], Awaitable[bool]] | None = None
 _rescan_full_fn: Callable[[], Awaitable[bool]] | None = None
 _selection_refresh_fn: Callable[[], Awaitable[bool]] | None = None
 _placement_refresh_fn: Callable[[], Awaitable[bool]] | None = None
+# A frame drawn after the given monotonic instant, as RGB pixels.
+PreviewCapture = Callable[[float], Awaitable[np.ndarray]]
+_preview_capture_fn: PreviewCapture | None = None
 
 
 @dataclass
@@ -120,13 +124,21 @@ def set_placement_refresh_fn(fn: Callable[[], Awaitable[bool]]) -> None:
     _placement_refresh_fn = fn
 
 
+def set_preview_capture_fn(fn: PreviewCapture) -> None:
+    """Set the capture that reads the game's placement preview after a cursor move."""
+    global _preview_capture_fn
+    _preview_capture_fn = fn
+
+
 def clear_refresh_callbacks() -> None:
     """Release per-game capture callbacks after all loops have stopped."""
     global _rescan_fn, _rescan_full_fn, _selection_refresh_fn, _placement_refresh_fn
+    global _preview_capture_fn
     _rescan_fn = None
     _rescan_full_fn = None
     _selection_refresh_fn = None
     _placement_refresh_fn = None
+    _preview_capture_fn = None
 
 
 async def _selection_refresh() -> bool:
@@ -2214,6 +2226,76 @@ def _to_int(value: object) -> int:
     raise TypeError(f"Expected int-coercible value, got {type(value).__name__}")
 
 
+def _spatial_rejection(action_dict: Mapping[str, object]) -> str | None:
+    """Why the detections can't back this click, or None if they can."""
+    if not current_ledger().spatial_valid:
+        return "spatial observation invalid after camera movement; refresh required"
+    if not _fresh_spatial_cache(static_target=_static_click(action_dict)):
+        return "spatial observation is too old for a dependent click"
+    return None
+
+
+async def _previewed_placement(
+    action_dict: Mapping[str, object], capture: PreviewCapture
+) -> tuple[str, tuple[int, int] | None]:
+    """The first candidate spot the game's placement preview accepts.
+
+    Nothing is clicked here: the caller clicks the spot this returns.
+    """
+    if rejection := _spatial_rejection(action_dict):
+        return (rejection, None)
+    key = str(action_dict.get("building_key", ""))
+    menu = str(action_dict.get("menu") or ECON_MENU)
+    name = building_class(menu, key) or key
+    candidates = placement_candidates(key, menu=menu)[:_PREVIEW_HOVER_LIMIT]
+    if not candidates:
+        return (f"no visible resource or ground for the {name}", None)
+    point = await _first_accepted(candidates, _footprint(name), capture)
+    if point is None:
+        log.warning("placement_preview_refused_all", building=name, tried=len(candidates))
+        return (
+            f"no valid ground in view for the {name}: "
+            f"the preview was red at {len(candidates)} spots",
+            None,
+        )
+    log.info(
+        "placement_preview_accepted",
+        building=name,
+        point=point,
+        tried=candidates.index(point) + 1,
+    )
+    return ("", point)
+
+
+async def _first_accepted(
+    candidates: Sequence[tuple[int, int]], footprint: "_Footprint", capture: PreviewCapture
+) -> tuple[int, int] | None:
+    """Hover each candidate in turn; the first whose preview isn't red, or None.
+
+    The comparison frame is taken with the cursor over the command panel, where
+    the game draws no preview.
+    """
+    size = _window_size()
+    without = await _capture_hovering(_command_panel_point(), capture)
+    for point in candidates:
+        with_preview = await _capture_hovering(point, capture)
+        if not preview_refused(without, with_preview, footprint.preview_region(point, size)):
+            return point
+    return None
+
+
+async def _capture_hovering(point: tuple[int, int], capture: PreviewCapture) -> np.ndarray:
+    """A frame drawn after the cursor moved to `point` and the game redrew."""
+    pyautogui.moveTo(*_translate(*point))
+    return await capture(time.monotonic() + _PREVIEW_SETTLE_SECONDS)
+
+
+def _command_panel_point() -> tuple[int, int]:
+    """The middle of the command panel at the bottom of the frame."""
+    width, height = _window_size()
+    return (width // 2, height - UI_MARGIN_BOTTOM // 2)
+
+
 def _resolve_coords(action_dict: dict[str, object]) -> tuple[str, tuple[int, int] | None]:
     """Resolve action coordinates from auto_placement, targets, or x/y fields.
 
@@ -2221,10 +2303,8 @@ def _resolve_coords(action_dict: dict[str, object]) -> tuple[str, tuple[int, int
     auto_placement resolves NOW — against the entity cache as it is at click
     time, after any camera move earlier in the sequence (run 8, F-33).
     """
-    if not current_ledger().spatial_valid:
-        return ("spatial observation invalid after camera movement; refresh required", None)
-    if not _fresh_spatial_cache(static_target=_static_click(action_dict)):
-        return ("spatial observation is too old for a dependent click", None)
+    if rejection := _spatial_rejection(action_dict):
+        return (rejection, None)
     if action_dict.get("auto_placement"):
         key = str(action_dict.get("building_key", ""))
         menu = str(action_dict.get("menu") or ECON_MENU)
@@ -2509,6 +2589,10 @@ _FOOTPRINT_TILES: dict[str, int] = {
 _DEFAULT_FOOTPRINT_TILES = 3
 _TOWN_CENTER_TILES = 4
 _MIN_GROUND_STEP = 24  # Frame pixels between points of the open-ground search.
+# Spots hovered before giving up on a placement, and how long after a cursor move
+# the preview is read: a hover costs one capture, against 6 s for a refused click.
+_PREVIEW_HOVER_LIMIT = 8
+_PREVIEW_SETTLE_SECONDS = 0.15
 
 
 @dataclass(frozen=True, slots=True)
@@ -2517,6 +2601,10 @@ class _Footprint:
 
     half_width: float
     half_height: float
+
+    def preview_region(self, point: tuple[int, int], size: tuple[int, int]) -> PreviewRegion:
+        """Where the game draws this building's preview when the cursor is at `point`."""
+        return PreviewRegion.around(point, self.half_width, self.half_height, size)
 
     def overlaps(self, point: tuple[int, int], box: tuple[float, float, float, float]) -> bool:
         px, py = point
@@ -2840,7 +2928,7 @@ def default_build_placement(building_key: str, *, menu: str = ECON_MENU) -> tupl
     A drop-off camp takes the emptiest point on a tight ring around its resource;
     everything else takes one around the town centre, never the TC tile itself
     (clicking on the TC always fails). None means the camp's resource is off
-    screen and the caller should skip the turn.
+    screen, or no ground in view is clear, and the caller should skip the turn.
     """
     resource = _resource_anchor(building_key) if menu == ECON_MENU else None
     if resource is not None:
@@ -2857,14 +2945,33 @@ def default_build_placement(building_key: str, *, menu: str = ECON_MENU) -> tupl
             candidates=len(candidates),
         )
         return point
+    footprint = _footprint(building_class(menu, building_key))
+    home = _refusal_home()
+    candidates = placement_candidates(building_key, menu=menu)
+    return next((point for point in candidates if _clear_ground(point, footprint, home)), None)
+
+
+def placement_candidates(building_key: str, *, menu: str = ECON_MENU) -> list[tuple[int, int]]:
+    """Spots worth hovering, best first, for the game's preview to judge.
+
+    A drop-off camp hugs its resource. Anything else takes the clear spots the
+    detections allow, then the rest of the ring around the Town Center: the
+    detections miss bushes and snow-covered trees, and see blocked ground where
+    a box overhangs open grass, so the preview has the last word.
+    """
+    resource = _resource_anchor(building_key) if menu == ECON_MENU else None
+    if resource is not None:
+        return _open_ground_candidates(resource, RESOURCE_RING_RADII)
     if menu == ECON_MENU and building_key in _RESOURCE_REQUIRED_KEYS:
-        return None
+        return []
     anchor = _home_anchor()
     footprint = _footprint(building_class(menu, building_key))
-    candidates = _open_ground_candidates(anchor, footprint=footprint)
-    if candidates and _clear_ground(candidates[0], footprint, _refusal_home()):
-        return candidates[0]
-    return _nearest_clear_ground(anchor, footprint)
+    home = _refusal_home()
+    ring = _open_ground_candidates(anchor, footprint=footprint)
+    clear = [point for point in ring if _clear_ground(point, footprint, home)]
+    nearest = _nearest_clear_ground(anchor, footprint)
+    ordered = [*clear, *([nearest] if nearest is not None else []), *ring]
+    return list(dict.fromkeys(ordered))
 
 
 def _nearest_clear_ground(anchor: tuple[int, int], footprint: _Footprint) -> tuple[int, int] | None:
@@ -3059,7 +3166,10 @@ def build_steps(
 
 
 async def _handle_click(action_dict: dict[str, object], intent: str) -> ActionResult:
-    fail_detail, coords = _resolve_coords(action_dict)
+    if action_dict.get("auto_placement") and _preview_capture_fn is not None:
+        fail_detail, coords = await _previewed_placement(action_dict, _preview_capture_fn)
+    else:
+        fail_detail, coords = _resolve_coords(action_dict)
     if coords is None:
         log.warning("click_no_coords", action=action_dict)
         return ActionResult(False, fail_detail)

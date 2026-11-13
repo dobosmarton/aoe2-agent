@@ -115,6 +115,12 @@ def capture_native(monitor: int = 1, *, after: float | None = None) -> NativeCap
     )
 
 
+def capture_pixels_after(after: float) -> np.ndarray:
+    """The game's frame drawn after the monotonic instant `after`, as RGB pixels."""
+    capture = capture_native(after=after)
+    return np.frombuffer(capture.rgb, dtype=np.uint8).reshape(capture.height, capture.width, 3)
+
+
 def _cursor_in(rect: tuple[int, int, int, int] | None) -> tuple[int, int] | None:
     """The cursor in frame pixels, relative to the window. pyautogui reports input units."""
     if rect is None:
