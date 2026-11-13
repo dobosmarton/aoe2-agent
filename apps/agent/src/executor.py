@@ -2240,9 +2240,7 @@ async def _previewed_placement(
 ) -> tuple[str, tuple[int, int] | None]:
     """The first candidate spot the game's placement preview accepts.
 
-    The cursor first rests over the command panel, where the game draws no
-    preview, for a frame to compare against. Then it hovers each candidate in
-    turn. Nothing is clicked here: the caller clicks the spot this returns.
+    Nothing is clicked here: the caller clicks the spot this returns.
     """
     if rejection := _spatial_rejection(action_dict):
         return (rejection, None)
@@ -2252,24 +2250,50 @@ async def _previewed_placement(
     candidates = placement_candidates(key, menu=menu)[:_PREVIEW_HOVER_LIMIT]
     if not candidates:
         return (f"no visible resource or ground for the {name}", None)
-    footprint = _footprint(name)
-    width, height = _window_size()
-    pyautogui.moveTo(*_translate(width // 2, height - UI_MARGIN_BOTTOM // 2))
-    without = await capture(time.monotonic() + _PREVIEW_SETTLE_SECONDS)
-    for tried, point in enumerate(candidates, start=1):
-        pyautogui.moveTo(*_translate(*point))
-        with_preview = await capture(time.monotonic() + _PREVIEW_SETTLE_SECONDS)
-        region = PreviewRegion.around(
-            point, footprint.half_width, footprint.half_height, (width, height)
+    point = await _first_accepted(candidates, _footprint(name), capture)
+    if point is None:
+        log.warning("placement_preview_refused_all", building=name, tried=len(candidates))
+        return (
+            f"no valid ground in view for the {name}: "
+            f"the preview was red at {len(candidates)} spots",
+            None,
         )
-        if not preview_refused(without, with_preview, region):
-            log.info("placement_preview_accepted", building=name, point=point, tried=tried)
-            return ("", point)
-    log.warning("placement_preview_refused_all", building=name, tried=len(candidates))
-    return (
-        f"no valid ground in view for the {name}: the preview was red at {len(candidates)} spots",
-        None,
+    log.info(
+        "placement_preview_accepted",
+        building=name,
+        point=point,
+        tried=candidates.index(point) + 1,
     )
+    return ("", point)
+
+
+async def _first_accepted(
+    candidates: Sequence[tuple[int, int]], footprint: "_Footprint", capture: PreviewCapture
+) -> tuple[int, int] | None:
+    """Hover each candidate in turn; the first whose preview isn't red, or None.
+
+    The comparison frame is taken with the cursor over the command panel, where
+    the game draws no preview.
+    """
+    size = _window_size()
+    without = await _capture_hovering(_command_panel_point(), capture)
+    for point in candidates:
+        with_preview = await _capture_hovering(point, capture)
+        if not preview_refused(without, with_preview, footprint.preview_region(point, size)):
+            return point
+    return None
+
+
+async def _capture_hovering(point: tuple[int, int], capture: PreviewCapture) -> np.ndarray:
+    """A frame drawn after the cursor moved to `point` and the game redrew."""
+    pyautogui.moveTo(*_translate(*point))
+    return await capture(time.monotonic() + _PREVIEW_SETTLE_SECONDS)
+
+
+def _command_panel_point() -> tuple[int, int]:
+    """The middle of the command panel at the bottom of the frame."""
+    width, height = _window_size()
+    return (width // 2, height - UI_MARGIN_BOTTOM // 2)
 
 
 def _resolve_coords(action_dict: dict[str, object]) -> tuple[str, tuple[int, int] | None]:
@@ -2577,6 +2601,10 @@ class _Footprint:
 
     half_width: float
     half_height: float
+
+    def preview_region(self, point: tuple[int, int], size: tuple[int, int]) -> PreviewRegion:
+        """Where the game draws this building's preview when the cursor is at `point`."""
+        return PreviewRegion.around(point, self.half_width, self.half_height, size)
 
     def overlaps(self, point: tuple[int, int], box: tuple[float, float, float, float]) -> bool:
         px, py = point
