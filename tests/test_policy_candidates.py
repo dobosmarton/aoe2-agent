@@ -220,3 +220,21 @@ def test_a_dark_age_gold_target_does_not_route_idle_villagers_past_farms() -> No
     overdue = controller.overdue(state, candidates, with_gold, now=5.1)
     assert overdue is not None
     assert overdue.id == "build_farm"
+
+
+def test_economic_buildings_use_the_grid_slots_the_game_shows() -> None:
+    """The Mac game's economic menu (q), captured with a villager selected."""
+    from gameplay_agent.policy.catalog import SPECS
+
+    bindings = {spec.subject: (spec.menu, spec.key) for spec in SPECS if spec.kind == "build"}
+    seen_in_game = {
+        "house": ("q", "q"),
+        "mill": ("q", "w"),
+        "mining_camp": ("q", "e"),
+        "lumber_camp": ("q", "r"),
+        "farm": ("q", "a"),
+        "blacksmith": ("q", "s"),
+        "market": ("q", "d"),
+        "monastery": ("q", "f"),
+    }
+    assert {name: bindings[name] for name in seen_in_game} == seen_in_game
