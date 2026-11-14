@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 from gameplay_agent.placement_preview import (
+    PreviewKind,
     PreviewReading,
     PreviewRegion,
     changed_share,
@@ -51,3 +52,29 @@ def test_an_unchanged_region_has_no_changed_share() -> None:
 def test_a_reading_keeps_the_numbers_behind_its_verdict() -> None:
     reading = read_preview(_frame(), _frame(red_at=_REGION), _REGION)
     assert reading == PreviewReading(red_before=0.0, red=1.0, changed=1.0)
+
+
+_FARM = PreviewRegion.around(_SPOT, 50.0, 25.0, _SIZE, PreviewKind.OUTLINE)
+
+
+def _outline(color: tuple[int, int, int]) -> np.ndarray:
+    """Grass with a one-pixel outline along the top of a farm's footprint."""
+    pixels = _frame()
+    pixels[_FARM.y0, _FARM.x0 : _FARM.x1] = color
+    return pixels
+
+
+def test_a_farm_is_read_over_its_footprint_alone() -> None:
+    assert PreviewRegion(142, 171, 257, 228, PreviewKind.OUTLINE) == _FARM
+
+
+def test_a_thin_red_outline_refuses_a_farm() -> None:
+    assert read_preview(_frame(), _outline((210, 40, 40)), _FARM).refused
+
+
+def test_a_light_outline_accepts_a_farm() -> None:
+    assert read_preview(_frame(), _outline((235, 235, 235)), _FARM).accepted
+
+
+def test_a_sprite_with_nothing_drawn_is_not_accepted() -> None:
+    assert not read_preview(_frame(), _frame(), _REGION).accepted

@@ -1,48 +1,92 @@
 """The game's own verdict on a building spot.
 
-With a building on the cursor, the game draws it at the cursor in its normal
-colours where it can go and tinted red where it can't. Measured on a Mac with a
-house: the strong-red share around the spot stayed at 0.000 on open ground, and
-rose to 0.053 over a tree and 0.177 over the Town Center. Before the hover check
-the agent judged spots from its own detections, which miss bushes, snow-covered
-trees and unexplored ground, and it learned of a refusal only 6 s after the click.
+With a building on the cursor, the game draws its preview at the cursor: red
+where it can't go. Most buildings draw their whole sprite, tinted red when
+refused. A farm draws only the outline of its footprint, red when refused. The
+agent judged spots from its own detections before, which miss bushes,
+snow-covered trees and unexplored ground, and it learned of a refusal only 6 s
+after the click.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 
 import numpy as np
 
 # A preview pixel is strongly red: a high red channel, low green and blue.
 _RED_MIN = 170
 _OTHER_MAX = 90
-# The red share must rise by this much over the frame without a preview.
-_REFUSED_RISE = 0.01
 _CHANGED_LEVEL = 40  # A pixel changed if any channel moved by more than this.
+# The footprint region reaches a little past the diamond, so its outline is inside.
+_OUTLINE_MARGIN = 1.15
+
+
+class PreviewKind(Enum):
+    """How the game draws a building's preview, which decides where and how to read it."""
+
+    SPRITE = "sprite"  # The whole building, tinted red when refused.
+    OUTLINE = "outline"  # Only the footprint's outline, drawn red when refused.
+
+
+@dataclass(frozen=True, slots=True)
+class _Calibration:
+    """Thresholds for one preview kind, measured in a live Mac game."""
+
+    refused_rise: float  # The red share must rise by this much to refuse.
+    drawn_share: float  # The share that must change to prove a preview is there.
+
+
+_CALIBRATION: dict[PreviewKind, _Calibration] = {
+    # A house: red 0.000 on open ground, 0.053-0.177 over a tree or the Town Center;
+    # 0.22-0.44 of the region changed with it on the cursor, 0.000-0.001 without.
+    # Markets with nothing on the cursor changed 0.006-0.034 and were clicked anyway.
+    PreviewKind.SPRITE: _Calibration(refused_rise=0.01, drawn_share=0.08),
+    # A farm, over its footprint: a red outline read 0.0023-0.0204 at six blocked
+    # spots, and every farm placed in game 11 read 0.000. An outline changes too
+    # few pixels to prove it is drawn, so that check is off.
+    PreviewKind.OUTLINE: _Calibration(refused_rise=0.001, drawn_share=0.0),
+}
 
 
 @dataclass(frozen=True, slots=True)
 class PreviewRegion:
-    """Where the preview of a building placed at one point is drawn, in frame pixels."""
+    """Where a building's preview is read for one point, in frame pixels."""
 
     x0: int
     y0: int
     x1: int
     y1: int
+    kind: PreviewKind = PreviewKind.SPRITE
 
     @classmethod
     def around(
-        cls, point: tuple[int, int], half_width: float, half_height: float, size: tuple[int, int]
+        cls,
+        point: tuple[int, int],
+        half_width: float,
+        half_height: float,
+        size: tuple[int, int],
+        kind: PreviewKind = PreviewKind.SPRITE,
     ) -> PreviewRegion:
-        """The footprint, and the sprite above it: a building stands as tall as it is wide."""
+        """A sprite's footprint and the building above it, or an outline's footprint alone.
+
+        A building stands about as tall as it is wide. A farm's outline is a thin
+        line; read over the sprite's height it was diluted below any threshold.
+        """
         width, height = size
         x, y = point
+        if kind is PreviewKind.OUTLINE:
+            reach_x = half_width * _OUTLINE_MARGIN
+            above = below = half_height * _OUTLINE_MARGIN
+        else:
+            reach_x, above, below = half_width, 2 * half_width, half_height
         return cls(
-            x0=max(0, int(x - half_width)),
-            y0=max(0, int(y - 2 * half_width)),
-            x1=min(width, int(x + half_width)),
-            y1=min(height, int(y + half_height)),
+            x0=max(0, int(x - reach_x)),
+            y0=max(0, int(y - above)),
+            x1=min(width, int(x + reach_x)),
+            y1=min(height, int(y + below)),
+            kind=kind,
         )
 
     def crop(self, pixels: np.ndarray) -> np.ndarray:
@@ -60,11 +104,7 @@ def red_share(pixels: np.ndarray, region: PreviewRegion) -> float:
 
 
 def changed_share(without: np.ndarray, with_preview: np.ndarray, region: PreviewRegion) -> float:
-    """The share of `region` a preview changed, for the run log.
-
-    Measured with a house: 0.22-0.44 with it on the cursor, 0.000-0.001 with
-    nothing there. Not used to decide yet: farms and large buildings are unmeasured.
-    """
+    """The share of `region` that changed against a frame without a preview."""
     before = region.crop(without).astype(np.int16)
     after = region.crop(with_preview).astype(np.int16)
     if before.size == 0 or before.shape != after.shape:
@@ -79,6 +119,7 @@ class PreviewReading:
     red_before: float
     red: float
     changed: float
+    kind: PreviewKind = PreviewKind.SPRITE
 
     @property
     def refused(self) -> bool:
@@ -87,7 +128,16 @@ class PreviewReading:
         Comparing against the frame without a preview keeps red that was already
         there, such as a red player's units, from reading as a refusal.
         """
-        return self.red - self.red_before >= _REFUSED_RISE
+        return self.red - self.red_before >= _CALIBRATION[self.kind].refused_rise
+
+    @property
+    def drawn(self) -> bool:
+        """Whether a preview visibly appeared, so that "not red" means something."""
+        return self.changed >= _CALIBRATION[self.kind].drawn_share
+
+    @property
+    def accepted(self) -> bool:
+        return self.drawn and not self.refused
 
 
 def read_preview(
@@ -98,6 +148,7 @@ def read_preview(
         red_before=red_share(without, region),
         red=red_share(with_preview, region),
         changed=changed_share(without, with_preview, region),
+        kind=region.kind,
     )
 
 
@@ -107,6 +158,7 @@ def preview_refused(without: np.ndarray, with_preview: np.ndarray, region: Previ
 
 
 __all__ = [
+    "PreviewKind",
     "PreviewReading",
     "PreviewRegion",
     "changed_share",
