@@ -75,3 +75,22 @@ def test_no_clear_ground_in_view_means_no_placement() -> None:
     width, height = ex._window_size()
     _with_town_center(_box("tree", (0.0, 0.0, float(width), float(height))))
     assert ex.default_build_placement("a") is None
+
+
+def test_the_strip_the_bottom_panel_covers_is_not_map() -> None:
+    # Live, a farm was "placed" 248 px above the bottom edge: on the selection panel.
+    _width, height = ex._window_size()
+    assert not ex._in_play_area(1206, height - 248)
+
+
+def test_ring_candidates_keep_the_footprint_above_the_bottom_panel() -> None:
+    _with_town_center()
+    farm = ex._footprint("farm")
+    _width, height = ex._window_size()
+    lowest = max(y for _x, y in ex._open_ground_candidates((1500, height - 500), footprint=farm))
+    assert lowest + farm.half_height <= height - ex.UI_MARGIN_BOTTOM
+
+
+def test_the_cursor_rests_on_the_panel_side_of_the_bottom_edge() -> None:
+    width, _height = ex._window_size()
+    assert ex._command_panel_point()[0] < width // 2

@@ -2320,9 +2320,13 @@ async def _capture_hovering(point: tuple[int, int], capture: PreviewCapture) -> 
 
 
 def _command_panel_point() -> tuple[int, int]:
-    """The middle of the command panel at the bottom of the frame."""
+    """A point on the selection panel, where the game draws no placement preview.
+
+    The panels cover the left half of the bottom edge. The middle of the frame's
+    bottom is map: resting there drew the preview into the comparison frame.
+    """
     width, height = _window_size()
-    return (width // 2, height - UI_MARGIN_BOTTOM // 2)
+    return (width // 4, height - UI_MARGIN_BOTTOM // 2)
 
 
 def _resolve_coords(action_dict: dict[str, object]) -> tuple[str, tuple[int, int] | None]:
@@ -2655,7 +2659,9 @@ _BLOCKED_CLUTTER = 10  # A candidate inside an entity's box counts as this much 
 # bottom command panel; those regions have no entities, so an emptiness score would
 # wrongly rank them as "open" — exclude them from build candidates and gather clicks.
 UI_MARGIN_TOP: int = 160
-UI_MARGIN_BOTTOM: int = 240
+# The command and selection panels start about 275 px above the bottom edge of a
+# 3024-wide frame. At 240, a farm was "placed" at y=1650 of 1898: on the panel.
+UI_MARGIN_BOTTOM: int = 280
 UI_MARGIN_SIDE: int = 40
 
 # Drop-off camps are worthless away from their resource, so they anchor on it
@@ -2872,13 +2878,16 @@ def _open_ground_candidates(
     """
     ax, ay = anchor
     min_x, min_y, max_x, max_y = _play_area_bounds()
+    below = int(footprint.half_height) if footprint is not None else 0
     candidates: list[tuple[int, int]] = []
     for radius in radii:
         for i in range(BUILD_RING_DIRECTIONS):
             angle = 2.0 * math.pi * i / BUILD_RING_DIRECTIONS
             cx = int(ax + radius * math.cos(angle))
             cy = int(ay + radius * math.sin(angle))
-            if min_x <= cx <= max_x and min_y <= cy <= max_y and _explored((cx, cy)):
+            # A footprint reaching under the HUD hides its preview there.
+            on_map = min_x <= cx <= max_x and min_y <= cy <= max_y - below
+            if on_map and _explored((cx, cy)):
                 candidates.append((cx, cy))
     home = _refusal_home()
     candidates.sort(
