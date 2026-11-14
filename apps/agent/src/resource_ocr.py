@@ -32,6 +32,7 @@ machinery with synthesized digits (no real screenshots needed).
 
 from __future__ import annotations
 
+import difflib
 import functools
 import io
 import statistics
@@ -43,6 +44,8 @@ from typing import TYPE_CHECKING, Literal, NamedTuple, NotRequired, TypedDict, c
 
 import numpy as np
 from PIL import Image
+
+from .policy.catalog import SPECS
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -1188,8 +1191,11 @@ def read_selected_unit_pixels(rgb: np.ndarray, calibration: Calibration) -> str 
         text = _read_line_rapidocr(gray, whitelist=_LETTERS)
     else:
         text = _read_field_rapidocr(gray, whitelist=_LETTERS, binarize=False)
-    label = text.strip().lower().replace(" ", "_")
-    if label in {
+    return selection_class(text.strip().lower().replace(" ", "_"))
+
+
+_VILLAGER_ROLES = frozenset(
+    {
         "villager",
         "builder",
         "farmer",
@@ -1201,9 +1207,30 @@ def read_selected_unit_pixels(rgb: np.ndarray, calibration: Calibration) -> str 
         "hunter",
         "fisherman",
         "repairer",
-    }:
-        return "villager"
-    return label or None
+    }
+)
+# Names the agent checks a selection against. A misread one is matched to the
+# closest of these: live, "Mill" was read as "mil" and Horse Collar failed 7 times.
+_KNOWN_SELECTIONS = tuple(
+    sorted(
+        _VILLAGER_ROLES | {spec.subject for spec in SPECS if spec.kind == "build"} | {"town_center"}
+    )
+)
+_SELECTION_MATCH_CUTOFF = 0.8  # "mil" scores 0.86 against "mill".
+
+
+def selection_class(label: str) -> str | None:
+    """The unit or building a selection-panel label names, or None if empty.
+
+    An unknown label passes through unchanged, so it never authorizes input.
+    """
+    if not label:
+        return None
+    matches = difflib.get_close_matches(
+        label, _KNOWN_SELECTIONS, n=1, cutoff=_SELECTION_MATCH_CUTOFF
+    )
+    name = matches[0] if matches else label
+    return "villager" if name in _VILLAGER_ROLES else name
 
 
 # ---------------------------------------------------------------------------

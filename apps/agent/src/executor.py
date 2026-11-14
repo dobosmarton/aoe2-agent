@@ -32,7 +32,7 @@ from .entity_utils import (
     safe_gather_target,
 )
 from .models import Action, validate_action
-from .placement_preview import PreviewRegion, preview_refused
+from .placement_preview import PreviewRegion, read_preview
 from .policy.candidates import eligible
 from .policy.catalog import (
     BUILDINGS,
@@ -443,8 +443,9 @@ class _PendingPlacement:
     wood_readings: int = 0
     # Monotonic instant of the placement click, None when unknown.
     noted_at: float | None = None
-    # The lowest wood reading since the click, None before the first.
+    # The lowest and highest wood readings since the click, None before the first.
     lowest_wood: int | None = None
+    highest_wood: int | None = None
     # The click's offset from the Town Center, when the Town Center was in view.
     home_offset: tuple[int, int] | None = None
 
@@ -1284,22 +1285,30 @@ def _house_verdict(
 def _with_wood_reading(pending: _PendingPlacement, wood_now: int) -> _PendingPlacement:
     """The placement after one more wood reading it can be judged against."""
     lowest = wood_now if pending.lowest_wood is None else min(pending.lowest_wood, wood_now)
-    return replace(pending, wood_readings=pending.wood_readings + 1, lowest_wood=lowest)
+    highest = wood_now if pending.highest_wood is None else max(pending.highest_wood, wood_now)
+    return replace(
+        pending,
+        wood_readings=pending.wood_readings + 1,
+        lowest_wood=lowest,
+        highest_wood=highest,
+    )
 
 
 def _never_paid(pending: _PendingPlacement) -> bool:
-    """Whether a placement's wood has had time to leave and never fell at all.
+    """Whether a placement's wood has had time to leave, never fell, and can't be hidden.
 
-    A partial drop stays undecided: gathering can hide part of a payment, never
-    all of it within the few seconds a payment takes to show.
+    A partial drop stays undecided. So does wood that rose by the building's
+    cost or more: gathering that fast can hide the whole payment. Live, with 14
+    villagers on wood (about 8 wood a second), two 25-wood houses read as
+    "never paid" and were recorded as refused; both stood 25 s later.
     """
-    return (
-        pending.noted_at is not None
-        and _now() - pending.noted_at >= _PLACEMENT_PAYMENT_SECONDS
-        and pending.wood_readings >= _PLACEMENT_PAYMENT_READINGS
-        and pending.lowest_wood is not None
-        and pending.lowest_wood >= pending.wood_before
-    )
+    if pending.noted_at is None or pending.lowest_wood is None or pending.highest_wood is None:
+        return False
+    waited = _now() - pending.noted_at >= _PLACEMENT_PAYMENT_SECONDS
+    enough_readings = pending.wood_readings >= _PLACEMENT_PAYMENT_READINGS
+    never_fell = pending.lowest_wood >= pending.wood_before
+    income_could_hide_it = pending.highest_wood - pending.wood_before >= pending.wood_cost
+    return waited and enough_readings and never_fell and not income_could_hide_it
 
 
 def _refuse_placement(pending: _PendingPlacement) -> ActionOutcome:
@@ -2279,7 +2288,15 @@ async def _first_accepted(
     without = await _capture_hovering(_command_panel_point(), capture)
     for point in candidates:
         with_preview = await _capture_hovering(point, capture)
-        if not preview_refused(without, with_preview, footprint.preview_region(point, size)):
+        reading = read_preview(without, with_preview, footprint.preview_region(point, size))
+        log.debug(
+            "placement_preview_hover",
+            point=point,
+            refused=reading.refused,
+            red=round(reading.red, 3),
+            changed=round(reading.changed, 3),
+        )
+        if not reading.refused:
             return point
     return None
 

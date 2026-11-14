@@ -882,3 +882,21 @@ def test_narrow_glyphs_are_read_as_ones(strokes: tuple[int, ...], expected: int)
     for x in strokes:
         frame[10:24, x : x + 5] = 255  # 5 wide, 14 tall: the Mac's lone 1.
     assert read_hud_count(frame, FieldBox(0, 0, 80, 40), 160) == expected
+
+
+def test_a_misread_building_name_is_matched_to_the_nearest_known_one() -> None:
+    from gameplay_agent.resource_ocr import selection_class
+
+    assert selection_class("mil") == "mill"
+
+
+def test_a_villager_role_is_a_villager() -> None:
+    from gameplay_agent.resource_ocr import selection_class
+
+    assert selection_class("gold_miner") == "villager"
+
+
+def test_an_unknown_label_passes_through_unchanged() -> None:
+    from gameplay_agent.resource_ocr import selection_class
+
+    assert selection_class("militia") == "militia"
