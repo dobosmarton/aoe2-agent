@@ -1,45 +1,17 @@
 ---
 import Site from "@/layouts/Site.astro";
-import Artifact from "@/components/Artifact.astro";
 import CodeFigure from "@/components/CodeFigure.astro";
-import GameplayLoopDemo from "@/components/figures/GameplayLoopDemo.tsx";
 import PackageMap from "@/components/figures/PackageMap.tsx";
 import ArenaScreenshots from "@/components/figures/ArenaScreenshots.tsx";
+import Walkthrough from "@/components/walkthrough/Walkthrough.astro";
 import DotPlot from "@/components/charts/DotPlot.tsx";
-import LoopSteps from "@/components/charts/LoopSteps.tsx";
-import { CellFooter, Corners, SectionLabel, cellClass } from "@/components/ui/frame";
+import { CellFooter, SectionLabel, cellClass } from "@/components/ui/frame";
 import { getCollection } from "astro:content";
-import { FIRST_PAGE, getPage } from "@/lib/taxonomy";
+import { getPage } from "@/lib/taxonomy";
 import { ArrowRight } from "lucide-react";
 
-// The page tells one story, top to bottom: what the system is (hero), one turn
-// end to end (01), the loop behind it (02), how well the agent sees (03), where to
-// start reading (04), and how to run it (05). The repository map and the arena UI
-// close the page (06, 07).
-
-// The hero card: the four stages of the system, each linked to its docs page.
-const STAGES = [
-  {
-    name: "See",
-    text: "A YOLO26n detector and local OCR turn each frame into text.",
-    href: "/docs/detection/detector",
-  },
-  {
-    name: "Decide",
-    text: "A strategist model sets goals. A policy picks one named action.",
-    href: "/docs/agent/decision-loops",
-  },
-  {
-    name: "Act",
-    text: "The actor sends mouse and keyboard input. A ledger checks the result.",
-    href: "/docs/agent/actions-and-execution",
-  },
-  {
-    name: "Measure",
-    text: "A synthetic arena ranks prompt and model variants; autoresearch scores real games.",
-    href: "/docs/arena/overview",
-  },
-];
+// The page opens with one agent turn as a scroll-driven scene (Walkthrough), then the
+// detector's test results, reading paths, how to run it, the workspace and the arena UI.
 
 // Reading paths: short routes through the docs for readers who do not want to read
 // every section in order. Page titles come from taxonomy.ts.
@@ -87,12 +59,6 @@ const READING_PATHS = [
   },
 ];
 
-const MODEL_ROLES = [
-  { role: "Strategist", model: "gpt-5.6-terra", output: "Goals and allocation", when: "Every 25 s, and at once on an age change or an alarm" },
-  { role: "Policy", model: "jev-1.13.0", output: "One named action", when: "On each new frame, at most every 0.5 s" },
-  { role: "Executor", model: "gpt-5.6-luna", output: "Tactical or recovery tools", when: "Alarm, handoff or recovery only" },
-];
-
 const QUICK_START = `# Python workspace and the two frontend apps
 uv sync
 bun install
@@ -131,160 +97,13 @@ const sectionTitle = "mt-5 font-heading text-3xl font-bold tracking-tight text-b
 const sectionIntro = "mt-3 max-w-2xl text-muted-foreground";
 const accentLink =
   "inline-flex items-center gap-2 py-2 text-sm text-accent-foreground underline-offset-4 hover:text-muted-foreground hover:underline";
-const button =
-  "inline-flex h-10 items-center gap-2 rounded-md border border-foreground/10 bg-card px-4 text-sm font-medium transition-colors hover:text-accent-foreground";
 ---
 
 <Site>
-  {/* Hero: what the system is, and its four stages. */}
-  <section class="mx-auto grid max-w-6xl items-center gap-x-12 gap-y-12 px-4 pt-10 lg:grid-cols-12 lg:pt-16">
-    <div class="lg:col-span-7">
-      <h1 class="font-heading text-4xl leading-[1.08] font-bold tracking-tight text-balance sm:text-5xl">
-        An AI agent that plays Age of Empires II, and the arena that tests it.
-      </h1>
-      <p class="mt-6 max-w-xl font-heading text-lg text-muted-foreground">
-        The agent reads the game from screen pixels and plays with mouse and keyboard input. This site is the technical
-        documentation: how it sees, decides and acts, and how we measure it.
-      </p>
-      <div class="mt-8 flex flex-wrap items-center gap-2">
-        <a
-          href={`/docs/${FIRST_PAGE.fullSlug}`}
-          class="inline-flex h-10 items-center gap-2 rounded-md bg-foreground px-5 text-sm font-medium text-background transition-colors hover:bg-foreground/85"
-        >
-          Start reading
-          <ArrowRight className="h-4 w-4" />
-        </a>
-        <a href="#reading-paths" class={button}>Pick a reading path</a>
-      </div>
-    </div>
+  <Walkthrough />
 
-    <div class="lg:col-span-5">
-      <div class="relative">
-        <Corners className="text-foreground/25" />
-        <div class={cellClass}>
-          <div class="cell-header">
-            <span class="bracket-label">How it works</span>
-            <span class="cell-aside">4 stages</span>
-          </div>
-          <ol class="list-none divide-y divide-foreground/[0.07]">
-            {
-              STAGES.map((stage, i) => (
-                <li>
-                  <a
-                    href={stage.href}
-                    class="group grid grid-cols-[1.5rem_1fr_auto] items-baseline gap-3 px-4 py-3.5 transition-colors hover:bg-accent-foreground/[0.06]"
-                  >
-                    <span class="font-mono text-[11px] text-muted-foreground tabular-nums">
-                      {String(i + 1).padStart(2, "0")}
-                    </span>
-                    <span>
-                      <span class="block font-heading font-bold text-foreground group-hover:text-accent-foreground">
-                        {stage.name}
-                      </span>
-                      <span class="mt-0.5 block text-sm leading-snug text-muted-foreground">{stage.text}</span>
-                    </span>
-                    <ArrowRight className="h-3.5 w-3.5 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-accent-foreground" />
-                  </a>
-                </li>
-              ))
-            }
-          </ol>
-          <CellFooter>Each stage links to its docs page.</CellFooter>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section id="demo" class={section}>
-    <SectionLabel aside="Live example">01 · One agent turn</SectionLabel>
-    <h2 class={sectionTitle}>From pixels to one action</h2>
-    <p class={sectionIntro}>
-      A real screenshot and the detector's real output on it. Use the controls under the image to pause or jump to a step.
-    </p>
-    <div class="mt-8">
-      <Artifact label="Capture, detect, set goals, act" meta="4 steps">
-        <GameplayLoopDemo client:load />
-      </Artifact>
-    </div>
-  </section>
-
-  <section id="game-loop" class={section}>
-    <SectionLabel aside="Every frame">02 · The game loop</SectionLabel>
-    <h2 class={sectionTitle}>Nine steps, three loops</h2>
-    <p class={sectionIntro}>
-      The perceive, act and deliberate loops run at the same time and share one published frame. Only three models are in
-      the loop, and only the policy runs on every routine frame.
-    </p>
-    <div class="mt-8 grid gap-10 lg:grid-cols-5 lg:gap-8">
-      <div class="lg:col-span-3">
-        <LoopSteps
-          title="One perception frame through the game loop"
-          caption="The strategist runs in its own loop when its interval is due."
-          loopLabel="next frame"
-          phases={[
-            {
-              label: "Perceive",
-              steps: [
-                { label: "Capture the game window" },
-                { label: "Detect entities" },
-                { label: "Classify ownership" },
-                { label: "Check for an alarm" },
-              ],
-            },
-            {
-              label: "Plan",
-              steps: [{ label: "Publish the observation" }, { label: "Run the strategist", background: true }],
-            },
-            {
-              label: "Act",
-              steps: [{ label: "Pick a named action" }, { label: "Execute the input" }],
-            },
-            {
-              label: "Reconcile",
-              steps: [{ label: "Settle the ledger" }],
-            },
-          ]}
-        />
-      </div>
-      <div class="artifacts lg:col-span-2">
-        <Artifact label="Role" meta="3 rows" caption="The three models and when they run">
-          <div class="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Role</th>
-                  <th>Model</th>
-                  <th>When it runs</th>
-                </tr>
-              </thead>
-              <tbody>
-                {
-                  MODEL_ROLES.map((row) => (
-                    <tr>
-                      <td>
-                        {row.role}
-                        <span class="block text-[0.85em] font-normal text-muted-foreground">{row.output}</span>
-                      </td>
-                      <td class="whitespace-nowrap">
-                        <code>{row.model}</code>
-                      </td>
-                      <td>{row.when}</td>
-                    </tr>
-                  ))
-                }
-              </tbody>
-            </table>
-          </div>
-        </Artifact>
-      </div>
-    </div>
-    <a href="/docs/agent/decision-loops" class={`mt-4 ${accentLink}`}>
-      Read about the decision loops <ArrowRight className="h-4 w-4" />
-    </a>
-  </section>
-
-  <section id="detector" class={section}>
-    <SectionLabel aside="40 test screenshots">03 · What the agent sees</SectionLabel>
+  <section id="detector" class={`${section} reveal`}>
+    <SectionLabel aside="40 test screenshots">What the agent sees</SectionLabel>
     <h2 class={sectionTitle}>A small detector, tested on real screenshots</h2>
     <p class={sectionIntro}>
       The served YOLO26n model finds 65 classes. On 40 held-out screenshots with 1,248 labelled boxes it scores precision
@@ -322,8 +141,8 @@ const button =
     </a>
   </section>
 
-  <section id="reading-paths" class={section}>
-    <SectionLabel aside="5 sections">04 · Start reading</SectionLabel>
+  <section id="reading-paths" class={`${section} reveal`}>
+    <SectionLabel aside="5 sections">Start reading</SectionLabel>
     <h2 class={sectionTitle}>Pick a reading path</h2>
     <p class={sectionIntro}>Short routes through the docs. Or start at the agent overview and read in order.</p>
     <div class="mt-8 grid gap-4 sm:grid-cols-2">
@@ -353,8 +172,8 @@ const button =
     </div>
   </section>
 
-  <section id="quick-start" class={section}>
-    <SectionLabel aside="Repository root">05 · Run it</SectionLabel>
+  <section id="quick-start" class={`${section} reveal`}>
+    <SectionLabel aside="Repository root">Run it</SectionLabel>
     <h2 class={sectionTitle}>Install, start, and fix</h2>
     <p class={sectionIntro}>
       The agent runs in a Windows VM that calls a detection server on the Mac host, or natively on macOS. The runbooks
@@ -393,8 +212,8 @@ const button =
     </div>
   </section>
 
-  <section id="packages" class={section}>
-    <SectionLabel aside="uv workspace">06 · The repository</SectionLabel>
+  <section id="packages" class={`${section} reveal`}>
+    <SectionLabel aside="uv workspace">The repository</SectionLabel>
     <h2 class={sectionTitle}>Nine Python workspace members</h2>
     <p class={sectionIntro}>
       Members share types through <code class="font-mono text-[0.9em]">core</code>. Hover a cell to see what it depends on.
@@ -404,8 +223,8 @@ const button =
     </div>
   </section>
 
-  <section class={section}>
-    <SectionLabel aside="Internal tool">07 · The arena UI</SectionLabel>
+  <section class={`${section} reveal`}>
+    <SectionLabel aside="Internal tool">The arena UI</SectionLabel>
     <h2 class={sectionTitle}>Watch a run, turn by turn</h2>
     <p class={sectionIntro}>The arena UI shows what the agent perceives, decides and does. Click a panel to expand it.</p>
     <div class="mt-8">
