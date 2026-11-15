@@ -91,9 +91,9 @@ navigation or naval play; its first gate is the same land-opening economy.
 
 ## Where to read more
 
-- [Part 1 — Real-game Architecture](../../docs/part1-architecture/01-system-overview.md) — system overview, game loop, action model.
-- [Part 2 — LLM Integration](../../docs/part2-llm-integration/04-provider-pattern.md) — providers, prompts, context injection.
-- [Chapter 22 — Autoresearch](../../docs/part8-autoresearch/22-autoresearch-overview.md) — uses this package's `game_loop` + `memory_chain` to drive prompt-mutation experiments.
+- [Gameplay agent overview](../../docs/agent/overview.md), [decision loops](../../docs/agent/decision-loops.md) and [actions and execution](../../docs/agent/actions-and-execution.md): roles, the three loops, the action model.
+- [LLM providers](../../docs/agent/llm-providers.md) and [prompts and context](../../docs/agent/prompts-and-context.md): providers, prompts, what each role reads per turn.
+- [Autoresearch](../../docs/autoresearch/overview.md): uses this package's `game_loop` + `memory_chain` to drive prompt-mutation experiments.
 
 ## Conventions
 

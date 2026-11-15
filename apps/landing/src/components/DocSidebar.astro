@@ -1,14 +1,36 @@
 ---
-import { PARTS } from "@/lib/taxonomy";
+import { SECTIONS } from "@/lib/taxonomy";
 
 interface Props {
-  /** Full slug of the currently rendered doc (e.g. "part1-architecture/01-system-overview"). */
+  /** Full slug of the currently rendered doc (e.g. "agent/overview"). */
   currentSlug?: string;
 }
 
 const { currentSlug } = Astro.props;
 
 const referenceGroups = [
+  {
+    label: "Runbooks",
+    items: [
+      { href: "/docs/runbooks/deployment", label: "Deployment" },
+      { href: "/docs/runbooks/windows-vm-agent-bringup", label: "Windows VM agent bring-up" },
+      { href: "/docs/runbooks/retrain-detector", label: "Retrain the detector" },
+      { href: "/docs/runbooks/baseline-experiments", label: "Baseline experiments" },
+      { href: "/docs/runbooks/redis-broker-ops", label: "Redis broker operations" },
+      { href: "/docs/runbooks/switching-broker-backend", label: "Switching the broker backend" },
+      { href: "/docs/runbooks/debug-stuck-fork", label: "Debugging a stuck fork" },
+    ],
+  },
+  {
+    label: "Decisions",
+    items: [
+      { href: "/docs/adr/0001-broker-first-architecture", label: "0001 Broker-first event architecture" },
+      { href: "/docs/adr/0002-redis-streams-for-cross-process", label: "0002 Redis Streams for cross-process events" },
+      { href: "/docs/adr/0003-basedpyright", label: "0003 basedpyright" },
+      { href: "/docs/adr/0004-bradley-terry-ranking", label: "0004 Bradley-Terry ranking" },
+      { href: "/docs/adr/0005-arena-ui-stack", label: "0005 Arena UI stack" },
+    ],
+  },
   {
     label: "Appendix",
     items: [
@@ -22,7 +44,7 @@ const referenceGroups = [
       },
       {
         href: "/docs/appendix/03-bradley-terry-and-bootstrap",
-        label: "C · Bradley-Terry and bootstrap CIs",
+        label: "C · Bradley-Terry and the bootstrap",
       },
     ],
   },
@@ -31,7 +53,6 @@ const referenceGroups = [
     items: [
       { href: "/docs/index", label: "Documentation index" },
       { href: "/docs/glossary", label: "Glossary" },
-      { href: "/docs/deployment-guide", label: "Deployment guide" },
     ],
   },
 ];
@@ -40,24 +61,22 @@ const referenceGroups = [
 <nav class="space-y-6 text-sm" aria-label="Documentation navigation">
   <div>
     <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-      Tutorial
+      Guide
     </p>
     <ol class="space-y-4">
       {
-        PARTS.map((part) => (
+        SECTIONS.map((section) => (
           <li>
-            <p class="mb-1 flex items-baseline gap-2 font-semibold text-foreground">
-              <span class="text-xs font-mono text-muted-foreground">{part.label}</span>
-              {part.title}
-            </p>
+            <p class="mb-1 font-semibold text-foreground">{section.title}</p>
             <ul class="ml-3 border-l border-border">
-              {part.chapters.map((chapter) => {
-                const slug = `${part.id}/${chapter.slug}`;
+              {section.pages.map((page) => {
+                const slug = `${section.id}/${page.slug}`;
                 const isActive = currentSlug === slug;
                 return (
                   <li>
                     <a
                       href={`/docs/${slug}`}
+                      title={page.blurb}
                       class:list={[
                         "block border-l-2 -ml-px px-3 py-1 text-sm transition-colors",
                         isActive
@@ -65,7 +84,7 @@ const referenceGroups = [
                           : "border-transparent text-muted-foreground hover:border-border hover:text-foreground",
                       ]}
                     >
-                      {chapter.title}
+                      {page.title}
                     </a>
                   </li>
                 );

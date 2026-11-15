@@ -4,7 +4,7 @@ The broker is the single source of truth for *live* event consumers. DuckDB
 and SSE clients are symmetric materializations that subscribe via
 `broker.stream(...)`. Neither knows about the other.
 
-See `docs/design/event-broker-architecture.md` for the full motivation
+See `docs/adr/0001-broker-first-architecture.md` for the full motivation
 (spoiler: today's `/events` handler races with the writer-side replay task
 for the same DuckDB file). This module is a pure-domain leaf — it does not
 import FastAPI, DuckDB, or anything from `arena/`.

@@ -270,7 +270,7 @@ def test_get_detector_warns_and_substitutes_when_configured_model_missing(
 # ---------------------------------------------------------------------------
 # Schema contract: synthetic render must match real DetectedEntity schema.
 #
-# Risk 4 mitigation per docs/design/synthetic-arena-analysis.md line 380.
+# See docs/arena/world-sim.md.
 # Parametrized over both `mock_detect` (existing) and `mock_detect_from_world`
 # (Phase 1, new) so any schema drift between the two surfaces fails loudly.
 # ---------------------------------------------------------------------------

@@ -23,6 +23,6 @@ These are the types that cross package boundaries:
 
 ## Where to read more
 
-- [Chapter 15 — Event Broker](../../docs/part6-evaluation-arena/15-event-broker.md) — how the `Event` / `EventSink` Protocol is consumed.
-- [Chapter 16 — DuckDB Persister and Replay](../../docs/part6-evaluation-arena/16-duckdb-persister-and-replay.md) — the nine `Payload` kinds and their DuckDB schema.
-- [Chapter 18 — Synthetic World Sim](../../docs/part6-evaluation-arena/18-synthetic-world-sim.md) — what consumers do with `WorldState`.
+- [Event broker](../../docs/arena/event-broker.md): how the `Event` / `EventSink` Protocol is consumed.
+- [Event log and replay](../../docs/arena/event-log-and-replay.md): the nine `Payload` kinds and their DuckDB schema.
+- [World sim](../../docs/arena/world-sim.md): what consumers do with `WorldState`.

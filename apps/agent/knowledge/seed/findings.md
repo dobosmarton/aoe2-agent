@@ -13,7 +13,7 @@ change. 12 live only in tests, which the plan does not delete.
 Read this before writing any rule. Most of these findings are not opinions — they
 are failures that cost a whole game each.
 
-- `F-n` — a finding from a numbered run review (`docs/run-reviews/`).
+- `F-n` — a finding from a numbered run review.
 - `T-n` — a tracked task raised by a review.
 - `V-4` — the drift guard: constants duplicated across modules, pinned by tests.
 

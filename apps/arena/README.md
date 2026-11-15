@@ -42,10 +42,10 @@ Every command writes its event log to `logs/arena/<YYYY-MM-DD>/<label>-<HHMMSS>.
 
 ## Where to read more
 
-- [Chapter 14 — Arena Overview](../../docs/part6-evaluation-arena/14-arena-overview.md) — what each subcommand does, when to use which.
-- [Chapter 17 — Ranking Pipeline](../../docs/part6-evaluation-arena/17-ranking-pipeline.md) — Bradley-Terry math, scoring, bootstrap.
-- [Chapter 18 — Synthetic World Sim](../../docs/part6-evaluation-arena/18-synthetic-world-sim.md) — the AoE2-lite economy model races run against (`evaluation/world_sim.py`).
-- [Chapter 15 — Event Broker](../../docs/part6-evaluation-arena/15-event-broker.md) — how every CLI flows through `make_broker()` + `MultiRunBrokerSink`.
+- [Synthetic arena overview](../../docs/arena/overview.md): what each subcommand does, when to use which.
+- [Ranking](../../docs/arena/ranking.md): Bradley-Terry math, scoring, bootstrap.
+- [World sim](../../docs/arena/world-sim.md): the AoE2-lite economy model races run against (`evaluation/world_sim.py`).
+- [Event broker](../../docs/arena/event-broker.md): how every CLI flows through `make_broker()` + `MultiRunBrokerSink`.
 
 ## Conventions
 

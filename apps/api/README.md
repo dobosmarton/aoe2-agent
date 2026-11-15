@@ -50,10 +50,10 @@ Browse <http://localhost:5173>, pick a run.
 
 ## Reading order
 
-- [Chapter 19 — Web Architecture](../../docs/part7-arena-web/19-web-architecture.md) — backend lifespan, dependencies, `/events` dispatch.
-- [Chapter 20 — Fork and Diff UI](../../docs/part7-arena-web/20-fork-and-diff-ui.md) — what each tab does.
-- [Chapter 21 — Running the UI Locally](../../docs/part7-arena-web/21-running-the-ui-locally.md) — dev workflow, env vars, troubleshooting.
-- [ADR 0005](../../docs/adr/0005-vite-react-tailwind-for-arena-ui.md) — frontend stack choice.
+- [Arena web architecture](../../docs/web/architecture.md): backend lifespan, dependencies, `/events` dispatch.
+- [Run viewer](../../docs/web/run-viewer.md): what each tab does.
+- [Running locally](../../docs/web/running-locally.md): dev workflow, env vars, deployment modes.
+- [ADR 0005](../../docs/adr/0005-arena-ui-stack.md): frontend stack choice.
 
 ## Notes for contributors
 

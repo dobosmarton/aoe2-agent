@@ -243,7 +243,7 @@
  *   .concept    — short "what is X" callout (~150 words).
  *   .deep-dive  — collapsible <details>/<summary> sidebar
  *                  for algorithm intuition (~400 words).
- *   .prereqs    — per-chapter on-ramp at the top of a chapter.
+ *   .prereqs    — per-page on-ramp at the top of a page.
  *
  * Authored inline in markdown. Blank lines around the content
  * are required so the inner markdown is re-parsed by remark:

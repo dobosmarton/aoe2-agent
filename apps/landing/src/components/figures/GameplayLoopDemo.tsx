@@ -6,9 +6,9 @@ import { Pause, Play } from "lucide-react";
  *
  * Loops through capture → detect → reason → act using a real Mac+VMware
  * screenshot of a Dark Age AoE2 game, with the actual detector's predicted
- * bounding boxes from the labeling pipeline. Strategist and executor copy
- * is hand-written but uses the exact string shapes that the live agent
- * emits (entity_utils.py:58, action_tools.py).
+ * bounding boxes from the labeling pipeline. Strategist and policy copy is
+ * hand-written but follows the string shapes the live agent uses
+ * (entity_utils.build_entity_summary, policy/catalog.py, executor.py).
  *
  * All animation derives from a single elapsedMs counter, which makes
  * step-jumping, pausing, and reduced-motion fallback trivial.
@@ -19,9 +19,9 @@ import { Pause, Play } from "lucide-react";
 const IMG_W = 1440;
 const IMG_H = 935;
 
-// Five hex strings mirroring apps/agent/src/overlay.py:51-61. Duplicated by
-// design — the landing workspace can't import Python and these change once
-// a year at most.
+// Five hex strings mirroring the category colours in apps/agent/src/overlay.py.
+// Duplicated by design: the landing workspace can't import Python and these
+// change once a year at most.
 const CATEGORY_COLOR = {
   resource: "#228B22",
   animal: "#FFA500",
@@ -67,15 +67,16 @@ interface Step {
   caption: string;
 }
 
-// Per prompts/strategist.md:1-9, the strategist reads the *screenshot* (for
-// resource bar / pop / age text that YOLO can't detect) and emits goals;
-// the executor is text-only and uses YOLO entity ids to resolve targets
-// (providers/executor_provider.py:233). Captions reflect that data flow.
+// No role is sent a screenshot. The strategist reads HUD values (local OCR)
+// and the entity list as text and sets goals; the TypeSafe policy picks one
+// feasible catalog action, and executor.py binds clicks to detected entity
+// ids (docs/agent/overview.md, docs/agent/decision-loops.md). Captions
+// reflect that data flow.
 const STEPS: Step[] = [
-  { title: "1. Capture screen", caption: "Frame grabbed from the AoE2 client" },
-  { title: "2. Detect entities", caption: "YOLOv8 finds units, buildings, resources" },
-  { title: "3. Strategist reasons", caption: "Sonnet reads the screenshot, sets goals" },
-  { title: "4. Executor acts", caption: "Haiku turns goals into tool calls on YOLO ids" },
+  { title: "1. Capture screen", caption: "Frame grabbed from the AoE2 window" },
+  { title: "2. Detect entities", caption: "YOLO finds units, buildings, resources" },
+  { title: "3. Strategist reasons", caption: "Reads HUD values and entities as text, sets goals" },
+  { title: "4. Policy acts", caption: "Picks a feasible action, clicked on a detected entity id" },
 ];
 
 const STEP_DURATIONS_MS = [1500, 2500, 2500, 2500] as const;
@@ -88,22 +89,23 @@ const STEP_STARTS_MS = STEP_DURATIONS_MS.reduce<number[]>((acc, d, i) => {
 const BOX_REVEAL_STAGGER_MS = 160;
 const TYPE_MS_PER_CHAR = 10;
 
-// Entity summary block — uses entity_utils.py:58's exact format.
+// Entity summary block, in the format of entity_utils.build_entity_summary.
 const ENTITY_SUMMARY_LINES = ENTITIES.map(
   (e) =>
     `${e.id}: ${e.class} at (${Math.round(e.cx * IMG_W)},${Math.round(e.cy * IMG_H)}) [${Math.round(e.conf * 100)}%]`,
 );
 
-// Strategist-shaped output: reasoning + resource readings (read from the
-// screenshot's UI bar, not from YOLO) + prioritized goals. Mirrors the
-// StrategistResponse model in providers/strategist.py:43-48.
+// Strategist-shaped output: reasoning over the HUD readings (read locally by
+// OCR, not by the model) plus prioritized goals. Mirrors the
+// StrategistResponse model in providers/strategist.py.
 const REASONING_TEXT =
-  "Dark Age opener — resource bar reads F=200 W=100 G=0 S=200, pop 3/5. Wood is the bottleneck. Goals: gather wood→200 (P9), queue villagers→10 (P8), advance to Feudal Age (P4).";
+  "Dark Age opener. HUD reads F=200 W=100 G=0 S=200, pop 3/5. Wood is the bottleneck. Goals: gather wood→200 (P9), queue villagers→10 (P8), advance to Feudal Age (P4).";
 
-// Real tool names from apps/agent/src/providers/action_tools.py.
+// A catalog action from apps/agent/src/policy/catalog.py and the executor
+// actions it renders to (see docs/agent/actions-and-execution.md).
 const TOOL_CALLS = [
-  `click target="villager_0"`,
-  `right_click target="tree_0"`,
+  `assign_wood → assign_idle resource="wood"`,
+  `right_click target_id="tree_0"`,
 ];
 
 function stepFromElapsed(elapsedMs: number): { step: number; stepElapsed: number } {
@@ -255,7 +257,7 @@ export default function GameplayLoopDemo(): React.ReactElement {
                   </g>
                 );
               })}
-              {/* Action vector: villager_3 → tree_0 */}
+              {/* Action vector: villager_0 → tree_0 */}
               {step === 3 && (
                 <g>
                   <defs>
@@ -300,19 +302,19 @@ export default function GameplayLoopDemo(): React.ReactElement {
 
         {/* Narration panel */}
         <aside className="flex flex-col gap-3 text-xs">
-          <Section label="Entity detections (YOLOv8)" active={step === 1} done={step > 1}>
+          <Section label="Entity detections (YOLO)" active={step === 1} done={step > 1}>
             <pre className="whitespace-pre-wrap font-mono text-[11px] leading-snug text-foreground">
               {entitiesTyped || " "}
               {step === 1 && !reducedMotion && <Caret />}
             </pre>
           </Section>
-          <Section label="Strategist (Sonnet · reads screenshot)" active={step === 2} done={step > 2} dimmed={step < 2}>
+          <Section label="Strategist (LLM · text only)" active={step === 2} done={step > 2} dimmed={step < 2}>
             <p className="leading-snug text-foreground">
               {reasoningTyped || " "}
               {step === 2 && !reducedMotion && <Caret />}
             </p>
           </Section>
-          <Section label="Executor (Haiku · text only, uses YOLO ids)" active={step === 3} dimmed={step < 3}>
+          <Section label="Policy (TypeSafe · catalog action)" active={step === 3} dimmed={step < 3}>
             <pre className="whitespace-pre-wrap font-mono text-[11px] leading-snug text-foreground">
               {toolCallsTyped || " "}
               {step === 3 && !reducedMotion && <Caret />}
@@ -347,7 +349,7 @@ export default function GameplayLoopDemo(): React.ReactElement {
           ))}
         </div>
         <p className="ml-auto text-xs text-muted-foreground">
-          Real screenshot · real detector output (6 entities on this frame) · strategist/executor copy is illustrative.
+          Real screenshot · real detector output (6 entities on this frame) · strategist and policy copy is illustrative.
         </p>
       </div>
     </div>

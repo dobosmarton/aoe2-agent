@@ -1,104 +1,116 @@
-# Runbook — Redis Broker Operations
+# Redis broker operations
 
-Operational checklist for the Redis backend of the event broker. For the architecture rationale see [Chapter 15](../part6-evaluation-arena/15-event-broker.md) and [ADR 0002](../adr/0002-redis-streams-for-cross-process.md).
+Procedures for the compose Redis that backs `RedisStreamsBroker`. Run every command from the root of the agent repository, where `docker-compose.yml`, `.env` and the `justfile` are. How the broker uses Redis is in [event broker](../arena/event-broker.md).
 
-## Bring it up (compose stack)
+## Start Redis
 
-The compose Redis is configured for AUTH with `REDIS_PASSWORD` (see `docker-compose.yml`):
+1. Set `REDIS_PASSWORD` in `.env` (`.env.example` has it under "Synthetic Arena: Redis"). Use a hex password, because `make_broker()` puts the password into a URL without escaping:
 
-```bash
-# Generate a password (and the other compose secrets) if .env is fresh
-{
-  echo "REDIS_PASSWORD=$(openssl rand -base64 24 | tr -d '=+/')"
-} >> .env   # plus the other vars from README.md "Synthetic Arena infrastructure"
+   ```bash
+   openssl rand -hex 24
+   ```
 
-# Start the stack — Redis healthcheck passes when redis-cli -a $REDIS_PASSWORD ping returns PONG
-just arena-infra-up
+2. Start Redis alone, or the whole stack:
 
-# Verify
-just arena-infra-status | grep -i redis
-# Expected: arena-redis  Up X seconds (healthy)
+   ```bash
+   docker compose up -d redis
+   just arena-infra-up          # docker compose up -d --wait, every service
+   ```
+
+3. Check it is healthy. The healthcheck runs `redis-cli -a $REDIS_PASSWORD ping` every 5 s with 10 retries.
+
+   ```bash
+   docker compose ps redis
+   ```
+
+Redis runs with `--appendonly yes` and `--maxmemory-policy noeviction` on the `redis-data` volume, with no memory limit. `just arena-infra-nuke` (`docker compose down -v`) deletes the volume along with every other volume in the stack.
+
+## Reach Redis from the host
+
+`docker-compose.yml` publishes no Redis port, and `make_broker()` connects to `localhost:6379` unless `REDIS_URL` says otherwise. Arena processes run on the host, so add a `docker-compose.override.yml` next to `docker-compose.yml`. `docker compose` merges it automatically, including inside `just arena-infra-up`:
+
+```yaml
+services:
+  redis:
+    ports:
+      - "127.0.0.1:6379:6379"
 ```
 
-The healthcheck command is `redis-cli -a "${REDIS_PASSWORD}" ping` (every 5s, 10 retries). If it never goes healthy, `docker compose logs redis` is the first stop — most often the `--requirepass` value mismatches what the healthcheck sends, which means `REDIS_PASSWORD` isn't being substituted (`.env` not loaded by your compose invocation).
+Apply it with `docker compose up -d redis`. `docker-compose.ci.yml` has the same mapping, but it also puts every volume on tmpfs. To use a Redis outside the stack, set `REDIS_URL` instead.
 
-## Point the agent at it
+## Point the arena at it
 
-Two paths, depending on what's already in your shell:
-
-```bash
-# Path 1 — your shell already has REDIS_PASSWORD (e.g. you sourced .env)
-export ARENA_BROKER_BACKEND=redis
-# make_broker() auto-builds redis://:${REDIS_PASSWORD}@localhost:6379/0
-just arena-smoke   # or any arena CLI
-
-# Path 2 — explicit URL
-export ARENA_BROKER_BACKEND=redis
-export REDIS_URL="redis://:$(grep ^REDIS_PASSWORD .env | cut -d= -f2)@localhost:6379/0"
-just arena-smoke
-```
-
-`just arena-broker-redis-env` prints both export lines if you prefer `eval`-ing the recipe.
-
-## Verify connectivity
+`just` loads `.env` (`set dotenv-load`), so every recipe has `REDIS_PASSWORD`, and `make_broker()` builds `redis://:$REDIS_PASSWORD@localhost:6379/0` from it. The `-redis` recipes also set the backend:
 
 ```bash
-# Round-trip
-redis-cli -a "$REDIS_PASSWORD" ping
-# PONG
-
-# Inspect a live stream during an in-flight run
-redis-cli -a "$REDIS_PASSWORD" --scan --pattern 'arena:run:*:events'
-# arena:run:<uuid>:events
-
-# Tail the head of a stream
-redis-cli -a "$REDIS_PASSWORD" XINFO STREAM arena:run:<uuid>:events
-# Shows length, first-entry, last-entry — first-entry is the head_seq the
-# backend uses for overflow detection (see redis_broker.py:381)
-
-# See which runs the broker thinks are open
-redis-cli -a "$REDIS_PASSWORD" --scan --pattern 'arena:run:*:open'
+just arena-web-dev-redis     # web server on :8000
+just arena-rank-redis        # or arena-race-redis
 ```
 
-The three key namespaces per run (`packages/evaluation/src/redis_broker.py:96`):
+Commands run outside `just` need the variables in their own environment. Selecting and verifying the backend is in [switching the broker backend](switching-broker-backend.md).
 
-| Key | Type | Purpose |
+## Inspect runs
+
+Load `.env` and define a helper that runs `redis-cli` inside the container:
+
+```bash
+set -a; . ./.env; set +a
+rcli() { docker compose exec -T redis redis-cli -a "$REDIS_PASSWORD" --no-auth-warning "$@"; }
+```
+
+| Question | Command |
+|---|---|
+| Is Redis up? | `rcli ping` |
+| Which runs are open? | `rcli --scan --pattern 'arena:run:*:open'` |
+| A run's label and start time | `rcli GET arena:run:<id>:open` |
+| Time before an abandoned run stops showing as open | `rcli TTL arena:run:<id>:open` |
+| Events stored for a run | `rcli XLEN arena:run:<id>:events` |
+| Oldest retained `Seq` (the overflow boundary) | `rcli XINFO STREAM arena:run:<id>:events`, field `first-entry` |
+| The last three events | `rcli XREVRANGE arena:run:<id>:events + - COUNT 3` |
+
+| Key | Type | Lifetime |
 |---|---|---|
-| `arena:run:<uuid>:open` | string `"1"` with EX (6h default) | Cross-process "producer still alive" sentinel. |
-| `arena:run:<uuid>:seq` | integer | `INCR` source for `Seq` values. |
-| `arena:run:<uuid>:events` | stream (MAXLEN ~ 10000) | The actual event log. Stream ID is `<seq>-0`. |
+| `arena:run:<id>:open` | string: JSON label and start time, or `1` | Set by `open_run` with a 6 h TTL, deleted by `close_run` |
+| `arena:run:<id>:seq` | integer | Until `reap` reaches Redis |
+| `arena:run:<id>:events` | stream, IDs `<seq>-0`, about 10,000 entries | Until `reap` reaches Redis |
 
-## Rotate `REDIS_PASSWORD`
+## Clean up leftover run keys
 
-The compose Redis re-reads the password from env when the container restarts. The process is:
+The CLI's `close_all()` calls `reap`, but the Redis broker only queues that `DEL` and sends it on its next async call, which never comes because the CLI exits. Every CLI run on the Redis backend therefore leaves its `:seq` and `:events` keys behind, with no TTL. Fork runs are reaped by the web server 30 minutes after they close, and the `DEL` goes out with its next broker call.
 
-1. Generate a new password and update `.env` (`REDIS_PASSWORD=<new>`).
-2. `docker compose up -d --force-recreate redis` (recreates only Redis, leaves Langfuse / Postgres alone).
-3. Verify: `just arena-infra-status | grep redis` is healthy.
-4. Restart anything that holds an open Redis connection (the arena web server, any in-flight CLI). The `make_broker()` factory reads `REDIS_PASSWORD` at call time, not import time, so a fresh process picks up the new value.
+Delete the keys of every run that has no `:open` key:
 
-⚠️ The old password is invalidated immediately. Any process still holding an open connection authenticated with the old password will start getting auth errors on the next command — restart them. Langfuse will also need restarting if you rotate while it's running.
+```bash
+docker compose exec -T redis sh -c '
+  for k in $(redis-cli -a "$1" --no-auth-warning --scan --pattern "arena:run:*:seq"); do
+    run=${k%:seq}
+    if [ "$(redis-cli -a "$1" --no-auth-warning EXISTS "$run:open")" = 0 ]; then
+      redis-cli -a "$1" --no-auth-warning DEL "$run:seq" "$run:events"
+    fi
+  done' _ "$REDIS_PASSWORD"
+```
 
-## Disk and memory limits
+A run's events are already in its DuckDB file once the CLI has exited, so nothing is lost.
 
-The compose Redis runs with `appendonly yes` and writes to the `redis-data` named volume. We don't set a `maxmemory` policy — the assumption is that arena runs are bounded in size (10k entries per stream × O(active runs)) and the host has enough RAM. If you start using this for higher-throughput workloads, set `--maxmemory` and pick a policy explicitly.
+## Rotate the password
 
-Persistence model: AOF (append-only file). Good for crash recovery, bad if you don't want history. To wipe everything: `just arena-infra-nuke` deletes the volume; on next `up` Redis starts empty.
+1. Write the replacement password to `.env` as `REDIS_PASSWORD`.
+2. Recreate Redis and the two services that authenticate to it:
 
-## When something is wrong
+   ```bash
+   docker compose up -d --force-recreate redis langfuse-web langfuse-worker
+   ```
 
-| Symptom | Likely cause | Fix |
+3. Restart every arena process that holds a Redis connection (the web server, any running CLI). `make_broker()` reads `REDIS_PASSWORD` when it is called, so a restarted process reads the current value.
+
+## Symptoms
+
+| Symptom | Cause | Fix |
 |---|---|---|
-| `redis.exceptions.AuthenticationError` on first publish | `REDIS_PASSWORD` env var not set; `make_broker()` falls back to bare `redis://localhost:6379/0` which has no auth | Source `.env` or set `REDIS_URL` explicitly. |
-| `redis.exceptions.ConnectionError: Error 61 connecting to localhost:6379` | Redis container not running, or not bound to `localhost` | `docker compose ps redis` — should be Up. Check `docker compose logs redis`. |
-| `BrokerOverflowError` raised in consumers right after starting | Consumer asked for `from_seq` below stream's `first-entry` | Reconnect with `from_seq=available_from` from the overflow event (frontend does this automatically). |
-| `XREAD` consumer hangs forever, never sees a published event | Publisher and consumer on different brokers (one on Redis, one on InProcess) | Both processes need `ARENA_BROKER_BACKEND=redis` and the same `REDIS_URL`. |
-| Stream `XINFO` shows growing length but consumers see nothing | Connection-pool poisoning from a cancelled `XREAD BLOCK` (upstream redis-py #2624) | The broker has a workaround (`packages/evaluation/src/redis_broker.py:340–379`) that should handle this; if you still see it, file an issue with reproducer. |
-| `flush()` never lands the `:open` DELETE | Pub or stream methods aren't being called after the sync `close_run()` | Call `await broker.flush()` explicitly before the producer process exits, OR let the FastAPI lifespan handle teardown. |
-
-## Where things live
-
-- Broker impl: `packages/evaluation/src/redis_broker.py`.
-- Factory + env-var read: `packages/evaluation/src/broker_factory.py`.
-- Healthcheck + compose config: `docker-compose.yml` (Redis service starts at line 155).
-- Compose env-var template: `.env.example` (look for `REDIS_PASSWORD`).
+| `ConnectionError` connecting to `localhost:6379` | Redis is not running, or its port is not published | `docker compose ps redis`; add the override from [Reach Redis from the host](#reach-redis-from-the-host) |
+| `AuthenticationError` on the first publish | `REDIS_PASSWORD` is not in the process environment, so the URL has no password | Run through `just`, or `set -a; . ./.env; set +a` first, or set `REDIS_URL` |
+| `ValueError: Port could not be cast to integer value` when the broker is built | The password contains `/`, `#` or `?`, which end the host part of the auto-built URL (a `%` instead corrupts the password and gives `AuthenticationError`) | Use a hex password, or set `REDIS_URL` with the password percent-encoded |
+| Log line "Task exception was never retrieved" with `ResponseError: The ID specified in XADD is equal or smaller than the target stream top item`; the DuckDB log has fewer rows than expected | Concurrent publishes to one run reached `XADD` out of order (see [event broker](../arena/event-broker.md#redis)) | Use the in-process backend when the full log matters |
+| A run stays in `/runs` as running after its producer died | The `:open` key outlives the process until its TTL | Wait for the TTL, or `rcli DEL arena:run:<id>:open` |
+| `BrokerOverflowError` in a consumer | It asked for, or fell behind to, a `Seq` older than `first-entry` | The dashboard stops at the gap and does not resume; reopen the run once it finishes to read it in full from DuckDB |
+| Memory grows across many runs | Leftover `:seq` and `:events` keys | [Clean up leftover run keys](#clean-up-leftover-run-keys) |

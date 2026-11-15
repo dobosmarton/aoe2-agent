@@ -4,6 +4,7 @@ import Wordmark from "@/components/Wordmark.astro";
 import ThemeToggle from "@/components/ThemeToggle.astro";
 import SearchPalette from "@/components/SearchPalette.tsx";
 import Analytics from "@vercel/analytics/astro";
+import { FIRST_PAGE } from "@/lib/taxonomy";
 
 interface Props {
   title?: string;
@@ -13,7 +14,7 @@ interface Props {
 
 const {
   title = "AoE2 LLM Arena — Documentation",
-  description = "A two-tier AI agent that plays Age of Empires II: Definitive Edition, plus a synthetic evaluation tier that races prompt/model variants.",
+  description = "An agent that plays Age of Empires II: Definitive Edition from screen pixels, plus a detection model and server, a synthetic arena for comparing prompts and models, a web viewer for arena runs, and an autoresearch loop that scores real games.",
   ogImage = "/og-image.png",
 } = Astro.props;
 
@@ -61,10 +62,10 @@ const canonical = new URL(Astro.url.pathname, Astro.site ?? Astro.url).toString(
         <Wordmark />
         <nav class="hidden items-center gap-1 text-sm md:flex">
           <a
-            href="/docs/part1-architecture/01-system-overview"
+            href={`/docs/${FIRST_PAGE.fullSlug}`}
             class="rounded-md px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
           >
-            Tutorial
+            Docs
           </a>
           <a
             href="/#packages"

@@ -47,7 +47,7 @@ dist/
 experiments/
 overlay-update.zip
 # Pre-implementation plans, design sketches, scratch notes — written while a
-# feature is in flight; replaced by canonical docs under docs/design/ when
+# feature is in flight; replaced by canonical docs under docs/ when
 # the work lands. Kept out of git so stale planning docs don't accumulate.
 docs/plan/
 

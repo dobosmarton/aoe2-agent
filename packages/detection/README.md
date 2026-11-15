@@ -2,7 +2,7 @@
 
 This package contains the AoE2:DE entity detector, model-training tools, labeling utilities, and sprite extraction. The deployed model is a YOLO26n checkpoint served as ONNX by `apps/detection-server`; its class schema lives in `src/training/config/classes.yaml`.
 
-The detector adapters return **stateless, single-frame** classes, boxes, and scores. The gameplay agent owns short-term association and camera alignment in `apps/agent/src/temporal_entities.py`. Every published spatial observation uses a fresh inference result; historical predictions are never click targets. See [streaming perception](../../docs/streaming-perception.md) for the live observation contract.
+The detector adapters return **stateless, single-frame** classes, boxes, and scores. The gameplay agent owns short-term association and camera alignment in `apps/agent/src/temporal_entities.py`. Every published spatial observation uses a fresh inference result; historical predictions are never click targets. See [perception](../../docs/agent/perception.md) and [tracking](../../docs/agent/tracking.md) for the live observation contract.
 
 ## Main components
 
@@ -30,7 +30,7 @@ The agent's production path captures game pixels on Windows and sends selected J
 
 The current model is trained for single-pass inference at `imgsz=1280`. SAHI inference remains available in the library for model experiments, but it is not the deployed mode because tiling changes object scale relative to this checkpoint's training distribution.
 
-For dataset preparation and retraining, start with [the training pipeline](../../docs/part3-entity-detection/08-training-pipeline.md), [labeling workflow](../../docs/part3-entity-detection/09-labeling-and-active-learning.md), and [detector quality runbook](../../docs/runbooks/detector-quality-retraining.md).
+For dataset preparation and retraining, start with [detector training](../../docs/detection/training.md), [labeling workflow](../../docs/detection/labeling.md), and [retraining runbook](../../docs/runbooks/retrain-detector.md).
 
 ## Preparing reviewed images
 
@@ -61,6 +61,6 @@ development data. `--historical-real` imports the 219 distinct v9 real images
 from both old splits as **training only**: the old validation images share
 near-duplicate views with old training images, so they cannot provide a new
 validation score. The eight new validation images are grouped by capture
-session but remain development data. See the [historical-data audit](../../docs/runbooks/detector-historical-data-audit.md)
+session but remain development data. See [training data sources](../../docs/detection/training.md#training-data-sources)
 for provenance and limitations. An independent final-test set is still needed
 before making a release-quality claim.
