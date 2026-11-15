@@ -164,7 +164,9 @@ SPECS: tuple[ActionSpec, ...] = (
         (("wood", 175),),
         age="Feudal Age",
         subject="market",
-        menu="v",
+        # The economic menu's second row: farm a, blacksmith s, market d, monastery f.
+        # Live, "v" opened nothing and 7 of 8 markets were clicked with none on the cursor.
+        menu="q",
         key="d",
         unique=True,
     ),
@@ -186,7 +188,7 @@ SPECS: tuple[ActionSpec, ...] = (
         (("wood", 175),),
         age="Castle Age",
         subject="monastery",
-        menu="w",
+        menu="q",
         key="f",
         unique=True,
     ),

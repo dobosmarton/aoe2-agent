@@ -32,7 +32,7 @@ from .entity_utils import (
     safe_gather_target,
 )
 from .models import Action, validate_action
-from .placement_preview import PreviewRegion, read_preview
+from .placement_preview import PreviewKind, PreviewRegion, read_preview
 from .policy.candidates import eligible
 from .policy.catalog import (
     BUILDINGS,
@@ -2259,46 +2259,58 @@ async def _previewed_placement(
     candidates = placement_candidates(key, menu=menu)[:_PREVIEW_HOVER_LIMIT]
     if not candidates:
         return (f"no visible resource or ground for the {name}", None)
-    point = await _first_accepted(candidates, _footprint(name), capture)
-    if point is None:
-        log.warning("placement_preview_refused_all", building=name, tried=len(candidates))
-        return (
-            f"no valid ground in view for the {name}: "
-            f"the preview was red at {len(candidates)} spots",
-            None,
+    hover = await _hover_candidates(candidates, _footprint(name), capture)
+    if hover.accepted is not None:
+        log.info(
+            "placement_preview_accepted", building=name, point=hover.accepted, tried=hover.tried
         )
-    log.info(
-        "placement_preview_accepted",
-        building=name,
-        point=point,
-        tried=candidates.index(point) + 1,
+        return ("", hover.accepted)
+    if not hover.any_drawn:
+        # Live, three markets were clicked with no market on the cursor and refused.
+        log.warning("placement_preview_missing", building=name, tried=hover.tried)
+        return (f"no {name} on the cursor: its build key didn't take", None)
+    log.warning("placement_preview_refused_all", building=name, tried=hover.tried)
+    return (
+        f"no valid ground in view for the {name}: the preview was red at {hover.tried} spots",
+        None,
     )
-    return ("", point)
 
 
-async def _first_accepted(
+@dataclass(frozen=True, slots=True)
+class _Hover:
+    """What hovering the candidates showed."""
+
+    accepted: tuple[int, int] | None
+    tried: int
+    any_drawn: bool
+
+
+async def _hover_candidates(
     candidates: Sequence[tuple[int, int]], footprint: "_Footprint", capture: PreviewCapture
-) -> tuple[int, int] | None:
-    """Hover each candidate in turn; the first whose preview isn't red, or None.
+) -> _Hover:
+    """Hover each candidate in turn until the game draws an accepting preview.
 
     The comparison frame is taken with the cursor over the command panel, where
-    the game draws no preview.
+    the game draws no preview. A spot counts only where a preview appeared: with
+    nothing on the cursor no spot is ever red, so "not red" alone proves nothing.
     """
     size = _window_size()
     without = await _capture_hovering(_command_panel_point(), capture)
-    for point in candidates:
+    any_drawn = False
+    for tried, point in enumerate(candidates, start=1):
         with_preview = await _capture_hovering(point, capture)
         reading = read_preview(without, with_preview, footprint.preview_region(point, size))
         log.debug(
             "placement_preview_hover",
             point=point,
-            refused=reading.refused,
-            red=round(reading.red, 3),
+            accepted=reading.accepted,
+            red=round(reading.red, 4),
             changed=round(reading.changed, 3),
         )
-        if not reading.refused:
-            return point
-    return None
+        any_drawn = any_drawn or reading.drawn
+        if reading.accepted:
+            return _Hover(point, tried, any_drawn)
+    return _Hover(None, len(candidates), any_drawn)
 
 
 async def _capture_hovering(point: tuple[int, int], capture: PreviewCapture) -> np.ndarray:
@@ -2308,9 +2320,13 @@ async def _capture_hovering(point: tuple[int, int], capture: PreviewCapture) -> 
 
 
 def _command_panel_point() -> tuple[int, int]:
-    """The middle of the command panel at the bottom of the frame."""
+    """A point on the selection panel, where the game draws no placement preview.
+
+    The panels cover the left half of the bottom edge. The middle of the frame's
+    bottom is map: resting there drew the preview into the comparison frame.
+    """
     width, height = _window_size()
-    return (width // 2, height - UI_MARGIN_BOTTOM // 2)
+    return (width // 4, height - UI_MARGIN_BOTTOM // 2)
 
 
 def _resolve_coords(action_dict: dict[str, object]) -> tuple[str, tuple[int, int] | None]:
@@ -2604,6 +2620,8 @@ _FOOTPRINT_TILES: dict[str, int] = {
     "siege_workshop": 4,
 }
 _DEFAULT_FOOTPRINT_TILES = 3
+# Buildings whose placement preview is only their footprint's outline.
+_OUTLINE_PREVIEWS = frozenset({"farm"})
 _TOWN_CENTER_TILES = 4
 _MIN_GROUND_STEP = 24  # Frame pixels between points of the open-ground search.
 # Spots hovered before giving up on a placement, and how long after a cursor move
@@ -2618,10 +2636,11 @@ class _Footprint:
 
     half_width: float
     half_height: float
+    preview: PreviewKind = PreviewKind.SPRITE
 
     def preview_region(self, point: tuple[int, int], size: tuple[int, int]) -> PreviewRegion:
         """Where the game draws this building's preview when the cursor is at `point`."""
-        return PreviewRegion.around(point, self.half_width, self.half_height, size)
+        return PreviewRegion.around(point, self.half_width, self.half_height, size, self.preview)
 
     def overlaps(self, point: tuple[int, int], box: tuple[float, float, float, float]) -> bool:
         px, py = point
@@ -2640,7 +2659,9 @@ _BLOCKED_CLUTTER = 10  # A candidate inside an entity's box counts as this much 
 # bottom command panel; those regions have no entities, so an emptiness score would
 # wrongly rank them as "open" — exclude them from build candidates and gather clicks.
 UI_MARGIN_TOP: int = 160
-UI_MARGIN_BOTTOM: int = 240
+# The command and selection panels start about 275 px above the bottom edge of a
+# 3024-wide frame. At 240, a farm was "placed" at y=1650 of 1898: on the panel.
+UI_MARGIN_BOTTOM: int = 280
 UI_MARGIN_SIDE: int = 40
 
 # Drop-off camps are worthless away from their resource, so they anchor on it
@@ -2857,13 +2878,16 @@ def _open_ground_candidates(
     """
     ax, ay = anchor
     min_x, min_y, max_x, max_y = _play_area_bounds()
+    below = int(footprint.half_height) if footprint is not None else 0
     candidates: list[tuple[int, int]] = []
     for radius in radii:
         for i in range(BUILD_RING_DIRECTIONS):
             angle = 2.0 * math.pi * i / BUILD_RING_DIRECTIONS
             cx = int(ax + radius * math.cos(angle))
             cy = int(ay + radius * math.sin(angle))
-            if min_x <= cx <= max_x and min_y <= cy <= max_y and _explored((cx, cy)):
+            # A footprint reaching under the HUD hides its preview there.
+            on_map = min_x <= cx <= max_x and min_y <= cy <= max_y - below
+            if on_map and _explored((cx, cy)):
                 candidates.append((cx, cy))
     home = _refusal_home()
     candidates.sort(
@@ -2880,7 +2904,8 @@ def _footprint(building: str | None) -> _Footprint:
     """`building`'s ground diamond, scaled from the Town Center's width."""
     tiles = _FOOTPRINT_TILES.get(building or "", _DEFAULT_FOOTPRINT_TILES)
     width = _town_center_width() * tiles / _TOWN_CENTER_TILES
-    return _Footprint(width / 2, width / 4)  # An isometric tile is half as tall as wide.
+    preview = PreviewKind.OUTLINE if building in _OUTLINE_PREVIEWS else PreviewKind.SPRITE
+    return _Footprint(width / 2, width / 4, preview)  # A tile is half as tall as wide.
 
 
 def _town_center_width() -> float:
