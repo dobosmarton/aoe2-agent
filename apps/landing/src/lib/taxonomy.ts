@@ -1,268 +1,239 @@
 /**
- * Single source of truth for the sequential tutorial path through docs/.
+ * Single source of truth for the sequential reading path through docs/.
  *
- * Hand-curated rather than derived from frontmatter because most docs in
- * the corpus don't have frontmatter. The ordering matches docs/index.md
- * (Parts 1–8, chapters 01–23), which is the README the rest of the team
- * is already using as a navigation anchor.
+ * Hand-curated rather than derived from frontmatter because the docs have
+ * no frontmatter. Sections and pages follow the order of docs/index.md, and
+ * titles and blurbs are taken from its tables.
  *
- * If `docs/index.md` changes, update this file. Chapter slugs are the
- * filename without the `.md` extension; full slugs are `<part>/<chapter>`.
+ * If `docs/index.md` changes, update this file. A section id is its
+ * directory under docs/, a page slug is the filename without `.md`, and a
+ * full slug is `<section>/<page>`.
  */
 
-export type PartId =
-  | "part1-architecture"
-  | "part2-llm-integration"
-  | "part3-entity-detection"
-  | "part4-game-knowledge"
-  | "part5-operations"
-  | "part6-evaluation-arena"
-  | "part7-arena-web"
-  | "part8-autoresearch";
+export type SectionId = "agent" | "detection" | "arena" | "web" | "autoresearch";
 
-export interface Chapter {
-  /** Slug under the part directory, without `.md`. */
+export interface Page {
+  /** Filename under the section directory, without `.md`. */
   slug: string;
-  /** Display title for the sidebar / TOC. */
+  /** Display title for the sidebar and prev/next links. */
   title: string;
-  /** One-line description for hover and the landing page. */
+  /** One-line description, shown on hover. */
   blurb: string;
 }
 
-export interface Part {
-  id: PartId;
-  /** Roman numeral or short label shown in the timeline. */
-  label: string;
+export interface Section {
+  /** Directory name under docs/. */
+  id: SectionId;
   /** Full title. */
   title: string;
-  /** One-line description for the landing page. */
-  blurb: string;
-  chapters: Chapter[];
+  pages: Page[];
 }
 
-export const PARTS: Part[] = [
+export const SECTIONS: Section[] = [
   {
-    id: "part1-architecture",
-    label: "I",
-    title: "Real-game architecture",
-    blurb:
-      "Two-tier design, graceful degradation, the capture → detect → think → act loop.",
-    chapters: [
+    id: "agent",
+    title: "Gameplay agent",
+    pages: [
       {
-        slug: "01-system-overview",
-        title: "System Overview",
-        blurb: "Two-tier design, graceful degradation, async architecture.",
-      },
-      {
-        slug: "02-game-loop-pipeline",
-        title: "Game Loop Pipeline",
+        slug: "overview",
+        title: "Overview",
         blurb:
-          "Capture-detect-alarm-strategist-execute-verify cycle.",
+          "What the agent is, the three loops, deployment topologies, repo layout, configuration.",
       },
       {
-        slug: "03-action-model-and-execution",
-        title: "Action Model & Execution",
-        blurb: "Pydantic action types, target resolution.",
-      },
-    ],
-  },
-  {
-    id: "part2-llm-integration",
-    label: "II",
-    title: "LLM integration",
-    blurb: "Strategist + executor provider pattern, prompts, context injection.",
-    chapters: [
-      {
-        slug: "04-provider-pattern",
-        title: "Provider Pattern",
+        slug: "perception",
+        title: "Perception",
         blurb:
-          "Abstract base, Claude executor (text-only), strategist (vision).",
+          "Window capture on Windows and macOS, the capture, detection and HUD lanes, OCR, ownership, how a Perception frame is versioned and published.",
       },
       {
-        slug: "05-prompt-engineering",
-        title: "Prompt Engineering",
-        blurb: "Executor + strategist prompt design.",
+        slug: "tracking",
+        title: "Tracking",
+        blurb:
+          "Stable track IDs and smoothed labels, the screentrack Rust tracker, camera-motion resets, the tracker benchmark.",
       },
       {
-        slug: "06-context-injection",
-        title: "Context Injection",
-        blurb: "Memory, goals, resources, dynamic game knowledge.",
+        slug: "decision-loops",
+        title: "Decision loops",
+        blurb:
+          "TypeSafe policy, strategist and executor on the perceive, act and deliberate clocks; the feasible catalog, revalidation, fallback, goals, alarms and recovery.",
+      },
+      {
+        slug: "actions-and-execution",
+        title: "Actions and execution",
+        blurb:
+          "The action model, executor tools, spend checks, target resolution, input on Windows and macOS, the action ledger, the offline scenario runner.",
+      },
+      {
+        slug: "llm-providers",
+        title: "LLM providers",
+        blurb:
+          "ChatWire adapters, wire selection, model defaults, the TypeSafe client, cost accounting, the text completer.",
+      },
+      {
+        slug: "prompts-and-context",
+        title: "Prompts and context",
+        blurb: "Prompt files, what each role reads per turn, cross-game memories.",
+      },
+      {
+        slug: "game-knowledge",
+        title: "Game knowledge",
+        blurb:
+          "The packages/data reference database and where the agent's runtime game facts actually live.",
       },
     ],
   },
   {
-    id: "part3-entity-detection",
-    label: "III",
-    title: "Entity detection",
-    blurb: "YOLO architecture, training pipeline, labeling workflow.",
-    chapters: [
+    id: "detection",
+    title: "Detection",
+    pages: [
       {
-        slug: "07-detector-architecture",
-        title: "Detector Architecture",
-        blurb: "EntityDetector, PyTorch/ONNX/Mock backends, 60-class taxonomy.",
+        slug: "detector",
+        title: "Entity detector",
+        blurb:
+          "The inference library, the served YOLO26n model, pre and postprocessing, thresholds, ownership, the 65-class taxonomy.",
       },
       {
-        slug: "08-training-pipeline",
-        title: "Training Pipeline",
-        blurb: "Synthetic data, augmentations, YOLO11n training.",
+        slug: "serving-and-evaluation",
+        title: "Serving and evaluation",
+        blurb:
+          "The detection server, the one-inference-at-a-time rule, model export, the model registry, release evaluation.",
       },
       {
-        slug: "09-labeling-and-active-learning",
-        title: "Labeling & Active Learning",
-        blurb: "CVAT workflow, COCO/YOLO conversion, class remapping.",
-      },
-    ],
-  },
-  {
-    id: "part4-game-knowledge",
-    label: "IV",
-    title: "Game knowledge",
-    blurb: "SQLite knowledge DB, sprite extraction.",
-    chapters: [
-      {
-        slug: "10-knowledge-database",
-        title: "Knowledge Database",
-        blurb: "SQLite schema, data sources, dynamic queries.",
+        slug: "training",
+        title: "Training",
+        blurb:
+          "Real, synthetic and composite training data, train_yolo.py settings, local and cloud runs, promotion.",
       },
       {
-        slug: "11-sprite-extraction",
-        title: "Sprite Extraction",
-        blurb: "SLD format, DXT1 decompression, player color recoloring.",
+        slug: "labeling",
+        title: "Labeling",
+        blurb:
+          "Capture sessions, prelabels, X-AnyLabeling review, label aliases, the independent test set.",
+      },
+      {
+        slug: "sprite-extraction",
+        title: "Sprite extraction",
+        blurb: "Decoding .sld sprites into PNGs for the synthetic generators.",
       },
     ],
   },
   {
-    id: "part5-operations",
-    label: "V",
-    title: "Operations",
-    blurb: "Cloud training, class schema evolution.",
-    chapters: [
+    id: "arena",
+    title: "Synthetic arena",
+    pages: [
       {
-        slug: "12-cloud-training",
-        title: "Cloud Training",
-        blurb: "Lambda Labs workflow, dataset packaging, cost analysis.",
+        slug: "overview",
+        title: "Overview",
+        blurb:
+          "The aoe2-arena CLI, profiles, how a variant is invoked, the infra stack.",
       },
       {
-        slug: "13-class-schema-evolution",
-        title: "Class Schema Evolution",
-        blurb: "Schema history, unified 60-class taxonomy, legacy mapping.",
-      },
-    ],
-  },
-  {
-    id: "part6-evaluation-arena",
-    label: "VI",
-    title: "Evaluation arena",
-    blurb:
-      "race / smoke / rank CLI, broker, DuckDB log, Bradley-Terry ranking, synthetic world.",
-    chapters: [
-      {
-        slug: "14-arena-overview",
-        title: "Arena Overview",
-        blurb: "race / smoke / rank — when to use which.",
+        slug: "world-sim",
+        title: "World sim",
+        blurb: "The AoE2-lite economy model and what the arena model sees.",
       },
       {
-        slug: "15-event-broker",
-        title: "Event Broker",
-        blurb: "In-process vs Redis, backpressure, /metrics.",
+        slug: "ranking",
+        title: "Ranking",
+        blurb:
+          "Round-robin play over scenarios, Bradley-Terry ratings, bootstrap intervals.",
       },
       {
-        slug: "16-duckdb-persister-and-replay",
-        title: "DuckDB Persister & Replay",
-        blurb: "Event log schema, cold-path reader, fork primitive.",
+        slug: "event-broker",
+        title: "Event broker",
+        blurb:
+          "The EventBroker protocol, in-process and Redis Streams backends, backpressure.",
       },
       {
-        slug: "17-ranking-pipeline",
-        title: "Ranking Pipeline",
-        blurb: "Bradley-Terry MLE, scenarios, bootstrap CIs.",
-      },
-      {
-        slug: "18-synthetic-world-sim",
-        title: "Synthetic World Sim",
-        blurb: "AoE2-lite economy + perception projection.",
+        slug: "event-log-and-replay",
+        title: "Event log and replay",
+        blurb: "Event types, the DuckDB persister and reader, the fork primitive.",
       },
     ],
   },
   {
-    id: "part7-arena-web",
-    label: "VII",
+    id: "web",
     title: "Arena web",
-    blurb: "FastAPI + SSE backend, fork/diff UI, local dev.",
-    chapters: [
+    pages: [
       {
-        slug: "19-web-architecture",
-        title: "Web Architecture",
-        blurb: "FastAPI lifespan, /events dispatch, reaper, /forks flow.",
+        slug: "architecture",
+        title: "Architecture",
+        blurb:
+          "FastAPI endpoints, live versus cold event streams, forks, the reaper, the dashboard routes.",
       },
       {
-        slug: "20-fork-and-diff-ui",
-        title: "Fork and Diff UI",
-        blurb: "Timeline scrubber, World/Trace/Diff/Operator tabs.",
+        slug: "run-viewer",
+        title: "Run viewer",
+        blurb:
+          "The run page: timeline, World, Trace, Diff and Operator panels, forking from the UI.",
       },
       {
-        slug: "21-running-the-ui-locally",
-        title: "Running the UI Locally",
-        blurb: "Dev proxy, VITE_API_BASE_URL, deployment modes.",
+        slug: "running-locally",
+        title: "Running locally",
+        blurb:
+          "just recipes, the Vite proxy, environment variables, deployment modes.",
       },
     ],
   },
   {
-    id: "part8-autoresearch",
-    label: "VIII",
+    id: "autoresearch",
     title: "Autoresearch",
-    blurb: "Mutate → run → score → accept/revert prompt evolution loop.",
-    chapters: [
+    pages: [
       {
-        slug: "22-autoresearch-overview",
-        title: "Autoresearch Overview",
-        blurb: "Mutate → run → score → accept/revert loop.",
+        slug: "overview",
+        title: "Overview",
+        blurb:
+          "Playing and scoring real games, the experiment ledger and merge gate, the prompt tournament.",
       },
       {
-        slug: "23-prompt-mutation-and-memory",
-        title: "Prompt Mutation & Memory",
-        blurb: "Mutator constraints, protected sections, memory chain.",
+        slug: "mutation-and-memory",
+        title: "Mutation and memory",
+        blurb: "PromptMutator and MemoryChain.",
       },
     ],
   },
 ];
 
-export interface FlatChapter {
+export interface FlatPage {
   fullSlug: string;
-  part: Part;
-  chapter: Chapter;
-  index: number;
+  section: Section;
+  page: Page;
 }
 
-export const FLAT_CHAPTERS: FlatChapter[] = PARTS.flatMap((part, partIdx) =>
-  part.chapters.map((chapter, chapterIdx) => ({
-    fullSlug: `${part.id}/${chapter.slug}`,
-    part,
-    chapter,
-    index: partIdx * 100 + chapterIdx,
+export const FLAT_PAGES: FlatPage[] = SECTIONS.flatMap((section) =>
+  section.pages.map((page) => ({
+    fullSlug: `${section.id}/${page.slug}`,
+    section,
+    page,
   })),
 );
 
-const BY_SLUG = new Map(FLAT_CHAPTERS.map((c) => [c.fullSlug, c]));
+const BY_SLUG = new Map(FLAT_PAGES.map((p) => [p.fullSlug, p]));
 
-export function getChapter(fullSlug: string): FlatChapter | undefined {
+export function getPage(fullSlug: string): FlatPage | undefined {
   return BY_SLUG.get(fullSlug);
 }
 
-export function prevChapter(fullSlug: string): FlatChapter | undefined {
-  const i = FLAT_CHAPTERS.findIndex((c) => c.fullSlug === fullSlug);
-  return i > 0 ? FLAT_CHAPTERS[i - 1] : undefined;
+export function prevPage(fullSlug: string): FlatPage | undefined {
+  const i = FLAT_PAGES.findIndex((p) => p.fullSlug === fullSlug);
+  return i > 0 ? FLAT_PAGES[i - 1] : undefined;
 }
 
-export function nextChapter(fullSlug: string): FlatChapter | undefined {
-  const i = FLAT_CHAPTERS.findIndex((c) => c.fullSlug === fullSlug);
-  return i >= 0 && i < FLAT_CHAPTERS.length - 1
-    ? FLAT_CHAPTERS[i + 1]
-    : undefined;
+export function nextPage(fullSlug: string): FlatPage | undefined {
+  const i = FLAT_PAGES.findIndex((p) => p.fullSlug === fullSlug);
+  return i >= 0 && i < FLAT_PAGES.length - 1 ? FLAT_PAGES[i + 1] : undefined;
 }
 
-export function partFor(fullSlug: string): Part | undefined {
-  return getChapter(fullSlug)?.part;
+export function sectionFor(fullSlug: string): Section | undefined {
+  return getPage(fullSlug)?.section;
 }
 
-/** First chapter of the tutorial — used as the default "Start tutorial" CTA. */
-export const FIRST_CHAPTER = FLAT_CHAPTERS[0]!;
+/** True when a doc id belongs to one of the sections above. */
+export function isSectionPage(fullSlug: string): boolean {
+  const dir = fullSlug.split("/")[0];
+  return SECTIONS.some((s) => s.id === dir);
+}
+
+/** First page of the reading path, used by the "Start reading" links. */
+export const FIRST_PAGE = FLAT_PAGES[0]!;

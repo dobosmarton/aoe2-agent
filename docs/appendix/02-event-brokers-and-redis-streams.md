@@ -1,173 +1,71 @@
-# Appendix B — Event brokers and Redis Streams
+# Event brokers and Redis Streams
 
-This appendix is the reference behind [Chapter 15 (Event Broker)](../part6-evaluation-arena/15-event-broker.md), [Chapter 16 (DuckDB Persister and Replay)](../part6-evaluation-arena/16-duckdb-persister-and-replay.md), and [ADR 0001 (Broker-First Architecture)](../adr/0001-broker-first-architecture.md). The chapters describe *what we built*; this appendix explains *the family of solutions our broker is one member of, why Redis Streams beat the alternatives at our scale, and the parts of distributed-systems theory you need to be comfortable with the design.*
+An event broker sits between the code that produces events and the code that reads them, so neither side has to know about the other. This primer covers the broker models, offsets, backpressure and the Redis Streams commands that the arena's [event broker](../arena/event-broker.md) is built on.
 
-If you're new to event-driven architectures, read this first. If you've shipped one before, skim to §B.5 for the Redis Streams operational details.
+## Why a broker
 
----
+Without a broker, a producer calls each consumer directly: it writes to the database, pushes to every open browser connection, and so on. Adding a consumer means changing the producer, and a slow consumer slows the producer down. With a broker, the producer publishes once and each consumer subscribes on its own. The broker holds events until the slower consumers catch up.
 
-## B.1 The problem an event broker solves
+## Queue, pub/sub and log
 
-You have a *producer* of events (in our case: a running game agent emitting `turn_start`, `observation`, `llm_response`, `action`, … events as it plays) and one or more *consumers* (in our case: the DuckDB persister writing to disk, the SSE endpoint pushing to browsers, the ranking pipeline computing scores, plus future consumers we haven't built yet).
+| Model | Who receives a message | Late subscriber | Examples |
+|---|---|---|---|
+| Queue | Exactly one consumer from a pool | Gets only what is still queued; consumed messages are gone | RabbitMQ work queues, SQS, Celery |
+| Pub/sub | Every subscriber connected at that moment | Sees nothing published before it connected | Redis `PUBLISH`/`SUBSCRIBE`, MQTT |
+| Log | Every consumer, each at its own pace | Reads from any retained position | Kafka, Kinesis, Redis Streams, NATS JetStream |
 
-The naive design connects producer to each consumer directly:
+A queue spreads work across workers. Pub/sub fans out with minimal latency but keeps no history. A log keeps events in order and lets each consumer track its own position, which is what a reconnecting viewer needs: it asks for everything after the last event it saw. The cost is retention: the broker has to store events and decide when to drop them.
 
-```
-producer → DuckDB writer
-producer → SSE clients
-producer → ranking pipeline
-```
+The arena broker is a log with one stream per run. The DuckDB persister and each browser connection are independent consumers of the same run.
 
-This couples the producer to every consumer. Adding a consumer means changing the producer. A slow consumer slows the producer. A crashed consumer might lose events. Etc.
+## Offsets
 
-An **event broker** is a middle tier that decouples them:
+In a log, an offset is a consumer's position. The broker numbers entries in order, and a consumer asks for everything at or after a number. Kafka calls it an offset, Redis Streams uses entry IDs, and the arena calls it `Seq`. Because the consumer owns its offset, the broker does not track who has read what, and a consumer can reread from the start.
 
-```
-producer → broker → DuckDB writer
-                  → SSE clients
-                  → ranking pipeline
-```
+Offsets order events within one log only. Two runs are separate streams, and their numbers cannot be compared.
 
-The producer talks to *one* thing (the broker). Each consumer subscribes independently. Adding a new consumer is a new subscription — no producer changes. The broker absorbs the timing mismatch (a fast producer + slow consumer is fine as long as the broker can buffer).
+## Backpressure
 
----
+When a producer is faster than a consumer, the backlog grows until something gives. There are three standard policies:
 
-## B.2 The three flavours: queue vs pub/sub vs log
+| Policy | Producer | Events | Typical use |
+|---|---|---|---|
+| Block the producer | Waits for space | None lost | Work queues where every message must be processed |
+| Drop oldest | Never waits | Oldest discarded | Live views, where recent events matter most |
+| Drop newest | Never waits | Incoming events discarded | Cases where the first events matter most |
 
-Brokers come in three flavours that are easy to confuse because the words are used loosely.
+The arena broker drops oldest, with a 10,000-event limit per run. A consumer whose next event has already been dropped receives an error naming the oldest event still available, so the gap is visible to it. The full history is in DuckDB.
 
-### Queue (work distribution)
+## Redis Streams
 
-Each message is delivered to **exactly one consumer** out of a pool. RabbitMQ work-queues, AWS SQS, Celery. Use when you have N workers and want load-balanced work distribution.
+A Redis stream is an append-only log stored under one key. Each entry has an ID and a small map of fields.
 
-| Strength | Weakness |
+| Command | Does |
 |---|---|
-| Built-in load balancing across workers. | A consumed message is *gone* — you can't replay it for a new consumer later. |
-| Backpressure is natural: workers ack at their own pace. | Inherently single-purpose: one queue per job type. |
+| `XADD key [MAXLEN ~ n] id field value ...` | Appends an entry. `*` lets Redis generate the ID; an explicit ID must be greater than the last one |
+| `XREAD [BLOCK ms] STREAMS key id` | Returns entries with an ID greater than `id`. `BLOCK` waits up to `ms` for entries to arrive; `BLOCK 0` waits forever |
+| `XRANGE key start end [COUNT n]`, `XREVRANGE` | Reads a range of entries, oldest or newest first |
+| `XLEN key` | Number of entries |
+| `XINFO STREAM key` | Length, first and last entry, and other metadata |
+| `XTRIM key MAXLEN ~ n` | Trims the stream to about `n` entries |
+| `XREADGROUP` | Reads as part of a consumer group, where each entry goes to one member of the group |
 
-### Pub/sub (broadcast, fire-and-forget)
+Points that matter in practice:
 
-Each message is delivered to **every subscriber that's currently connected**. Redis `PUBLISH`/`SUBSCRIBE`, MQTT, classic JMS topics. Late subscribers miss earlier messages — the broker doesn't persist anything.
+- Generated IDs have the form `<milliseconds>-<sequence>`. An application can supply its own IDs instead, as long as each is larger than the previous one. The arena writes `<seq>-0` so that the stream ID is the `Seq`.
+- `MAXLEN ~ n` trims in whole internal nodes, so the stream can hold somewhat more than `n` entries. Exact trimming (no `~`) costs more.
+- `XREAD` with `$` returns only entries added after the call; with `0` it starts at the beginning. A consumer that restarts with `$` misses everything published while it was away, so consumers that must not miss events keep their last ID.
+- A finite `BLOCK` lets a consumer return periodically to check other conditions, such as whether the producer has finished.
+- Consumer groups distribute entries across workers like a queue. A log where every consumer wants every event, like the arena's, uses plain `XREAD`.
 
-| Strength | Weakness |
-|---|---|
-| Trivial fan-out. | No history. Connect late → see nothing. |
-| Lowest possible latency. | If a subscriber crashes, the messages it was about to process are lost. |
+Streams sit beside ordinary keys. A key written with `SET key value EX seconds` expires on its own, which makes it a liveness marker: if the producer dies without deleting it, the key disappears after the TTL. `SCAN` with `MATCH` walks the keyspace in batches without blocking the server, where `KEYS` does not.
 
-### Log (append-only, replayable)
+## Durability
 
-Each message is **persisted in order**; consumers track their own *offset* into the log and can rewind, replay, or join late. Kafka, AWS Kinesis, **Redis Streams**, NATS JetStream.
-
-| Strength | Weakness |
-|---|---|
-| Replayable from any offset → late-joining consumers see the full history. | More storage (you're keeping events around). |
-| Multiple independent consumers reading the same stream at different paces. | Operational complexity is higher than pub/sub. |
-| Audit trail comes for free — every event ever produced is on disk. | Requires deciding on retention (how long to keep events). |
-
-The log model is the only one that works for our case because the SSE endpoint needs to deliver every event a UI client missed during a reconnect, and the DuckDB persister, ranking pipeline, and future consumers all read at different paces. We need offset-based replay, not fire-and-forget broadcast.
-
----
-
-## B.3 Why Redis Streams and not Kafka / NATS / Postgres LISTEN
-
-We considered four log-shaped backends seriously.
-
-### Kafka
-
-The reference design. Excellent throughput (millions of events/sec), partition-based parallelism, ironclad durability, mature ecosystem. **Massive operational overhead** for our scale: a Kafka cluster needs Zookeeper (or KRaft), multiple broker nodes for HA, partition planning, schema-registry decisions. At our peak of maybe ~100 events/sec across all running games, Kafka is several orders of magnitude over-provisioned. A single developer running the system on a laptop should not need to operate a 3-node distributed cluster.
-
-### NATS JetStream
-
-Closer in scale to what we need. Lightweight, single binary, supports streams with replay. Genuinely a good choice. The reason we didn't pick it: we already had Redis as a dependency (for caching, rate limiting in the arena web), and adding a second piece of stateful infra felt like premature complexity. "Pick the boring backend you already run" was the decisive factor.
-
-### Postgres LISTEN/NOTIFY (or row triggers as an event log)
-
-Tempting because we have Postgres elsewhere. Two problems: `LISTEN/NOTIFY` is fire-and-forget (no replay), and using an `events` table as a stream means polling — slow, and prone to lock contention on the write side.
-
-### Redis Streams (XADD / XREAD)
-
-What we ship. Redis has had streams as a first-class data structure since 5.0 (2018). Combines pub/sub's simplicity with log semantics:
-
-- `XADD stream * key value …` appends an event with a server-assigned monotonic ID (`<timestamp>-<seq>`).
-- `XREAD BLOCK <ms> STREAMS stream <id>` reads events with ID > given (the consumer's offset). The `BLOCK` makes the call wait for new events instead of polling.
-- `XREADGROUP` adds consumer-group semantics if you want load-balanced consumption within a group (we don't use this — every consumer wants every event).
-- `XLEN`, `XTRIM`, `MAXLEN` for retention policy.
-
-It's *zero operational overhead beyond the Redis we already run*, has the right semantics, and is fast enough that we won't outgrow it for several orders of magnitude.
-
-See [ADR 0002](../adr/0002-redis-streams-for-cross-process.md) for the formal decision write-up.
-
----
-
-## B.4 Backpressure: the thing every broker eventually forces you to think about
-
-If your producer is consistently faster than the slowest consumer, *something* has to give. There are three policies, none of which is wrong, but you have to pick one consciously.
-
-### Block the producer (lossless, slow)
-
-The producer's `publish()` call waits until the broker has buffer space. Memory-safe, never loses events, but a slow consumer slows the whole system. Default in most queue-based brokers.
-
-### Drop oldest (lossy, fast)
-
-The broker enforces a max buffer size; when full, it discards the oldest events to make room. The producer never blocks. Events are lost, but only the events that were already stale.
-
-### Drop newest (lossy, fast, different failure mode)
-
-When full, discard the *new* event instead of the old. Useful when older events represent more important state (e.g., the first error matters more than later ones).
-
-**Our policy:** drop-oldest with high-water-mark logging. Redis Streams' `XADD … MAXLEN ~ N` does this natively — `~` is "approximate trim" (faster). The broker emits an `overflow` event when trimming happens so we can detect persistent backpressure problems. See `packages/evaluation/src/event_broker.py` for the implementation.
-
-The reason drop-oldest is right for our system: every event eventually lands in DuckDB *anyway* (the persister is the slow consumer; the broker is the hot buffer). The broker only needs to hold the last few seconds of events for live SSE subscribers to catch up after a reconnect. Older events are queryable from DuckDB.
-
----
-
-## B.5 Operational gotchas with Redis Streams
-
-A practical checklist of things that bit us, distilled:
-
-- **`XREAD BLOCK 0` vs `BLOCK <ms>`** — `0` is "block forever." Use a finite timeout (we use 5s) so your consumer can periodically check its own shutdown signal and gracefully exit. Otherwise `Ctrl-C` won't deliver until the next event arrives.
-- **The starting ID matters.** `$` means "from now on, only new events." `0` means "from the start of time." A consumer that crashes and restarts with `$` will miss everything that happened during the outage. Always persist the last-seen ID somewhere if you care about not missing events.
-- **`MAXLEN ~ N` is approximate.** The `~` lets Redis trim in efficient chunks; you'll occasionally find slightly more than N entries. Don't rely on exact bounds. For exact: drop the `~`, but pay a performance cost.
-- **Connection pooling.** The `redis-py` async client has a known pitfall (SDK issue #2624) where a single connection blocked in `XREAD` can starve other operations. We use a separate connection per long-lived subscription.
-- **Stream IDs are monotonic per-stream, not globally.** Don't try to merge IDs across streams expecting global ordering.
-
----
-
-## B.6 The single-loop invariant (and why it matters)
-
-A subtle but important property of our broker: **all `publish()` and subscriber dispatch happens on a single asyncio event loop**. This is what makes the in-process broker correct without locks.
-
-When the persister and SSE endpoints subscribe, they get an `async for envelope in broker.stream(run_id)` coroutine. The broker delivers events by `await queue.put(envelope)` — a coroutine yield, not a synchronous call. As long as everyone is on the same loop, "publish then read" is sequentially consistent without explicit synchronization.
-
-The CLI breaks this invariant when `synth_game_loop` runs in a worker thread. That's why `MultiRunBrokerSink` uses `loop.call_soon_threadsafe(...)` to marshal cross-thread publishes back onto the main loop. See [Chapter 16 §"close_all is load-bearing"](../part6-evaluation-arena/16-duckdb-persister-and-replay.md) for the details.
-
-The Redis backend is naturally cross-process — `XADD` from any process is safe — so the single-loop concern doesn't apply once you switch to Redis. But the in-process broker is faster (no serialization, no network), and you need to understand the invariant to know when each is safe.
-
----
-
-## B.7 When does this design break?
-
-A few growth scenarios that would force a redesign:
-
-- **>10k events/sec sustained.** Redis Streams can do it on beefy hardware, but you'd start wanting Kafka's partition-based parallelism. Not a concern today.
-- **Cross-region consumers.** Redis replication is async and not the same shape as Kafka mirror-maker. If you need a consumer in another datacenter, Kafka or a managed log service (Confluent Cloud, AWS MSK, Warpstream) becomes attractive.
-- **Strict at-least-once semantics under broker crashes.** Redis Streams persists if AOF is configured (which we do), but the durability story is weaker than Kafka's quorum-replicated log. For payment-grade workloads, this would matter.
-
-For an evaluation arena running on dev laptops and one small VPS, none of these apply.
-
----
+Redis keeps data in memory. With `appendonly yes`, as in the compose file, it also logs every write to an append-only file and replays it on restart, so streams survive a container restart. With `maxmemory-policy noeviction`, Redis refuses writes once a memory limit is reached instead of evicting keys; the compose file sets no limit, so streams can grow until host memory runs out. Untrimmed streams and forgotten keys therefore stay until something deletes them.
 
 ## Further reading
 
-- Martin Kleppmann, *Designing Data-Intensive Applications*, Chapter 11 ("Stream Processing"). The reference textbook.
-- Redis docs: [*Introduction to Redis Streams*](https://redis.io/docs/data-types/streams/) — short, well-written.
-- Jay Kreps, [*The Log: What every software engineer should know about real-time data's unifying abstraction*](https://engineering.linkedin.com/distributed-systems/log-what-every-software-engineer-should-know-about-real-time-datas-unifying) (LinkedIn 2013) — the essay that popularized the log-shaped broker model.
-
----
-
-**Cross-references:**
-
-- [Chapter 15 — Event Broker](../part6-evaluation-arena/15-event-broker.md) — our `BrokerProtocol`, in-process vs Redis backends, `/metrics` surface.
-- [Chapter 16 — DuckDB Persister and Replay](../part6-evaluation-arena/16-duckdb-persister-and-replay.md) — the cold-path consumer that reads from the broker.
-- [ADR 0001](../adr/0001-broker-first-architecture.md) and [ADR 0002](../adr/0002-redis-streams-for-cross-process.md) — the formal decisions.
-- [Runbook — Redis broker operations](../runbooks/redis-broker-ops.md) — when something is wrong with Redis in production.
+- Redis documentation, [Redis Streams](https://redis.io/docs/latest/develop/data-types/streams/).
+- Martin Kleppmann, *Designing Data-Intensive Applications*, chapter 11, "Stream Processing".
+- Jay Kreps, [The Log: What every software engineer should know about real-time data's unifying abstraction](https://engineering.linkedin.com/distributed-systems/log-what-every-software-engineer-should-know-about-real-time-datas-unifying).

@@ -37,9 +37,8 @@ Each accepted change is a git commit on the main repo (`[autoresearch] <id>: <de
 
 ## Reading order
 
-- [Chapter 22 — Autoresearch Overview](../../docs/part8-autoresearch/22-autoresearch-overview.md) — the loop and the scoring composite.
-- [Chapter 23 — Prompt Mutation and Memory](../../docs/part8-autoresearch/23-prompt-mutation-and-memory.md) — mutator + memory-chain internals.
-- [`docs/design/autoresearch-plan.md`](../../docs/design/autoresearch-plan.md) — the original 5-phase plan (frozen historical; only Phases 0–1 are shipped).
+- [Autoresearch overview](../../docs/autoresearch/overview.md): the loop and the scoring composite.
+- [Mutation and memory](../../docs/autoresearch/mutation-and-memory.md): mutator + memory-chain internals.
 
 ## When to use this vs `arena rank`
 

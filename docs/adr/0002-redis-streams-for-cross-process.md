@@ -1,54 +1,40 @@
-# ADR 0002 — Redis Streams as the cross-process broker backend
+# ADR 0002: Redis Streams as the cross-process broker
 
-**Status:** Accepted (2026-05). Shipped as Phase C.
-**Context:** [ADR 0001](./0001-broker-first-architecture.md) created the broker abstraction. This ADR picks the cross-process backend.
+Status: accepted.
+
+## Context
+
+The in-process broker from [ADR 0001](0001-broker-first-architecture.md) lives inside one Python process. The arena CLI and the web server are separate processes, so showing a CLI run live in the dashboard needs a backend that both can reach and that keeps the `EventBroker` contract: per-run `Seq` from 1, replay from any `Seq`, a bounded buffer with a detectable overflow, and an open or closed status that every process can read. The compose stack in `docker-compose.yml` already runs Redis for Langfuse.
 
 ## Decision
 
-Use Redis Streams (`XADD` / `XREAD BLOCK` per run) as the second `EventBroker` implementation, behind `ARENA_BROKER_BACKEND=redis`. Use `INCR` for the `Seq` source and embed it as the left half of the stream ID.
+`RedisStreamsBroker` (`packages/evaluation/src/redis_broker.py`) implements `EventBroker` with one Redis stream per run. `ARENA_BROKER_BACKEND=redis` selects it.
 
-## What we considered
-
-| Option | Pros | Cons |
-|---|---|---|
-| **Redis Streams** | Already in the compose stack (Langfuse needs it). Native `XADD MAXLEN` matches the in-process deque. `BLOCK` makes consumers cheap. Single-binary ops. | Redis isn't a "real" message broker — replication semantics aren't NATS/Kafka grade. |
-| **NATS JetStream** | Purpose-built for this; better delivery guarantees. | New ops surface; another container, another set of credentials. |
-| **Kafka / Redpanda** | Industry standard. | Ridiculous overkill for our load; ops complexity dwarfs the architecture. |
-| **Postgres `LISTEN/NOTIFY`** | Postgres already in stack. | NOTIFY drops messages on disconnect; no replay; payload size limit. |
-
-## Why Redis Streams
-
-- **Already deployed.** The compose stack runs Redis with `--requirepass ${REDIS_PASSWORD}` for Langfuse. Reusing the container is one shared dependency vs two.
-- **The primitives map cleanly.** `XADD` is publish, `XREAD BLOCK` is consumer wait, `MAXLEN ~ N` is the bounded-buffer policy, custom `<seq>-0` IDs preserve our `Seq` identity. The whole impl in `packages/evaluation/src/redis_broker.py` is 458 lines including the cross-process `:open` sentinel and the SDK-bug workarounds.
-- **Observable equivalence with in-process.** Same parametrized contract test (`tests/test_event_broker.py`) runs against both impls and passes byte-for-byte at the envelope level. That's the design's strongest guarantee.
-- **Local dev story is fine.** `fakeredis` covers CI; real-Redis local work needs the `broker-redis` extra.
-
-## Why we kept `Seq` from INCR (not native Redis IDs)
-
-`Seq` is a `NewType("Seq", int)` starting at 1 and totally ordered. We could have used Redis-native `<ms>-<n>` IDs and translated at the consumer boundary, but every consumer would then need its own translation table. `INCR` is one round-trip per publish, embedded into the stream ID as `<seq>-0`, and the identity stays stable across both impls. Cleaner everywhere.
-
-## Subtle correctness items we hit
-
-These are documented in the source where they apply, but worth surfacing for ADR future-readers:
-
-- **Sync lifecycle on async backend.** `open_run` / `close_run` / `reap` are Protocol-sync; Redis needs network I/O to be observable cross-process. Resolved with a `_pending_admin` thunk queue drained at the top of every async method via `flush()` (`packages/evaluation/src/redis_broker.py:225`). Sync methods stage the side effect; the next async call lands it.
-- **`XREAD BLOCK` cancellation poisons the connection.** Upstream redis-py issue #2624. A cancelled consumer leaves a pending response on the socket; the next `publish` reads it and sees `None` where it expected an INCR result. The fix is `connection_pool.disconnect(inuse_connections=False)` on the `CancelledError` / `GeneratorExit` path (`redis_broker.py:340–379`). Only idle connections are evicted, so concurrent publishers aren't disrupted.
-- **Cross-process truth via the `:open` sentinel.** `is_open()` is process-local per Protocol (sync). `is_open_remote()` does the Redis round-trip when callers (like the server's reaper loop) need the cross-process answer.
+- `publish` takes the next `Seq` from `INCR arena:run:<id>:seq` and writes the event with `XADD arena:run:<id>:events MAXLEN ~ 10000` and the explicit ID `<seq>-0`, so stream IDs and `Seq` are the same number.
+- `stream` reads with `XREAD BLOCK 100` from the last delivered ID and detects overflow from the stream's first entry.
+- `open_run` writes `arena:run:<id>:open` with a 6-hour TTL, holding the run's label and start time as JSON. `is_open_remote` and `live_runs` read these keys.
+- The `redis` package is imported only when this backend is selected.
 
 ## Consequences
 
-**Positive**
-- Cross-process producer / consumer separation, which unlocks the FastAPI-on-VM + UI-on-laptop topology.
-- Existing compose stack covers the production dependency.
-- One `ARENA_BROKER_BACKEND` env var is the operator surface — see [Runbook: switching-broker-backend](../runbooks/switching-broker-backend.md).
-- `REDIS_PASSWORD` auto-builds the URL when `REDIS_URL` isn't set (compose-stack default path).
+- A CLI run is visible live in the web server, and any number of processes can consume a run.
+- The contract test suite (`tests/test_event_broker.py`) runs against both implementations, the Redis one through `fakeredis`.
+- The stack gains no extra service.
+- The protocol's lifecycle methods are synchronous, so the Redis broker queues their `SET` and `DEL` until its next async call. A process that makes no further call after `reap` leaves the run's keys in Redis.
+- Cancelling a blocked `XREAD` can leave a redis-py connection with an unread reply (redis-py issue #2624). The broker drops idle pool connections whenever a stream is cancelled.
+- `INCR` and `XADD` are two round trips, so concurrent publishes to one run can reach `XADD` out of order, and Redis rejects the lower ID.
+- `MAXLEN ~` trims approximately, and the metrics counters cover only the process that reports them.
 
-**Negative**
-- The `redis` Python client is an optional dep (good — slim install keeps working) but means a `broker-redis` extra to install.
-- The two SDK gotchas above are real complexity we paid for in source comments and tests.
-- A future third backend (NATS, Kafka) needs to pass the same contract tests *and* not break the single-loop-eviction invariant of the in-process impl.
+## Alternatives considered
+
+| Option | Why it was rejected |
+|---|---|
+| NATS JetStream | Fits the model, but adds a service and its credentials to a stack that already runs Redis |
+| Kafka or Redpanda | Operational weight far beyond a handful of runs on one machine |
+| Postgres `LISTEN`/`NOTIFY` | No replay: a notification reaches only listeners connected at that moment, and payloads are size-limited |
+| Redis-generated stream IDs (`<ms>-<n>`) | Every consumer would need to translate them to `Seq`, and the two brokers would number events differently |
 
 ## Related
 
-- [Chapter 15 — Event Broker](../part6-evaluation-arena/15-event-broker.md) — current-state reference.
-- [Runbook: redis-broker-ops](../runbooks/redis-broker-ops.md) — operational checklist.
+- [Event broker](../arena/event-broker.md)
+- [Redis broker operations](../runbooks/redis-broker-ops.md)

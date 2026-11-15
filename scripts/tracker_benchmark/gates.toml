@@ -13,7 +13,7 @@ max_differences = 0
 [overhead]
 question = "Inside the perception budget?"
 group = "faster"
-# Camera plus temporal p95, from docs/streaming-perception.md.
+# Camera plus temporal p95, from docs/agent/tracking.md.
 max_p95_ms = 20.0
 
 [speed]

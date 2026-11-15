@@ -1,50 +1,39 @@
-# ADR 0001 — Broker-first event architecture
+# ADR 0001: broker-first event architecture
 
-**Status:** Accepted (2026-05). Shipped through Phases 0–C.
-**Context:** [`docs/design/event-broker-architecture.md`](../design/event-broker-architecture.md) (frozen full spec).
+Status: accepted.
+
+## Context
+
+An arena run has several readers. The DuckDB log keeps every event for post-mortem queries, ranking and forks. The web UI shows a run while it plays and must resume after a dropped connection without missing or repeating events. Fork replays started from the web API produce runs of their own that the same UI follows.
+
+DuckDB allows one read-write process per file, and a read-only open from another process fails while that writer holds the file. Any design in which live readers open the file being written breaks as soon as the producer and the reader are different processes, as the arena CLI and the web server are.
 
 ## Decision
 
-Make the event broker the single source of truth for live event consumers. DuckDB and the web UI are symmetric materializations of the broker stream — neither knows about the other. Delete the old `live.py` shim and `LiveRunRegistry` / `BroadcastingSink`.
+Producers publish events to an `EventBroker` (`packages/evaluation/src/event_broker.py`), and every reader is a broker consumer that calls `stream(run_id, from_seq)`.
 
-## What we considered
-
-1. **Status-quo patch** — drop `read_only=True` from the SSE handler's DuckDB scan, or route the live path past the scan by tracking `db_path` in a registry.
-2. **Broker-first redesign** — abstract producers and consumers behind an `EventBroker` Protocol, push DuckDB to the side as one of N consumers.
-
-## Why broker-first
-
-The status-quo patches both work and both ship in half a day. They also both encode the load-bearing assumption that **"readers open the writer's DuckDB file."** That assumption is fine in a single-process FastAPI app and instantly false the day any of these happen:
-
-- Replay moves to a worker process. DuckDB's cross-process rule: one writer system-wide, no concurrent readers — not even RO.
-- Frontend dev box talks to a backend on a VM (already happening, per past project context).
-- Multiple materializers want the event stream (DuckDB + analytical OLAP + Langfuse).
-- Parallel forks fan out across machines.
-
-Each of those is a forced rewrite of the SSE layer under deadline pressure if we bake in the file-coupling assumption now. The broker-first design moves that assumption out of the SSE layer entirely.
+- The broker assigns each event a per-run `Seq` starting at 1 and delivers `EventEnvelope(run_id, seq, event)`. A consumer that reconnects passes the next `Seq` it needs.
+- The DuckDB persister is one consumer. It is the only code that opens a run's file for writing, and the file is released once the run is closed and its stream drained.
+- Live readers stream from the broker. Readers of finished runs use `stream_cold`, which opens the file read-only and numbers rows the same way, so both paths deliver the same envelope shape.
+- `make_broker()` chooses the implementation, so producers and consumers do not depend on a backend.
 
 ## Consequences
 
-**Positive**
-- The Phase 9 DuckDB collision bug disappears as a side effect — only the persister opens the writer's file.
-- Race-window dedupe code disappears as a side effect — `Seq` ordering is total per-run.
-- The day we go distributed, swapping in `RedisStreamsBroker` is a one-line factory change (it shipped as Phase C; see [ADR 0002](./0002-redis-streams-for-cross-process.md)).
-- Per-run cold reads stay untouched (`stream_cold` over read-only DuckDB).
+- No reader opens a file that a writer holds. The web server checks `is_open_remote` and streams live runs from the broker and finished runs from DuckDB.
+- Adding a consumer means one more `stream` subscription; producers do not change.
+- Each producer needs an adapter (`BrokerEventSink`, `MultiRunBrokerSink`) and has to keep the lifecycle order: open the run before publishing, let queued publishes finish before `close_run`, wait for the persister before treating the file as complete, then `reap`.
+- The broker keeps at most 10,000 events per run. A consumer that falls further behind gets `BrokerOverflowError` and has to accept a gap; the DuckDB file still has the full run.
+- The in-process broker is correct only while all callers share one asyncio event loop.
+- With the in-process broker, the web server cannot watch a run produced by a separate CLI process. That needs a cross-process backend ([ADR 0002](0002-redis-streams-for-cross-process.md)).
 
-**Negative**
-- One more abstraction layer; producers now go through `BrokerEventSink` instead of writing to DuckDB directly.
-- The single-loop invariant on `InProcessEventBroker` (publishers can't run between consumer awaits) is invisible until you try to add a thread-pooled backend; the test suite catches the visible part but reviewers must be aware of the invisible part.
+## Alternatives considered
 
-## Sequencing
-
-- **Phase 0** — `Event.from_row` + DuckDB collision regression test.
-- **Phase 1** — `EventBroker` Protocol + `InProcessEventBroker` + DuckDB persister behind `ARENA_BROKER_ENABLED`.
-- **Phase 2** — Cutover. Delete `live.py`. Remove the gate; broker is unconditional.
-- **Phase 2.5** — Roll `race` / `smoke` / `rank` CLIs onto the broker.
-- **Phase 3** — Bounded buffers, explicit `reap()`, `/metrics` endpoint, overflow backpressure semantics.
-- **Phase C** — Redis Streams broker + fakeredis contract tests for byte-for-byte equivalence.
+| Option | Why it was rejected |
+|---|---|
+| The SSE handler reads the run's DuckDB file directly, polling for new rows | Fails while the writer holds the file in another process, and couples every reader to the file layout |
+| A process-local registry that maps live runs to their files or forwards events to open SSE connections | Works only when producer and web server share a process, and leaves DuckDB as the point every reader depends on |
 
 ## Related
 
-- [Chapter 15 — Event Broker](../part6-evaluation-arena/15-event-broker.md) — current-state reference.
-- [ADR 0002 — Redis Streams](./0002-redis-streams-for-cross-process.md) — the Phase C backend choice.
+- [Event broker](../arena/event-broker.md)
+- [Event log and replay](../arena/event-log-and-replay.md)

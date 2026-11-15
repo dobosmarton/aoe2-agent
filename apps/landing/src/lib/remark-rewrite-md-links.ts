@@ -9,9 +9,9 @@ import { visit } from "unist-util-visit";
  * form.
  *
  * Source markdown in `docs/` uses GitHub-style relative links like
- * `./04-provider-pattern.md` or `../part1-architecture/02-game-loop-pipeline.md`.
+ * `./llm-providers.md` or `../detection/detector.md`.
  * Those work on GitHub (which transforms them at render time) but break in
- * the built site because the routes are `/docs/<part>/<chapter>` with no
+ * the built site because the routes are `/docs/<section>/<page>` with no
  * `.md` extension.
  *
  * This plugin walks markdown link nodes, resolves relative `.md` targets

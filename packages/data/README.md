@@ -2,9 +2,8 @@
 
 A self-contained SQLite database of AoE2 game knowledge — buildings, units,
 techs, civs, counter relationships — plus the loaders that populated it.
-Consumed by `gameplay-agent.providers.executor_provider` for dynamic context injection
-(the executor can be asked "what's the cost of a Castle?" and look it up
-without re-prompting the LLM).
+The gameplay agent does not import this package at runtime; see
+[game knowledge](../../docs/agent/game-knowledge.md).
 
 ## What's here
 
@@ -37,5 +36,4 @@ uv run --package data python -m data.populate_db
 
 ## Where to read more
 
-- [Chapter 10 — Knowledge Database](../../docs/part4-game-knowledge/10-knowledge-database.md) — schema, query patterns, dynamic context injection.
-- [Chapter 6 — Context Injection](../../docs/part2-llm-integration/06-context-injection.md) — how the agent threads knowledge-base lookups into LLM context.
+- [Game knowledge](../../docs/agent/game-knowledge.md): schema, the two builds, and where the agent's runtime game facts live.

@@ -46,5 +46,5 @@ curl http://192.168.64.1:8420/health
 
 ## Where to read more
 
-- [Deployment Guide](../../docs/deployment-guide.md) — Mac + Windows VM setup, IP discovery, firewall.
-- [Chapter 7 — Detector Architecture](../../docs/part3-entity-detection/07-detector-architecture.md) — the inference backends this server exposes.
+- [Deployment runbook](../../docs/runbooks/deployment.md): Windows VM and native macOS setup.
+- [Serving and evaluation](../../docs/detection/serving-and-evaluation.md) and [entity detector](../../docs/detection/detector.md): the server, its inference backends, the model it serves.

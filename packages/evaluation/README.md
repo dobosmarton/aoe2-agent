@@ -37,9 +37,9 @@ just eval-all
 
 ## Reading order
 
-- Broker mechanics: [Chapter 15](../../docs/part6-evaluation-arena/15-event-broker.md).
-- DuckDB persister + the cold path + fork primitive: [Chapter 16](../../docs/part6-evaluation-arena/16-duckdb-persister-and-replay.md).
-- World sim economy + `render()` perception projection: [Chapter 18](../../docs/part6-evaluation-arena/18-synthetic-world-sim.md).
+- Broker mechanics: [event broker](../../docs/arena/event-broker.md).
+- DuckDB persister + the cold path + fork primitive: [event log and replay](../../docs/arena/event-log-and-replay.md).
+- World sim economy + `render()` perception projection: [world sim](../../docs/arena/world-sim.md).
 
 ## Invariants worth knowing
 

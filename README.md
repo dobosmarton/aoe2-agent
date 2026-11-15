@@ -146,7 +146,7 @@ ValueError: unknown AOE2_LLM_WIRE='zzz'; expected one of 'anthropic', 'openai', 
 ### Event broker backend (Phase C)
 
 The arena runs every event through an `EventBroker` (see
-`docs/design/event-broker-architecture.md`). The default in-process broker has
+`docs/arena/event-broker.md`). The default in-process broker has
 zero external dependencies and is fine for single-machine work — local
 development, CI, and `just arena-smoke` all use it implicitly.
 
@@ -375,18 +375,18 @@ entities = render(state, 1920, 1080)  # list[DetectedEntity], confidence=1.0
 
 ## Documentation
 
-See [docs/index.md](docs/index.md) for the full table of contents (8 parts, 23 chapters).
+See [docs/index.md](docs/index.md) for the full table of contents.
 
-Most useful entry points:
-
-- **Real-game agent**: Parts 1–4 ([game loop](docs/part1-architecture/02-game-loop-pipeline.md), [LLM integration](docs/part2-llm-integration/04-provider-pattern.md), [detection](docs/part3-entity-detection/07-detector-architecture.md), [game knowledge](docs/part4-game-knowledge/10-knowledge-database.md)).
-- **Synthetic arena**: [Part 6](docs/part6-evaluation-arena/14-arena-overview.md) (CLI / broker / ranking / world sim).
-- **Arena web UI**: [Part 7](docs/part7-arena-web/19-web-architecture.md) (SSE backend + Vite/React frontend).
-- **Autoresearch prompt loop**: [Part 8](docs/part8-autoresearch/22-autoresearch-overview.md).
-- **Why decisions were made**: [Architecture Decision Records](docs/adr/) (broker-first, Redis Streams, basedpyright, Bradley-Terry, Vite/React).
-- **Operational checklists**: [Runbooks](docs/runbooks/) (Redis ops, switching broker backend, debug a stuck fork, Windows VM bring-up).
-- **Deployment**: [deployment-guide.md](docs/deployment-guide.md) (Mac + Windows VM first-time setup).
-- **Detection internals**: [detection/README.md](detection/README.md).
+- **Gameplay agent**: [overview](docs/agent/overview.md), [perception](docs/agent/perception.md), [tracking](docs/agent/tracking.md), [decision loops](docs/agent/decision-loops.md), [actions and execution](docs/agent/actions-and-execution.md), [LLM providers](docs/agent/llm-providers.md), [prompts and context](docs/agent/prompts-and-context.md), [game knowledge](docs/agent/game-knowledge.md).
+- **Detection**: [entity detector](docs/detection/detector.md), [serving and evaluation](docs/detection/serving-and-evaluation.md), [training](docs/detection/training.md), [labeling](docs/detection/labeling.md), [sprite extraction](docs/detection/sprite-extraction.md).
+- **Synthetic arena**: [overview](docs/arena/overview.md), [world sim](docs/arena/world-sim.md), [ranking](docs/arena/ranking.md), [event broker](docs/arena/event-broker.md), [event log and replay](docs/arena/event-log-and-replay.md).
+- **Arena web**: [architecture](docs/web/architecture.md), [run viewer](docs/web/run-viewer.md), [running locally](docs/web/running-locally.md).
+- **Autoresearch**: [overview](docs/autoresearch/overview.md), [mutation and memory](docs/autoresearch/mutation-and-memory.md).
+- **Why decisions were made**: [Architecture Decision Records](docs/adr/) (broker-first, Redis Streams, basedpyright, Bradley-Terry, arena UI stack).
+- **Operational checklists**: [Runbooks](docs/runbooks/) (deployment, Windows VM bring-up, detector retraining, baseline experiments, Redis ops, switching broker backend, debugging a stuck fork).
+- **Deployment**: [deployment runbook](docs/runbooks/deployment.md) (first-time setup on a Windows VM or native macOS).
+- **Background**: [appendix](docs/appendix/) (YOLO, event brokers and Redis Streams, Bradley-Terry) and the [glossary](docs/glossary.md).
+- **Detection internals**: [packages/detection/README.md](packages/detection/README.md).
 
 ## License
 

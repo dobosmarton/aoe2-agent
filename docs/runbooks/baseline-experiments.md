@@ -1,62 +1,39 @@
-# Runbook: Record the P0.1 Baseline (experiments/results.tsv)
+# Record baseline experiments
 
-**Goal:** 3–5 full games with the current stack recorded in the ledger, so every
-subsequent change (IMPROVEMENT-PLAN.md P1–P4) is measured against a baseline
-instead of vibes.
+Record scored games for the current commit in `experiments/results.tsv`, so later changes can be compared against them and `just experiment-gate` passes. How games are scored and what makes a run invalid is in [autoresearch](../autoresearch/overview.md).
 
-## Prerequisites
+## Before you start
 
-- Windows VM with AoE2 DE running in a skirmish game (see the VM setup notes),
-  repo synced to the commit you want to baseline.
-- Detection server running on the Mac host (`just server --model <path-to-aoe2_yolo_v12_nms736.onnx>`)
-  and `AOE2_DETECTION_HOST` pointing at it.
-- `AOE2_LLM_API_KEY` set.
-- `TYPESAFE_API_KEY` set.
-- `AOE2_OCR_BACKEND=template` set (T-202): millisecond digit reads via the
-  harvested `templates/3024x1672/` glyphs instead of ~2-4 s of RapidOCR per
-  field; age text stays on RapidOCR, sampled every 5 ticks. Only set this where
-  digit templates exist for the capture resolution — the template backend
-  refuses to run without them (the default `rapidocr` needs no assets).
+- AoE2 is running a skirmish on the machine the agent controls, and the repo there is at the commit you want to record.
+- A detector is reachable: `AOE2_DETECTION_HOST` points at a running detection server (`just server --model <model.onnx or .mlpackage>`, port 8420), or the local model named by `AOE2_DETECTION_MODEL` is installed. Without one the run fails at start. See [detection serving](../detection/serving-and-evaluation.md).
+- `AOE2_LLM_API_KEY` and `TYPESAFE_API_KEY` are set.
+- `AOE2_GAME_PROFILE` points at a profile JSON for this setup with `roster_verified`, `hotkeys_verified` and `ownership_verified` all `true`. Examples are in `apps/agent/profiles/` (`magyars_highland_4v4.example.json` for Windows, `magyars_highland_4v4.macos.example.json` for macOS). Without a verified profile every run is invalid.
 
-## Run
+## Record
 
 ```bash
-# 3 games, 20 minutes each (adjust n / add --time-budget as needed)
 just experiment-baseline 3 --time-budget 1200
 ```
 
-Each game appends a row to `experiments/results.tsv` (composite score, survival,
-population, age, economy, action-success rate, end reason, turn count, git SHA)
-and, when the memory chain is enabled, extracts cross-game memories (P4.1).
+This runs `python -m autoresearch.game_runner` three times with descriptions `baseline run 1/3` to `3/3`. Start a fresh game before each run. Each run prints its scores and appends one ledger row.
+
+A run that prints `Run invalid for scoring` was logged with `accepted=false` and git SHA `(reverted)`. It does not count for the gate. Check that the profile is verified, then look in the run's log for actions that ended `uncertain`.
 
 ## Verify
 
 ```bash
-just experiment-gate          # requires a row at HEAD — should PASS now
+just experiment-gate
 ```
 
-The ledger (`experiments/results.tsv`) is deliberately NOT committed — it is
-machine-local, and the VM that runs the games is its source of truth. Run the
-gate on that machine; copy the file (e.g. into a run's `logs/` folder) when a
-snapshot needs to be shared.
+`PASS: N game(s) recorded at <sha>` means the ledger has a valid row at HEAD. `just experiment-gate --sha <sha>` checks another commit, and `--any` only requires a non-empty ledger.
 
-## Ongoing discipline
+The ledger is ignored by git and exists only on the machine that played the games, so run the gate there. Copy `experiments/results.tsv` elsewhere if someone else needs the numbers.
 
-Before merging any behavior-affecting change, run at least one game with a
-description naming the change:
+## For each later change
 
 ```bash
-just experiment "P1.3 villager job classes"
-just experiment-gate          # merge gate: fails without a row at HEAD
+just experiment "<what changed>"
+just experiment-gate
 ```
 
-While the ledger is being bootstrapped, `just experiment-gate --any` only
-requires a non-empty ledger.
-
-## Free side quests during baseline games
-
-- **P0.2:** the games produce screenshots under `logs/` — harvest frames across
-  ages/biomes for the ≥200-image frozen real eval set (label in CVAT,
-  bootstrap with `prelabel.py --open-vocab`).
-- **P4.1:** hand-review the first few extracted memories in `memories/` to tune
-  the extraction prompt.
+Each valid game can add memory files in `apps/agent/memories/`. Read them; delete any that give bad advice (see [mutation and memory](../autoresearch/mutation-and-memory.md)).

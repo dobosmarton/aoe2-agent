@@ -324,9 +324,8 @@ def evaluate_end_state(end_state_spec: dict, state: WorldState) -> list[str]:
 # ---------------------------------------------------------------------------
 # Rendering: project WorldState to DetectedEntity[] for synthetic perception.
 #
-# Phase 1 of the synthetic-arena buildout — see
-# docs/design/synthetic-arena-analysis.md lines 336 (deliverable) and 380
-# (Risk 4: schema contract).
+# Phase 1 of the synthetic-arena buildout. See docs/arena/world-sim.md; the
+# schema contract is pinned in tests/test_detector.py.
 # ---------------------------------------------------------------------------
 
 

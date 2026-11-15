@@ -2,6 +2,7 @@
 import { getCollection, render, type CollectionEntry } from "astro:content";
 import Doc from "@/layouts/Doc.astro";
 import Site from "@/layouts/Site.astro";
+import { isSectionPage } from "@/lib/taxonomy";
 
 export async function getStaticPaths() {
   const docs = await getCollection("docs");
@@ -26,12 +27,13 @@ const title =
   "Documentation";
 const description = entry.data.description;
 
-// Only chapters under a `partN-*/` prefix get the tutorial sidebar + timeline.
-const isTutorialChapter = /^part[1-8]-/.test(entry.id);
+// Pages under a section directory (agent/, detection/, arena/, web/,
+// autoresearch/) get the sidebar, timeline and prev/next links.
+const isGuidePage = isSectionPage(entry.id);
 ---
 
 {
-  isTutorialChapter ? (
+  isGuidePage ? (
     <Doc title={title} description={description} slug={entry.id}>
       <Content />
     </Doc>

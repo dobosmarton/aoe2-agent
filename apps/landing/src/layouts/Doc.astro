@@ -2,21 +2,21 @@
 import Site from "./Site.astro";
 import DocSidebar from "@/components/DocSidebar.astro";
 import PhaseTimeline from "@/components/figures/PhaseTimeline.tsx";
-import { partFor, prevChapter, nextChapter, getChapter } from "@/lib/taxonomy";
+import { sectionFor, prevPage, nextPage, getPage } from "@/lib/taxonomy";
 
 interface Props {
   title: string;
   description?: string;
-  /** Full slug like "part1-architecture/01-system-overview". */
+  /** Full slug like "agent/overview". */
   slug: string;
 }
 
 const { title, description, slug } = Astro.props;
 
-const part = partFor(slug);
-const prev = prevChapter(slug);
-const next = nextChapter(slug);
-const currentChapter = getChapter(slug);
+const section = sectionFor(slug);
+const prev = prevPage(slug);
+const next = nextPage(slug);
+const currentPage = getPage(slug);
 ---
 
 <Site title={`${title} — AoE2 LLM Arena`} description={description}>
@@ -29,7 +29,7 @@ const currentChapter = getChapter(slug);
 
     <main class="min-w-0">
       {
-        part && currentChapter && (
+        section && currentPage && (
           <div class="mb-6">
             <PhaseTimeline client:visible currentSlug={slug} />
           </div>
@@ -43,7 +43,7 @@ const currentChapter = getChapter(slug);
         <slot />
       </article>
 
-      <nav class="mt-12 grid gap-3 border-t pt-6 sm:grid-cols-2" aria-label="Chapter navigation">
+      <nav class="mt-12 grid gap-3 border-t pt-6 sm:grid-cols-2" aria-label="Page navigation">
         {
           prev ? (
             <a
@@ -51,7 +51,7 @@ const currentChapter = getChapter(slug);
               class="group rounded-lg border bg-card p-4 transition-colors hover:bg-accent"
             >
               <p class="text-xs text-muted-foreground">← Previous</p>
-              <p class="mt-1 font-medium group-hover:text-foreground">{prev.chapter.title}</p>
+              <p class="mt-1 font-medium group-hover:text-foreground">{prev.section.title}: {prev.page.title}</p>
             </a>
           ) : (
             <span />
@@ -64,7 +64,7 @@ const currentChapter = getChapter(slug);
               class="group rounded-lg border bg-card p-4 text-right transition-colors hover:bg-accent sm:col-start-2"
             >
               <p class="text-xs text-muted-foreground">Next →</p>
-              <p class="mt-1 font-medium group-hover:text-foreground">{next.chapter.title}</p>
+              <p class="mt-1 font-medium group-hover:text-foreground">{next.section.title}: {next.page.title}</p>
             </a>
           )
         }

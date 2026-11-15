@@ -1,150 +1,89 @@
-# Appendix A — YOLO and object detection
+# YOLO and object detection
 
-This appendix is the reference behind every chapter that talks about the detector — [Chapter 7 (Detector Architecture)](../part3-entity-detection/07-detector-architecture.md), [Chapter 8 (Training Pipeline)](../part3-entity-detection/08-training-pipeline.md), [Chapter 12 (Cloud Training)](../part5-operations/12-cloud-training.md). If you understand how a YOLO-family detector actually works end-to-end, those chapters become operational walkthroughs of a system you already understand. If you don't, this appendix builds the mental model from the ground up: what the network outputs, how raw predictions become a final list of boxes, how training pushes the network toward better predictions, and how we know when it's improving.
+An object detector takes an image and returns a list of boxes, each with a class from a fixed list and a confidence score. The project's detector is a fine-tuned Ultralytics YOLO26n (the `n` is the smallest size in the family). The concepts below are the ones the [entity detector](../detection/detector.md) and [serving and evaluation](../detection/serving-and-evaluation.md) pages assume.
 
-We use **YOLO26n** (Ultralytics) — `n` for nano, the smallest variant in the family. This appendix is written for the YOLOv5/8/11 generation; the broad strokes apply to the whole lineage, with one modern twist: YOLO26 is end-to-end / NMS-free (see A.2).
+## One forward pass, many predictions
 
----
+YOLO is a single-stage detector: one pass through a convolutional network produces every candidate box at once. The network has three parts:
 
-## A.1 The shape of the problem
+| Part | Does |
+|---|---|
+| Backbone | Turns pixels into feature maps at decreasing resolution |
+| Neck | Combines coarse and fine feature maps so each scale sees both detail and context |
+| Head | At every cell of each output grid, predicts a box and one score per class |
 
-You have an image. You want a list: *what objects are in it, and where?* "Where" means a bounding box: `(x_center, y_center, width, height)`, all in pixels. "What" means a class label drawn from a fixed set (our 60-class taxonomy: villager, militia, sheep, town_center, …).
+The grids have strides of 8, 16 and 32 input pixels. Fine grids catch small objects such as sheep, coarse grids catch town centres. Each grid cell is one prediction, which ONNX outputs and the project's code call an anchor. For a 736x1280 input:
 
-The naive approach is to slide a classifier across the image at many positions and scales (R-CNN, ~2014). Slow — thousands of forward passes per image. The YOLO insight (*You Only Look Once*, Redmon 2016) is: **predict everything in one forward pass**. The network looks at the entire image once and emits a structured grid where every cell is responsible for predicting any objects centered in it.
-
-Modern YOLO is just that idea, refined for a decade: a better backbone, multi-scale prediction, anchor-free heads, and a much better loss function. The cost: one forward pass through a ~3 MB network. That's why we can run it ~10 times per second on a laptop.
-
----
-
-## A.2 What the network outputs
-
-A single forward pass through YOLO26n on a 640×640 image produces a tensor of shape roughly `(num_predictions, 4 + num_classes)`. Each row is one candidate prediction:
-
-> **YOLO26 is end-to-end / NMS-free.** Unlike the YOLOv5/8/11 generation, YOLO26 has no NMS head — its (ONNX) output is already-decoded `(num_boxes, 6)` boxes, so the NMS step described in A.3 below isn't part of the model's forward pass. We keep that section because it's the right mental model *and* it still runs in practice: our detector applies its own dedup NMS across overlapping detections and SAHI tiles after the model returns.
-
-- **4 box parameters** — `(x_center, y_center, width, height)` in pixels.
-- **`num_classes` class scores** — one logit per class. After a sigmoid (or in some YOLOs, a softmax), each becomes a probability.
-
-There are *thousands* of candidates per image — modern YOLOs predict at multiple scales (e.g. a 80×80 grid for small objects, 40×40 for medium, 20×20 for large), giving `80² + 40² + 20² = 8400` candidate predictions per image at default resolution. **Most of them are garbage** — predictions for empty patches of grass. The class scores tell you which to keep.
-
-### Anchor boxes (older YOLOs) vs anchor-free (modern)
-
-Older YOLOs (v3–v5) used **anchor boxes**: each grid cell predicted offsets relative to a small set of pre-defined box shapes (tall, square, wide). The anchors were chosen by k-means clustering of the training set's ground-truth boxes. This worked but required you to pick good anchors for each dataset.
-
-YOLO11/26 is **anchor-free**: each cell directly predicts box parameters relative to its own location. Simpler, no per-dataset tuning, and competitive accuracy. You'll still see anchor-box language in older tutorials and the YOLOv5 codebase.
-
----
-
-## A.3 From raw predictions to a clean list of boxes — NMS
-
-Even after thresholding away the low-confidence garbage, you'll have multiple overlapping boxes for the same object — three cells near a sheep all "see" the sheep and emit boxes. **Non-Maximum Suppression (NMS)** is the post-processing that collapses these:
-
-```python
-def nms(boxes, scores, iou_threshold=0.5):
-    keep = []
-    order = scores.argsort(descending=True)
-    while len(order) > 0:
-        best = order[0]
-        keep.append(best)
-        ious = iou(boxes[best], boxes[order[1:]])
-        order = order[1:][ious < iou_threshold]
-    return keep
+```text
+(736/8)  x (1280/8)  = 92 x 160 = 14,720
+(736/16) x (1280/16) = 46 x 80  =  3,680
+(736/32) x (1280/32) = 23 x 40  =    920
+                                 19,320 predictions
 ```
 
-Sort by confidence, greedily keep the top box, drop anything overlapping it too much, repeat. The `iou_threshold` (typically 0.5) controls how aggressive the suppression is — too high and you keep duplicates; too low and you'll erase legitimate adjacent objects (two villagers standing next to each other).
+Each prediction has 4 box numbers (centre x, centre y, width, height, in input pixels) and 65 class scores, so the raw output tensor is `[1, 69, 19320]`. Most rows score near zero everywhere.
 
-### IoU: the universal box-similarity score
+## Two heads
 
-`IoU = area(A ∩ B) / area(A ∪ B)`. Always between 0 (no overlap) and 1 (identical). It's everywhere in detection:
+YOLO26 is trained with two heads on the same features.
 
-- NMS uses IoU to decide whether to suppress.
-- mAP uses IoU thresholds to decide what counts as a correct detection.
-- Trackers use IoU as the cost in the Hungarian matching step.
+| Head | Trained to | Export output | Needs NMS |
+|---|---|---|---|
+| One-to-one (end-to-end) | Fire once per object | Top 300 rows of `[x1, y1, x2, y2, score, class]` | No |
+| One-to-many | Let several nearby cells fire for one object | All raw predictions, `[4 + classes, anchors]` | Yes |
 
-Two non-overlapping boxes have IoU=0. Two identical boxes have IoU=1. IoU=0.5 means the boxes overlap by about half — a reasonable "this is probably the same object" threshold for most domains.
+Ultralytics exports the one-to-one head by default (`end2end=True`). The served model uses the one-to-many head (`end2end=False`), so the code that reads its output removes duplicates itself.
 
----
+## From raw output to boxes
 
-## A.4 How training pushes predictions toward truth
+1. Class: each prediction keeps its highest class score, and that score is its confidence.
+2. Threshold: predictions below a confidence threshold are dropped. Thresholds can differ per class.
+3. Box format: centre and size become corners, `x1 = cx - w/2` and so on.
+4. Non-maximum suppression (NMS): sort by confidence, keep the best box, drop every other box of the same class that overlaps it too much, repeat. Class-wise NMS never lets a villager suppress a house.
 
-Training a YOLO is supervised: you have images with ground-truth boxes and class labels, and you compute a loss that punishes wrong predictions.
+Overlap is measured as intersection over union:
 
-The loss is a sum of three components:
+```text
+IoU(A, B) = area(A ∩ B) / area(A ∪ B)
+```
 
-1. **Box regression loss** — typically *CIoU loss* (Complete IoU): penalizes both how badly the predicted box overlaps the ground truth and how far apart their centers are. Smoother gradient than raw MSE on box coordinates.
-2. **Classification loss** — binary cross-entropy on each class's predicted probability. Sigmoid'd, not softmax'd, so the network can predict multiple labels per box (though we don't use that).
-3. **Objectness / distribution-focal loss** — penalizes wrong confidence in whether a cell contains an object at all.
+IoU is 0 for disjoint boxes and 1 for identical ones. The project uses 0.5 both as the NMS cut-off and as the bar for a prediction to match a labelled box.
 
-Modern YOLOs assign each ground-truth box to the *k* best-matching predictions (Task-Aligned Assignment, TAL) rather than to a single cell — the loss is computed against those, and unmatched predictions are pushed toward zero confidence.
+## Input size and object scale
 
-Backprop, repeat for thousands of mini-batches over hundreds of epochs.
+The network takes a fixed input size. Letterboxing resizes the image by one factor for both axes, so nothing is stretched, and pads the rest with grey `(114, 114, 114)`. Detections are mapped back by undoing the padding and the scale.
 
-### Augmentations: data multipliers
+A detector learns objects at the pixel sizes it saw in training. A 3024x1672 capture letterboxed to 1280 wide shrinks by 0.42, and the model learned every sprite at that scale. Showing it the same frame at another scale moves objects outside what it learned, in either direction:
 
-Real training data is finite. **Augmentations** synthesize variations: random crops, scaling, horizontal flip, color jitter, mosaic (four images stitched together in a 2×2), MixUp (two images blended). They make the network robust to natural variation it didn't see literally during training.
+- Too small: thin objects and distant units fall below what the stride-8 grid can resolve.
+- Too large: objects look unlike the training examples, and recall and precision both drop.
 
-Our domain has a constraint most YOLO recipes don't: **isometric perspective**. The game camera is fixed; villagers never appear upside-down. So we set `flipud=0.0` (vertical flip would create unnatural training images), `degrees=10` (gentle rotation only), and rely heavily on mosaic + color jitter. Synthetic data generation does most of the augmentation work for us — see [Chapter 8](../part3-entity-detection/08-training-pipeline.md).
+Sliced inference (SAHI) cuts a large image into tiles and runs each one at full input size, which enlarges small objects. It helps only when the enlarged objects match the training scale. The agent instead measures how large objects appear on screen and shrinks frames when they are too large (see [perception](../agent/perception.md)).
 
----
+## Scoring a detector
 
-## A.5 mAP: the standard detection metric
+On a labelled test set, each prediction is matched to at most one labelled box of the same class with IoU at or above the bar, highest confidence first.
 
-Once trained, you measure quality on a held-out test set. The metric is **mean Average Precision (mAP)**.
-
-For each class, on each test image, you sort the model's predictions by confidence and walk down the list. At each rank:
-
-- A prediction is **correct** if it matches a ground-truth box at the chosen IoU threshold and the class label is right (and that ground-truth box hasn't already been claimed by a higher-ranked prediction).
-- Compute precision (`tp / (tp + fp)`) and recall (`tp / (tp + fn)`) at this rank.
-
-You now have a precision-recall curve per class. Its area is the *Average Precision (AP)* for that class. Average across classes → *mAP*.
-
-### mAP50 vs mAP50-95 — what the numbers mean
-
-- **mAP50** — uses a single IoU threshold of 0.5. "The predicted box has to overlap the ground truth by ≥50% to count as correct." Looser, easier to improve, the headline number in older papers.
-- **mAP50-95** — averages mAP across 10 IoU thresholds from 0.5 to 0.95 in 0.05 steps. Much harder: at IoU 0.95 you need an almost-pixel-perfect box. The COCO benchmark default.
-
-For our domain, mAP50 is more representative — we don't need pixel-perfect boxes (the LLM only needs to know roughly where to click), but we need recall on small entities like sheep that are ~20 pixels across at our typical zoom level. Small objects naturally drive mAP50-95 down because a few pixels of box error pushes IoU below 0.95 quickly.
-
-### A useful rule of thumb
-
-| mAP50 | What it means in practice |
+| Count | Meaning |
 |---|---|
-| < 0.5 | Detector is unreliable — too many misses, too many wrong-class predictions. |
-| 0.5–0.7 | Workable for low-stakes recommendation systems; not workable as a sole input to a planning agent. |
-| 0.7–0.85 | Good for most production CV systems. Most rare-class errors. |
-| > 0.85 | Excellent. At this point you're chasing edge cases. |
+| True positive (TP) | Prediction matched a label |
+| False positive (FP) | Prediction matched nothing |
+| False negative (FN) | Label matched nothing |
 
-Our 60-class model sits around 0.78 mAP50 with most error concentrated on rare or visually similar classes (light cavalry vs heavy cavalry from a distance).
+Precision is `TP / (TP + FP)`, recall is `TP / (TP + FN)`, and F1 is their harmonic mean. Raising a threshold usually trades recall for precision. Micro scores pool the counts over all classes, so common classes (trees, villagers) dominate them; per-class scores show the rare classes.
 
----
+Benchmarks often report mAP, the area under the precision-recall curve averaged over classes, which summarises every possible threshold. The agent runs at one set of thresholds, so the project reports micro precision, recall and F1 at those thresholds.
 
-## A.6 Why "single-shot" beats "two-stage" for our use case
+## Training and fine-tuning
 
-The older Faster R-CNN family is *two-stage*: first a Region Proposal Network suggests where things might be, then a classifier scores each proposal. Higher accuracy historically, but ~5× slower.
+Training is supervised. The model sees images with labelled boxes, and a loss penalises box error and wrong class scores. Fine-tuning starts from weights pretrained on a general dataset and continues on game images, which needs far less data than training from scratch. The project's mix of real, synthetic and composite images is described in [training](../detection/training.md).
 
-YOLO is *single-shot*: one network produces everything in one pass. Faster, slightly less accurate at the high end, but modern YOLOs have closed most of the gap. For an interactive agent that needs to act every second, single-shot is the only viable choice.
+## Model files and runtimes
 
----
+| File | Format | Used for |
+|---|---|---|
+| `.pt` | PyTorch checkpoint, loaded by Ultralytics | Training, fine-tuning, export |
+| `.onnx` | Portable computation graph, run by onnxruntime | Serving. Runs on CPU, DirectML or CoreML through execution providers |
+| `.mlpackage` | Apple CoreML model | Running directly on CPU and Neural Engine through `coremltools` |
 
-## A.7 What we glossed over
-
-- **The backbone** — the CNN that extracts features before the detection head. YOLO11/26n uses a custom C3k2 backbone, but you can swap in MobileNet, EfficientNet, etc. The detection head is largely backbone-agnostic.
-- **Multi-scale prediction (FPN)** — the detection head outputs at three resolutions so the network can handle objects of very different sizes. The feature-pyramid architecture is why YOLO works on both villagers (small) and town centers (huge) in the same model.
-- **Quantization and ONNX export** — for deployment we sometimes export to ONNX and run on CPU via onnxruntime or CoreML. See [Chapter 7](../part3-entity-detection/07-detector-architecture.md) for our backend abstraction.
-
----
-
-## Further reading
-
-- Redmon et al., *You Only Look Once: Unified, Real-Time Object Detection* (2016) — the original paper. Worth reading for the framing even though the architecture is dated.
-- Ultralytics, [*YOLO26 documentation*](https://docs.ultralytics.com/) — current reference for the model and training CLI we use.
-- Glenn Jocher et al., *YOLOv5 docs* — still the most accessible writeup of the modern recipe (mosaic, anchor-free head, NMS variants).
-
----
-
-**Cross-references:**
-
-- [Chapter 7 — Detector Architecture](../part3-entity-detection/07-detector-architecture.md) — how we wrap YOLO behind our `EntityDetector` abstraction.
-- [Chapter 8 — Training Pipeline](../part3-entity-detection/08-training-pipeline.md) — how we generate synthetic training data and tune the augmentation recipe.
-- [Chapter 12 — Cloud Training](../part5-operations/12-cloud-training.md) — the Lambda Labs workflow for full retraining.
-- [Glossary](../glossary.md) — one-liners for anchor box, IoU, mAP, NMS, and friends.
+An ONNX graph has a static or dynamic input shape. A static graph accepts exactly one shape, such as `[1, 3, 736, 1280]`, and some accelerators, including onnxruntime's CoreML provider at this size, accept only static graphs. A dynamic graph accepts varying batch and image sizes. Ultralytics writes the class names into the exported file's metadata, so a served model carries its own class list.

@@ -9,7 +9,7 @@ name: Arena Integration
 #
 # Phase 0 scope: just "stack comes up healthy within ~90s on tmpfs volumes".
 # Later phases extend this file with synthetic smoke runs + DuckDB + Langfuse
-# trace assertions (per docs/design/synthetic-arena-analysis.md §"Verification").
+# trace assertions.
 #
 # Kept OUT of the fast PR CI (`ci.yml`) so day-to-day PR feedback stays under
 # ~3 min and doesn't pull multi-hundred-MB images on every push.

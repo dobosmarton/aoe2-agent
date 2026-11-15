@@ -2,7 +2,7 @@ import * as React from "react";
 import { ArrowRight, Box } from "lucide-react";
 
 import { PACKAGES } from "@/lib/packages";
-import { PARTS } from "@/lib/taxonomy";
+import { getPage } from "@/lib/taxonomy";
 import { cn } from "@/lib/utils";
 
 const TIER_LABELS: Record<string, string> = {
@@ -11,13 +11,14 @@ const TIER_LABELS: Record<string, string> = {
   detection: "Detection",
   arena: "Arena",
   ops: "Operations",
+  reference: "Reference data",
 };
 
-const TIER_ORDER = ["shared", "detection", "real-game", "arena", "ops"];
+const TIER_ORDER = ["shared", "detection", "real-game", "arena", "ops", "reference"];
 
 /**
- * Card grid for the 9-package uv workspace. Hovering a card dims unrelated
- * packages and highlights its direct dependencies.
+ * Card grid for the nine Python members of the uv workspace. Hovering a card
+ * dims unrelated packages and highlights its direct dependencies.
  *
  * React island because of the hover-link visualization. Without that, this
  * could be a pure Astro component.
@@ -43,9 +44,7 @@ export default function PackageMap(): React.ReactElement {
           </p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {packages.map((pkg) => {
-              const part = pkg.part
-                ? PARTS.find((p) => p.id === pkg.part)
-                : undefined;
+              const docPage = pkg.doc ? getPage(pkg.doc) : undefined;
               const isHovered = hovered === pkg.id;
               const isDependency =
                 dependsByHovered?.has(pkg.id) ?? false;
@@ -86,12 +85,13 @@ export default function PackageMap(): React.ReactElement {
                         ))}
                       </span>
                     )}
-                    {part && (
+                    {docPage && (
                       <a
-                        href={`/docs/${part.id}/${part.chapters[0]!.slug}`}
+                        href={`/docs/${docPage.fullSlug}`}
+                        title={docPage.page.title}
                         className="ml-auto inline-flex items-center gap-1 rounded-md border px-2 py-0.5 font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
                       >
-                        Part {part.label}
+                        {docPage.section.title}
                         <ArrowRight className="h-3 w-3" />
                       </a>
                     )}

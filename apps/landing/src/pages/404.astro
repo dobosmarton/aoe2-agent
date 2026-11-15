@@ -1,7 +1,7 @@
 ---
 import Site from "@/layouts/Site.astro";
 import { ArrowLeft } from "lucide-react";
-import { FIRST_CHAPTER } from "@/lib/taxonomy";
+import { FIRST_PAGE } from "@/lib/taxonomy";
 ---
 
 <Site title="Not found — AoE2 LLM Arena" description="Page not found.">
@@ -11,7 +11,7 @@ import { FIRST_CHAPTER } from "@/lib/taxonomy";
       That page isn't here.
     </h1>
     <p class="mt-3 text-muted-foreground">
-      The link may be out of date, or the doc may have moved. Try the tutorial start, or use search.
+      The link may be out of date, or the doc may have moved. Start from the docs, or use search.
     </p>
     <div class="mt-6 flex items-center justify-center gap-3">
       <a
@@ -22,10 +22,10 @@ import { FIRST_CHAPTER } from "@/lib/taxonomy";
         Home
       </a>
       <a
-        href={`/docs/${FIRST_CHAPTER.fullSlug}`}
+        href={`/docs/${FIRST_PAGE.fullSlug}`}
         class="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
       >
-        Start the tutorial
+        Start reading
       </a>
     </div>
   </div>
