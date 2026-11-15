@@ -108,7 +108,7 @@ def test_a_layout_that_cannot_type_an_agent_key_blocks_the_run(
     monkeypatch.setattr(window_macos, "input_allowed", lambda: True)
     monkeypatch.setattr(window_macos, "colour_space", lambda: "sRGB")
     profile = load_profile(
-        Path(__file__).parents[1] / "apps/agent/profiles/magyars_arabia_4v4.macos.example.json"
+        Path(__file__).parents[1] / "apps/agent/profiles/magyars_highland_4v4.macos.example.json"
     )
     (check,) = [c for c in preflight._macos_checks(profile) if c.name == "keyboard_layout"]
     assert not check.passed

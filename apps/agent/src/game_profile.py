@@ -39,7 +39,9 @@ class GameProfile(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
 
     civilization: Literal["Magyars"]
-    map_name: Literal["Arabia", "Highland"]
+    # Recorded for comparison only: the screen reader can't recognize a map. The
+    # detector works best on grassland, so a mostly green map plays best.
+    map_name: str = Field(min_length=1)
     resources: Literal["standard"]
     population_limit: Literal[200]
     locked_teams: Literal[True]

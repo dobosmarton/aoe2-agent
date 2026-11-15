@@ -45,8 +45,8 @@ apps/agent/src/            # importable as `gameplay_agent`
 just agent                                       # Real game on Windows VM
 just agent --iterations 50
 
-# Copy the Arabia or Highland example, fill the actual eight-player lobby
-# roster and exported hotkey/game-build details, then validate Windows.
+# Copy the Windows or macOS example, fill the actual eight-player lobby
+# roster and exported hotkey/game-build details, then validate.
 uv run --no-sync python -m gameplay_agent.preflight --profile my-4v4-profile.json
 AOE2_GAME_PROFILE=my-4v4-profile.json just agent
 
@@ -56,10 +56,15 @@ uv run --package gameplay-agent \
     apps/agent/src/scenarios/production/castle_imperial_army.yaml
 ```
 
-The [Arabia](profiles/magyars_arabia_4v4.example.json) and
-[Highland](profiles/magyars_highland_4v4.example.json) examples are deliberately
+The [Windows](profiles/magyars_highland_4v4.example.json) and
+[macOS](profiles/magyars_highland_4v4.macos.example.json) examples are deliberately
 unqualified. The declared map is recorded for comparison but does not change
 gameplay or require verification; the screen reader cannot recognize a map name.
+
+**Choose a mostly green map** with a temperate or highland look, such as
+Highland. The object detector works best on grassland. On a snow map it missed
+sheep and trees and misread unexplored ground, and other terrain hasn't been
+checked.
 Recorded experiments with no profile or unverified roster, hotkeys, or ownership
 colors are invalid for scoring. Preflight exits nonzero until the window, HUD,
 selection, roster, hotkey, and ownership-color gates are satisfied. It

@@ -36,7 +36,7 @@ from gameplay_agent.screen import close_capture
 if TYPE_CHECKING:
     from gameplay_agent.policy.advice import PolicyRequest
 
-PROFILE = Path(__file__).parents[1] / "apps/agent/profiles/magyars_arabia_4v4.macos.example.json"
+PROFILE = Path(__file__).parents[1] / "apps/agent/profiles/magyars_highland_4v4.macos.example.json"
 # Time an action's outcome gets before the next scripted action is chosen.
 OUTCOME_SECONDS = 12.0
 
