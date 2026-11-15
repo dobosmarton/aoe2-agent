@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 T = TypeVar("T")
 _MAC_PROFILE = (
-    Path(__file__).parents[1] / "apps/agent/profiles/magyars_arabia_4v4.macos.example.json"
+    Path(__file__).parents[1] / "apps/agent/profiles/magyars_highland_4v4.macos.example.json"
 )
 # The middle of the 3024x1898 game area, in points: (1512, 949 + 66) / 2, rounded.
 _MAC_CENTRE = (756, 508)

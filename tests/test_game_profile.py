@@ -14,9 +14,8 @@ from gameplay_agent.preflight import inspect_capture, run_preflight
 from gameplay_agent.window import Platform
 from pydantic import ValidationError
 
-_EXAMPLE = Path(__file__).parents[1] / "apps/agent/profiles/magyars_arabia_4v4.example.json"
-_HIGHLAND = Path(__file__).parents[1] / "apps/agent/profiles/magyars_highland_4v4.example.json"
-_MAC = Path(__file__).parents[1] / "apps/agent/profiles/magyars_arabia_4v4.macos.example.json"
+_EXAMPLE = Path(__file__).parents[1] / "apps/agent/profiles/magyars_highland_4v4.example.json"
+_MAC = Path(__file__).parents[1] / "apps/agent/profiles/magyars_highland_4v4.macos.example.json"
 
 
 def test_example_is_structurally_valid_but_not_qualified() -> None:
@@ -27,12 +26,18 @@ def test_example_is_structurally_valid_but_not_qualified() -> None:
     assert profile.ownership_verified is False
 
 
-def test_highland_is_a_supported_declared_map() -> None:
+def test_any_map_can_be_declared() -> None:
     data = load_profile(_EXAMPLE).model_dump()
-    data["map_name"] = "Highland"
+    data["map_name"] = "Black Forest"
 
-    assert GameProfile.model_validate(data).map_name == "Highland"
-    assert load_profile(_HIGHLAND).map_name == "Highland"
+    assert GameProfile.model_validate(data).map_name == "Black Forest"
+
+
+def test_profile_rejects_an_empty_map_name() -> None:
+    data = load_profile(_EXAMPLE).model_dump()
+    data["map_name"] = ""
+    with pytest.raises(ValidationError):
+        GameProfile.model_validate(data)
 
 
 def test_recorded_profile_requires_a_verified_roster_but_not_map() -> None:
@@ -91,9 +96,6 @@ def test_preflight_reads_calibrated_hud_but_does_not_self_certify_window(monkeyp
     assert not checks["hotkeys"].passed
     assert not checks["ownership_colors"].passed
     assert "map" not in checks
-
-
-_MAC = Path(__file__).parents[1] / "apps/agent/profiles/magyars_arabia_4v4.macos.example.json"
 
 
 def test_the_mac_example_is_the_full_screen_game_area() -> None:
