@@ -1,7 +1,6 @@
 ---
 import { getCollection, render, type CollectionEntry } from "astro:content";
 import Doc from "@/layouts/Doc.astro";
-import Site from "@/layouts/Site.astro";
 import { isSectionPage } from "@/lib/taxonomy";
 
 export async function getStaticPaths() {
@@ -27,23 +26,21 @@ const title =
   "Documentation";
 const description = entry.data.description;
 
+// Reading time from the markdown source, at 230 words per minute.
+const words = (entry.body ?? "").split(/\s+/).filter(Boolean).length;
+const readMinutes = Math.max(1, Math.round(words / 230));
+
 // Pages under a section directory (agent/, detection/, arena/, web/,
 // autoresearch/) get the sidebar, timeline and prev/next links.
 const isGuidePage = isSectionPage(entry.id);
 ---
 
-{
-  isGuidePage ? (
-    <Doc title={title} description={description} slug={entry.id}>
-      <Content />
-    </Doc>
-  ) : (
-    <Site title={`${title} — AoE2 LLM Arena`} description={description}>
-      <div class="mx-auto max-w-3xl px-4 py-10">
-        <article data-pagefind-body class="prose-doc">
-          <Content />
-        </article>
-      </div>
-    </Site>
-  )
-}
+<Doc
+  title={title}
+  description={description}
+  slug={isGuidePage ? entry.id : undefined}
+  headings={headings}
+  readMinutes={readMinutes}
+>
+  <Content />
+</Doc>

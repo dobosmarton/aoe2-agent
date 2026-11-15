@@ -1,0 +1,30 @@
+---
+// The detector frame (see `.artifact` in styles/globals.css) for Astro markup and for
+// React islands, which cannot sit inside the React <ArtifactFrame> as server children.
+interface Props {
+  label: string;
+  meta?: string;
+  caption?: string;
+  class?: string;
+}
+
+const { label, meta, caption, class: className } = Astro.props;
+const corners = ["tl", "tr", "bl", "br"];
+---
+
+<figure class:list={["artifact", className]}>
+  <div class="artifact-frame">
+    {
+      corners.map((position) => (
+        <svg class={`artifact-corner artifact-corner-${position}`} viewBox="0 0 7 7" aria-hidden="true">
+          <path d="M3.5 0v7M0 3.5h7" stroke="currentColor" stroke-width="1" />
+        </svg>
+      ))
+    }
+    <slot />
+  </div>
+  <figcaption class="artifact-caption">
+    {caption ?? label}
+    {meta && <span class="artifact-label-meta"> {meta}</span>}
+  </figcaption>
+</figure>

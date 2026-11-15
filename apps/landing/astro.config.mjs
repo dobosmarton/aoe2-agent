@@ -8,6 +8,7 @@ import rehypeSlug from "rehype-slug";
 import rehypeAutolinkHeadings from "rehype-autolink-headings";
 import remarkGfm from "remark-gfm";
 import { remarkRewriteMdLinks } from "./src/lib/remark-rewrite-md-links.ts";
+import { rehypeArtifacts } from "./src/lib/rehype-artifacts.ts";
 
 // Update SITE to your production URL before deploy.
 const SITE = process.env.SITE_URL ?? "https://aoe2-llm-arena.example.com";
@@ -76,6 +77,8 @@ export default defineConfig({
           properties: { className: ["heading-anchor"], ariaLabel: "Permalink" },
         },
       ],
+      // Last: frames tables, code, mermaid diagrams and lone images like the blog.
+      rehypeArtifacts,
     ],
   },
 });

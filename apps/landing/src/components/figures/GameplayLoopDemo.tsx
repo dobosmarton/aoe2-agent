@@ -6,9 +6,9 @@ import { Pause, Play } from "lucide-react";
  *
  * Loops through capture → detect → reason → act using a real Mac+VMware
  * screenshot of a Dark Age AoE2 game, with the actual detector's predicted
- * bounding boxes from the labeling pipeline. Strategist and policy copy is
- * hand-written but follows the string shapes the live agent uses
- * (entity_utils.build_entity_summary, policy/catalog.py, executor.py).
+ * bounding boxes from the labeling pipeline. Strategist and executor copy
+ * is hand-written but uses the exact string shapes that the live agent
+ * emits (entity_utils.py:58, action_tools.py).
  *
  * All animation derives from a single elapsedMs counter, which makes
  * step-jumping, pausing, and reduced-motion fallback trivial.
@@ -19,9 +19,9 @@ import { Pause, Play } from "lucide-react";
 const IMG_W = 1440;
 const IMG_H = 935;
 
-// Five hex strings mirroring the category colours in apps/agent/src/overlay.py.
-// Duplicated by design: the landing workspace can't import Python and these
-// change once a year at most.
+// Five hex strings mirroring apps/agent/src/overlay.py:51-61. Duplicated by
+// design — the landing workspace can't import Python and these change once
+// a year at most.
 const CATEGORY_COLOR = {
   resource: "#228B22",
   animal: "#FFA500",
@@ -67,16 +67,17 @@ interface Step {
   caption: string;
 }
 
-// No role is sent a screenshot. The strategist reads HUD values (local OCR)
-// and the entity list as text and sets goals; the TypeSafe policy picks one
-// feasible catalog action, and executor.py binds clicks to detected entity
-// ids (docs/agent/overview.md, docs/agent/decision-loops.md). Captions
-// reflect that data flow.
+// The current data flow (README "How it works"): perception publishes text (YOLO
+// entities plus local OCR of the HUD), the strategist sets goals from that text,
+// and the TypeSafe policy picks one named action from the catalog
+// (apps/agent/src/policy/catalog.py), which the actor executes. The executor
+// model only runs on an alarm, a tactical handoff or recovery, so it is not in
+// this routine turn.
 const STEPS: Step[] = [
-  { title: "1. Capture screen", caption: "Frame grabbed from the AoE2 window" },
-  { title: "2. Detect entities", caption: "YOLO finds units, buildings, resources" },
-  { title: "3. Strategist reasons", caption: "Reads HUD values and entities as text, sets goals" },
-  { title: "4. Policy acts", caption: "Picks a feasible action, clicked on a detected entity id" },
+  { title: "1. Capture screen", caption: "The game window, at a 100 ms target" },
+  { title: "2. Detect entities", caption: "YOLO26n finds units, buildings and resources" },
+  { title: "3. Strategist sets goals", caption: "Text only: OCR'd resources and goals" },
+  { title: "4. Policy picks an action", caption: "One named action; the actor clicks" },
 ];
 
 const STEP_DURATIONS_MS = [1500, 2500, 2500, 2500] as const;
@@ -89,23 +90,23 @@ const STEP_STARTS_MS = STEP_DURATIONS_MS.reduce<number[]>((acc, d, i) => {
 const BOX_REVEAL_STAGGER_MS = 160;
 const TYPE_MS_PER_CHAR = 10;
 
-// Entity summary block, in the format of entity_utils.build_entity_summary.
+// Entity summary block — uses entity_utils.py:58's exact format.
 const ENTITY_SUMMARY_LINES = ENTITIES.map(
   (e) =>
     `${e.id}: ${e.class} at (${Math.round(e.cx * IMG_W)},${Math.round(e.cy * IMG_H)}) [${Math.round(e.conf * 100)}%]`,
 );
 
-// Strategist-shaped output: reasoning over the HUD readings (read locally by
-// OCR, not by the model) plus prioritized goals. Mirrors the
-// StrategistResponse model in providers/strategist.py.
+// Strategist-shaped output: reasoning over the resource readings (local OCR of
+// the HUD, not YOLO) and prioritized goals. Illustrative text.
 const REASONING_TEXT =
-  "Dark Age opener. HUD reads F=200 W=100 G=0 S=200, pop 3/5. Wood is the bottleneck. Goals: gather wood→200 (P9), queue villagers→10 (P8), advance to Feudal Age (P4).";
+  "Dark Age opener: HUD reads F=200 W=100 G=0 S=200, pop 3/5. Wood is the bottleneck. Goals: gather wood to 200 (P9), queue villagers to 10 (P8), advance to Feudal Age (P4).";
 
-// A catalog action from apps/agent/src/policy/catalog.py and the executor
-// actions it renders to (see docs/agent/actions-and-execution.md).
+// A named catalog action (assign_wood, apps/agent/src/policy/catalog.py) and the
+// input the actor sends for it. Illustrative text.
 const TOOL_CALLS = [
-  `assign_wood → assign_idle resource="wood"`,
-  `right_click target_id="tree_0"`,
+  `policy: assign_wood  (focus: wood)`,
+  `actor:  select idle villager_0`,
+  `actor:  right_click tree_0`,
 ];
 
 function stepFromElapsed(elapsedMs: number): { step: number; stepElapsed: number } {
@@ -180,7 +181,7 @@ export default function GameplayLoopDemo(): React.ReactElement {
 
   return (
     <div
-      className="rounded-xl border bg-card p-4"
+      className="rounded-md bg-card p-3 sm:p-4"
       role="figure"
       aria-label="Animated demonstration of one agent turn: capture, detect, reason, act"
     >
@@ -188,7 +189,7 @@ export default function GameplayLoopDemo(): React.ReactElement {
         {/* Image + SVG overlay */}
         <figure className="m-0 flex flex-col">
           <div
-            className="relative w-full overflow-hidden rounded-md border bg-muted"
+            className="relative w-full overflow-hidden rounded-md border border-foreground/10 bg-muted"
             style={{ aspectRatio: `${IMG_W} / ${IMG_H}` }}
           >
             <img
@@ -257,7 +258,7 @@ export default function GameplayLoopDemo(): React.ReactElement {
                   </g>
                 );
               })}
-              {/* Action vector: villager_0 → tree_0 */}
+              {/* Action vector: villager_3 → tree_0 */}
               {step === 3 && (
                 <g>
                   <defs>
@@ -294,27 +295,27 @@ export default function GameplayLoopDemo(): React.ReactElement {
               }
             `}</style>
           </div>
-          <figcaption className="mt-3 flex items-baseline gap-3">
-            <span className="font-semibold text-foreground">{STEPS[step].title}</span>
+          <figcaption className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span className="font-heading font-bold text-foreground">{STEPS[step].title}</span>
             <span className="text-sm text-muted-foreground">{STEPS[step].caption}</span>
           </figcaption>
         </figure>
 
         {/* Narration panel */}
         <aside className="flex flex-col gap-3 text-xs">
-          <Section label="Entity detections (YOLO)" active={step === 1} done={step > 1}>
+          <Section label="Entity detections · YOLO26n" active={step === 1} done={step > 1}>
             <pre className="whitespace-pre-wrap font-mono text-[11px] leading-snug text-foreground">
               {entitiesTyped || " "}
               {step === 1 && !reducedMotion && <Caret />}
             </pre>
           </Section>
-          <Section label="Strategist (LLM · text only)" active={step === 2} done={step > 2} dimmed={step < 2}>
+          <Section label="Strategist · text only" active={step === 2} done={step > 2} dimmed={step < 2}>
             <p className="leading-snug text-foreground">
               {reasoningTyped || " "}
               {step === 2 && !reducedMotion && <Caret />}
             </p>
           </Section>
-          <Section label="Policy (TypeSafe · catalog action)" active={step === 3} dimmed={step < 3}>
+          <Section label="Policy and actor · named action" active={step === 3} dimmed={step < 3}>
             <pre className="whitespace-pre-wrap font-mono text-[11px] leading-snug text-foreground">
               {toolCallsTyped || " "}
               {step === 3 && !reducedMotion && <Caret />}
@@ -330,7 +331,7 @@ export default function GameplayLoopDemo(): React.ReactElement {
           onClick={() => setPaused((p) => !p)}
           disabled={reducedMotion}
           aria-label={paused ? "Play" : "Pause"}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md border bg-background text-muted-foreground hover:text-foreground disabled:opacity-40"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-foreground/10 bg-card text-muted-foreground transition-colors hover:text-accent-foreground disabled:opacity-40"
         >
           {paused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
         </button>
@@ -343,13 +344,13 @@ export default function GameplayLoopDemo(): React.ReactElement {
               aria-label={`Jump to ${s.title}`}
               aria-current={step === i ? "step" : undefined}
               className={`h-2 w-6 rounded-full transition-colors ${
-                step === i ? "bg-foreground" : "bg-border hover:bg-muted-foreground"
+                step === i ? "bg-accent-foreground" : "bg-foreground/15 hover:bg-muted-foreground"
               }`}
             />
           ))}
         </div>
-        <p className="ml-auto text-xs text-muted-foreground">
-          Real screenshot · real detector output (6 entities on this frame) · strategist and policy copy is illustrative.
+        <p className="ml-auto font-mono text-[11px] leading-snug text-muted-foreground">
+          Real screenshot and detector output (6 entities). Strategist and policy text is illustrative.
         </p>
       </div>
     </div>
@@ -371,17 +372,21 @@ function Section({
 }): React.ReactElement {
   return (
     <div
-      className={`rounded-md border p-3 transition-colors ${
-        active ? "border-foreground bg-background" : "border-border bg-background/40"
-      } ${dimmed ? "opacity-50" : ""}`}
+      className={`overflow-hidden rounded-md border transition-colors ${
+        active ? "border-accent-foreground/50" : "border-foreground/10"
+      } ${dimmed ? "opacity-70" : ""}`}
     >
-      <div className="mb-1.5 flex items-center justify-between">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          {label}
+      <div className="flex items-center justify-between gap-2 border-b border-foreground/10 px-3 py-1.5">
+        <span
+          className={`font-mono text-[10px] tracking-wider uppercase ${
+            active ? "text-accent-foreground" : "text-muted-foreground"
+          }`}
+        >
+          [ {label} ]
         </span>
-        {done && <span className="text-[10px] text-muted-foreground">✓</span>}
+        {done && <span className="font-mono text-[10px] text-accent-foreground">done</span>}
       </div>
-      {children}
+      <div className="p-3">{children}</div>
     </div>
   );
 }

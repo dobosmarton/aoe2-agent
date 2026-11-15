@@ -1,0 +1,59 @@
+---
+// The site's backdrop, the same as the author's blog: a faint hairline grid, a slow
+// spotlight that lights the grid lines in the accent color, two soft glows, and small
+// "+" ticks that blink on grid intersections like detector hits. Everything but the
+// ticks is CSS (`.site-bg` in styles/globals.css); the ticks need positions on the
+// grid, so a small script places them.
+interface Props {
+  /** Reading pages mask the grid out of the text column. */
+  reading?: boolean;
+}
+
+const { reading = false } = Astro.props;
+---
+
+<div aria-hidden="true" class:list={["site-bg", reading && "site-bg-reading"]}>
+  <div class="site-bg-glow site-bg-glow-a"></div>
+  <div class="site-bg-glow site-bg-glow-b"></div>
+  <div class="site-bg-lines" data-site-bg-lines>
+    <div class="site-bg-grid"></div>
+    <div class="site-bg-spot"></div>
+  </div>
+</div>
+
+<script>
+  const CELL = 64;
+  const TICK_EVERY_MS = 1_400;
+  const TICK_LIFE_MS = 2_600;
+  const MAX_TICKS = 4;
+  // Ticks land in the upper part of the viewport, where the grid is still visible.
+  const TICK_AREA = 0.7;
+  // Ticks only land on empty background: never behind text, cards, frames or fields.
+  const CONTENT = "h1, h2, h3, h4, p, a, li, button, input, pre, table, figure, img, nav, [data-detect]";
+
+  const layer = document.querySelector<HTMLElement>("[data-site-bg-lines]");
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  if (layer && !reduced) {
+    window.setInterval(() => {
+      if (document.hidden) return;
+      const columns = Math.floor(window.innerWidth / CELL);
+      const rows = Math.floor((window.innerHeight * TICK_AREA) / CELL);
+      if (columns < 2 || rows < 2) return;
+      const x = (1 + Math.floor(Math.random() * (columns - 1))) * CELL;
+      const y = (1 + Math.floor(Math.random() * (rows - 1))) * CELL;
+      if (document.elementFromPoint(x, y)?.closest(CONTENT)) return;
+
+      const ticks = layer.querySelectorAll(".site-bg-tick");
+      if (ticks.length >= MAX_TICKS) ticks[0]?.remove();
+
+      const tick = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      tick.setAttribute("viewBox", "0 0 9 9");
+      tick.setAttribute("class", "site-bg-tick");
+      tick.style.transform = `translate(${x - 4.5}px, ${y - 4.5}px)`;
+      tick.innerHTML = '<path d="M4.5 0v9M0 4.5h9" stroke="currentColor" stroke-width="1" />';
+      layer.append(tick);
+      window.setTimeout(() => tick.remove(), TICK_LIFE_MS);
+    }, TICK_EVERY_MS);
+  }
+</script>

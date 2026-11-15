@@ -66,14 +66,14 @@ export default function ArenaScreenshots(): React.ReactElement {
             key={shot.panel}
             type="button"
             onClick={() => setOpenIdx(i)}
-            className="group rounded-lg border bg-card p-3 text-left transition-colors hover:border-foreground"
+            className="group rounded-lg border border-foreground/10 bg-card p-3 text-left transition-[border-color,box-shadow] duration-200 hover:border-accent-foreground/50 hover:shadow-[0_12px_32px_-16px_rgb(0_0_0/0.25)]"
           >
             <ScreenshotPlaceholder src={shot.src} panel={shot.panel} />
-            <p className="mt-3 text-sm font-semibold">{shot.panel}</p>
+            <p className="mt-3 font-heading font-bold group-hover:text-accent-foreground">{shot.panel}</p>
             <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
               {shot.caption}
             </p>
-            <p className="mt-2 inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+            <p className="mt-2 inline-flex items-center gap-1 font-mono text-[11px] tracking-wider text-muted-foreground uppercase">
               {shot.docLabel}
               <ExternalLink className="h-3 w-3" />
             </p>
@@ -167,7 +167,7 @@ function ScreenshotPlaceholder({
     <img
       src={src}
       alt={`${panel} panel of the arena UI`}
-      className={cn("w-full rounded-md border", large && "rounded-lg")}
+      className={cn("w-full rounded-md border border-foreground/10", large && "rounded-lg")}
       loading="lazy"
       onError={() => setErrored(true)}
     />
