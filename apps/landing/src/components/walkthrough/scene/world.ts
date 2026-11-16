@@ -272,23 +272,29 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
   const STRIDE = 1.3; // tiles per full walk cycle
   const PAUSE = 1.1; // seconds standing at each end
   type Route = { ax: number; az: number; bx: number; bz: number; length: number; offset: number };
-  type Worker = { handle: SpriteHandle; base: string; x: number; z: number; walk: boolean; route: Route | null; phase: number };
+  type Worker = { handle: SpriteHandle; base: string; x: number; z: number; walk: boolean; route: Route | null; stand: boolean; phase: number };
 
   // Routes avoid buildings, fields, trees and mines; prefer heading to or from the
   // Town Center, as villagers carrying goods do.
   const obstacles = layout.placements.filter((p) => p.kind === "building" || p.kind === "farm" || p.kind === "tree" || p.kind === "mine");
-  const blockedAt = (x: number, z: number) =>
-    obstacles.some((o) => {
-      const reach = o.kind === "tree" ? 0.55 : o.kind === "mine" ? 0.9 : o.size / 2 + 0.35;
-      return Math.abs(x - o.x) < reach && Math.abs(z - o.z) < reach;
-    });
+  const covers = (o: Placement, x: number, z: number) => {
+    const reach = o.kind === "tree" ? 0.55 : o.kind === "mine" ? 0.9 : o.size / 2 + 0.35;
+    return Math.abs(x - o.x) < reach && Math.abs(z - o.z) < reach;
+  };
   const routeFrom = (x: number, z: number, seed: number): Route | null => {
+    // A villager standing in a building's footprint (under the Town Center's roof,
+    // dropping off goods) walks out of it; only the other obstacles block its route.
+    const around = obstacles.filter((o) => !covers(o, x, z));
     const home = Math.atan2(layout.tc.z - z, layout.tc.x - x);
     for (let k = 0; k < 16; k++) {
       const angle = home + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * (Math.PI / 8);
       const length = 2.2 + (seed % 5) * 0.25;
       let clear = true;
-      for (let d = 0.4; d <= length && clear; d += 0.3) clear = !blockedAt(x + Math.cos(angle) * d, z + Math.sin(angle) * d);
+      for (let d = 0.4; d <= length && clear; d += 0.3) {
+        const px = x + Math.cos(angle) * d;
+        const pz = z + Math.sin(angle) * d;
+        clear = !around.some((o) => covers(o, px, pz));
+      }
       if (clear) return { ax: x, az: z, bx: x + Math.cos(angle) * length, bz: z + Math.sin(angle) * length, length, offset: seed * 1.7 };
     }
     return null;
@@ -304,10 +310,12 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
       }
       const towards = target.place ? Math.atan2(target.place.z - v.z, target.place.x - v.x) : 0;
       const facing = nearestWorkFacing(facingFor(Math.cos(towards), Math.sin(towards)));
-      const base = task === "walk" ? `vil${gender}_walk` : `vil${gender}_${task}_d${facing}`;
-      const handle = sprites.add(task === "walk" ? `${base}_d0` : base, v.x, 0, v.z, i * 3);
       const route = task === "walk" ? routeFrom(v.x, v.z, i) : null;
-      return { handle, base, x: v.x, z: v.z, walk: route !== null, route, phase: i * 0.77 };
+      const base = task === "walk" ? `vil${gender}_walk` : `vil${gender}_${task}_d${facing}`;
+      // A walker with nowhere clear to go stands, facing the viewer, rather than
+      // walking on the spot.
+      const handle = sprites.add(task === "walk" ? `${base}_d4` : base, v.x, 0, v.z, i * 3);
+      return { handle, base, x: v.x, z: v.z, walk: route !== null, route, stand: task === "walk" && route === null, phase: i * 0.77 };
     });
   const animals = layout.placements
     .filter((p) => p.kind === "animal")
@@ -335,7 +343,7 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
     for (const w of workers) {
       const r = w.route;
       if (!w.walk || !r) {
-        w.handle.frame = Math.floor(time * FPS + w.phase * 10);
+        w.handle.frame = w.stand ? 0 : Math.floor(time * FPS + w.phase * 10);
         continue;
       }
       // One loop: walk out, stand, walk back, stand.
@@ -378,6 +386,7 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
       const route = routeFrom(w.x, w.z, Math.round(w.phase * 13));
       if (!route) return;
       w.walk = true;
+      w.stand = false;
       w.route = route;
       w.base = `${w.base.slice(0, 4)}_walk`;
     },
