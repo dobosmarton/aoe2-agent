@@ -10,6 +10,7 @@ import { createOverlays } from "./overlays";
 import { createPost } from "./post";
 import { applyPose, type CameraPose } from "./rig";
 import { createScreen } from "./screen";
+import { createTracking } from "./track";
 import type { SpriteMeta } from "./sprites";
 import { buildTimeline, createState, TIMELINE_LENGTH, type Poses } from "./timeline";
 import type { TurnData } from "./types";
@@ -129,7 +130,7 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
   // ---- The mind --------------------------------------------------------------------------
   const board = createBoard(data, frameTexture, hudTexture);
   mindRoot.add(board.group);
-  const mind = createMind(data, board, frameTexture);
+  const mind = createMind(board);
   mindRoot.add(mind.group);
   const flow = createFlow(data, board, MIND.crystal.clone().sub(MIND.slab));
   board.group.add(flow.object);
@@ -158,6 +159,18 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
     ledgerAt: new THREE.Vector3(green.x, 3.4, green.z),
   });
 
+  // ---- Tracking in the village: the walking villagers nearest the Town Center ----------
+  // Walkers near the Town Center show the trails best; nearby workers fill the group.
+  const near = (t: { anchor: THREE.Vector3 }) => Math.hypot(t.anchor.x - layout.tc.x, t.anchor.z - layout.tc.z);
+  const byDistance = [...world.tracked].sort((a, b) => near(a) - near(b));
+  const walkers = byDistance.filter((t) => t.walking && near(t) < 11).slice(0, 6);
+  const followed = [...walkers, ...byDistance.filter((t) => !walkers.includes(t))].slice(0, 9);
+  for (const t of followed) t.walk();
+  const tracking = createTracking(followed, [41, 7, 63, 12, 28, 55, 3, 90, 34]);
+  const trackCentre = followed.reduce((c, t) => ({ x: c.x + t.anchor.x / followed.length, z: c.z + t.anchor.z / followed.length }), { x: 0, z: 0 });
+  const spread = Math.max(...followed.map((t) => Math.hypot(t.anchor.x - trackCentre.x, t.anchor.z - trackCentre.z)));
+  const trackSize = THREE.MathUtils.clamp(spread * 0.8, 5.5, 9);
+
   // ---- Camera poses ----------------------------------------------------------------------
   const inMind = (local: THREE.Vector3, dAz: number, dEl: number, size: number, fov = 30): CameraPose => {
     const t = toWorld(local);
@@ -171,7 +184,7 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
     game: { tx: 0, ty: 0, tz: 0, az: GAME_AZ, el: GAME_EL, size: gameSize * 1.75, fov: GAME_FOV },
     capture: inMind(new THREE.Vector3(3, 0, 1), 20, -4, 8.5),
     detect: inMind(new THREE.Vector3(MIND.gate + 7, 1, 2), 28, -8, 10.5),
-    track: inMind(new THREE.Vector3(MIND.slab.x - 2, 0.5, -2), 62, -10, 8.2),
+    track: { tx: trackCentre.x, ty: 0.3, tz: trackCentre.z, az: 50, el: 33, size: trackSize, fov: 26 },
     hud: inMind(new THREE.Vector3(hudLocal.x + 4.5, hudLocal.y - 1.2, hudLocal.z + 2), 10, 6, 4.8),
     publish: inMind(new THREE.Vector3(MIND.crystal.x - 3, 0, 3), 22, -6, 9.5),
     decide: inMind(MIND.decision.clone().add(new THREE.Vector3(-0.9, -0.8, 0)), 0, 0, 7.6),
@@ -179,6 +192,7 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
     verify: { tx: green.x, ty: 1, tz: green.z, az: 52, el: 32, size: 6.5, fov: 26 },
   };
   const S = createState(poses.hero);
+  scene.add(tracking.group);
   const timeline = buildTimeline(S, poses);
 
   const post = createPost(renderer, scene, camera, small);
@@ -255,6 +269,7 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
       ghostOk: S.world.cursor > 2.5,
       build: S.world.build,
     });
+    tracking.update(S.world.track, time);
     screen.update(S.pane, time);
     board.update(S, time);
     mind.update(S, time);
@@ -314,7 +329,7 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
       debugPose = p;
     },
     info() {
-      return { calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, mindScale, gameSize };
+      return { calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, mindScale, gameSize, poses, followed: followed.length };
     },
   };
 

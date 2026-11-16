@@ -3,7 +3,6 @@ import { CSS3DSprite } from "three/examples/jsm/renderers/CSS3DRenderer.js";
 
 import type { Board } from "./board";
 import type { SceneState } from "./timeline";
-import type { TurnData } from "./types";
 
 // The mind: the agent's pipeline as objects in space, on the viewer's side of the
 // pane. Local units match the pane (16 wide); +x runs along the pipeline, +z towards
@@ -20,7 +19,7 @@ export const MIND = {
 
 const glowColor = (r: number, g: number, b: number) => new THREE.Color(r, g, b);
 
-export function createMind(data: TurnData, board: Board, frameTexture: THREE.Texture) {
+export function createMind(board: Board) {
   const group = new THREE.Group();
   group.name = "mind";
 
@@ -140,34 +139,6 @@ export function createMind(data: TurnData, board: Board, frameTexture: THREE.Tex
   gate.add(railLines);
   group.add(gate);
 
-  // ---- Earlier frames behind the slab, joined by track tubes -------------------------
-  const ghosts = new THREE.Group();
-  const ghostMaterials: THREE.MeshBasicMaterial[] = [];
-  for (let k = 1; k <= 3; k++) {
-    const material = new THREE.MeshBasicMaterial({ map: frameTexture, transparent: true, opacity: 0, depthWrite: false });
-    ghostMaterials.push(material);
-    const plane = new THREE.Mesh(new THREE.PlaneGeometry(board.W, board.H), material);
-    plane.position.set(MIND.slab.x - k * 0.6, MIND.slab.y + k * 0.25, MIND.slab.z - k * 3.2);
-    ghosts.add(plane);
-  }
-  group.add(ghosts);
-
-  // Tubes follow villagers back through the earlier frames. The drift between frames
-  // is illustrative: no recorded run stores track histories.
-  const villagers = data.entities.filter((e) => e.cls === "villager").slice(0, 14);
-  const tubeMaterial = new THREE.MeshBasicMaterial({ color: glowColor(0.5, 1.2, 2.8), transparent: true, opacity: 0, toneMapped: false });
-  const tubes = villagers.map((e, i) => {
-    const c = board.toBoard(e.x + e.w / 2, e.y + e.h / 2);
-    const points = [0, 1, 2, 3].map((k) => {
-      const wobble = k === 0 ? 0 : Math.sin(i * 1.9 + k * 1.3) * 0.25 * k;
-      return new THREE.Vector3(MIND.slab.x - k * 0.6 + c.x + wobble, MIND.slab.y + k * 0.25 + c.y + Math.cos(i + k) * 0.15 * k, MIND.slab.z - k * 3.2 + 0.25);
-    });
-    const geometry = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 32, 0.045, 6);
-    const mesh = new THREE.Mesh(geometry, tubeMaterial);
-    group.add(mesh);
-    return mesh;
-  });
-
   // ---- Perception crystal and the FramePipe rail -------------------------------------
   const crystal = new THREE.Group();
   const crystalMaterial = new THREE.MeshStandardMaterial({
@@ -243,15 +214,6 @@ export function createMind(data: TurnData, board: Board, frameTexture: THREE.Tex
       layer.label.classList.toggle("is-active", inside);
     });
     (railLines.material as THREE.LineDashedMaterial).opacity = S.mind.gate * 0.35;
-
-    ghosts.visible = S.mind.track > 0.01;
-    ghostMaterials.forEach((m, i) => (m.opacity = S.mind.track * (0.42 - i * 0.1)));
-    tubeMaterial.opacity = S.mind.track;
-    tubes.forEach((t, i) => {
-      t.visible = S.mind.track > 0.01;
-      const grow = THREE.MathUtils.clamp(S.mind.track * 1.6 - i * 0.04, 0, 1);
-      t.geometry.setDrawRange(0, Math.floor(t.geometry.index!.count * grow));
-    });
 
     crystal.visible = S.card.on > 0.01;
     crystalMaterial.opacity = S.card.on * 0.9;

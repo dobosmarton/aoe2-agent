@@ -9,10 +9,10 @@ import type { CameraPose } from "./rig";
 export function createState(hero: CameraPose) {
   return {
     cam: { ...hero },
-    world: { dim: 0, ghost: 0, build: 0, cursor: 0 },
+    world: { dim: 0, ghost: 0, build: 0, cursor: 0, track: 0 },
     pane: { on: 0, mix: 0, flash: 0 },
     slab: { on: 0, peel: 0, travel: 0 },
-    mind: { gate: 0, track: 0, rail: 0, pulse: 0 },
+    mind: { gate: 0, rail: 0, pulse: 0 },
     frame: { scan: 1, scanOn: 0, dim: 0, flash: 0, grid: 0, hudHole: 0 },
     boxes: { rise: 0, alpha: 0, fill: 0.05, labels: 0, track: 0, shimmer: 1 },
     stamp: { on: 0 },
@@ -60,16 +60,23 @@ export function buildTimeline(S: SceneState, P: Poses): gsap.core.Timeline {
   to(S.boxes, 2.42, 0.3, { rise: 1, alpha: 1, fill: 0.1, ease: "power1.inOut" });
   to(S.boxes, 2.68, 0.12, { labels: 1 });
 
-  // 3 Track: earlier frames stack up behind; tubes thread each villager through time.
+  // 3 Track: back through the glass into the village, where each villager keeps its
+  //   ID while it moves; the trail is where the tracker saw it on recent frames.
   to(S.mind, 3, 0.15, { gate: 0 });
-  cam(3, 0.32, "track");
-  to(S.mind, 3.22, 0.4, { track: 1, ease: "power1.inOut" });
-  to(S.boxes, 3.3, 0.2, { track: 1 });
+  cam(3, 0.34, "track");
+  to(S.world, 3.05, 0.2, { dim: 0 });
+  // The glass and the frame step aside while the camera is in the village.
+  to(S.pane, 3.12, 0.08, { on: 0 });
+  to(S.slab, 3.12, 0.04, { on: 0 });
+  to(S.world, 3.3, 0.2, { track: 1 });
 
-  // 4 Read the HUD: the resource bar lifts off and its fields are read.
-  to(S.boxes, 4, 0.15, { track: 0, labels: 0, alpha: 0.3, fill: 0.04 });
-  to(S.mind, 4, 0.15, { track: 0.15 });
-  cam(4, 0.3, "hud");
+  // 4 Read the HUD: back to the frame; the resource bar lifts off and is read.
+  to(S.world, 4, 0.12, { track: 0 });
+  to(S.world, 4.02, 0.2, { dim: 1 });
+  to(S.pane, 4.05, 0.1, { on: 1 });
+  to(S.slab, 4.08, 0.04, { on: 1 });
+  to(S.boxes, 4, 0.15, { labels: 0, alpha: 0.3, fill: 0.04 });
+  cam(4, 0.32, "hud");
   to(S.hud, 4.25, 0.3, { lift: 1 });
   to(S.frame, 4.25, 0.3, { hudHole: 1 });
   to(S.hud, 4.5, 0.15, { fields: 1 });
@@ -78,7 +85,6 @@ export function buildTimeline(S: SceneState, P: Poses): gsap.core.Timeline {
   // 5 Publish: everything streams into one Perception crystal on the FramePipe rail.
   to(S.hud, 5, 0.2, { values: 0, fields: 0, lift: 0 });
   to(S.frame, 5, 0.2, { hudHole: 0 });
-  to(S.mind, 5, 0.15, { track: 0 });
   cam(5, 0.34, "publish");
   to(S.boxes, 5.05, 0.25, { alpha: 0.6, rise: 0.25 });
   to(S.flow, 5.1, 0.05, { on: 1 });

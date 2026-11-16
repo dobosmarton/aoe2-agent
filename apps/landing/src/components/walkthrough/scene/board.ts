@@ -102,11 +102,9 @@ export function createBoard(data: TurnData, frameTexture: THREE.Texture, hudText
   const tcCenter = toBoard(tc.x + tc.w / 2, tc.y + tc.h / 2);
   const maxDist = Math.hypot(W, H) / 2;
 
-  const heightOf = (e: TurnEntity) => {
-    const area = e.w * W * e.h * H;
-    const base = e.cat === "unit" || e.cat === "animal" ? 0.32 : Math.sqrt(area) * 0.7;
-    return THREE.MathUtils.clamp(base, 0.22, 1.6);
-  };
+  // Boxes lie on the frame, lifted by a hairline, so each one stays exactly on the
+  // object it marks from any viewing angle.
+  const heightOf = (e: TurnEntity) => (e.cat === "unit" || e.cat === "animal" ? 0.05 : 0.09);
   const delayOf = (e: TurnEntity, i: number) => {
     const c = toBoard(e.x + e.w / 2, e.y + e.h / 2);
     return (c.distanceTo(tcCenter) / maxDist) * 0.38 + ((i * 7919) % 97) / 97 * 0.04;

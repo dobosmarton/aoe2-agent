@@ -306,9 +306,10 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
     for (const w of workers) {
       w.handle.frame = Math.floor(time * FPS + w.phase * 10);
       if (!w.walk) continue;
-      const t = Math.sin(time * 0.35 * w.speed + w.phase);
-      const dir = Math.cos(time * 0.35 * w.speed + w.phase) >= 0 ? 1 : -1;
-      w.handle.anchor.set(w.x + Math.cos(w.heading) * t * 1.1, 0, w.z + Math.sin(w.heading) * t * 1.1);
+      // About a tile a second at the middle of the beat, as villagers walk.
+      const t = Math.sin(time * 0.6 * w.speed + w.phase);
+      const dir = Math.cos(time * 0.6 * w.speed + w.phase) >= 0 ? 1 : -1;
+      w.handle.anchor.set(w.x + Math.cos(w.heading) * t * 1.8, 0, w.z + Math.sin(w.heading) * t * 1.8);
       w.handle.name = `${w.base}_d${facingFor(Math.cos(w.heading) * dir, Math.sin(w.heading) * dir)}`;
     }
     for (const a of animals) a.handle.frame = Math.floor(time * 8 + a.phase * 5);
@@ -325,5 +326,19 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
     sprites.update(camera, s.light);
   }
 
-  return { group, update, center: layout.center };
+  /** Villagers the Track chapter can follow: live anchors, and a way to set one walking
+   * (villagers walk between their work and the Town Center), which shows its trail. */
+  const tracked = workers.map((w) => ({
+    anchor: w.handle.anchor,
+    get walking() {
+      return w.walk;
+    },
+    walk() {
+      if (w.walk) return;
+      w.walk = true;
+      w.base = `${w.base.slice(0, 4)}_walk`;
+    },
+  }));
+
+  return { group, update, center: layout.center, tracked };
 }
