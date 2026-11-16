@@ -110,10 +110,12 @@ def still(
 def animation(graphics: Path, file: str, name: str, facings: list[int] = FACINGS) -> dict[str, list[Sprite]]:
     decoded = read_sld(graphics / f"{file}_x1.sld")
     per = len(decoded) // 16
-    step = max(1, per // FRAMES_PER_ANIMATION)
+    # Frames spread evenly over the whole cycle, so the loop closes without a jump.
+    count = min(FRAMES_PER_ANIMATION, per)
+    picks = [round(k * per / count) for k in range(count)]
     out = {}
     for facing in facings:
-        sprites = [compose(decoded[facing * per + i]) for i in range(0, per, step)][:FRAMES_PER_ANIMATION]
+        sprites = [compose(decoded[facing * per + i]) for i in picks]
         out[f"{name}_d{facing}"] = [s for s in sprites if s]
     return out
 

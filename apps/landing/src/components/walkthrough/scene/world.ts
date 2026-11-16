@@ -47,11 +47,12 @@ function noise(x: number, y: number) {
   return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
 }
 
-/** AoE2 facing (0..15, counter-clockwise from screen-left) for a ground direction. */
+/** AoE2 facing for a ground direction: the game stores 16 facings clockwise on
+ * screen from facing right (0), through facing the viewer (4), left (8) and away (12). */
 export function facingFor(dx: number, dz: number) {
   // Ground to screen: right is x - z, down is (x + z) / 2.
   const angle = Math.atan2((dx + dz) / 2, dx - dz);
-  return ((Math.round((Math.PI - angle) / (Math.PI / 8)) % 16) + 16) % 16;
+  return ((Math.round(angle / (Math.PI / 8)) % 16) + 16) % 16;
 }
 
 /** The atlas keeps four facings for work animations; pick the closest. */
@@ -264,7 +265,34 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
     }
     return { place: best as Placement | null, distance: bestD };
   };
-  type Worker = { handle: SpriteHandle; base: string; x: number; z: number; walk: boolean; heading: number; phase: number; speed: number };
+  // Walkers go out and back along a clear straight route at a steady pace, stand a
+  // moment at each end, and step through the walk cycle by distance covered, so their
+  // feet keep pace with the ground.
+  const WALK_SPEED = 0.85; // tiles per second
+  const STRIDE = 1.3; // tiles per full walk cycle
+  const PAUSE = 1.1; // seconds standing at each end
+  type Route = { ax: number; az: number; bx: number; bz: number; length: number; offset: number };
+  type Worker = { handle: SpriteHandle; base: string; x: number; z: number; walk: boolean; route: Route | null; phase: number };
+
+  // Routes avoid buildings, fields, trees and mines; prefer heading to or from the
+  // Town Center, as villagers carrying goods do.
+  const obstacles = layout.placements.filter((p) => p.kind === "building" || p.kind === "farm" || p.kind === "tree" || p.kind === "mine");
+  const blockedAt = (x: number, z: number) =>
+    obstacles.some((o) => {
+      const reach = o.kind === "tree" ? 0.55 : o.kind === "mine" ? 0.9 : o.size / 2 + 0.35;
+      return Math.abs(x - o.x) < reach && Math.abs(z - o.z) < reach;
+    });
+  const routeFrom = (x: number, z: number, seed: number): Route | null => {
+    const home = Math.atan2(layout.tc.z - z, layout.tc.x - x);
+    for (let k = 0; k < 16; k++) {
+      const angle = home + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * (Math.PI / 8);
+      const length = 2.2 + (seed % 5) * 0.25;
+      let clear = true;
+      for (let d = 0.4; d <= length && clear; d += 0.3) clear = !blockedAt(x + Math.cos(angle) * d, z + Math.sin(angle) * d);
+      if (clear) return { ax: x, az: z, bx: x + Math.cos(angle) * length, bz: z + Math.sin(angle) * length, length, offset: seed * 1.7 };
+    }
+    return null;
+  };
   const workers: Worker[] = layout.placements
     .filter((p) => p.kind === "villager")
     .map((v, i) => {
@@ -278,7 +306,8 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
       const facing = nearestWorkFacing(facingFor(Math.cos(towards), Math.sin(towards)));
       const base = task === "walk" ? `vil${gender}_walk` : `vil${gender}_${task}_d${facing}`;
       const handle = sprites.add(task === "walk" ? `${base}_d0` : base, v.x, 0, v.z, i * 3);
-      return { handle, base, x: v.x, z: v.z, walk: task === "walk", heading: (i * 2.399) % (Math.PI * 2), phase: i * 0.77, speed: 0.5 + (i % 3) * 0.12 };
+      const route = task === "walk" ? routeFrom(v.x, v.z, i) : null;
+      return { handle, base, x: v.x, z: v.z, walk: route !== null, route, phase: i * 0.77 };
     });
   const animals = layout.placements
     .filter((p) => p.kind === "animal")
@@ -304,13 +333,24 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
     wallMaterial.color.setScalar(s.light);
 
     for (const w of workers) {
-      w.handle.frame = Math.floor(time * FPS + w.phase * 10);
-      if (!w.walk) continue;
-      // About a tile a second at the middle of the beat, as villagers walk.
-      const t = Math.sin(time * 0.6 * w.speed + w.phase);
-      const dir = Math.cos(time * 0.6 * w.speed + w.phase) >= 0 ? 1 : -1;
-      w.handle.anchor.set(w.x + Math.cos(w.heading) * t * 1.8, 0, w.z + Math.sin(w.heading) * t * 1.8);
-      w.handle.name = `${w.base}_d${facingFor(Math.cos(w.heading) * dir, Math.sin(w.heading) * dir)}`;
+      const r = w.route;
+      if (!w.walk || !r) {
+        w.handle.frame = Math.floor(time * FPS + w.phase * 10);
+        continue;
+      }
+      // One loop: walk out, stand, walk back, stand.
+      const leg = r.length / WALK_SPEED;
+      const loop = 2 * (leg + PAUSE);
+      const t = (time + r.offset) % loop;
+      const out = t < leg + PAUSE;
+      const u = out ? t : t - leg - PAUSE;
+      const along = Math.min(u, leg) * WALK_SPEED;
+      const [fx, fz, tx, tz] = out ? [r.ax, r.az, r.bx, r.bz] : [r.bx, r.bz, r.ax, r.az];
+      const f = along / r.length;
+      w.handle.anchor.set(fx + (tx - fx) * f, 0, fz + (tz - fz) * f);
+      w.handle.name = `${w.base}_d${facingFor(tx - fx, tz - fz)}`;
+      // Stepping: frames advance with distance; standing shows the first frame.
+      w.handle.frame = u < leg ? Math.floor((along / STRIDE) * 12) % 12 : 0;
     }
     for (const a of animals) a.handle.frame = Math.floor(time * 8 + a.phase * 5);
 
@@ -335,7 +375,10 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
     },
     walk() {
       if (w.walk) return;
+      const route = routeFrom(w.x, w.z, Math.round(w.phase * 13));
+      if (!route) return;
       w.walk = true;
+      w.route = route;
       w.base = `${w.base.slice(0, 4)}_walk`;
     },
   }));
