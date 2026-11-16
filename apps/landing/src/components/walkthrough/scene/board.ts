@@ -5,8 +5,7 @@ import type { TurnData, TurnEntity } from "./types";
 
 // The board: the captured frame as a plane in the XY plane (normal +Z), with the
 // detections raised from it as glowing wireframe volumes, the HUD strip as its own
-// layer, and the house footprints of the Act chapter. One board unit is 1/16 of the
-// frame width.
+// layer. One board unit is 1/16 of the frame width.
 
 export const BOARD_W = 16;
 
@@ -330,89 +329,6 @@ export function createBoard(data: TurnData, frameTexture: THREE.Texture, hudText
   hud.position.set(hudBase.x, hudBase.y, 0.02);
   group.add(hud);
 
-  // ---- House footprints (Act chapter) --------------------------------------------------
-  // A house is 2 tiles on an edge; a Town Center is 4, and its detected width sets the
-  // scale, as in executor.py `_footprint`. Candidate spots ring the Town Center; the
-  // first two that overlap a building, tree or mine box show the red preview, the first
-  // clear one is clicked.
-  const px = data.frame.width;
-  const py = data.frame.height;
-  const tileW = (tc.w * px) / 4;
-  const fw = 2 * tileW;
-  const fh = fw / 2;
-  const blocking = data.entities.filter(
-    (e) => e.cat === "building" || e.cat === "defense" || e.cls === "tree" || e.cls.endsWith("_mine"),
-  );
-  const tcPx = { x: (tc.x + tc.w / 2) * px, y: (tc.y + tc.h / 2) * py };
-  const overlaps = (cx: number, cy: number) =>
-    blocking.some(
-      (b) =>
-        cx - fw / 2 < (b.x + b.w) * px && cx + fw / 2 > b.x * px && cy - fh / 2 < (b.y + b.h) * py && cy + fh / 2 > b.y * py,
-    );
-  const inPlay = (cx: number, cy: number) =>
-    cx - fw / 2 > 0.02 * px && cx + fw / 2 < 0.78 * px && cy - fh / 2 > 0.08 * py && cy + fh / 2 < 0.8 * py;
-  const red: { x: number; y: number }[] = [];
-  let green: { x: number; y: number } | null = null;
-  for (const radius of [280, 400, 520, 640]) {
-    for (let k = 0; k < 8; k++) {
-      const angle = (k / 8) * Math.PI * 2 + 0.3;
-      const cx = tcPx.x + Math.cos(angle) * radius;
-      const cy = tcPx.y + Math.sin(angle) * radius * 0.6;
-      if (!inPlay(cx, cy)) continue;
-      if (overlaps(cx, cy)) {
-        if (red.length < 2 && !green) red.push({ x: cx, y: cy });
-      } else if (!green && red.length === 2) {
-        green = { x: cx, y: cy };
-      }
-    }
-  }
-  green ??= { x: tcPx.x, y: tcPx.y + 420 };
-  const spots = [...red, green].map((s) => toBoard(s.x / px, s.y / py));
-  while (spots.length < 3) spots.unshift(spots[0]!.clone());
-
-  const diamond = new THREE.Shape();
-  const dw = (fw / px) * W;
-  const dh = (fh / py) * H;
-  diamond.moveTo(0, dh / 2);
-  diamond.lineTo(dw / 2, 0);
-  diamond.lineTo(0, -dh / 2);
-  diamond.lineTo(-dw / 2, 0);
-  diamond.closePath();
-  const footprints = spots.map((spot, i) => {
-    const ok = i === 2;
-    const fill = new THREE.Mesh(
-      new THREE.ShapeGeometry(diamond),
-      new THREE.MeshBasicMaterial({
-        color: ok ? new THREE.Color(0.2, 1.4, 0.45) : new THREE.Color(1.6, 0.18, 0.15),
-        transparent: true,
-        opacity: 0,
-        depthWrite: false,
-        toneMapped: false,
-      }),
-    );
-    const outline = new THREE.LineLoop(
-      new THREE.BufferGeometry().setFromPoints(diamond.getPoints().map((p) => new THREE.Vector3(p.x, p.y, 0.01))),
-      new THREE.LineBasicMaterial({
-        color: ok ? new THREE.Color(0.5, 3, 1) : new THREE.Color(3, 0.4, 0.35),
-        transparent: true,
-        opacity: 0,
-        toneMapped: false,
-      }),
-    );
-    const g = new THREE.Group();
-    g.add(fill, outline);
-    g.position.set(spot.x, spot.y, 0.03);
-    group.add(g);
-    return { group: g, fill, outline };
-  });
-
-  const ripple = new THREE.Mesh(
-    new THREE.RingGeometry(0.92, 1, 64),
-    new THREE.MeshBasicMaterial({ color: new THREE.Color(0.6, 2.6, 1.2), transparent: true, opacity: 0, toneMapped: false }),
-  );
-  ripple.position.set(spots[2]!.x, spots[2]!.y, 0.05);
-  group.add(ripple);
-
   function update(S: SceneState, time: number) {
     frameUniforms.uScan.value = S.frame.scan;
     frameUniforms.uScanOn.value = S.frame.scanOn;
@@ -436,18 +352,7 @@ export function createBoard(data: TurnData, frameTexture: THREE.Texture, hudText
     hud.visible = lift > 0.001;
     fieldMaterial.opacity = S.hud.fields;
 
-    footprints.forEach((f, i) => {
-      const hover = THREE.MathUtils.clamp(1.6 - Math.abs(S.act.cursor - (i + 1)) * 2.4, 0, 1) * S.act.on;
-      const a = i === 2 ? Math.max(hover, S.act.placed * S.act.on) : hover;
-      (f.fill.material as THREE.MeshBasicMaterial).opacity = a * 0.45;
-      (f.outline.material as THREE.LineBasicMaterial).opacity = a;
-      f.group.visible = a > 0.001;
-    });
-    const click = S.act.click;
-    ripple.visible = click > 0.001 && click < 0.999 && S.act.on > 0.01;
-    ripple.scale.setScalar(0.2 + click * 1.4);
-    (ripple.material as THREE.MeshBasicMaterial).opacity = (1 - click) * S.act.on;
   }
 
-  return { group, W, H, update, toBoard, entityTop, fieldCenters, hud, spots, footprintSize: { w: dw, h: dh } };
+  return { group, W, H, update, toBoard, entityTop, fieldCenters, hud };
 }

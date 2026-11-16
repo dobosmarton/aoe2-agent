@@ -39,7 +39,19 @@ const LABEL_CLASSES = ["town_center", "mill", "house", "farm", "tree", "gold_min
 // Track IDs are illustrative: no recorded run stores them.
 const TRACK_IDS = [3, 12, 7, 19, 28, 34, 55, 63, 41, 90, 17];
 
-export function createOverlays(data: TurnData, board: Board, decision: THREE.Group, cardStart: THREE.Vector3) {
+type Anchors = {
+  /** Scene root, for the elements that live in world coordinates. */
+  root: THREE.Object3D;
+  /** World units per mind unit. */
+  mindScale: number;
+  cardStart: THREE.Vector3;
+  cardEnd: THREE.Vector3;
+  /** Cursor path in the world: a start point, then the three hovered spots. */
+  cursorPath: THREE.Vector3[];
+  ledgerAt: THREE.Vector3;
+};
+
+export function createOverlays(data: TurnData, board: Board, decision: THREE.Group, anchors: Anchors) {
   const conf = (e: TurnEntity) => (e.conf == null ? "" : e.conf.toFixed(2));
 
   // ---- Entity labels (Detect, Track) -------------------------------------------------
@@ -84,8 +96,8 @@ export function createOverlays(data: TurnData, board: Board, decision: THREE.Gro
        <dt>alarm</dt><dd>false</dd>
      </dl>`,
   );
-  const cardSprite = sprite(card, PX * 1.35);
-  const cardEnd = new THREE.Vector3(RING_X.policy - 3.5, 0, 0);
+  const cardSprite = sprite(card, PX * 1.35 * anchors.mindScale);
+  anchors.root.add(cardSprite);
 
   // ---- Decision loops (Decide) -------------------------------------------------------
   const roleX = [RING_X.policy, RING_X.strategist, RING_X.executor];
@@ -124,11 +136,9 @@ export function createOverlays(data: TurnData, board: Board, decision: THREE.Gro
     "wt3d-cursor",
     `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3l14 8-6.5 1.5L10 19z" /></svg>`,
   );
-  const cursorSprite = sprite(cursor, PX * 1.2);
-  board.group.add(cursorSprite);
-  const [s0, s1, s2] = board.spots as [THREE.Vector2, THREE.Vector2, THREE.Vector2];
-  const cursorStart = new THREE.Vector2(s2.x + 2.4, s2.y - 1.8);
-  const path = [cursorStart, s0, s1, s2];
+  const cursorSprite = sprite(cursor, PX * 0.9);
+  anchors.root.add(cursorSprite);
+  const path = anchors.cursorPath;
 
   const wood = Number(r.wood);
   const [popNow, popCap] = String(r.population).split("/");
@@ -142,13 +152,12 @@ export function createOverlays(data: TurnData, board: Board, decision: THREE.Gro
        <li data-status="3"><b>confirmed</b><span>population ${popNow}/${popCap} → ${popNow}/${Number(popCap) + 5}</span></li>
      </ol>`,
   );
-  const ledgerSprite = sprite(ledger);
-  ledgerSprite.position.set(s2.x, s2.y + 1.9, 1.6);
-  board.group.add(ledgerSprite);
+  const ledgerSprite = sprite(ledger, PX * 0.75);
+  ledgerSprite.position.copy(anchors.ledgerAt);
+  anchors.root.add(ledgerSprite);
   const ledgerRows = [...ledger.querySelectorAll<HTMLElement>("[data-status]")];
 
   const tmp = new THREE.Vector3();
-  const endWorld = new THREE.Vector3();
 
   function update(S: SceneState) {
     // Labels follow the tops of their volumes.
@@ -165,13 +174,10 @@ export function createOverlays(data: TurnData, board: Board, decision: THREE.Gro
     hudValues.forEach((h, i) => fade(h, THREE.MathUtils.clamp(S.hud.values * 1.6 - i * 0.12, 0, 1)));
 
     // The card rises with the stream, then travels to the policy ring.
-    decision.updateMatrixWorld();
-    endWorld.copy(cardEnd);
-    decision.localToWorld(endWorld);
     const e = S.card.travel;
     const eased = e * e * (3 - 2 * e);
-    cardSprite.position.lerpVectors(cardStart, endWorld, eased);
-    cardSprite.scale.setScalar(PX * (1.35 - 0.4 * eased));
+    cardSprite.position.lerpVectors(anchors.cardStart, anchors.cardEnd, eased);
+    cardSprite.scale.setScalar(PX * anchors.mindScale * (1.35 - 0.4 * eased));
     fade(card, S.card.on);
 
     const on = S.decide.on;
@@ -191,13 +197,9 @@ export function createOverlays(data: TurnData, board: Board, decision: THREE.Gro
     });
 
     // Cursor along its path of hovers.
-    const t = THREE.MathUtils.clamp(S.act.cursor, 0, 3);
-    const k = Math.min(2, Math.floor(t));
-    const f = t - k;
-    const a = path[k]!;
-    const b = path[k + 1]!;
-    cursorSprite.position.set(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f, 0.35);
-    fade(cursor, S.act.on * Math.min(1, S.act.cursor * 3));
+    cursorAt(S.world.cursor, cursorSprite.position);
+    cursorSprite.position.y += 1.2;
+    fade(cursor, S.act.on);
     cursor.classList.toggle("is-click", S.act.click > 0.05 && S.act.click < 0.95);
 
     fade(ledger, S.verify.on);
@@ -208,5 +210,12 @@ export function createOverlays(data: TurnData, board: Board, decision: THREE.Gro
     });
   }
 
-  return { card: cardSprite, update };
+  /** Point on the cursor path: 0 is the start, 1 to 3 the hovered spots. */
+  function cursorAt(t: number, out: THREE.Vector3) {
+    const c = THREE.MathUtils.clamp(t, 0, 3);
+    const k = Math.min(2, Math.floor(c));
+    return out.lerpVectors(path[k]!, path[k + 1]!, c - k);
+  }
+
+  return { card: cardSprite, update, cursorAt };
 }

@@ -21,6 +21,11 @@ const REVIEW = process.argv.includes("--review");
 const STATIC = process.argv.includes("--static");
 const REVIEW_DIR = resolve(process.env.WT_REVIEW_DIR ?? resolve(LANDING, "../../tmp/walkthrough-review"));
 const STILLS_DIR = resolve(LANDING, "public/walkthrough/stills");
+// Metal on macOS renders the scene as a browser would; elsewhere fall back to SwiftShader.
+const GPU_ARGS =
+  process.platform === "darwin"
+    ? ["--use-angle=metal", "--enable-gpu", "--ignore-gpu-blocklist"]
+    : ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"];
 const CHAPTERS = ["hero", "capture", "detect", "track", "hud", "publish", "decide", "act", "verify"];
 
 // Scrolls so the scene sits at timeline time `p`, then waits until it has caught up.
@@ -50,7 +55,7 @@ async function open(page: Page) {
 
 async function stills() {
   await mkdir(STILLS_DIR, { recursive: true });
-  const browser = await chromium.launch({ args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"] });
+  const browser = await chromium.launch({ args: GPU_ARGS });
   const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
   await open(page);
   // Stills show the scene alone, centred: no text, rail, shade or header.
@@ -75,7 +80,7 @@ async function stills() {
 
 async function review() {
   await mkdir(REVIEW_DIR, { recursive: true });
-  const browser = await chromium.launch({ args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"] });
+  const browser = await chromium.launch({ args: GPU_ARGS });
   for (const [name, viewport] of [
     ["desktop", { width: 1440, height: 900 }],
     ["phone", { width: 390, height: 844 }],
