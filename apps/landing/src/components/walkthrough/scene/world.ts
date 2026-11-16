@@ -219,6 +219,21 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
     }
   }
 
+  // Ground cover on open grass, away from buildings, fields and forest.
+  // Mostly small grass tufts, with bushes and shrubs.
+  const cover = [...variants("tuft"), ...variants("tuft"), ...variants("bush"), ...variants("shrub")];
+  const blockers = layout.placements.filter((p) => p.kind === "building" || p.kind === "farm" || p.kind === "tree" || p.kind === "mine");
+  for (let k = 0, placed = 0; k < 900 && placed < 140; k++) {
+    const s = layout.rand();
+    const t = layout.rand();
+    const x = c0.x + (c1.x - c0.x) * s + (c3.x - c0.x) * t;
+    const z = c0.z + (c1.z - c0.z) * s + (c3.z - c0.z) * t;
+    if (Math.min(s, 1 - s, t, 1 - t) < 0.04) continue;
+    if (blockers.some((b) => Math.hypot(x - b.x, z - b.z) < (b.kind === "tree" ? 1.2 : b.size * 0.85 + 0.6))) continue;
+    sprites.add(pick(cover, layout.rand() * 1000), x, 0, z);
+    placed++;
+  }
+
   // Villagers: each works at what stands next to it, or walks a short beat.
   const nearest = (p: Placement, kinds: Placement["kind"][]) => {
     let best: Placement | null = null;

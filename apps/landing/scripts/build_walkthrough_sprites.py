@@ -125,18 +125,23 @@ def main() -> None:
     g = args.graphics
 
     sprites: dict[str, list[Sprite]] = {}
-    # Magyars build in the Eastern European style; the recorded game is in the Feudal Age.
-    sprites |= still(g, "b_east_town_center_age2", "town_center")
-    sprites |= still(g, "b_east_house_age2", "house", [0, 1, 2])
-    sprites |= still(g, "b_east_mill_age2", "mill")
-    sprites |= still(g, "b_east_lumber_camp_age2", "lumber_camp")
-    sprites |= still(g, "b_east_mining_camp_age2", "mining_camp")
-    sprites |= still(g, "b_east_tower_age2", "tower")
+    # Magyars build in the Eastern European style, the game's "slav" set; the recorded
+    # game is in the Feudal Age.
+    sprites |= still(g, "b_slav_town_center_age2", "town_center")
+    sprites |= still(g, "b_slav_house_age2", "house", [0, 1, 2])
+    sprites |= still(g, "b_slav_mill_age2", "mill")
+    sprites |= still(g, "b_slav_lumber_camp_age2", "lumber_camp")
+    sprites |= still(g, "b_slav_mining_camp_age2", "mining_camp")
+    sprites |= still(g, "b_slav_tower_age2", "tower")
     sprites |= still(g, "b_foundation_2x2_rubble", "foundation")
     sprites |= still(g, "n_tree_pine", "pine", list(range(27)), keep=is_green)
     sprites |= still(g, "n_tree_oak", "oak", list(range(12)), keep=is_green)
     sprites |= still(g, "n_mine_gold", "gold", list(range(0, 7, 2)))
     sprites |= still(g, "n_mine_stone", "stone", list(range(0, 7, 2)))
+    # Ground cover the map is dotted with: grass tufts, bushes and shrubs.
+    sprites |= still(g, "n_plant_grass_green", "tuft", list(range(8)))
+    sprites |= still(g, "n_plant_bush_green", "bush", list(range(8)))
+    sprites |= still(g, "n_plant_shrub_green", "shrub", list(range(8)))
     for gender in ("male", "female"):
         g_ = gender[0]
         sprites |= animation(g, f"u_vil_{gender}_lumberjack_taskA", f"vil{g_}_chop")
