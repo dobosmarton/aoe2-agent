@@ -66,8 +66,20 @@ export function createMind(data: TurnData, board: Board, frameTexture: THREE.Tex
       seg(cy - sy * o, cz - sz * o, cy - sy * o + sy * b, cz - sz * o);
       seg(cy - sy * o, cz - sz * o, cy - sy * o, cz - sz * o + sz * b);
     }
-    // Ruler ticks along the top edge, every 0.6, longer every third.
-    for (let k = 0, z = z0; z <= z1 + 1e-6; z += 0.6, k++) seg(y1 + 0.08, z, y1 + (k % 3 === 0 ? 0.36 : 0.2), z);
+    // A ruler on every edge, ticks pointing out of the frame: evenly spaced so the
+    // first and last land on the corners, every third one longer.
+    const ticks = (length: number) => Math.max(2, Math.round(length / 0.6));
+    const tick = (k: number) => (k % 3 === 0 ? 0.32 : 0.18);
+    for (let k = 0, n = ticks(GATE_D); k <= n; k++) {
+      const z = z0 + (k / n) * GATE_D;
+      seg(y1 + 0.08, z, y1 + 0.08 + tick(k), z);
+      seg(y0 - 0.08, z, y0 - 0.08 - tick(k), z);
+    }
+    for (let k = 0, n = ticks(GATE_H); k <= n; k++) {
+      const y = y0 + (k / n) * GATE_H;
+      seg(y, z0 - 0.08, y, z0 - 0.08 - tick(k));
+      seg(y, z1 + 0.08, y, z1 + 0.08 + tick(k));
+    }
     const frameMaterial = new THREE.LineBasicMaterial({ color: lineColor, transparent: true, opacity: 0, toneMapped: false });
     const outline = new THREE.LineSegments(segments(frame), frameMaterial);
 
@@ -85,10 +97,13 @@ export function createMind(data: TurnData, board: Board, frameTexture: THREE.Tex
         grid.push(x, y0, z, x, y1, z);
       }
     } else {
-      // The head: a column of class slots instead of a grid.
-      for (let k = 0; k < 13; k++) {
-        const y = y0 + 1 + k * ((GATE_H - 2) / 12);
-        grid.push(x, y, MIND.slab.z - 0.9, x, y, MIND.slab.z + 0.9);
+      // The head: a column of class slots across the frame instead of a grid.
+      const slots = 13;
+      for (let k = 0; k < slots; k++) {
+        const ya = y0 + 0.5 + k * ((GATE_H - 1) / slots);
+        const yb = ya + ((GATE_H - 1) / slots) * 0.62;
+        for (const y of [ya, yb]) grid.push(x, y, z0 + 0.45, x, y, z1 - 0.45);
+        grid.push(x, ya, z0 + 0.45, x, yb, z0 + 0.45, x, ya, z1 - 0.45, x, yb, z1 - 0.45);
       }
     }
     const gridMaterial = new THREE.LineBasicMaterial({ color: lineColor, transparent: true, opacity: 0, toneMapped: false });
