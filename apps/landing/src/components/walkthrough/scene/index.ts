@@ -329,7 +329,7 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
       debugPose = p;
     },
     info() {
-      return { calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, mindScale, gameSize, poses, followed: followed.map((t) => [t.anchor.x, t.anchor.z, t.walking]) };
+      return { calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, mindScale, gameSize, poses, followed: followed.map((t) => [t.anchor.x, t.anchor.z, t.walking]), farms: world.farmCheck() };
     },
   };
 

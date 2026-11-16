@@ -272,7 +272,7 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
   const STRIDE = 1.3; // tiles per full walk cycle
   const PAUSE = 1.1; // seconds standing at each end
   type Route = { ax: number; az: number; bx: number; bz: number; length: number; offset: number };
-  type Worker = { handle: SpriteHandle; base: string; x: number; z: number; walk: boolean; route: Route | null; stand: boolean; phase: number };
+  type Worker = { handle: SpriteHandle; base: string; x: number; z: number; walk: boolean; route: Route | null; stand: boolean; farmer: boolean; phase: number };
 
   // Routes avoid buildings, fields, trees and mines; prefer heading to or from the
   // Town Center, as villagers carrying goods do.
@@ -299,24 +299,58 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
     }
     return null;
   };
-  const workers: Worker[] = layout.placements
-    .filter((p) => p.kind === "villager")
-    .map((v, i) => {
-      const gender = i % 3 === 0 ? "f" : "m";
-      const target = nearest(v, ["tree", "mine", "farm"]);
-      let task = "walk";
-      if (target.place && target.distance < 1.8) {
-        task = target.place.kind === "tree" ? "chop" : target.place.kind === "mine" ? "mine" : "farm";
-      }
-      const towards = target.place ? Math.atan2(target.place.z - v.z, target.place.x - v.x) : 0;
-      const facing = nearestWorkFacing(facingFor(Math.cos(towards), Math.sin(towards)));
-      const route = task === "walk" ? routeFrom(v.x, v.z, i) : null;
-      const base = task === "walk" ? `vil${gender}_walk` : `vil${gender}_${task}_d${facing}`;
-      // A walker with nowhere clear to go stands, facing the viewer, rather than
-      // walking on the spot.
-      const handle = sprites.add(task === "walk" ? `${base}_d4` : base, v.x, 0, v.z, i * 3);
-      return { handle, base, x: v.x, z: v.z, walk: route !== null, route, stand: task === "walk" && route === null, phase: i * 0.77 };
-    });
+  // Every farm has exactly one farmer, as in the game: each farm takes the nearest
+  // villager not already chopping or mining, who works it from a spot on the field.
+  const villagers = layout.placements.filter((p) => p.kind === "villager");
+  const farms = layout.placements.filter((p) => p.kind === "farm");
+  const gathering = (v: Placement) => nearest(v, ["tree", "mine"]).distance < 1.8;
+  const farmerOf = new Map<Placement, Placement>();
+  const pairs = farms
+    .flatMap((f) => villagers.map((v) => ({ f, v, d: Math.hypot(f.x - v.x, f.z - v.z) + (gathering(v) ? 100 : 0) })))
+    .sort((a, b) => a.d - b.d);
+  const takenFarms = new Set<Placement>();
+  for (const { f, v } of pairs) {
+    if (takenFarms.has(f) || farmerOf.has(v)) continue;
+    takenFarms.add(f);
+    farmerOf.set(v, f);
+  }
+
+  const workers: Worker[] = villagers.map((v, i) => {
+    const gender = i % 3 === 0 ? "f" : "m";
+    const farm = farmerOf.get(v);
+    if (farm) {
+      // A spot a third of the way from the centre to a corner, facing across the field.
+      const corner = (i * 3 + 1) % 4;
+      const ox = (corner & 1 ? 1 : -1) * farm.size * 0.17;
+      const oz = (corner & 2 ? 1 : -1) * farm.size * 0.17;
+      const facing = nearestWorkFacing(facingFor(-ox, -oz));
+      const base = `vil${gender}_farm_d${facing}`;
+      const handle = sprites.add(base, farm.x + ox, 0, farm.z + oz, i * 3);
+      return { handle, base, x: farm.x + ox, z: farm.z + oz, walk: false, route: null, stand: false, farmer: true, phase: i * 0.77 };
+    }
+    // Fields belong to their farmers: anyone else detected on one steps just off its
+    // nearest edge, and routes from there go around it.
+    const spot = { ...v };
+    for (const f of farms) {
+      const reach = f.size / 2 + 0.35;
+      const dx = spot.x - f.x;
+      const dz = spot.z - f.z;
+      if (Math.abs(dx) >= reach || Math.abs(dz) >= reach) continue;
+      if (reach - Math.abs(dx) < reach - Math.abs(dz)) spot.x = f.x + Math.sign(dx || 1) * reach;
+      else spot.z = f.z + Math.sign(dz || 1) * reach;
+    }
+    const target = nearest(spot, ["tree", "mine"]);
+    let task = "walk";
+    if (target.place && target.distance < 1.8) task = target.place.kind === "tree" ? "chop" : "mine";
+    const towards = target.place ? Math.atan2(target.place.z - spot.z, target.place.x - spot.x) : 0;
+    const facing = nearestWorkFacing(facingFor(Math.cos(towards), Math.sin(towards)));
+    const route = task === "walk" ? routeFrom(spot.x, spot.z, i) : null;
+    const base = task === "walk" ? `vil${gender}_walk` : `vil${gender}_${task}_d${facing}`;
+    // A walker with nowhere clear to go stands, facing the viewer, rather than
+    // walking on the spot.
+    const handle = sprites.add(task === "walk" ? `${base}_d4` : base, spot.x, 0, spot.z, i * 3);
+    return { handle, base, x: spot.x, z: spot.z, walk: route !== null, route, stand: task === "walk" && route === null, farmer: false, phase: i * 0.77 };
+  });
   const animals = layout.placements
     .filter((p) => p.kind === "animal")
     .map((a, i) => {
@@ -374,6 +408,13 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
     sprites.update(camera, s.light);
   }
 
+  /** Debug: per farm, the farmers assigned and every villager standing on it now. */
+  const farmCheck = () =>
+    farms.map((f) => ({
+      farmers: workers.filter((w) => w.farmer && Math.abs(w.x - f.x) < f.size / 2 && Math.abs(w.z - f.z) < f.size / 2).length,
+      standing: workers.filter((w) => Math.abs(w.handle.anchor.x - f.x) < f.size / 2 && Math.abs(w.handle.anchor.z - f.z) < f.size / 2).length,
+    }));
+
   /** Villagers the Track chapter can follow: live anchors, and a way to set one walking
    * (villagers walk between their work and the Town Center), which shows its trail. */
   const tracked = workers.map((w) => ({
@@ -382,7 +423,8 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
       return w.walk;
     },
     walk() {
-      if (w.walk) return;
+      // Farmers stay on their fields.
+      if (w.walk || w.farmer) return;
       const route = routeFrom(w.x, w.z, Math.round(w.phase * 13));
       if (!route) return;
       w.walk = true;
@@ -392,5 +434,5 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
     },
   }));
 
-  return { group, update, center: layout.center, tracked };
+  return { group, update, center: layout.center, tracked, farmCheck };
 }
