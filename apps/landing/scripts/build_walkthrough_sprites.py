@@ -10,10 +10,11 @@ frame into one atlas and writes, under public/walkthrough/aoe2/:
 - terrain textures (grass, dirt, farm, forest floor) as webp
 
 With --frame and --turn-data it also places the village: the recorded frame shows
-these same sprites at 1:1, so each detected building, mine and stand of trees is
-template-matched against the frame (opaque, non-player-colour pixels only) to find
-the variant and the exact screen position of its anchor. The result goes into
-turn-data.json as `world`.
+these same sprites at 1:1, so each detected building and mine is template-matched
+against the frame (opaque, non-player-colour pixels only) to find the variant and
+the exact screen position of its anchor. Each stand of trees is filled one tree per
+tile where the frame shows canopy, with sprites of the frame's crown colours. The
+result goes into turn-data.json as `world`.
 
     uv run python apps/landing/scripts/build_walkthrough_sprites.py \
         --graphics game_graphics --terrain game_terrain/textures/2x \
@@ -91,22 +92,16 @@ def compose(frame: Frame) -> Sprite | None:
     )
 
 
-def is_green(sprite: Sprite) -> bool:
-    """True for a living tree: its opaque pixels lean green, not brown or bare."""
-    px = np.asarray(sprite.image, dtype=np.float32)
-    solid = px[px[:, :, 3] > 200]
-    return len(solid) > 0 and solid[:, 1].mean() > solid[:, 0].mean() * 1.08
-
-
 def still(
-    graphics: Path, file: str, name: str, frames: list[int] | None = None, keep=lambda sprite: True
+    graphics: Path, file: str, name: str, frames: list[int] | None = None
 ) -> dict[str, list[Sprite]]:
     decoded = read_sld(graphics / f"{file}_x1.sld")
     picks = frames if frames is not None else [0]
     out = {}
     for i in picks:
         sprite = compose(decoded[i])
-        if sprite and keep(sprite):
+        # Some frames of a tree file are empty or a stray leaf.
+        if sprite and (sprite.mask is None or sprite.mask.sum() > 300):
             out[f"{name}_{len(out)}" if len(picks) > 1 else name] = [sprite]
     return out
 
@@ -200,8 +195,6 @@ def place(sprites: dict[str, list[Sprite]], frame_path: Path, turn_path: Path) -
                     best = (score, x, y, name)
             assert best is not None
             world.append({"id": e["id"], "sprite": best[3], "x": best[1], "y": best[2], "score": round(best[0], 3)})
-        elif e["cls"] == "tree":
-            world.extend(place_trees(frame_rgb, sprites, names("pine") + names("oak") + names("autumn") + names("birch"), e["id"], box))
     # The anchors of whole-tile buildings fall on the game's tile grid. Its pitch is the
     # tile width; the Town Center's anchor is the origin.
     tc = next(x for x in world if x["id"].startswith("town_center"))
@@ -217,6 +210,12 @@ def place(sprites: dict[str, list[Sprite]], frame_path: Path, turn_path: Path) -
             sprite = sprites[item["sprite"]][0]
             score, x, y = match_on_grid(frame_rgb, sprite, (item["x"], item["y"]), origin, tile, footprint[cls] % 2 == 1)
             item.update(x=x, y=y, score=round(score, 3))
+    # Forests: one tree per tile, wherever the frame shows canopy inside a tree box.
+    canopy = forest_mask(frame_rgb)
+    trees = {n: sprites[n][0] for n in names("pine") + names("oak") + names("autumn")}
+    for k, e in enumerate(x for x in turn["entities"] if x["cls"] == "tree"):
+        box = (e["x"] * w, e["y"] * h, (e["x"] + e["w"]) * w, (e["y"] + e["h"]) * h)
+        world.extend(place_trees(frame_rgb, canopy, trees, e["id"], box, origin, tile, seed=k))
     farms: list[tuple[int, int]] = []
     for e in sorted((e for e in turn["entities"] if e["cls"] == "farm"), key=lambda e: -(e["conf"] or 0)):
         box = (e["x"] * w, e["y"] * h, (e["x"] + e["w"]) * w, (e["y"] + e["h"]) * h)
@@ -345,38 +344,80 @@ def grid_pitch(items: list[dict], origin: dict) -> int:
     return best[1]
 
 
-def place_trees(frame_rgb: np.ndarray, sprites, tree_names: list[str], entity_id: str, box) -> list[dict]:
-    """Greedily pick the best-matching tree sprites inside a forest box."""
+def forest_mask(frame_rgb: np.ndarray) -> np.ndarray:
+    """1 where the frame shows tree canopy, 0 on open ground.
+
+    Canopy is darker than the grass around it (crowns shade each other) or, for
+    autumn oaks, orange and busy where bare dirt is orange and smooth. The grass
+    brightness is measured locally because the fog of war dims whole areas."""
     import cv2
 
-    x0, y0, x1, y1 = (int(v) for v in box)
-    region = frame_rgb[max(0, y0 - 40) : y1 + 10, max(0, x0 - 20) : x1 + 20]
-    rx, ry = max(0, x0 - 20), max(0, y0 - 40)
-    peaks = []
-    for name in tree_names:
-        sprite = sprites[name][0]
+    h, w = frame_rgb.shape[:2]
+    r, g, b = frame_rgb[..., 0], frame_rgb[..., 1], frame_rgb[..., 2]
+    lum = frame_rgb @ np.array([0.3, 0.59, 0.11], np.float32)
+    lum_s = cv2.blur(lum, (9, 9))
+    grass = ((g > r * 1.05) & (g > b * 1.4) & (lum > 60)).astype(np.float32)
+    # Grass brightness around each point: a widening window until it holds grass.
+    small_lum = cv2.resize(lum * grass, (w // 8, h // 8), interpolation=cv2.INTER_AREA)
+    small_cov = cv2.resize(grass, (w // 8, h // 8), interpolation=cv2.INTER_AREA)
+    ref = np.full(small_lum.shape, np.nan, np.float32)
+    for k in (25, 51, 101, 201):
+        cov = cv2.blur(small_cov, (k, k))
+        ref = np.where(np.isnan(ref) & (cov > 0.05), cv2.blur(small_lum, (k, k)) / np.maximum(cov, 1e-4), ref)
+    ref = cv2.resize(np.nan_to_num(ref, nan=140.0), (w, h))
+    sd = np.sqrt(np.maximum(cv2.blur(lum * lum, (9, 9)) - lum_s**2, 0))
+    orange = (cv2.blur(r, (9, 9)) > cv2.blur(g, (9, 9)) * 1.05) & (sd > 22)
+    mask = cv2.blur(((lum_s < 0.62 * ref) | orange).astype(np.float32), (15, 15)) > 0.4
+    return cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_CLOSE, np.ones((31, 31), np.uint8)).astype(np.float32)
+
+
+def crown_colour(px: np.ndarray) -> np.ndarray:
+    """Red and blue relative to green: tells pine, green oak and autumn oak apart
+    and, as a ratio, holds up under the fog and the shade inside a forest."""
+    px = px.reshape(-1, 3).astype(np.float32) + 1
+    return np.array([np.median(px[:, 0] / px[:, 1]), np.median(px[:, 2] / px[:, 1])])
+
+
+def place_trees(frame_rgb, canopy, trees: dict[str, Sprite], entity_id: str, box, origin, tile: int, seed: int) -> list[dict]:
+    """Fill a tree box the way the game fills a forest: one tree per tile centre,
+    wherever the frame shows canopy above the tile and no grass at its foot.
+
+    Each tree takes a sprite whose crown colour is close to the frame's there. The
+    whole stand is either conifer or broadleaf, as the map's forests are; an orange
+    crown in a pine stand is still an autumn oak."""
+    import random
+
+    rnd = random.Random(seed)
+    colours = {}
+    for name, sprite in trees.items():
         assert sprite.mask is not None and sprite.rgb is not None
-        th, tw = sprite.mask.shape
-        if region.shape[0] < th or region.shape[1] < tw:
-            continue
-        mask = np.repeat(sprite.mask[:, :, None], 3, axis=2).astype(np.float32)
-        scores = np.nan_to_num(cv2.matchTemplate(region, sprite.rgb, cv2.TM_CCORR_NORMED, mask=mask), nan=-1.0)
-        for _ in range(25):
-            _, best, _, at = cv2.minMaxLoc(scores)
-            if best < 0.86:
-                break
-            ax = rx + at[0] - sprite.offset[0]
-            ay = ry + at[1] - sprite.offset[1]
-            peaks.append((best, ax, ay, name))
-            cv2.rectangle(scores, (at[0] - 12, at[1] - 12), (at[0] + 12, at[1] + 12), -1.0, -1)
-    peaks.sort(key=lambda p: -p[0])
-    chosen: list[tuple[float, float, float, str]] = []
-    for p in peaks:
-        if x0 - 10 <= p[1] <= x1 + 10 and y0 <= p[2] <= y1 + 10 and all(abs(p[1] - q[1]) > 16 or abs(p[2] - q[2]) > 10 for q in chosen):
-            chosen.append(p)
-        if len(chosen) >= 60:
-            break
-    return [{"id": entity_id, "sprite": n, "x": x, "y": y, "score": round(s, 3)} for s, x, y, n in chosen]
+        top = sprite.mask.astype(bool).copy()
+        top[int(top.shape[0] * 0.65) :] = False  # the crown, not the trunk
+        colours[name] = crown_colour(sprite.rgb[top])
+    h, w = frame_rgb.shape[:2]
+    x0, y0, x1, y1 = box
+    hx, hy = tile / 2, tile / 4
+    spots = []
+    for u in range(int((x0 - origin[0]) / hx) - 1, int((x1 - origin[0]) / hx) + 2):
+        for v in range(int((y0 - origin[1]) / hy) - 1, int((y1 - origin[1]) / hy) + 2):
+            if (u + v) % 2 != 1:  # tile centres
+                continue
+            ax, ay = int(origin[0] + u * hx), int(origin[1] + v * hy)
+            # Below the bottom panel line the frame shows the interface, not the map.
+            if not (x0 <= ax <= x1 and y0 + 30 <= ay <= y1 + 10) or ay > 0.83 * h:
+                continue
+            crown = (slice(max(0, ay - 100), ay - 30), slice(max(0, ax - 20), min(w, ax + 20)))
+            foot = (slice(ay - 12, min(h, ay + 6)), slice(max(0, ax - 16), min(w, ax + 16)))
+            if canopy[crown].mean() < 0.5 or canopy[foot].mean() < 0.4:
+                continue
+            c = crown_colour(frame_rgb[crown])
+            spots.append((ax, ay, sorted(colours, key=lambda n: float(np.abs(colours[n] - c).sum()))))
+    conifer = sum(r[0].startswith("pine") for *_, r in spots) >= len(spots) / 2
+    out = []
+    for ax, ay, ranked in spots:
+        fits = ranked if conifer and ranked[0].startswith("autumn") else [n for n in ranked if n.startswith("pine") == conifer]
+        out.append({"id": entity_id, "sprite": rnd.choice(fits[:3]), "x": ax, "y": ay, "score": 1.0})
+    return out
 
 
 def main() -> None:
@@ -400,12 +441,11 @@ def main() -> None:
     # The detector's "tower" class also covers the outpost, a lookout on stilts.
     sprites |= still(g, "b_dark_outpost_age1", "outpost")
     sprites |= still(g, "b_foundation_2x2_rubble", "foundation")
-    # Living trees for the forests: matching picks among them where the frame shows
-    # trees; the green ones also fill stands that matching leaves empty.
-    sprites |= still(g, "n_tree_pine", "pine", list(range(27)), keep=is_green)
-    sprites |= still(g, "n_tree_oak", "oak", list(range(12)), keep=is_green)
+    # Trees of the recorded map's forests: green pines (not the dead, rust or snowy
+    # ones), and oaks green, bare and autumn.
+    sprites |= still(g, "n_tree_pine", "pine", [*range(3, 15), 21, 22, 23])
+    sprites |= still(g, "n_tree_oak", "oak", list(range(12)))
     sprites |= still(g, "n_tree_autumn_oak", "autumn", list(range(12)))
-    sprites |= still(g, "n_tree_birch", "birch", list(range(12)), keep=is_green)
     sprites |= still(g, "n_mine_gold", "gold", list(range(0, 7, 2)))
     sprites |= still(g, "n_mine_stone", "stone", list(range(0, 7, 2)))
     # Ground cover the map is dotted with: grass tufts, bushes and shrubs.

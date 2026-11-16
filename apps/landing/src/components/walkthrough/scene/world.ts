@@ -207,8 +207,9 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
     tower: "tower",
   };
   const houses = variants("house");
-  // The build keeps only green pines and oaks, as on the recorded map.
-  const treeNames = [...variants("pine"), ...variants("oak")];
+  // Trees without a placement from the build (the forest hidden under the resource
+  // bar) are pines, like the stands along the map's edges.
+  const treeNames = variants("pine");
   let houseIndex = 0;
   for (const p of layout.placements) {
     if (p.kind === "building") {
