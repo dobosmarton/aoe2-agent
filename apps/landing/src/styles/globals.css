@@ -1714,6 +1714,29 @@
   color: #8a9ab3;
 }
 
+.wt3d-gate-label {
+  display: flex;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: #9fb6d8;
+  white-space: nowrap;
+  transition: color 200ms;
+}
+
+.wt3d-gate-label span {
+  color: #5b7bb0;
+}
+
+.wt3d-gate-label.is-active {
+  color: #e6f0ff;
+}
+
+.wt3d-gate-label.is-active span {
+  color: #7cc4ff;
+}
+
 .wt3d-role.is-idle .wt3d-role-model {
   color: #8a9ab3;
 }

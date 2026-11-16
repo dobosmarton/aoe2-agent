@@ -170,10 +170,10 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
     // A little wider than the frame, so the glass shows with the village around it.
     game: { tx: 0, ty: 0, tz: 0, az: GAME_AZ, el: GAME_EL, size: gameSize * 1.75, fov: GAME_FOV },
     capture: inMind(new THREE.Vector3(3, 0, 1), 20, -4, 8.5),
-    detect: inMind(new THREE.Vector3(22, 0, 2), 28, -8, 9),
-    track: inMind(new THREE.Vector3(25, 0.5, -2), 62, -10, 8.2),
+    detect: inMind(new THREE.Vector3(MIND.gate + 7, 1, 2), 28, -8, 10.5),
+    track: inMind(new THREE.Vector3(MIND.slab.x - 2, 0.5, -2), 62, -10, 8.2),
     hud: inMind(new THREE.Vector3(hudLocal.x + 4.5, hudLocal.y - 1.2, hudLocal.z + 2), 10, 6, 4.8),
-    publish: inMind(new THREE.Vector3(37, 0, 3), 22, -6, 9.5),
+    publish: inMind(new THREE.Vector3(MIND.crystal.x - 3, 0, 3), 22, -6, 9.5),
     decide: inMind(MIND.decision.clone().add(new THREE.Vector3(-0.9, -0.8, 0)), 0, 0, 7.6),
     house: { tx: spotsCentre.x, ty: 0.6, tz: spotsCentre.z, az: 48, el: 31, size: Math.max(6, spotsReach * 1.3), fov: 26 },
     verify: { tx: green.x, ty: 1, tz: green.z, az: 52, el: 32, size: 6.5, fov: 26 },

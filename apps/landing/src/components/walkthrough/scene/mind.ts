@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { CSS3DSprite } from "three/examples/jsm/renderers/CSS3DRenderer.js";
 
 import type { Board } from "./board";
 import type { SceneState } from "./timeline";
@@ -11,10 +12,10 @@ import type { TurnData } from "./types";
 export const MIND = {
   slabStart: new THREE.Vector3(0, 0, 0.15),
   slabPeel: new THREE.Vector3(0, 0, 3),
-  slab: new THREE.Vector3(27, 0, 3),
-  gate: 15,
-  crystal: new THREE.Vector3(40, 0, 5),
-  decision: new THREE.Vector3(55, 0, 5),
+  slab: new THREE.Vector3(30, 0, 3),
+  gate: 18,
+  crystal: new THREE.Vector3(43, 0, 5),
+  decision: new THREE.Vector3(58, 0, 5),
 };
 
 const glowColor = (r: number, g: number, b: number) => new THREE.Color(r, g, b);
@@ -23,25 +24,105 @@ export function createMind(data: TurnData, board: Board, frameTexture: THREE.Tex
   const group = new THREE.Group();
   group.name = "mind";
 
-  // ---- Detector gate: five glowing frames the slab slides through --------------------
+  // ---- Detector gate -------------------------------------------------------------------
+  // The network as five hairline frames the slab slides through: the letterboxed
+  // input, three feature maps (strides 8, 16, 32: each grid coarser than the last) and
+  // the head. Corner brackets, ruler ticks and dashed rails between the frames; a frame
+  // lights up and runs a scan line while the slab passes it.
+  const GATE_H = 10.4;
+  const GATE_D = 7.2;
+  const GATE_STEP = 1.25;
+  const LAYERS = [
+    { label: "letterbox · 736 × 1280", cells: 18 },
+    { label: "stride 8 · 92 × 160", cells: 13 },
+    { label: "stride 16 · 46 × 80", cells: 9 },
+    { label: "stride 32 · 23 × 40", cells: 5 },
+    { label: "head · 65 classes · NMS 0.5", cells: 0 },
+  ];
+  const gateX = (i: number) => MIND.gate - 2.5 + i * GATE_STEP;
   const gate = new THREE.Group();
-  const gateMaterials: THREE.MeshBasicMaterial[] = [];
-  for (let i = 0; i < 5; i++) {
-    const material = new THREE.MeshBasicMaterial({ color: glowColor(0.5, 1.1, 2.6), transparent: true, opacity: 0, toneMapped: false, side: THREE.DoubleSide });
-    gateMaterials.push(material);
-    const ring = new THREE.Mesh(new THREE.RingGeometry(6.2, 6.35, 4, 1), material);
-    ring.rotation.set(0, Math.PI / 2, Math.PI / 4);
-    ring.position.set(MIND.gate - 2 + i, 0, MIND.slab.z);
-    ring.scale.set(1, 1.15, 1);
-    gate.add(ring);
-    const fill = new THREE.Mesh(
-      new THREE.PlaneGeometry(8.6, 10.2),
-      new THREE.MeshBasicMaterial({ color: "#1d4ed8", transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }),
-    );
-    fill.rotation.y = Math.PI / 2;
-    fill.position.copy(ring.position);
-    gate.add(fill);
+  const lineColor = glowColor(0.55, 0.85, 1.6);
+  const segments = (points: number[]) => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(points, 3));
+    return g;
+  };
+  const layers = LAYERS.map((layer, i) => {
+    const x = gateX(i);
+    const y0 = -GATE_H / 2;
+    const y1 = GATE_H / 2;
+    const z0 = MIND.slab.z - GATE_D / 2;
+    const z1 = MIND.slab.z + GATE_D / 2;
+    const frame: number[] = [];
+    const seg = (ya: number, za: number, yb: number, zb: number) => frame.push(x, ya, za, x, yb, zb);
+    // Outline, then corner brackets drawn just outside it.
+    seg(y0, z0, y1, z0);
+    seg(y1, z0, y1, z1);
+    seg(y1, z1, y0, z1);
+    seg(y0, z1, y0, z0);
+    const b = 0.6;
+    const o = 0.18;
+    for (const [cy, cz, sy, sz] of [[y0, z0, 1, 1], [y0, z1, 1, -1], [y1, z0, -1, 1], [y1, z1, -1, -1]] as const) {
+      seg(cy - sy * o, cz - sz * o, cy - sy * o + sy * b, cz - sz * o);
+      seg(cy - sy * o, cz - sz * o, cy - sy * o, cz - sz * o + sz * b);
+    }
+    // Ruler ticks along the top edge, every 0.6, longer every third.
+    for (let k = 0, z = z0; z <= z1 + 1e-6; z += 0.6, k++) seg(y1 + 0.08, z, y1 + (k % 3 === 0 ? 0.36 : 0.2), z);
+    const frameMaterial = new THREE.LineBasicMaterial({ color: lineColor, transparent: true, opacity: 0, toneMapped: false });
+    const outline = new THREE.LineSegments(segments(frame), frameMaterial);
+
+    // The feature map: a grid, coarser through the network.
+    const grid: number[] = [];
+    if (layer.cells > 0) {
+      const rows = layer.cells;
+      const cols = Math.max(2, Math.round((layer.cells * GATE_D) / GATE_H));
+      for (let r = 1; r < rows; r++) {
+        const y = y0 + (r / rows) * GATE_H;
+        grid.push(x, y, z0, x, y, z1);
+      }
+      for (let c = 1; c < cols; c++) {
+        const z = z0 + (c / cols) * GATE_D;
+        grid.push(x, y0, z, x, y1, z);
+      }
+    } else {
+      // The head: a column of class slots instead of a grid.
+      for (let k = 0; k < 13; k++) {
+        const y = y0 + 1 + k * ((GATE_H - 2) / 12);
+        grid.push(x, y, MIND.slab.z - 0.9, x, y, MIND.slab.z + 0.9);
+      }
+    }
+    const gridMaterial = new THREE.LineBasicMaterial({ color: lineColor, transparent: true, opacity: 0, toneMapped: false });
+    const lattice = new THREE.LineSegments(segments(grid), gridMaterial);
+
+    // A scan line that sweeps the frame while the slab is inside it.
+    const scanMaterial = new THREE.MeshBasicMaterial({ color: glowColor(0.8, 1.6, 3.2), transparent: true, opacity: 0, toneMapped: false, side: THREE.DoubleSide });
+    const scan = new THREE.Mesh(new THREE.PlaneGeometry(GATE_D, 0.05), scanMaterial);
+    scan.rotation.y = Math.PI / 2;
+    scan.position.set(x, 0, MIND.slab.z);
+
+    const label = document.createElement("div");
+    label.className = "wt3d-gate-label";
+    label.innerHTML = `<span>L${i + 1}</span>${layer.label}`;
+    const tag = new CSS3DSprite(label);
+    // Labels step up through the network, so neighbours never overlap.
+    tag.scale.setScalar(0.026);
+    tag.position.set(x, y1 + 0.9 + i * 0.7, z1 - 0.4);
+
+    gate.add(outline, lattice, scan, tag);
+    return { x, frameMaterial, gridMaterial, scanMaterial, scan, label };
+  });
+  // Dashed rails from the first frame's corners to the last one's.
+  const rails: number[] = [];
+  for (const [y, z] of [[-GATE_H / 2, -GATE_D / 2], [-GATE_H / 2, GATE_D / 2], [GATE_H / 2, -GATE_D / 2], [GATE_H / 2, GATE_D / 2]] as const) {
+    rails.push(gateX(0) - 0.8, y, MIND.slab.z + z, gateX(LAYERS.length - 1) + 0.8, y, MIND.slab.z + z);
   }
+  const railGeometry = segments(rails);
+  const railLines = new THREE.LineSegments(
+    railGeometry,
+    new THREE.LineDashedMaterial({ color: lineColor, dashSize: 0.18, gapSize: 0.14, transparent: true, opacity: 0, toneMapped: false }),
+  );
+  railLines.computeLineDistances();
+  gate.add(railLines);
   group.add(gate);
 
   // ---- Earlier frames behind the slab, joined by track tubes -------------------------
@@ -130,16 +211,23 @@ export function createMind(data: TurnData, board: Board, frameTexture: THREE.Tex
     board.group.position.copy(tmp);
     board.group.visible = S.slab.on > 0.01;
 
-    // Gate frames light up as the slab's leading edge passes them.
-    const lead = tmp.x + board.W / 2;
+    // A frame lights up while the slab is inside it and scans it top to bottom.
     gate.visible = S.mind.gate > 0.01;
-    gateMaterials.forEach((m, i) => {
-      const x = MIND.gate - 2 + i;
-      const hit = Math.max(0, 1 - Math.abs(lead - x - board.W * 0.5) / (board.W * 0.6));
-      m.opacity = S.mind.gate * (0.35 + 0.65 * hit + 0.15 * Math.sin(time * 3 + i));
-      const fill = gate.children[i * 2 + 1] as THREE.Mesh;
-      (fill.material as THREE.MeshBasicMaterial).opacity = S.mind.gate * 0.06 * (1 + hit * 2);
+    const front = tmp.x + board.W / 2;
+    const back = tmp.x - board.W / 2;
+    layers.forEach((layer, i) => {
+      const inside = front > layer.x && back < layer.x;
+      const through = THREE.MathUtils.clamp((front - layer.x) / board.W, 0, 1);
+      const active = inside ? 1 : 0;
+      const g = S.mind.gate;
+      layer.frameMaterial.opacity = g * (0.45 + 0.55 * active);
+      layer.gridMaterial.opacity = g * (0.1 + 0.4 * active + 0.04 * Math.sin(time * 2 + i));
+      layer.scanMaterial.opacity = g * active * 0.9;
+      layer.scan.position.y = (0.5 - through) * GATE_H;
+      layer.label.style.opacity = String(g * (0.55 + 0.45 * active));
+      layer.label.classList.toggle("is-active", inside);
     });
+    (railLines.material as THREE.LineDashedMaterial).opacity = S.mind.gate * 0.35;
 
     ghosts.visible = S.mind.track > 0.01;
     ghostMaterials.forEach((m, i) => (m.opacity = S.mind.track * (0.42 - i * 0.1)));
