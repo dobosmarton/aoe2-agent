@@ -26,7 +26,22 @@ const GLSL_COLOR = /* glsl */ `
   #include <colorspace_fragment>
 `;
 
-export function createSpriteLayer(atlas: THREE.Texture, meta: SpriteMeta, worldPerPixel: number, capacity = 1200) {
+/** The recorded frame's fog of war: lighting per ground point (see `fogUv`). */
+export type Fog = { map: THREE.Texture; frame: THREE.Vector3 };
+
+/** GLSL: frame UV of a ground point; uFrame = (width, height, tile width) in px. */
+export const FOG_GLSL = /* glsl */ `
+  uniform sampler2D uFog;
+  uniform vec3 uFrame;
+  float fogAt(vec3 p) {
+    vec2 s = vec2(uFrame.x * 0.5 + (p.x - p.z) * uFrame.z * 0.5, uFrame.y * 0.5 + (p.x + p.z) * uFrame.z * 0.25);
+    float lit = texture2D(uFog, vec2(s.x / uFrame.x, 1.0 - s.y / uFrame.y)).r;
+    // Grass within 15% of the brightest counts as in full view.
+    return max(pow(clamp(lit / 0.85, 0.0, 1.0), 1.4), 0.04);
+  }
+`;
+
+export function createSpriteLayer(atlas: THREE.Texture, meta: SpriteMeta, worldPerPixel: number, fog: Fog, capacity = 1200) {
   atlas.flipY = false;
   atlas.colorSpace = THREE.SRGBColorSpace;
   atlas.generateMipmaps = true;
@@ -56,12 +71,15 @@ export function createSpriteLayer(atlas: THREE.Texture, meta: SpriteMeta, worldP
     uAtlasSize: { value: new THREE.Vector2(meta.size[0], meta.size[1]) },
     uScale: { value: worldPerPixel },
     uLight: { value: 1 },
+    uFog: { value: fog.map },
+    uFrame: { value: fog.frame },
   };
   const material = new THREE.ShaderMaterial({
     uniforms,
     transparent: true,
     depthWrite: false,
     vertexShader: /* glsl */ `
+      ${FOG_GLSL}
       uniform vec2 uAtlasSize;
       uniform float uScale;
       attribute vec3 aAnchor;
@@ -73,7 +91,9 @@ export function createSpriteLayer(atlas: THREE.Texture, meta: SpriteMeta, worldP
       varying vec4 vTint;
       varying float vRow;
       varying float vReveal;
+      varying float vFog;
       void main() {
+        vFog = fogAt(aAnchor);
         // Sprite pixel of this corner, y down from the top of the sprite.
         vec2 px = vec2(position.x * aRect.z, (1.0 - position.y) * aRect.w);
         vec2 offset = vec2(px.x - aPivot.x, aPivot.y - px.y) * uScale;
@@ -96,11 +116,12 @@ export function createSpriteLayer(atlas: THREE.Texture, meta: SpriteMeta, worldP
       varying vec4 vTint;
       varying float vRow;
       varying float vReveal;
+      varying float vFog;
       void main() {
         if (vRow < 1.0 - vReveal) discard;
         vec4 c = texture2D(uAtlas, vUv);
         if (c.a < 0.01) discard;
-        gl_FragColor = vec4(c.rgb * vTint.rgb * uLight, c.a * vTint.a);
+        gl_FragColor = vec4(c.rgb * vTint.rgb * uLight * vFog, c.a * vTint.a);
         ${GLSL_COLOR}
       }
     `,

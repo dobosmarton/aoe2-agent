@@ -19,6 +19,9 @@ The output is committed, so the site build needs no Python. Run from the repo ro
 
 Without a model file the reviewed labels in --labels are used instead, and the
 JSON records that with "source": "reviewed".
+
+This rewrites turn-data.json; run scripts/build_walkthrough_sprites.py with --frame
+afterwards to add the village placements (`world`).
 """
 
 from __future__ import annotations

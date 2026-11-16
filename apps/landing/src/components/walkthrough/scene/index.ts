@@ -56,7 +56,7 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
   const data = turn as TurnData;
   const small = window.matchMedia("(max-width: 767px)").matches;
   const art = `${assets}/aoe2`;
-  const [meta, atlas, grass, patchy, dirt, forest, farm, frameTexture, hudTexture] = await Promise.all([
+  const [meta, atlas, grass, patchy, dirt, forest, farm, visibility, frameTexture, hudTexture] = await Promise.all([
     loadJson<SpriteMeta>(`${art}/sprites.json`),
     loadTexture(`${art}/sprites.webp`),
     loadTexture(`${art}/grass.webp`),
@@ -64,6 +64,7 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
     loadTexture(`${art}/dirt.webp`),
     loadTexture(`${art}/forest.webp`),
     loadTexture(`${art}/farm.webp`),
+    loadTexture(`${art}/visibility.png`),
     loadTexture(`${assets}/frame-${small ? 1024 : 2048}.webp`),
     loadTexture(`${assets}/hud.webp`),
   ]);
@@ -90,7 +91,7 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
   const layout = buildLayout(data);
   // The world is drawn unlit, as the game draws it: sprites carry their own shading
   // and shadows. The lights only shape the mind's few lit materials.
-  const world = createWorld(layout, { atlas, grass, patchy, dirt, forest, farm }, meta);
+  const world = createWorld(layout, { atlas, grass, patchy, dirt, forest, farm, visibility }, meta);
   scene.add(world.group);
   const rim = new THREE.DirectionalLight("#8fb4ff", 1.2);
   rim.position.set(-20, 30, 20);

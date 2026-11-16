@@ -1,12 +1,14 @@
 import type { TurnData, TurnEntity } from "./types";
 
 // The recorded frame turned back into a ground plan. AoE2 draws the map in a 2:1
-// dimetric projection: a tile is `tw` pixels wide and tw/2 tall on screen, and the
-// Town Center is 4 tiles wide (the rule executor.py `_footprint` uses), so its
-// detected width gives tw. Screen offsets from the frame centre in half-tile units
-// (u, v) map to ground tiles as x = (u + v) / 2, z = (v - u) / 2. World units are
-// tiles; Y is up. Screen right is +x -z and screen down is +x +z, so the game
-// camera sits on the +x +z side at 30 degrees elevation, looking towards -x -z.
+// dimetric projection: a tile is `tw` pixels wide and tw/2 tall on screen. Matching
+// the game's sprites against the frame (scripts/build_walkthrough_sprites.py) gives
+// each building, mine and tree its exact anchor and measures tw from the tile grid
+// those anchors sit on; without that, the Town Center's detected width (4 tiles)
+// estimates it. Screen offsets from the frame centre in half-tile units (u, v) map to
+// ground tiles as x = (u + v) / 2, z = (v - u) / 2. World units are tiles; Y is up.
+// Screen right is +x -z and screen down is +x +z, so the game camera sits on the
+// +x +z side at 30 degrees elevation, looking towards -x -z.
 
 export type Placement = {
   entity: TurnEntity;
@@ -15,6 +17,8 @@ export type Placement = {
   z: number;
   /** Footprint edge in tiles (buildings) or a size hint. */
   size: number;
+  /** The game sprite matched at this spot in the frame, when there is one. */
+  sprite?: string;
 };
 
 // Footprint edge in tiles per class.
@@ -34,7 +38,11 @@ export function buildLayout(data: TurnData) {
   const W = data.frame.width;
   const H = data.frame.height;
   const tc = data.entities.find((e) => e.cls === "town_center")!;
-  const tw = (tc.w * W) / 4;
+  const tw = data.world?.tile ?? (tc.w * W) / 4;
+  const matched = new Map<string, { sprite: string; x: number; y: number }[]>();
+  for (const item of data.world?.items ?? []) {
+    matched.set(item.id, [...(matched.get(item.id) ?? []), item]);
+  }
 
   /** Frame pixel to ground tiles. */
   const toGround = (sx: number, sy: number) => {
@@ -56,6 +64,13 @@ export function buildLayout(data: TurnData) {
     return (seed - 1) / 2147483646;
   };
 
+  // Buildings sit on whole tiles: an even footprint is anchored on a tile corner, an
+  // odd one (tower, farm) on a tile centre.
+  const snap = (g: { x: number; z: number }, tiles: number) => {
+    const half = tiles % 2 ? 0.5 : 0;
+    return { x: Math.round(g.x - half) + half, z: Math.round(g.z - half) + half };
+  };
+
   const placements: Placement[] = [];
   for (const e of data.entities) {
     const left = e.x * W;
@@ -65,10 +80,19 @@ export function buildLayout(data: TurnData) {
     const bottom = top + height;
     const cx = left + width / 2;
     const tiles = BUILDINGS[e.cls];
+    const hits = matched.get(e.id);
     if (tiles) {
-      // The footprint diamond's lowest corner sits at the box bottom.
-      const g = toGround(cx, bottom - (tiles * tw) / 4);
-      placements.push({ entity: e, kind: e.cls === "farm" ? "farm" : "building", ...g, size: tiles });
+      // A matched anchor is exact; otherwise the footprint diamond's lowest corner
+      // sits at the box bottom (farm boxes also hold the crops above it).
+      const hit = hits?.[0];
+      const g = hit ? toGround(hit.x, hit.y) : toGround(cx, bottom - (tiles * tw) / 4);
+      placements.push({ entity: e, kind: e.cls === "farm" ? "farm" : "building", ...snap(g, tiles), size: tiles, sprite: hit?.sprite });
+    } else if (e.cls === "tree" && hits?.length) {
+      // Trees under the bottom panel are off the island.
+      for (const hit of hits) {
+        if (hit.y > 0.83 * H - tw * 0.2 || hit.y < 0.06 * H) continue;
+        placements.push({ entity: e, kind: "tree", ...toGround(hit.x, hit.y), size: 1, sprite: hit.sprite });
+      }
     } else if (e.cls === "tree") {
       // A tree box covers a stand of trees: fill its lower part densely, as forests are.
       const count = Math.max(1, Math.min(70, Math.round((width * height) / (tw * tw * 0.3))));
@@ -79,8 +103,10 @@ export function buildLayout(data: TurnData) {
         placements.push({ entity: e, kind: "tree", ...toGround(sx, sy), size: 0.8 + rand() * 0.5 });
       }
     } else if (e.cls === "gold_mine" || e.cls === "stone_mine") {
-      const g = toGround(cx, bottom - tw * 0.3);
-      placements.push({ entity: e, kind: "mine", ...g, size: Math.max(1, width / tw) });
+      const hit = hits?.[0];
+      if (hit === undefined && matched.size > 0) continue; // a duplicate detection of a matched pile
+      const g = hit ? toGround(hit.x, hit.y) : toGround(cx, bottom - tw * 0.3);
+      placements.push({ entity: e, kind: "mine", ...g, size: Math.max(1, width / tw), sprite: hit?.sprite });
     } else if (e.cat === "unit") {
       placements.push({ entity: e, kind: "villager", ...toGround(cx, bottom - tw * 0.08), size: 1 });
     } else if (e.cat === "animal") {

@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 
 import type { Layout, Placement } from "./layout";
-import { createSpriteLayer, type SpriteHandle, type SpriteMeta } from "./sprites";
+import { createSpriteLayer, FOG_GLSL, type SpriteHandle, type SpriteMeta } from "./sprites";
 
 // The world: the recorded frame rebuilt with the game's own art. Terrain uses the
 // game's grass, dirt, forest-floor and farm textures; buildings, trees, mines, animals
@@ -24,6 +24,8 @@ export type WorldTextures = {
   dirt: THREE.Texture;
   forest: THREE.Texture;
   farm: THREE.Texture;
+  /** The recorded frame's fog of war (scripts/build_walkthrough_sprites.py). */
+  visibility: THREE.Texture;
 };
 
 // Value noise for terrain variation.
@@ -65,6 +67,8 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
   const group = new THREE.Group();
   group.name = "world";
   const worldPerPixel = Math.SQRT2 / layout.tw;
+  // Explored, fogged and unexplored ground darken as they do in the recorded frame.
+  const fog = { map: textures.visibility, frame: new THREE.Vector3(layout.W, layout.H, layout.tw) };
 
   // ---- Terrain: textured island --------------------------------------------------------
   const [c0, c1, c2, c3] = layout.corners as [{ x: number; z: number }, { x: number; z: number }, { x: number; z: number }, { x: number; z: number }];
@@ -108,6 +112,8 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
     uDirt: { value: textures.dirt },
     uForest: { value: textures.forest },
     uLight: { value: 1 },
+    uFog: { value: fog.map },
+    uFrame: { value: fog.frame },
   };
   // The game lays its terrain textures out on screen axes; one texture spans about ten
   // tiles across at the recorded zoom.
@@ -118,11 +124,14 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
       uniforms: terrainUniforms,
       vertexShader: /* glsl */ `
         ${TERRAIN_UV}
+        ${FOG_GLSL}
         attribute vec4 aMask;
         varying vec4 vMask;
         varying vec2 vUv;
+        varying float vFog;
         void main() {
           vMask = aMask;
+          vFog = fogAt(position);
           vUv = terrainUv(position);
           gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         }
@@ -132,13 +141,14 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
         uniform float uLight;
         varying vec4 vMask;
         varying vec2 vUv;
+        varying float vFog;
         void main() {
           vec3 c = texture2D(uGrass, vUv).rgb;
           c = mix(c, texture2D(uPatchy, vUv * 0.9).rgb, vMask.z * 0.8);
           c = mix(c, texture2D(uForest, vUv * 1.3).rgb, vMask.y);
           c = mix(c, texture2D(uDirt, vUv * 1.1).rgb, vMask.x);
           // The rim fades to the black of unexplored map.
-          c *= mix(0.15, 1.0, vMask.w) * uLight;
+          c *= mix(0.15, 1.0, vMask.w) * uLight * vFog;
           gl_FragColor = vec4(c, 1.0);
           ${GLSL_COLOR}
         }
@@ -169,17 +179,24 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
 
   // ---- Farms: the game's farm texture on 3x3-tile squares ------------------------------
   const farmMaterial = new THREE.ShaderMaterial({
-    uniforms: { uFarm: { value: textures.farm }, uLight: terrainUniforms.uLight },
+    uniforms: { uFarm: { value: textures.farm }, uLight: terrainUniforms.uLight, uFog: terrainUniforms.uFog, uFrame: terrainUniforms.uFrame },
     vertexShader: /* glsl */ `
       ${TERRAIN_UV}
+      ${FOG_GLSL}
       varying vec2 vUv;
-      void main() { vUv = terrainUv(position) * 2.5; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+      varying float vFog;
+      void main() {
+        vUv = terrainUv(position) * 2.5;
+        vFog = fogAt(position);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
     `,
     fragmentShader: /* glsl */ `
       uniform sampler2D uFarm;
       uniform float uLight;
       varying vec2 vUv;
-      void main() { gl_FragColor = vec4(texture2D(uFarm, vUv).rgb * uLight, 1.0); ${GLSL_COLOR} }
+      varying float vFog;
+      void main() { gl_FragColor = vec4(texture2D(uFarm, vUv).rgb * uLight * vFog, 1.0); ${GLSL_COLOR} }
     `,
     polygonOffset: true,
     polygonOffsetFactor: -2,
@@ -190,7 +207,7 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
   if (farmParts.length) group.add(new THREE.Mesh(mergeGeometries(farmParts)!, farmMaterial));
 
   // ---- Sprites --------------------------------------------------------------------------
-  const sprites = createSpriteLayer(textures.atlas, meta, worldPerPixel);
+  const sprites = createSpriteLayer(textures.atlas, meta, worldPerPixel, fog);
   group.add(sprites.mesh);
   const variants = (prefix: string) => Object.keys(meta.sprites).filter((n) => n === prefix || n.startsWith(`${prefix}_`));
   const pick = <T,>(list: T[], seed: number) => list[Math.abs(Math.floor(seed)) % list.length]!;
@@ -208,14 +225,13 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
   let houseIndex = 0;
   for (const p of layout.placements) {
     if (p.kind === "building") {
-      const name = p.entity.cls === "house" ? houses[houseIndex++ % houses.length] : BUILDING_SPRITE[p.entity.cls];
+      const name = p.sprite ?? (p.entity.cls === "house" ? houses[houseIndex++ % houses.length] : BUILDING_SPRITE[p.entity.cls]);
       if (name) sprites.add(name, p.x, 0, p.z);
     } else if (p.kind === "tree") {
-      sprites.add(pick(treeNames, p.x * 13.7 + p.z * 7.1), p.x, 0, p.z);
+      sprites.add(p.sprite ?? pick(treeNames, p.x * 13.7 + p.z * 7.1), p.x, 0, p.z);
     } else if (p.kind === "mine") {
       const list = variants(p.entity.cls === "gold_mine" ? "gold" : "stone");
-      sprites.add(pick(list, p.x * 3), p.x, 0, p.z);
-      sprites.add(pick(list, p.z * 5 + 1), p.x + 0.9, 0, p.z - 0.5);
+      sprites.add(p.sprite ?? pick(list, p.x * 3), p.x, 0, p.z);
     }
   }
 
