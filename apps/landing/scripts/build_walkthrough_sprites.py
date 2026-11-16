@@ -40,6 +40,10 @@ SHADOW_ALPHA = 0.55
 # Facings kept for animated units, out of the 16 a unit file stores.
 FACINGS = [2, 6, 10, 14]
 FRAMES_PER_ANIMATION = 12
+# Forest in the frame (x0, y0, x1, y1 px) that no detection covers: its edge shows
+# below the resource bar and the rest is under it, too hidden to match sprites. The
+# lumber camp works it; its lumberjacks are the villagers carrying wood along the top.
+HIDDEN_FORESTS = [(590, 100, 1030, 140)]
 
 
 @dataclass
@@ -223,7 +227,7 @@ def place(sprites: dict[str, list[Sprite]], frame_path: Path, turn_path: Path) -
     # Two detections of one object end up on the same spot: keep one.
     seen: set[tuple[str, int, int]] = set()
     world = [x for x in world if (k := (x["sprite"], x["x"], x["y"])) not in seen and not seen.add(k)]
-    turn["world"] = {"tile": tile, "origin": list(origin), "items": world}
+    turn["world"] = {"tile": tile, "origin": list(origin), "items": world, "forests": [list(b) for b in HIDDEN_FORESTS]}
     turn_path.write_text(json.dumps(turn, indent=1) + "\n")
     visibility(frame_rgb).save(OUT / "visibility.png")
     kept = [x for x in world if not x["id"].startswith("tree")]
@@ -415,6 +419,11 @@ def main() -> None:
         sprites |= animation(g, f"u_vil_{gender}_miner_gold_taskA", f"vil{g_}_mine")
         sprites |= animation(g, f"u_vil_{gender}_builder_taskA", f"vil{g_}_build")
         sprites |= animation(g, f"u_vil_{gender}_villager_walkA", f"vil{g_}_walk", list(range(16)))
+        # Walking back to a drop site with a load, in eight facings. Men have no farmer
+        # carry walk in the game files; the forager's basket of food stands in.
+        food = "farmer" if gender == "female" else "forager"
+        for load, file in (("wood", "lumberjack"), ("gold", "miner_gold"), ("stone", "miner_stone"), ("food", food)):
+            sprites |= animation(g, f"u_vil_{gender}_{file}_carrywalkA", f"vil{g_}_carry_{load}", list(range(0, 16, 2)))
     sprites |= animation(g, "a_hunt_deer_idleA", "deer", [2, 10])
     sprites |= animation(g, "a_hunt_boar_idleA", "boar", [2, 10])
 

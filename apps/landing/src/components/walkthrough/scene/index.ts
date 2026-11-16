@@ -160,12 +160,12 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
   });
 
   // ---- Tracking in the village: the walking villagers nearest the Town Center ----------
-  // Walkers near the Town Center show the trails best; nearby workers fill the group.
+  // Villagers with the longest walks near the Town Center show the trails best; the
+  // nearest others fill the group.
   const near = (t: { anchor: THREE.Vector3 }) => Math.hypot(t.anchor.x - layout.tc.x, t.anchor.z - layout.tc.z);
   const byDistance = [...world.tracked].sort((a, b) => near(a) - near(b));
-  const walkers = byDistance.filter((t) => t.walking && near(t) < 11).slice(0, 6);
+  const walkers = byDistance.filter((t) => t.route > 2 && near(t) < 11).slice(0, 6);
   const followed = [...walkers, ...byDistance.filter((t) => !walkers.includes(t))].slice(0, 9);
-  for (const t of followed) t.walk();
   const tracking = createTracking(followed, [41, 7, 63, 12, 28, 55, 3, 90, 34]);
   const trackCentre = followed.reduce((c, t) => ({ x: c.x + t.anchor.x / followed.length, z: c.z + t.anchor.z / followed.length }), { x: 0, z: 0 });
   const spread = Math.max(...followed.map((t) => Math.hypot(t.anchor.x - trackCentre.x, t.anchor.z - trackCentre.z)));
@@ -329,7 +329,7 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
       debugPose = p;
     },
     info() {
-      return { calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, mindScale, gameSize, poses, followed: followed.map((t) => [t.anchor.x, t.anchor.z, t.walking]), farms: world.farmCheck() };
+      return { calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, mindScale, gameSize, poses, followed: followed.map((t) => [t.anchor.x, t.anchor.z, t.walking]), villagers: world.villagerCheck() };
     },
   };
 

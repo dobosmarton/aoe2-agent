@@ -1,13 +1,14 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 
-import type { Layout, Placement } from "./layout";
-import { createSpriteLayer, FOG_GLSL, type SpriteHandle, type SpriteMeta } from "./sprites";
+import type { Layout } from "./layout";
+import { createSpriteLayer, FOG_GLSL, type SpriteMeta } from "./sprites";
+import { createVillagers } from "./villagers";
 
 // The world: the recorded frame rebuilt with the game's own art. Terrain uses the
 // game's grass, dirt, forest-floor and farm textures; buildings, trees, mines, animals
 // and villagers are AoE2:DE sprites (scripts/build_walkthrough_sprites.py) standing
-// where the detector found them. Villagers play the game's work and walk animations.
+// where the detector found them. Villagers work and carry loads (villagers.ts).
 
 const SOIL_TOP = new THREE.Color("#5b4128");
 const SOIL_BOTTOM = new THREE.Color("#1d140c");
@@ -45,21 +46,6 @@ function noise(x: number, y: number) {
   const c = hash(xi, yi + 1);
   const d = hash(xi + 1, yi + 1);
   return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
-}
-
-/** AoE2 facing for a ground direction: the game stores 16 facings clockwise on
- * screen from facing right (0), through facing the viewer (4), left (8) and away (12). */
-export function facingFor(dx: number, dz: number) {
-  // Ground to screen: right is x - z, down is (x + z) / 2.
-  const angle = Math.atan2((dx + dz) / 2, dx - dz);
-  return ((Math.round(angle / (Math.PI / 8)) % 16) + 16) % 16;
-}
-
-/** The atlas keeps four facings for work animations; pick the closest. */
-const WORK_FACINGS = [2, 6, 10, 14];
-function nearestWorkFacing(f: number) {
-  const gap = (k: number) => Math.min(Math.abs(k - f), 16 - Math.abs(k - f));
-  return WORK_FACINGS.reduce((best, k) => (gap(k) < gap(best) ? k : best), 2);
 }
 
 export type World = ReturnType<typeof createWorld>;
@@ -251,106 +237,7 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
     placed++;
   }
 
-  // Villagers: each works at what stands next to it, or walks a short beat.
-  const nearest = (p: Placement, kinds: Placement["kind"][]) => {
-    let best: Placement | null = null;
-    let bestD = Infinity;
-    for (const q of layout.placements) {
-      if (!kinds.includes(q.kind)) continue;
-      const d = Math.hypot(q.x - p.x, q.z - p.z);
-      if (d < bestD) {
-        bestD = d;
-        best = q;
-      }
-    }
-    return { place: best as Placement | null, distance: bestD };
-  };
-  // Walkers go out and back along a clear straight route at a steady pace, stand a
-  // moment at each end, and step through the walk cycle by distance covered, so their
-  // feet keep pace with the ground.
-  const WALK_SPEED = 0.85; // tiles per second
-  const STRIDE = 1.3; // tiles per full walk cycle
-  const PAUSE = 1.1; // seconds standing at each end
-  type Route = { ax: number; az: number; bx: number; bz: number; length: number; offset: number };
-  type Worker = { handle: SpriteHandle; base: string; x: number; z: number; walk: boolean; route: Route | null; stand: boolean; farmer: boolean; phase: number };
-
-  // Routes avoid buildings, fields, trees and mines; prefer heading to or from the
-  // Town Center, as villagers carrying goods do.
-  const obstacles = layout.placements.filter((p) => p.kind === "building" || p.kind === "farm" || p.kind === "tree" || p.kind === "mine");
-  const covers = (o: Placement, x: number, z: number) => {
-    const reach = o.kind === "tree" ? 0.55 : o.kind === "mine" ? 0.9 : o.size / 2 + 0.35;
-    return Math.abs(x - o.x) < reach && Math.abs(z - o.z) < reach;
-  };
-  const routeFrom = (x: number, z: number, seed: number): Route | null => {
-    // A villager standing in a building's footprint (under the Town Center's roof,
-    // dropping off goods) walks out of it; only the other obstacles block its route.
-    const around = obstacles.filter((o) => !covers(o, x, z));
-    const home = Math.atan2(layout.tc.z - z, layout.tc.x - x);
-    for (let k = 0; k < 16; k++) {
-      const angle = home + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * (Math.PI / 8);
-      const length = 2.2 + (seed % 5) * 0.25;
-      let clear = true;
-      for (let d = 0.4; d <= length && clear; d += 0.3) {
-        const px = x + Math.cos(angle) * d;
-        const pz = z + Math.sin(angle) * d;
-        clear = !around.some((o) => covers(o, px, pz));
-      }
-      if (clear) return { ax: x, az: z, bx: x + Math.cos(angle) * length, bz: z + Math.sin(angle) * length, length, offset: seed * 1.7 };
-    }
-    return null;
-  };
-  // Every farm has exactly one farmer, as in the game: each farm takes the nearest
-  // villager not already chopping or mining, who works it from a spot on the field.
-  const villagers = layout.placements.filter((p) => p.kind === "villager");
-  const farms = layout.placements.filter((p) => p.kind === "farm");
-  const gathering = (v: Placement) => nearest(v, ["tree", "mine"]).distance < 1.8;
-  const farmerOf = new Map<Placement, Placement>();
-  const pairs = farms
-    .flatMap((f) => villagers.map((v) => ({ f, v, d: Math.hypot(f.x - v.x, f.z - v.z) + (gathering(v) ? 100 : 0) })))
-    .sort((a, b) => a.d - b.d);
-  const takenFarms = new Set<Placement>();
-  for (const { f, v } of pairs) {
-    if (takenFarms.has(f) || farmerOf.has(v)) continue;
-    takenFarms.add(f);
-    farmerOf.set(v, f);
-  }
-
-  const workers: Worker[] = villagers.map((v, i) => {
-    const gender = i % 3 === 0 ? "f" : "m";
-    const farm = farmerOf.get(v);
-    if (farm) {
-      // A spot a third of the way from the centre to a corner, facing across the field.
-      const corner = (i * 3 + 1) % 4;
-      const ox = (corner & 1 ? 1 : -1) * farm.size * 0.17;
-      const oz = (corner & 2 ? 1 : -1) * farm.size * 0.17;
-      const facing = nearestWorkFacing(facingFor(-ox, -oz));
-      const base = `vil${gender}_farm_d${facing}`;
-      const handle = sprites.add(base, farm.x + ox, 0, farm.z + oz, i * 3);
-      return { handle, base, x: farm.x + ox, z: farm.z + oz, walk: false, route: null, stand: false, farmer: true, phase: i * 0.77 };
-    }
-    // Fields belong to their farmers: anyone else detected on one steps just off its
-    // nearest edge, and routes from there go around it.
-    const spot = { ...v };
-    for (const f of farms) {
-      const reach = f.size / 2 + 0.35;
-      const dx = spot.x - f.x;
-      const dz = spot.z - f.z;
-      if (Math.abs(dx) >= reach || Math.abs(dz) >= reach) continue;
-      if (reach - Math.abs(dx) < reach - Math.abs(dz)) spot.x = f.x + Math.sign(dx || 1) * reach;
-      else spot.z = f.z + Math.sign(dz || 1) * reach;
-    }
-    const target = nearest(spot, ["tree", "mine"]);
-    let task = "walk";
-    if (target.place && target.distance < 1.8) task = target.place.kind === "tree" ? "chop" : "mine";
-    const towards = target.place ? Math.atan2(target.place.z - spot.z, target.place.x - spot.x) : 0;
-    const facing = nearestWorkFacing(facingFor(Math.cos(towards), Math.sin(towards)));
-    const route = task === "walk" ? routeFrom(spot.x, spot.z, i) : null;
-    const base = task === "walk" ? `vil${gender}_walk` : `vil${gender}_${task}_d${facing}`;
-    // A walker with nowhere clear to go stands, facing the viewer, rather than
-    // walking on the spot.
-    const handle = sprites.add(task === "walk" ? `${base}_d4` : base, spot.x, 0, spot.z, i * 3);
-    return { handle, base, x: spot.x, z: spot.z, walk: route !== null, route, stand: task === "walk" && route === null, farmer: false, phase: i * 0.77 };
-  });
+  const villagers = createVillagers(layout.placements, layout.corners, sprites);
   const animals = layout.placements
     .filter((p) => p.kind === "animal")
     .map((a, i) => {
@@ -374,26 +261,7 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
     terrainUniforms.uLight.value = s.light;
     wallMaterial.color.setScalar(s.light);
 
-    for (const w of workers) {
-      const r = w.route;
-      if (!w.walk || !r) {
-        w.handle.frame = w.stand ? 0 : Math.floor(time * FPS + w.phase * 10);
-        continue;
-      }
-      // One loop: walk out, stand, walk back, stand.
-      const leg = r.length / WALK_SPEED;
-      const loop = 2 * (leg + PAUSE);
-      const t = (time + r.offset) % loop;
-      const out = t < leg + PAUSE;
-      const u = out ? t : t - leg - PAUSE;
-      const along = Math.min(u, leg) * WALK_SPEED;
-      const [fx, fz, tx, tz] = out ? [r.ax, r.az, r.bx, r.bz] : [r.bx, r.bz, r.ax, r.az];
-      const f = along / r.length;
-      w.handle.anchor.set(fx + (tx - fx) * f, 0, fz + (tz - fz) * f);
-      w.handle.name = `${w.base}_d${facingFor(tx - fx, tz - fz)}`;
-      // Stepping: frames advance with distance; standing shows the first frame.
-      w.handle.frame = u < leg ? Math.floor((along / STRIDE) * 12) % 12 : 0;
-    }
+    villagers.update(time);
     for (const a of animals) a.handle.frame = Math.floor(time * 8 + a.phase * 5);
 
     ghost.visible = s.ghost > 0.01;
@@ -408,31 +276,5 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
     sprites.update(camera, s.light);
   }
 
-  /** Debug: per farm, the farmers assigned and every villager standing on it now. */
-  const farmCheck = () =>
-    farms.map((f) => ({
-      farmers: workers.filter((w) => w.farmer && Math.abs(w.x - f.x) < f.size / 2 && Math.abs(w.z - f.z) < f.size / 2).length,
-      standing: workers.filter((w) => Math.abs(w.handle.anchor.x - f.x) < f.size / 2 && Math.abs(w.handle.anchor.z - f.z) < f.size / 2).length,
-    }));
-
-  /** Villagers the Track chapter can follow: live anchors, and a way to set one walking
-   * (villagers walk between their work and the Town Center), which shows its trail. */
-  const tracked = workers.map((w) => ({
-    anchor: w.handle.anchor,
-    get walking() {
-      return w.walk;
-    },
-    walk() {
-      // Farmers stay on their fields.
-      if (w.walk || w.farmer) return;
-      const route = routeFrom(w.x, w.z, Math.round(w.phase * 13));
-      if (!route) return;
-      w.walk = true;
-      w.stand = false;
-      w.route = route;
-      w.base = `${w.base.slice(0, 4)}_walk`;
-    },
-  }));
-
-  return { group, update, center: layout.center, tracked, farmCheck };
+  return { group, update, center: layout.center, tracked: villagers.tracked, villagerCheck: villagers.check };
 }

@@ -24,6 +24,8 @@ export type TurnData = {
     /** Frame pixel of the tile grid's origin. */
     origin: number[];
     items: { id: string; sprite: string; x: number; y: number; score: number }[];
+    /** Forests no detection covers (x0, y0, x1, y1 in frame pixels). */
+    forests?: number[][];
   };
   hud: {
     readings: Record<string, string | number>;

@@ -116,6 +116,16 @@ export function buildLayout(data: TurnData) {
     }
   }
 
+  // Forest the detector has no box for (mostly under the resource bar): trees along
+  // its visible edge, as a stand fills a tree box.
+  for (const [k, [x0, y0, x1, y1]] of (data.world?.forests ?? []).entries()) {
+    const entity = { id: `forest_hidden_${k}`, cls: "tree", cat: "resource", conf: null, x: x0! / W, y: y0! / H, w: (x1! - x0!) / W, h: (y1! - y0!) / H };
+    const count = Math.round(((x1! - x0!) * (y1! - y0!)) / (tw * tw * 0.12));
+    for (let i = 0; i < count; i++) {
+      placements.push({ entity, kind: "tree", ...toGround(x0! + (x1! - x0!) * rand(), y0! + (y1! - y0!) * rand()), size: 0.8 + rand() * 0.5 });
+    }
+  }
+
   // The part of the map the frame shows (between the resource bar and the panel).
   const playTop = 0.06 * H;
   const playBottom = 0.83 * H;
