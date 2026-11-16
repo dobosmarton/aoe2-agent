@@ -38,5 +38,6 @@ export function applyPose(camera: THREE.PerspectiveCamera, pose: CameraPose, asp
   camera.up.set(0, 1, 0);
   camera.lookAt(target);
   camera.updateProjectionMatrix();
+  camera.updateMatrixWorld();
   return distance;
 }

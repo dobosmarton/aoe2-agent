@@ -1,5 +1,4 @@
 import * as THREE from "three";
-import { N8AOPostPass } from "n8ao";
 import {
   BloomEffect,
   EffectComposer,
@@ -13,30 +12,18 @@ import {
   VignetteEffect,
 } from "postprocessing";
 
-// One pmndrs/postprocessing chain: ambient occlusion, then a single merged effect pass
-// with tilt-shift (the miniature look of the world), bloom (the glow of the mind),
-// tone mapping and a vignette, then SMAA. Phones skip AO and tilt-shift.
+// One pmndrs/postprocessing chain: a single merged effect pass with tilt-shift (the
+// miniature look of the world), bloom (the glow of the mind), tone mapping and a
+// vignette, then SMAA. Phones skip the tilt-shift. Neutral tone mapping keeps the
+// game's sprite colours close to how the game draws them.
 export function createPost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, small: boolean) {
   const composer = new EffectComposer(renderer, { frameBufferType: THREE.HalfFloatType });
   composer.addPass(new RenderPass(scene, camera));
 
-  let ao: N8AOPostPass | null = null;
-  if (!small) {
-    ao = new N8AOPostPass(scene, camera, 1, 1);
-    ao.configuration.aoRadius = 1.6;
-    ao.configuration.distanceFalloff = 0.6;
-    ao.configuration.intensity = 2.4;
-    ao.configuration.color = new THREE.Color("#1d1530");
-    ao.setQualityMode("Medium");
-    ao.configuration.halfRes = true;
-    ao.configuration.gammaCorrection = false;
-    composer.addPass(ao);
-  }
-
   const tiltShift = new TiltShiftEffect({ focusArea: 0.56, feather: 0.34, offset: 0.04, resolutionScale: 0.5 });
   const bloom = new BloomEffect({ intensity: 0.9, luminanceThreshold: 0.85, luminanceSmoothing: 0.2, mipmapBlur: true, radius: 0.7 });
   const vignette = new VignetteEffect({ offset: 0.32, darkness: 0.5 });
-  const tone = new ToneMappingEffect({ mode: ToneMappingMode.AGX });
+  const tone = new ToneMappingEffect({ mode: ToneMappingMode.NEUTRAL });
   const effects = small ? [bloom, tone, vignette] : [tiltShift, bloom, tone, vignette];
   composer.addPass(new EffectPass(camera, ...effects));
   composer.addPass(new EffectPass(camera, new SMAAEffect({ preset: SMAAPreset.HIGH })));

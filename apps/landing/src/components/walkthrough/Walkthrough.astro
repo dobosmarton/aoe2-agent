@@ -34,8 +34,8 @@ const pad = (n: number) => String(n).padStart(2, "0");
         {KEYS.map((key, i) => <li data-key={i}>{key.length === 1 ? <kbd>{key}</kbd> : <span>{key}</span>}</li>)}
       </ol>
       <p class="wt-note">
-        The village is a 3D rebuild of one recorded frame, laid out from its detections. Frame, boxes and HUD values
-        are real; track IDs, goals and placement spots are illustrative.
+        The village is one recorded frame rebuilt with the game's own sprites, laid out from its detections. Frame,
+        boxes and HUD values are real; track IDs, goals and placement spots are illustrative.
       </p>
     </div>
 
@@ -63,7 +63,7 @@ const pad = (n: number) => String(n).padStart(2, "0");
         <h1 id="wt-title">An AI agent that plays Age of Empires II from screen pixels.</h1>
         <p class="wt-lede">
           A detector and local OCR turn the screen into text, a policy model and two LLMs decide, and mouse and keyboard
-          input does the rest. Scroll to follow one turn from a recorded game, rebuilt in 3D.
+          input does the rest. Scroll to follow one turn from a recorded game.
         </p>
         <div class="wt-ctas">
           <a href={`/docs/${FIRST_PAGE.fullSlug}`} class="wt-btn wt-btn-primary">

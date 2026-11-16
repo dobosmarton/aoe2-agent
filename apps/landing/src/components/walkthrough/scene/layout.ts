@@ -11,22 +11,21 @@ import type { TurnData, TurnEntity } from "./types";
 export type Placement = {
   entity: TurnEntity;
   kind: "building" | "farm" | "tree" | "mine" | "villager" | "animal" | "other";
-  model?: string;
   x: number;
   z: number;
   /** Footprint edge in tiles (buildings) or a size hint. */
   size: number;
 };
 
-// Footprint edge in tiles per class, and the village model that stands in for it.
-const BUILDINGS: Record<string, { tiles: number; model: string }> = {
-  town_center: { tiles: 4, model: "castle" },
-  house: { tiles: 2, model: "home_A" },
-  mill: { tiles: 2, model: "windmill" },
-  lumber_camp: { tiles: 2, model: "lumbermill" },
-  mining_camp: { tiles: 2, model: "mine" },
-  tower: { tiles: 1, model: "tower" },
-  farm: { tiles: 3, model: "" },
+// Footprint edge in tiles per class.
+const BUILDINGS: Record<string, number> = {
+  town_center: 4,
+  house: 2,
+  mill: 2,
+  lumber_camp: 2,
+  mining_camp: 2,
+  tower: 1,
+  farm: 3,
 };
 
 export type Layout = ReturnType<typeof buildLayout>;
@@ -58,7 +57,6 @@ export function buildLayout(data: TurnData) {
   };
 
   const placements: Placement[] = [];
-  let houseIndex = 0;
   for (const e of data.entities) {
     const left = e.x * W;
     const top = e.y * H;
@@ -66,15 +64,14 @@ export function buildLayout(data: TurnData) {
     const height = e.h * H;
     const bottom = top + height;
     const cx = left + width / 2;
-    const building = BUILDINGS[e.cls];
-    if (building) {
+    const tiles = BUILDINGS[e.cls];
+    if (tiles) {
       // The footprint diamond's lowest corner sits at the box bottom.
-      const g = toGround(cx, bottom - (building.tiles * tw) / 4);
-      const model = e.cls === "house" ? (houseIndex++ % 2 ? "home_B" : "home_A") : building.model || undefined;
-      placements.push({ entity: e, kind: e.cls === "farm" ? "farm" : "building", model, ...g, size: building.tiles });
+      const g = toGround(cx, bottom - (tiles * tw) / 4);
+      placements.push({ entity: e, kind: e.cls === "farm" ? "farm" : "building", ...g, size: tiles });
     } else if (e.cls === "tree") {
-      // A tree box covers a stand of trees: scatter trunks over its lower part.
-      const count = Math.max(1, Math.min(26, Math.round((width * height) / (tw * tw * 0.55))));
+      // A tree box covers a stand of trees: fill its lower part densely, as forests are.
+      const count = Math.max(1, Math.min(70, Math.round((width * height) / (tw * tw * 0.3))));
       for (let i = 0; i < count; i++) {
         const sx = left + width * (0.08 + rand() * 0.84);
         const sy = top + height * (0.35 + rand() * 0.62);

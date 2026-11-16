@@ -1,6 +1,4 @@
 import * as THREE from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { CSS3DRenderer } from "three/examples/jsm/renderers/CSS3DRenderer.js";
 
 import turn from "../turn-data.json";
@@ -12,6 +10,7 @@ import { createOverlays } from "./overlays";
 import { createPost } from "./post";
 import { applyPose, type CameraPose } from "./rig";
 import { createScreen } from "./screen";
+import type { SpriteMeta } from "./sprites";
 import { buildTimeline, createState, TIMELINE_LENGTH, type Poses } from "./timeline";
 import type { TurnData } from "./types";
 import { createWorld } from "./world";
@@ -47,28 +46,30 @@ function loadTexture(url: string): Promise<THREE.Texture> {
   return new Promise((resolve, reject) => new THREE.TextureLoader().load(url, resolve, undefined, reject));
 }
 
-async function loadModels(url: string) {
-  const loader = new GLTFLoader();
-  loader.setMeshoptDecoder(MeshoptDecoder);
-  const gltf = await loader.loadAsync(url);
-  const models = new Map<string, THREE.Object3D>();
-  for (const child of gltf.scene.children) models.set(child.name, child);
-  return models;
+async function loadJson<T>(url: string): Promise<T> {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`${url}: ${response.status}`);
+  return (await response.json()) as T;
 }
 
 export async function mountScene({ view, stage, assets }: MountOptions): Promise<SceneHandle> {
   const data = turn as TurnData;
   const small = window.matchMedia("(max-width: 767px)").matches;
-  const [models, frameTexture, hudTexture] = await Promise.all([
-    loadModels(`${assets}/village.glb`),
+  const art = `${assets}/aoe2`;
+  const [meta, atlas, grass, patchy, dirt, forest, farm, frameTexture, hudTexture] = await Promise.all([
+    loadJson<SpriteMeta>(`${art}/sprites.json`),
+    loadTexture(`${art}/sprites.webp`),
+    loadTexture(`${art}/grass.webp`),
+    loadTexture(`${art}/grass_patchy.webp`),
+    loadTexture(`${art}/dirt.webp`),
+    loadTexture(`${art}/forest.webp`),
+    loadTexture(`${art}/farm.webp`),
     loadTexture(`${assets}/frame-${small ? 1024 : 2048}.webp`),
     loadTexture(`${assets}/hud.webp`),
   ]);
 
   const renderer = new THREE.WebGLRenderer({ powerPreference: "high-performance", antialias: false, stencil: false, depth: false });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFShadowMap;
   // Count draw calls over the whole frame (shadow, scene and post passes), not per pass.
   renderer.info.autoReset = false;
   for (const texture of [frameTexture, hudTexture]) {
@@ -87,22 +88,13 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
 
   // ---- World ---------------------------------------------------------------------------
   const layout = buildLayout(data);
-  const world = await createWorld(layout, models);
+  // The world is drawn unlit, as the game draws it: sprites carry their own shading
+  // and shadows. The lights only shape the mind's few lit materials.
+  const world = createWorld(layout, { atlas, grass, patchy, dirt, forest, farm }, meta);
   scene.add(world.group);
-
-  const hemi = new THREE.HemisphereLight("#e2eeff", "#5a4630", 1.5);
-  const sun = new THREE.DirectionalLight("#ffe4b8", 3.6);
-  sun.position.set(18, 26, -10);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(small ? 1024 : 2048, small ? 1024 : 2048);
-  Object.assign(sun.shadow.camera, { left: -34, right: 34, top: 34, bottom: -34, near: 1, far: 90 });
-  sun.shadow.camera.updateProjectionMatrix();
-  sun.shadow.bias = -0.0004;
-  sun.shadow.normalBias = 0.03;
-  sun.shadow.radius = 3;
-  const rim = new THREE.DirectionalLight("#8fb4ff", 0.6);
-  rim.position.set(-20, 12, 20);
-  scene.add(hemi, sun, sun.target, rim);
+  const rim = new THREE.DirectionalLight("#8fb4ff", 1.2);
+  rim.position.set(-20, 30, 20);
+  scene.add(new THREE.HemisphereLight("#e2eeff", "#1a2030", 1.2), rim);
 
   // ---- The game camera and the glass pane ------------------------------------------------
   // Half-height of the recorded frame on the ground plane's screen, in world units.
@@ -172,7 +164,8 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
   };
   const hudLocal = board.hud.position.clone().add(MIND.slab);
   const poses: Poses = {
-    hero: { tx: layout.tc.x * 0.4, ty: 0.6, tz: layout.tc.z * 0.4, az: 70, el: 26, size: 11, fov: 30 },
+    // World shots stay close to the game's own angle, where its sprites are drawn for.
+    hero: { tx: layout.tc.x * 0.5 + 1.5, ty: 0, tz: layout.tc.z * 0.5 - 1.5, az: 45, el: 30, size: 9.5, fov: 28 },
     // A little wider than the frame, so the glass shows with the village around it.
     game: { tx: 0, ty: 0, tz: 0, az: GAME_AZ, el: GAME_EL, size: gameSize * 1.75, fov: GAME_FOV },
     capture: inMind(new THREE.Vector3(3, 0, 1), 20, -4, 8.5),
@@ -181,8 +174,8 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
     hud: inMind(new THREE.Vector3(hudLocal.x + 4.5, hudLocal.y - 1.2, hudLocal.z + 2), 10, 6, 4.8),
     publish: inMind(new THREE.Vector3(37, 0, 3), 22, -6, 9.5),
     decide: inMind(MIND.decision.clone().add(new THREE.Vector3(-0.9, -0.8, 0)), 0, 0, 7.6),
-    house: { tx: spotsCentre.x, ty: 0.8, tz: spotsCentre.z, az: 75, el: 36, size: Math.max(5.5, spotsReach * 1.25), fov: 30 },
-    verify: { tx: green.x, ty: 1.4, tz: green.z, az: 105, el: 28, size: 7, fov: 30 },
+    house: { tx: spotsCentre.x, ty: 0.6, tz: spotsCentre.z, az: 48, el: 31, size: Math.max(6, spotsReach * 1.3), fov: 26 },
+    verify: { tx: green.x, ty: 1, tz: green.z, az: 52, el: 32, size: 6.5, fov: 26 },
   };
   const S = createState(poses.hero);
   const timeline = buildTimeline(S, poses);
@@ -245,18 +238,16 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
     pointer.sy += (pointer.y - pointer.sy) * 0.05;
     Object.assign(pose, S.cam, debugPose ?? {});
     if (!debugPose) {
-      pose.az += hero * (Math.sin(time * 0.08) * 6 + pointer.sx * 4);
-      pose.el += hero * pointer.sy * 2;
+      pose.az += hero * (Math.sin(time * 0.08) * 3 + pointer.sx * 3);
+      pose.el += hero * pointer.sy * 1.5;
+      pose.size *= 1 + hero * Math.sin(time * 0.11) * 0.03;
     }
     applyPose(camera, pose, width / height, fit);
 
     const dim = S.world.dim;
-    sun.intensity = 3.6 * (1 - 0.85 * dim);
-    hemi.intensity = 1.5 * (1 - 0.75 * dim);
-    sun.castShadow = dim < 0.95;
-
     overlays.cursorAt(S.world.cursor, ghostAt);
-    world.update(time, {
+    world.update(time, camera, {
+      light: 1 - 0.78 * dim,
       ghost: S.world.ghost,
       ghostX: ghostAt.x,
       ghostZ: ghostAt.z,
@@ -287,7 +278,7 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
     }
 
     // The miniature look is for wide world shots; close-ups keep more in focus.
-    const wide = 0.4 + 0.6 * THREE.MathUtils.smoothstep(pose.size, 6, 11);
+    const wide = 0.35 + 0.65 * THREE.MathUtils.smoothstep(pose.size, 5, 10);
     post.setMiniature((1 - dim) * THREE.MathUtils.smoothstep(pose.fov, 12, 24) * wide);
     post.setBloom(0.55 + 0.75 * dim);
     post.render(delta);
