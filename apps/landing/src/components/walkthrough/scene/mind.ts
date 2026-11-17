@@ -3,6 +3,7 @@ import * as THREE from "three";
 import type { Board } from "./board";
 import type { Labels } from "./labels";
 import { fatSegments, lineMaterial } from "./lines";
+import { createPacket } from "./packet";
 import { createPublish } from "./publish";
 import { createStack } from "./stack";
 import type { SceneState } from "./timeline";
@@ -171,16 +172,8 @@ export function createMind(data: TurnData, board: Board, frameTexture: THREE.Tex
     new THREE.Vector3(14, 5, 6),
     new THREE.Vector3(0, 0, 0.4),
   ]);
-  const pulse = new THREE.Mesh(
-    new THREE.SphereGeometry(0.4, 20, 14),
-    new THREE.MeshBasicMaterial({ color: new THREE.Color(1.2, 2.6, 1.4), transparent: true, toneMapped: false }),
-  );
-  const trailSamples = pulseCurve.getSpacedPoints(160);
-  const trailPoints: number[] = [];
-  for (let i = 0; i + 1 < trailSamples.length; i++) trailPoints.push(...trailSamples[i]!.toArray(), ...trailSamples[i + 1]!.toArray());
-  const trailMaterial = lineMaterial({ color: new THREE.Color(0.6, 2.2, 1.1), width: 3, opacity: 0 });
-  const trail = fatSegments(trailPoints, trailMaterial);
-  group.add(pulse, trail);
+  const packet = createPacket(pulseCurve, labels, (local, out) => group.localToWorld(out.copy(local)));
+  group.add(packet.group);
 
   const atmosphere = createAtmosphere();
   group.add(atmosphere.group);
@@ -206,16 +199,16 @@ export function createMind(data: TurnData, board: Board, frameTexture: THREE.Tex
     railMaterial.opacity = S.mind.rail * 0.9;
     railMaterial.dashOffset = -time * 1.2;
 
-    const p = S.mind.pulse;
-    pulse.visible = p > 0.001 && p < 0.999;
-    pulseCurve.getPointAt(Math.min(0.999, p), pulse.position);
-    // The trail draws itself behind the pulse, then fades.
-    trail.visible = p > 0.001;
-    trail.geometry.instanceCount = Math.floor((trailSamples.length - 1) * p);
-    trailMaterial.opacity = (1 - THREE.MathUtils.smoothstep(p, 0.85, 1)) * 0.9;
+    packet.update(S.mind.pulse, time, pointScale);
 
     atmosphere.update(S.mind.space, time, pointScale);
   }
 
-  return { group, update, railCurve, plate: publish.plate };
+  /** The action packet's position in world coordinates. */
+  function packetHead(p: number, out: THREE.Vector3) {
+    pulseCurve.getPointAt(THREE.MathUtils.clamp(p, 0, 0.999), out);
+    return group.localToWorld(out);
+  }
+
+  return { group, update, railCurve, plate: publish.plate, packetHead };
 }

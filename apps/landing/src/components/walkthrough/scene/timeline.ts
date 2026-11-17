@@ -12,10 +12,10 @@ export function createState(hero: CameraPose) {
   return {
     cam: { ...hero },
     world: { dim: 0, ghost: 0, build: 0, cursor: 0, track: 0 },
-    pane: { on: 0, mix: 0, flash: 0, finder: 0 },
+    pane: { on: 0, mix: 0, flash: 0, finder: 0, impact: 0 },
     slab: { on: 0, peel: 0, travel: 0 },
     stack: { on: 0, pulse: 0 },
-    mind: { rail: 0, pulse: 0, space: 0 },
+    mind: { rail: 0, pulse: 0, space: 0, follow: 0 },
     frame: { scan: 1, scanOn: 0, dim: 0, flash: 0, grid: 0, hudHole: 0 },
     boxes: { rise: 0, alpha: 0, labels: 0, track: 0 },
     stamp: { on: 0 },
@@ -127,19 +127,23 @@ export function buildTimeline(S: SceneState, P: Poses): gsap.core.Timeline {
   to(S.decide, 6.54, 0.14, { filter: 1, ease: "none" });
   to(S.decide, 6.7, 0.12, { pick: 1, ease: MOVE });
 
-  // 7 Act: the decision clears; the action pulse runs back to the glass with the camera
-  //   behind it and through into the village. The house hovers over three spots, its
-  //   footprint red, red, green; the click; it is built.
-  to(S.decide, 7, 0.06, { on: 0 });
-  to(S.card, 7.02, 0.06, { on: 0 });
-  to(S.mind, 7.02, 0.06, { rail: 0 });
-  to(S.mind, 7.02, 0.18, { pulse: 1, ease: "power2.in" });
+  // 7 Act: the decision clears; the chosen action flies back to the glass as a packet
+  //   with the camera on its tail, strikes the glass, and the camera follows it through
+  //   into the village. The house hovers over three spots, its footprint red, red,
+  //   green; the click; it is built.
+  to(S.decide, 7, 0.05, { on: 0 });
+  to(S.card, 7.01, 0.05, { on: 0 });
+  to(S.mind, 7.01, 0.05, { rail: 0 });
+  to(S.mind, 7.02, 0.14, { pulse: 1, ease: "power1.inOut" });
+  to(S.mind, 7, 0.04, { follow: 1 });
   cam(7, 0.1, "pulse", "power2.inOut");
-  cam(7.1, 0.1, "game", "power2.in");
+  to(S.mind, 7.11, 0.05, { follow: 0 });
+  cam(7.1, 0.07, "game", "power2.inOut");
+  to(S.pane, 7.155, 0.06, { impact: 1, ease: "power2.out" });
   to(S.slab, 7.06, 0.05, { on: 0 });
-  to(S.mind, 7.12, 0.08, { space: 0 });
-  to(S.world, 7.14, 0.14, { dim: 0 });
-  to(S.pane, 7.2, 0.06, { on: 0 });
+  to(S.mind, 7.14, 0.08, { space: 0 });
+  to(S.world, 7.16, 0.12, { dim: 0 });
+  to(S.pane, 7.205, 0.025, { on: 0 });
   cam(7.2, 0.18, "house", "power3.out");
   to(S.act, 7.3, 0.04, { on: 1 });
   to(S.act, 7.32, 0.08, { keys: 2, ease: "steps(2)" });

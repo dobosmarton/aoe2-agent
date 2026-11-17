@@ -283,6 +283,7 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
   let slowFrames = 0;
   const pose: CameraPose = { ...poses.hero };
   const ghostAt = new THREE.Vector3();
+  const followAt = new THREE.Vector3();
 
   const render = () => {
     renderer.info.reset();
@@ -322,6 +323,15 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
       pose.size *= 1 + hero * Math.sin(time * 0.11) * 0.03;
       pose.size *= 1 + 0.14 * (1 - intro);
       pose.el += 5 * (1 - intro);
+    }
+    // On the action packet's tail: the camera's target rides with it.
+    if (S.mind.follow > 0.001 && !debugPose) {
+      const w = S.mind.follow;
+      mind.packetHead(S.mind.pulse, followAt);
+      pose.tx += (followAt.x - pose.tx) * w;
+      pose.ty += (followAt.y - pose.ty) * w;
+      pose.tz += (followAt.z - pose.tz) * w;
+      pose.size += (7.5 * mindScale - pose.size) * w;
     }
     applyPose(camera, pose, width / height, fit);
 

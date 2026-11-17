@@ -26,6 +26,7 @@ export function createScreen(real: THREE.Texture, rendered: THREE.Texture, aspec
     uMix: { value: 0 },
     uOpacity: { value: 0 },
     uFlash: { value: 0 },
+    uImpact: { value: 0 },
     uTime: { value: 0 },
     uSize: { value: new THREE.Vector2(PANE_W, PANE_H) },
   };
@@ -41,7 +42,7 @@ export function createScreen(real: THREE.Texture, rendered: THREE.Texture, aspec
       `,
       fragmentShader: /* glsl */ `
         uniform sampler2D uReal, uRendered;
-        uniform float uMix, uOpacity, uFlash, uTime;
+        uniform float uMix, uOpacity, uFlash, uImpact, uTime;
         uniform vec2 uSize;
         varying vec2 vUv;
         void main() {
@@ -64,6 +65,11 @@ export function createScreen(real: THREE.Texture, rendered: THREE.Texture, aspec
           float band = abs(fract(vUv.x * 0.5 + vUv.y * 0.3 - uTime * 0.02) - 0.5);
           c += vec3(0.05) * (1.0 - smoothstep(0.0, 0.03, band));
           c = mix(c, vec3(1.0), uFlash);
+          // The action arriving: a ring spreading over the glass from its centre.
+          float r = length(p) / uSize.y;
+          float wave = uImpact * 0.75;
+          float ripple = exp(-pow((r - wave) * 28.0, 2.0)) * (1.0 - uImpact) * step(0.001, uImpact);
+          c += vec3(0.6, 2.2, 1.2) * ripple * 0.8;
           c += vec3(0.5, 0.85, 1.9) * rim;
           gl_FragColor = vec4(c, uOpacity * max(inside, rim));
           if (gl_FragColor.a < 0.003) discard;
@@ -80,7 +86,8 @@ export function createScreen(real: THREE.Texture, rendered: THREE.Texture, aspec
   const finder = fatSegments(brackets(PANE_W + 1.2, PANE_H + 1.2, 1.4, 0.05), finderMaterial);
   group.add(finder);
 
-  function update(s: { on: number; mix: number; flash: number; finder: number }, time: number) {
+  function update(s: { on: number; mix: number; flash: number; finder: number; impact: number }, time: number) {
+    uniforms.uImpact.value = s.impact;
     uniforms.uOpacity.value = s.on;
     uniforms.uMix.value = s.mix;
     // An exposure pulse, never a full white flash.
