@@ -314,6 +314,11 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
     if (!debugPose) {
       pose.az += hero * (Math.sin(time * 0.08) * 3 + pointer.sx * 3);
       pose.el += hero * pointer.sy * 1.5;
+      // Every other shot breathes a little and leans towards the pointer, so a held
+      // beat is never frozen.
+      const held = 1 - hero;
+      pose.az += held * (Math.sin(time * 0.13) * 0.7 + pointer.sx * (small ? 0 : 1.1));
+      pose.el += held * (Math.sin(time * 0.1 + 1.3) * 0.35 + pointer.sy * (small ? 0 : 0.5));
       pose.size *= 1 + hero * Math.sin(time * 0.11) * 0.03;
       pose.size *= 1 + 0.14 * (1 - intro);
       pose.el += 5 * (1 - intro);

@@ -45,7 +45,7 @@ export const CHAPTERS: Chapter[] = [
     title: "Find every entity",
     body: `A YOLO26n model trained on 65 classes boxes the units, buildings, animals and resources. On this frame it returns ${TURN_FACTS.boxes} boxes: ${TURN_FACTS.villagers} villagers, ${TURN_FACTS.trees} trees, ${TURN_FACTS.farms} farms, ${TURN_FACTS.houses} houses and the rest.`,
     doc: { slug: "detection/detector", label: "Entity detector" },
-    length: 1.5,
+    length: 1.75,
   },
   {
     id: "track",
@@ -77,7 +77,7 @@ export const CHAPTERS: Chapter[] = [
     title: "Pick one action",
     body: `The act loop filters the action catalog against the frame. Population is at its cap and no villager is idle, so <code>queue_villager</code> and the <code>assign_*</code> actions drop out. The TypeSafe policy picks <code>build_house</code>. The strategist runs on its own 25 s clock and only sets goals; the executor LLM wakes for alarms, handoffs and recovery.`,
     doc: { slug: "agent/decision-loops", label: "Decision loops" },
-    length: 2,
+    length: 2.2,
   },
   {
     id: "act",

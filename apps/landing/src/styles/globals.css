@@ -1072,6 +1072,10 @@
   transition: opacity 700ms ease;
 }
 
+.wt[data-mode="scene"] .wt-poster {
+  transform: var(--wt-poster, none);
+}
+
 .wt[data-ready] .wt-poster {
   opacity: 0;
 }

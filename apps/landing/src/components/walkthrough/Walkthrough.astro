@@ -169,8 +169,16 @@ const pad = (n: number) => String(n).padStart(2, "0");
   };
   const applySafe = () => {
     const safe = safeArea();
-    stage?.style.setProperty("--wt-cx", `${(safe.left + safe.right) / 2}px`);
+    const width = stage?.clientWidth ?? window.innerWidth;
+    const height = stage?.clientHeight ?? window.innerHeight;
+    const cx = (safe.left + safe.right) / 2;
+    const cy = (safe.top + safe.bottom) / 2;
+    stage?.style.setProperty("--wt-cx", `${cx}px`);
     stage?.style.setProperty("--wt-safe-bottom", `${safe.bottom}px`);
+    // The poster is the hero still, framed on the whole view; place and scale it the
+    // way the scene frames its first shot, so the crossfade does not jump.
+    const fit = Math.max(height / (safe.bottom - safe.top), (1.3 * height) / (safe.right - safe.left));
+    stage?.style.setProperty("--wt-poster", `translate(${cx - width / 2}px, ${cy - height / 2}px) scale(${1 / fit})`);
     scene?.setSafe(safe);
   };
 
