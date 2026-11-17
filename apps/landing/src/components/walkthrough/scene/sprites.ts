@@ -27,17 +27,61 @@ const GLSL_COLOR = /* glsl */ `
 `;
 
 /** The recorded frame's fog of war: lighting per ground point (see `fogUv`). */
-export type Fog = { map: THREE.Texture; frame: THREE.Vector3 };
+/** Shared ground uniforms: the recorded frame's fog of war, where the frame shows the
+ * map, drifting cloud shadows and how far the map has opened (the hero intro). */
+export type Fog = {
+  map: THREE.Texture;
+  /** (frame width, frame height, tile width) in px. */
+  frame: THREE.Vector3;
+  /** Top and bottom of the map area in the frame (resource bar and panel excluded), px. */
+  play: THREE.Vector2;
+  time: { value: number };
+  open: { value: number };
+};
 
-/** GLSL: frame UV of a ground point; uFrame = (width, height, tile width) in px. */
+export const fogUniforms = (fog: Fog) => ({
+  uFog: { value: fog.map },
+  uFrame: { value: fog.frame },
+  uPlay: { value: fog.play },
+  uTime: fog.time,
+  uOpen: fog.open,
+});
+
+/** GLSL for ground points: the fog of war, the map edge and cloud shadows. */
 export const FOG_GLSL = /* glsl */ `
   uniform sampler2D uFog;
   uniform vec3 uFrame;
+  uniform vec2 uPlay;
+  uniform float uTime, uOpen;
+  vec2 framePx(vec3 p) {
+    return vec2(uFrame.x * 0.5 + (p.x - p.z) * uFrame.z * 0.5, uFrame.y * 0.5 + (p.x + p.z) * uFrame.z * 0.25);
+  }
   float fogAt(vec3 p) {
-    vec2 s = vec2(uFrame.x * 0.5 + (p.x - p.z) * uFrame.z * 0.5, uFrame.y * 0.5 + (p.x + p.z) * uFrame.z * 0.25);
+    vec2 s = framePx(p);
     float lit = texture2D(uFog, vec2(s.x / uFrame.x, 1.0 - s.y / uFrame.y)).r;
     // Grass within 15% of the brightest counts as in full view.
     return max(pow(clamp(lit / 0.85, 0.0, 1.0), 1.4), 0.04);
+  }
+  float hash21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+  float vnoise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash21(i), hash21(i + vec2(1.0, 0.0)), f.x), mix(hash21(i + vec2(0.0, 1.0)), hash21(i + vec2(1.0, 1.0)), f.x), f.y);
+  }
+  // 1 inside the map, 0 past its edge. The edge is ragged, like the border of explored
+  // ground, and recedes as the map opens.
+  float mapEdge(vec3 p) {
+    vec2 s = framePx(p);
+    float e = min(min(s.x, uFrame.x - s.x), min(s.y - uPlay.x, uPlay.y - s.y)) / uFrame.z;
+    float n = vnoise(p.xz * 0.45) * 1.6 + vnoise(p.xz * 1.7 + 7.0) * 0.6;
+    return smoothstep(-0.5, 1.6, e + n - 1.1 + (1.0 - uOpen) * 5.0 * (n - 1.6));
+  }
+  // Slow cloud shadows drifting over the map.
+  float clouds(vec3 p) {
+    vec2 q = p.xz * 0.06 + uTime * vec2(0.016, 0.007);
+    float n = vnoise(q) * 0.65 + vnoise(q * 2.3 + 5.0) * 0.35;
+    return 1.0 - 0.17 * smoothstep(0.48, 0.78, n);
   }
 `;
 
@@ -71,8 +115,7 @@ export function createSpriteLayer(atlas: THREE.Texture, meta: SpriteMeta, worldP
     uAtlasSize: { value: new THREE.Vector2(meta.size[0], meta.size[1]) },
     uScale: { value: worldPerPixel },
     uLight: { value: 1 },
-    uFog: { value: fog.map },
-    uFrame: { value: fog.frame },
+    ...fogUniforms(fog),
   };
   const material = new THREE.ShaderMaterial({
     uniforms,
@@ -92,8 +135,10 @@ export function createSpriteLayer(atlas: THREE.Texture, meta: SpriteMeta, worldP
       varying float vRow;
       varying float vReveal;
       varying float vFog;
+      varying float vEdge;
       void main() {
-        vFog = fogAt(aAnchor);
+        vFog = fogAt(aAnchor) * clouds(aAnchor);
+        vEdge = mapEdge(aAnchor);
         // Sprite pixel of this corner, y down from the top of the sprite.
         vec2 px = vec2(position.x * aRect.z, (1.0 - position.y) * aRect.w);
         vec2 offset = vec2(px.x - aPivot.x, aPivot.y - px.y) * uScale;
@@ -117,11 +162,12 @@ export function createSpriteLayer(atlas: THREE.Texture, meta: SpriteMeta, worldP
       varying float vRow;
       varying float vReveal;
       varying float vFog;
+      varying float vEdge;
       void main() {
         if (vRow < 1.0 - vReveal) discard;
         vec4 c = texture2D(uAtlas, vUv);
-        if (c.a < 0.01) discard;
-        gl_FragColor = vec4(c.rgb * vTint.rgb * uLight * vFog, c.a * vTint.a);
+        if (c.a < 0.01 || vEdge < 0.01) discard;
+        gl_FragColor = vec4(c.rgb * vTint.rgb * uLight * vFog, c.a * vTint.a * vEdge);
         ${GLSL_COLOR}
       }
     `,

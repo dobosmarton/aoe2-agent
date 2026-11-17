@@ -51,6 +51,31 @@ const PANE_DISTANCE = 45;
 // camera fits that box into the safe area.
 const SUBJECT_ASPECT = 1.3;
 
+// The space around the map and the mind: deep blue-black with a soft glow behind the
+// subject, darker towards the corners. Grain in post (post.ts) keeps it from banding.
+function createBackdrop(): THREE.Texture {
+  const canvas = document.createElement("canvas");
+  canvas.width = 512;
+  canvas.height = 288;
+  const g = canvas.getContext("2d")!;
+  g.fillStyle = "#03060e";
+  g.fillRect(0, 0, 512, 288);
+  const glow = g.createRadialGradient(300, 120, 10, 300, 130, 320);
+  glow.addColorStop(0, "rgba(38, 70, 140, 0.55)");
+  glow.addColorStop(0.45, "rgba(22, 40, 92, 0.32)");
+  glow.addColorStop(1, "rgba(3, 6, 14, 0)");
+  g.fillStyle = glow;
+  g.fillRect(0, 0, 512, 288);
+  const low = g.createRadialGradient(90, 300, 10, 90, 300, 260);
+  low.addColorStop(0, "rgba(70, 30, 140, 0.16)");
+  low.addColorStop(1, "rgba(3, 6, 14, 0)");
+  g.fillStyle = low;
+  g.fillRect(0, 0, 512, 288);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
 function loadTexture(url: string): Promise<THREE.Texture> {
   return new Promise((resolve, reject) => new THREE.TextureLoader().load(url, resolve, undefined, reject));
 }
@@ -93,7 +118,7 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
   view.append(cssRenderer.domElement);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color("#0a1020");
+  scene.background = createBackdrop();
   const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 500);
 
   // ---- World ---------------------------------------------------------------------------
@@ -214,6 +239,8 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
   let fit = 1;
   let pointScale = 1;
   let safe: SafeArea | null = null;
+  // Full sharpness on desktop; phones and slow machines render at 1.5x.
+  let maxDpr = small ? 1.5 : 2;
   let centred = false;
   const frameSafe = () => {
     const s = !centred && safe ? safe : { left: 0, top: 0, right: width, bottom: height };
@@ -225,7 +252,7 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
   const resize = () => {
     width = Math.max(1, view.clientWidth);
     height = Math.max(1, view.clientHeight);
-    const dpr = Math.min(window.devicePixelRatio, 1.5);
+    const dpr = Math.min(window.devicePixelRatio, maxDpr);
     renderer.setPixelRatio(dpr);
     renderer.setSize(width, height, false);
     cssRenderer.setSize(width, height);
@@ -252,6 +279,7 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
   let frameId = 0;
   let debugPose: Partial<CameraPose> | null = null;
   const timer = new THREE.Timer();
+  let slowFrames = 0;
   const pose: CameraPose = { ...poses.hero };
   const ghostAt = new THREE.Vector3();
 
@@ -260,6 +288,14 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
     timer.update();
     const time = timer.getElapsed();
     const delta = timer.getDelta();
+    // Fall back to 1.5x if frames keep running long (a 2x frame costs about 1.8x).
+    if (maxDpr > 1.5) {
+      slowFrames = delta > 0.022 ? slowFrames + 1 : Math.max(0, slowFrames - 1);
+      if (slowFrames > 90) {
+        maxDpr = 1.5;
+        resize();
+      }
+    }
     // Lenis already smooths the wheel; this light damping only removes steps from
     // keyboard and scrollbar jumps. Frame-rate independent.
     current = current < 0 ? target : THREE.MathUtils.damp(current, target, 9, Math.min(delta, 0.1));
@@ -267,6 +303,8 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
     timeline.seek(Math.min(TIMELINE_LENGTH, Math.max(0, current)), false);
     (stage as DebugStage).wtProgress = current;
 
+    // On load the map opens out of the dark and the camera settles (expo out, 1.8 s).
+    const intro = 1 - Math.pow(2, -10 * Math.min(1, time / 1.8));
     // The hero drifts and follows the pointer; the effect fades out by chapter 1.
     const hero = THREE.MathUtils.clamp(1 - current, 0, 1) + THREE.MathUtils.clamp(current - 8.8, 0, 1);
     pointer.sx += (pointer.x - pointer.sx) * 0.05;
@@ -276,6 +314,8 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
       pose.az += hero * (Math.sin(time * 0.08) * 3 + pointer.sx * 3);
       pose.el += hero * pointer.sy * 1.5;
       pose.size *= 1 + hero * Math.sin(time * 0.11) * 0.03;
+      pose.size *= 1 + 0.14 * (1 - intro);
+      pose.el += 5 * (1 - intro);
     }
     applyPose(camera, pose, width / height, fit);
 
@@ -283,6 +323,7 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
     overlays.cursorAt(S.world.cursor, ghostAt);
     world.update(time, camera, {
       light: 1 - 0.78 * dim,
+      open: intro,
       ghost: S.world.ghost,
       ghostX: ghostAt.x,
       ghostZ: ghostAt.z,

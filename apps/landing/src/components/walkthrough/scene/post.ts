@@ -2,7 +2,9 @@ import * as THREE from "three";
 import {
   BloomEffect,
   EffectComposer,
+  BlendFunction,
   EffectPass,
+  NoiseEffect,
   RenderPass,
   SMAAEffect,
   SMAAPreset,
@@ -20,11 +22,16 @@ export function createPost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, ca
   const composer = new EffectComposer(renderer, { frameBufferType: THREE.HalfFloatType });
   composer.addPass(new RenderPass(scene, camera));
 
-  const tiltShift = new TiltShiftEffect({ focusArea: 0.56, feather: 0.34, offset: 0.04, resolutionScale: 0.5 });
-  const bloom = new BloomEffect({ intensity: 0.9, luminanceThreshold: 0.85, luminanceSmoothing: 0.2, mipmapBlur: true, radius: 0.7 });
-  const vignette = new VignetteEffect({ offset: 0.32, darkness: 0.5 });
+  // A gentle miniature: only the top and bottom bands of a wide shot soften.
+  const tiltShift = new TiltShiftEffect({ focusArea: 0.7, feather: 0.28, offset: 0.05, resolutionScale: 0.5 });
+  // Only colours pushed past 1 (the mind's lines and glows) bloom; sprites never do.
+  const bloom = new BloomEffect({ intensity: 0.9, luminanceThreshold: 1.0, luminanceSmoothing: 0.25, mipmapBlur: true, radius: 0.65 });
+  const vignette = new VignetteEffect({ offset: 0.42, darkness: 0.32 });
   const tone = new ToneMappingEffect({ mode: ToneMappingMode.NEUTRAL });
-  const effects = small ? [bloom, tone, vignette] : [tiltShift, bloom, tone, vignette];
+  // Fine grain against banding in the dark gradients.
+  const grain = new NoiseEffect({ blendFunction: BlendFunction.OVERLAY, premultiply: false });
+  grain.blendMode.opacity.value = 0.06;
+  const effects = small ? [bloom, tone, vignette, grain] : [tiltShift, bloom, tone, vignette, grain];
   composer.addPass(new EffectPass(camera, ...effects));
   composer.addPass(new EffectPass(camera, new SMAAEffect({ preset: SMAAPreset.HIGH })));
 

@@ -2,16 +2,13 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 
 import type { Layout } from "./layout";
-import { createSpriteLayer, FOG_GLSL, type SpriteMeta } from "./sprites";
+import { createSpriteLayer, FOG_GLSL, type Fog, fogUniforms, type SpriteMeta } from "./sprites";
 import { createVillagers } from "./villagers";
 
 // The world: the recorded frame rebuilt with the game's own art. Terrain uses the
 // game's grass, dirt, forest-floor and farm textures; buildings, trees, mines, animals
 // and villagers are AoE2:DE sprites (scripts/build_walkthrough_sprites.py) standing
 // where the detector found them. Villagers work and carry loads (villagers.ts).
-
-const SOIL_TOP = new THREE.Color("#5b4128");
-const SOIL_BOTTOM = new THREE.Color("#1d140c");
 
 const GLSL_COLOR = /* glsl */ `
   #include <tonemapping_fragment>
@@ -54,22 +51,31 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
   const group = new THREE.Group();
   group.name = "world";
   const worldPerPixel = Math.SQRT2 / layout.tw;
-  // Explored, fogged and unexplored ground darken as they do in the recorded frame.
-  const fog = { map: textures.visibility, frame: new THREE.Vector3(layout.W, layout.H, layout.tw) };
+  // Explored, fogged and unexplored ground darken as they do in the recorded frame; the
+  // map fades out past the frame's edges like unexplored ground.
+  const fog: Fog = {
+    map: textures.visibility,
+    frame: new THREE.Vector3(layout.W, layout.H, layout.tw),
+    play: new THREE.Vector2(layout.playTop, layout.playBottom),
+    time: { value: 0 },
+    open: { value: 1 },
+  };
 
-  // ---- Terrain: textured island --------------------------------------------------------
-  const [c0, c1, c2, c3] = layout.corners as [{ x: number; z: number }, { x: number; z: number }, { x: number; z: number }, { x: number; z: number }];
-  const SEG = 120;
-  const top = new THREE.PlaneGeometry(1, 1, SEG, SEG);
+  // ---- Terrain ---------------------------------------------------------------------------
+  // A grid laid out in frame pixels, reaching a few tiles past the frame so the ragged
+  // edge (FOG_GLSL mapEdge) has ground to fade.
+  const [c0, c1, , c3] = layout.corners as [{ x: number; z: number }, { x: number; z: number }, unknown, { x: number; z: number }];
+  const MARGIN = layout.tw * 3;
+  const SEG = 140;
+  const top = new THREE.PlaneGeometry(1, 1, SEG, Math.round(SEG * 0.6));
   const pos = top.getAttribute("position") as THREE.BufferAttribute;
-  const mask = new Float32Array(pos.count * 4);
+  const mask = new Float32Array(pos.count * 3);
   const buildings = layout.placements.filter((p) => p.kind === "building");
   const trees = layout.placements.filter((p) => p.kind === "tree");
   for (let i = 0; i < pos.count; i++) {
-    const s = pos.getX(i) + 0.5;
-    const t = 0.5 - pos.getY(i);
-    const x = c0.x + (c1.x - c0.x) * s + (c3.x - c0.x) * t;
-    const z = c0.z + (c1.z - c0.z) * s + (c3.z - c0.z) * t;
+    const px = -MARGIN + (pos.getX(i) + 0.5) * (layout.W + 2 * MARGIN);
+    const py = layout.playTop - MARGIN / 2 + (0.5 - pos.getY(i)) * (layout.playBottom - layout.playTop + MARGIN);
+    const { x, z } = layout.toGround(px, py);
     pos.setXYZ(i, x, 0, z);
     let dirt = 0;
     for (const b of buildings) {
@@ -82,10 +88,9 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
       forest = Math.max(forest, 1 - THREE.MathUtils.smoothstep(d, 0.5, 1.8));
     }
     const patchy = THREE.MathUtils.smoothstep(noise(x * 0.09 + 4, z * 0.09), 0.45, 0.75);
-    const edge = Math.min(s, 1 - s, t, 1 - t);
-    mask.set([dirt * (0.7 + 0.3 * noise(x * 0.8, z * 0.8)), forest, patchy, THREE.MathUtils.smoothstep(edge, 0, 0.05)], i * 4);
+    mask.set([dirt * (0.7 + 0.3 * noise(x * 0.8, z * 0.8)), forest, patchy], i * 3);
   }
-  top.setAttribute("aMask", new THREE.BufferAttribute(mask, 4));
+  top.setAttribute("aMask", new THREE.BufferAttribute(mask, 3));
 
   for (const tex of [textures.grass, textures.patchy, textures.dirt, textures.forest, textures.farm]) {
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
@@ -99,8 +104,7 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
     uDirt: { value: textures.dirt },
     uForest: { value: textures.forest },
     uLight: { value: 1 },
-    uFog: { value: fog.map },
-    uFrame: { value: fog.frame },
+    ...fogUniforms(fog),
   };
   // The game lays its terrain textures out on screen axes; one texture spans about ten
   // tiles across at the recorded zoom.
@@ -109,34 +113,37 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
     top,
     new THREE.ShaderMaterial({
       uniforms: terrainUniforms,
+      transparent: true,
       vertexShader: /* glsl */ `
         ${TERRAIN_UV}
-        ${FOG_GLSL}
-        attribute vec4 aMask;
-        varying vec4 vMask;
+        attribute vec3 aMask;
+        varying vec3 vMask;
         varying vec2 vUv;
-        varying float vFog;
+        varying vec3 vPos;
         void main() {
           vMask = aMask;
-          vFog = fogAt(position);
+          vPos = position;
           vUv = terrainUv(position);
           gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         }
       `,
       fragmentShader: /* glsl */ `
+        ${FOG_GLSL}
         uniform sampler2D uGrass, uPatchy, uDirt, uForest;
         uniform float uLight;
-        varying vec4 vMask;
+        varying vec3 vMask;
         varying vec2 vUv;
-        varying float vFog;
+        varying vec3 vPos;
         void main() {
+          float edge = mapEdge(vPos);
+          if (edge < 0.002) discard;
           vec3 c = texture2D(uGrass, vUv).rgb;
           c = mix(c, texture2D(uPatchy, vUv * 0.9).rgb, vMask.z * 0.8);
           c = mix(c, texture2D(uForest, vUv * 1.3).rgb, vMask.y);
           c = mix(c, texture2D(uDirt, vUv * 1.1).rgb, vMask.x);
-          // The rim fades to the black of unexplored map.
-          c *= mix(0.15, 1.0, vMask.w) * uLight * vFog;
-          gl_FragColor = vec4(c, 1.0);
+          // Fog of war, cloud shadows, and the edge darkening into unexplored ground.
+          c *= uLight * fogAt(vPos) * clouds(vPos) * mix(0.35, 1.0, edge);
+          gl_FragColor = vec4(c, edge);
           ${GLSL_COLOR}
         }
       `,
@@ -144,29 +151,9 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
   );
   group.add(ground);
 
-  // Soil walls under the rim, so the island reads as a cut-out diorama.
-  const DEPTH = 2.2;
-  const wallParts: THREE.BufferGeometry[] = [];
-  const ring = [c0, c1, c2, c3, c0];
-  for (let k = 0; k < 4; k++) {
-    const a = ring[k]!;
-    const b = ring[k + 1]!;
-    const g = new THREE.BufferGeometry();
-    g.setAttribute(
-      "position",
-      new THREE.BufferAttribute(new Float32Array([a.x, 0, a.z, b.x, 0, b.z, b.x, -DEPTH, b.z, a.x, 0, a.z, b.x, -DEPTH, b.z, a.x, -DEPTH, a.z]), 3),
-    );
-    const cols = new Float32Array(18);
-    [SOIL_TOP, SOIL_TOP, SOIL_BOTTOM, SOIL_TOP, SOIL_BOTTOM, SOIL_BOTTOM].forEach((c, j) => cols.set([c.r, c.g, c.b], j * 3));
-    g.setAttribute("color", new THREE.BufferAttribute(cols, 3));
-    wallParts.push(g);
-  }
-  const wallMaterial = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
-  group.add(new THREE.Mesh(mergeGeometries(wallParts)!, wallMaterial));
-
   // ---- Farms: the game's farm texture on 3x3-tile squares ------------------------------
   const farmMaterial = new THREE.ShaderMaterial({
-    uniforms: { uFarm: { value: textures.farm }, uLight: terrainUniforms.uLight, uFog: terrainUniforms.uFog, uFrame: terrainUniforms.uFrame },
+    uniforms: { uFarm: { value: textures.farm }, uLight: terrainUniforms.uLight, ...fogUniforms(fog) },
     vertexShader: /* glsl */ `
       ${TERRAIN_UV}
       ${FOG_GLSL}
@@ -174,7 +161,7 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
       varying float vFog;
       void main() {
         vUv = terrainUv(position) * 2.5;
-        vFog = fogAt(position);
+        vFog = fogAt(position) * clouds(position);
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
       }
     `,
@@ -257,10 +244,11 @@ export function createWorld(layout: Layout, textures: WorldTextures, meta: Sprit
   function update(
     time: number,
     camera: THREE.Camera,
-    s: { light: number; ghost: number; ghostX: number; ghostZ: number; ghostOk: boolean; build: number },
+    s: { light: number; open: number; ghost: number; ghostX: number; ghostZ: number; ghostOk: boolean; build: number },
   ) {
     terrainUniforms.uLight.value = s.light;
-    wallMaterial.color.setScalar(s.light);
+    fog.time.value = time;
+    fog.open.value = s.open;
 
     villagers.update(time);
     for (const a of animals) a.handle.frame = Math.floor(time * 8 + a.phase * 5);
