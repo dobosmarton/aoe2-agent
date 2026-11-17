@@ -15,7 +15,8 @@ export function createState(hero: CameraPose) {
     pane: { on: 0, mix: 0, flash: 0, finder: 0, impact: 0 },
     slab: { on: 0, peel: 0, travel: 0 },
     stack: { on: 0, pulse: 0 },
-    mind: { rail: 0, pulse: 0, space: 0, follow: 0 },
+    mind: { rail: 0, space: 0 },
+    action: { on: 0, rail: 0, travel: 0, keys: 0 },
     frame: { scan: 1, scanOn: 0, dim: 0, flash: 0, grid: 0, hudHole: 0 },
     boxes: { rise: 0, alpha: 0, labels: 0, track: 0 },
     stamp: { on: 0 },
@@ -34,7 +35,7 @@ export type SceneState = ReturnType<typeof createState>;
 export const TIMELINE_LENGTH = 9;
 
 export type Poses = Record<
-  "hero" | "game" | "capture" | "detect" | "track" | "hud" | "publish" | "decide" | "pulse" | "house" | "verify",
+  "hero" | "game" | "capture" | "detect" | "track" | "hud" | "publish" | "decide" | "loop" | "house" | "verify",
   CameraPose
 >;
 
@@ -127,35 +128,40 @@ export function buildTimeline(S: SceneState, P: Poses): gsap.core.Timeline {
   to(S.decide, 6.54, 0.14, { filter: 1, ease: "none" });
   to(S.decide, 6.7, 0.12, { pick: 1, ease: MOVE });
 
-  // 7 Act: the decision clears; the chosen action flies back to the glass as a packet
-  //   with the camera on its tail, strikes the glass, and the camera follows it through
-  //   into the village. The house hovers over three spots, its footprint red, red,
-  //   green; the click; it is built.
-  to(S.decide, 7, 0.05, { on: 0 });
-  to(S.card, 7.01, 0.05, { on: 0 });
-  to(S.mind, 7.01, 0.05, { rail: 0 });
-  to(S.mind, 7.02, 0.14, { pulse: 1, ease: "power1.inOut" });
-  to(S.mind, 7, 0.04, { follow: 1 });
-  cam(7, 0.1, "pulse", "power2.inOut");
-  to(S.mind, 7.11, 0.05, { follow: 0 });
-  cam(7.1, 0.07, "game", "power2.inOut");
-  to(S.pane, 7.155, 0.06, { impact: 1, ease: "power2.out" });
-  to(S.slab, 7.06, 0.05, { on: 0 });
-  to(S.mind, 7.14, 0.08, { space: 0 });
-  to(S.world, 7.16, 0.12, { dim: 0 });
-  to(S.pane, 7.205, 0.025, { on: 0 });
-  cam(7.2, 0.18, "house", "power3.out");
-  to(S.act, 7.3, 0.04, { on: 1 });
-  to(S.act, 7.32, 0.08, { keys: 2, ease: "steps(2)" });
-  to(S.world, 7.38, 0.04, { ghost: 1 });
-  to(S.world, 7.38, 0.08, { cursor: 1, ease: "power2.out" });
-  to(S.world, 7.5, 0.08, { cursor: 2, ease: "power2.inOut" });
-  to(S.world, 7.62, 0.08, { cursor: 3, ease: "power2.inOut" });
-  to(S.act, 7.72, 0.08, { click: 1, ease: "power2.out" });
-  to(S.act, 7.72, 0.02, { placed: 1 });
-  to(S.world, 7.73, 0.04, { ghost: 0 });
-  to(S.world, 7.74, 0.2, { build: 5, ease: "none" });
-  to(S.act, 7.84, 0.05, { keys: 3, ease: "none" });
+  // 7 Act: the picked tile leaves the policy ring as an action card. The camera pulls
+  //   back to show the whole loop at once (glass, frame, Perception card, rings) while
+  //   the card rides the return rail under the pipeline to the glass; it lands as the
+  //   first key presses and the camera follows it through into the village. The house
+  //   hovers over three spots, its footprint red, red, green; the click; it is built.
+  cam(7, 0.11, "loop");
+  to(S.decide, 7, 0.06, { catalog: 0, on: 0.45 });
+  to(S.action, 7, 0.04, { on: 1, ease: ENTER });
+  to(S.action, 7.03, 0.06, { rail: 1, ease: "power1.inOut" });
+  to(S.action, 7.05, 0.14, { travel: 1, ease: "none" });
+  cam(7.14, 0.07, "game");
+  to(S.pane, 7.18, 0.06, { impact: 1, ease: "power2.out" });
+  to(S.action, 7.185, 0.03, { keys: 1, ease: ENTER });
+  to(S.act, 7.19, 0.02, { on: 1 });
+  to(S.act, 7.19, 0.04, { keys: 2, ease: "steps(2)" });
+  to(S.decide, 7.18, 0.04, { on: 0 });
+  to(S.card, 7.18, 0.04, { on: 0 });
+  to(S.mind, 7.18, 0.04, { rail: 0 });
+  to(S.action, 7.19, 0.04, { rail: 0 });
+  to(S.slab, 7.18, 0.04, { on: 0 });
+  to(S.mind, 7.19, 0.06, { space: 0 });
+  to(S.world, 7.21, 0.12, { dim: 0 });
+  to(S.action, 7.23, 0.03, { keys: 0, on: 0 });
+  to(S.pane, 7.25, 0.025, { on: 0 });
+  cam(7.23, 0.18, "house", "power3.out");
+  to(S.world, 7.42, 0.04, { ghost: 1 });
+  to(S.world, 7.42, 0.08, { cursor: 1, ease: "power2.out" });
+  to(S.world, 7.54, 0.08, { cursor: 2, ease: "power2.inOut" });
+  to(S.world, 7.66, 0.08, { cursor: 3, ease: "power2.inOut" });
+  to(S.act, 7.76, 0.08, { click: 1, ease: "power2.out" });
+  to(S.act, 7.76, 0.02, { placed: 1 });
+  to(S.world, 7.77, 0.04, { ghost: 0 });
+  to(S.world, 7.78, 0.18, { build: 5, ease: "none" });
+  to(S.act, 7.88, 0.05, { keys: 3, ease: "none" });
 
   // 8 Verify: the ledger settles beside the new house, one line at a time; then back
   //   to the hero shot.

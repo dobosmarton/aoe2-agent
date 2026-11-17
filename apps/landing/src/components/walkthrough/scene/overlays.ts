@@ -188,13 +188,17 @@ export function createOverlays(data: TurnData, board: Board, decision: THREE.Gro
 
     // Decide.
     const on = S.decide.on;
-    roles.forEach((role, i) => (role.opacity = THREE.MathUtils.clamp(on * 1.5 - i * 0.2, 0, 1) * (i === 2 ? 0.6 : 1)));
-    goals.opacity = on * THREE.MathUtils.clamp(S.decide.catalog * 1.5 - 0.3, 0, 1);
+    // The roles' names step back while the action returns to the game.
+    const away = 1 - S.action.on;
+    roles.forEach((role, i) => (role.opacity = THREE.MathUtils.clamp(on * 1.5 - i * 0.2, 0, 1) * (i === 2 ? 0.6 : 1) * away));
+    goals.opacity = on * THREE.MathUtils.clamp(S.decide.catalog * 1.5 - 0.3, 0, 1) * away;
     for (const [i, c] of catalog.entries()) {
       const appear = THREE.MathUtils.clamp(S.decide.catalog * 2.2 - i * 0.14, 0, 1);
       const out = !c.ok ? THREE.MathUtils.clamp(S.decide.filter * 1.6 - i * 0.08, 0, 1) : 0;
       const dim = c.pick ? 1 : 1 - S.decide.pick * 0.55;
-      c.label.opacity = on * appear * (1 - out * 0.6) * dim;
+      // The picked tile hands over to the action card when Act starts.
+      const handover = c.pick ? 1 - S.action.on : 1;
+      c.label.opacity = on * (c.pick ? Math.max(appear, S.decide.pick) : appear) * (1 - out * 0.6) * dim * handover;
       c.label.shift[0] = (1 - ease(appear)) * -16 + ease(out) * 28;
       c.element.classList.toggle("is-filtered", out > 0.5);
       // The pick rises into the policy ring.

@@ -13,32 +13,32 @@ const GLSL_COLOR = /* glsl */ `
   #include <colorspace_fragment>
 `;
 
-const ACCENT = "#7cc4ff";
-const MUTED = "#8a9ab3";
-const INK = "#e6edf7";
+export const ACCENT = "#7cc4ff";
+export const MUTED = "#8a9ab3";
+export const INK = "#e6edf7";
 const GOLD = "#ffd75a";
 
-function canvas(width: number, height: number) {
+export function canvas(width: number, height: number) {
   const c = document.createElement("canvas");
   c.width = width;
   c.height = height;
   return [c, c.getContext("2d")!] as const;
 }
 
-function texture(c: HTMLCanvasElement) {
+export function texture(c: HTMLCanvasElement) {
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 8;
   return t;
 }
 
-function roundRect(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+export function roundRect(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   g.beginPath();
   g.roundRect(x, y, w, h, r);
 }
 
 /** A plane that shows a canvas texture, fades and never writes depth. */
-function sheet(map: THREE.Texture, w: number, h: number) {
+export function sheet(map: THREE.Texture, w: number, h: number) {
   const uniforms = { uMap: { value: map }, uOpacity: { value: 0 }, uGlow: { value: 1 } };
   const mesh = new THREE.Mesh(
     new THREE.PlaneGeometry(w, h),

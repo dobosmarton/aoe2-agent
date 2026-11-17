@@ -65,11 +65,10 @@ export function createScreen(real: THREE.Texture, rendered: THREE.Texture, aspec
           float band = abs(fract(vUv.x * 0.5 + vUv.y * 0.3 - uTime * 0.02) - 0.5);
           c += vec3(0.05) * (1.0 - smoothstep(0.0, 0.03, band));
           c = mix(c, vec3(1.0), uFlash);
-          // The action arriving: a ring spreading over the glass from its centre.
-          float r = length(p) / uSize.y;
-          float wave = uImpact * 0.75;
-          float ripple = exp(-pow((r - wave) * 28.0, 2.0)) * (1.0 - uImpact) * step(0.001, uImpact);
-          c += vec3(0.6, 2.2, 1.2) * ripple * 0.8;
+          // The action arriving: the rim flares and a faint blue wash fades off the glass.
+          float hit = (1.0 - uImpact) * step(0.001, uImpact);
+          c += vec3(0.25, 0.45, 1.0) * hit * 0.18;
+          rim *= 1.0 + 3.0 * hit;
           c += vec3(0.5, 0.85, 1.9) * rim;
           gl_FragColor = vec4(c, uOpacity * max(inside, rim));
           if (gl_FragColor.a < 0.003) discard;

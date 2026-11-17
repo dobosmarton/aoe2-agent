@@ -39,7 +39,15 @@ type MountOptions = {
 
 type DebugStage = HTMLElement & {
   wtProgress?: number;
-  wtDebug?: { setPose(pose: Partial<CameraPose> | null): void; setCentred(on: boolean): void; info(): unknown };
+  wtDebug?: {
+    setPose(pose: Partial<CameraPose> | null): void;
+    setCentred(on: boolean): void;
+    info(): unknown;
+    /** A pose given in the mind's local frame, as the poses are written. */
+    mindPose(local: number[], dAz: number, dEl: number, size: number): void;
+    /** Screen positions (CSS px) of points in the mind's local frame. */
+    projectMind(points: number[][]): number[][];
+  };
 };
 
 // The game camera: 45 degrees round, 30 degrees up, so tiles draw as 2:1 diamonds.
@@ -220,8 +228,9 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
     // The frame and the plate the sheets seal into.
     publish: inMind(MIND.slab.clone().lerp(MIND.plate, 0.55).add(new THREE.Vector3(0, 0.5, 1)), 16, -5, 8.5),
     decide: inMind(MIND.decision.clone().add(new THREE.Vector3(-1.2, -1.5, 0)), 4, 0, 7),
-    // Wide over the mind, as the pulse heads back to the glass.
-    pulse: inMind(new THREE.Vector3(28, 2, 4), 8, 6, 17),
+    // The whole loop at once: the glass, the frame, the Perception card and the rings,
+    // with the return rail under them.
+    loop: inMind(new THREE.Vector3(28, -1.8, 3), 8, 6, 27),
     house: { tx: spotsCentre.x, ty: 0.6, tz: spotsCentre.z, az: 48, el: 31, size: Math.max(6, spotsReach * 1.3), fov: 26 },
     verify: { tx: green.x, ty: 1, tz: green.z, az: 52, el: 32, size: 6.5, fov: 26 },
   };
@@ -283,7 +292,6 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
   let slowFrames = 0;
   const pose: CameraPose = { ...poses.hero };
   const ghostAt = new THREE.Vector3();
-  const followAt = new THREE.Vector3();
 
   const render = () => {
     renderer.info.reset();
@@ -324,15 +332,6 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
       pose.size *= 1 + 0.14 * (1 - intro);
       pose.el += 5 * (1 - intro);
     }
-    // On the action packet's tail: the camera's target rides with it.
-    if (S.mind.follow > 0.001 && !debugPose) {
-      const w = S.mind.follow;
-      mind.packetHead(S.mind.pulse, followAt);
-      pose.tx += (followAt.x - pose.tx) * w;
-      pose.ty += (followAt.y - pose.ty) * w;
-      pose.tz += (followAt.z - pose.tz) * w;
-      pose.size += (7.5 * mindScale - pose.size) * w;
-    }
     applyPose(camera, pose, width / height, fit);
 
     const dim = S.world.dim;
@@ -353,7 +352,7 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
     flow.update(S, pointScale);
     rings.update(S, time);
     overlays.update(S);
-    mindRoot.visible = S.pane.on > 0.002 || S.slab.on > 0.01 || S.card.on > 0.01 || S.decide.on > 0.01 || S.mind.pulse > 0.001 || S.mind.space > 0.01;
+    mindRoot.visible = S.pane.on > 0.002 || S.slab.on > 0.01 || S.card.on > 0.01 || S.decide.on > 0.01 || S.action.on > 0.001 || S.mind.space > 0.01;
 
     stage.style.setProperty("--wt-stamp", String(S.stamp.on));
     stage.style.setProperty("--wt-input", String(S.act.on));
@@ -408,6 +407,15 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
     setCentred(on) {
       centred = on;
       frameSafe();
+    },
+    mindPose(local, dAz, dEl, size) {
+      debugPose = inMind(new THREE.Vector3(local[0], local[1], local[2]), dAz, dEl, size);
+    },
+    projectMind(points) {
+      return points.map((p) => {
+        const v = toWorld(new THREE.Vector3(p[0], p[1], p[2])).project(camera);
+        return [Math.round((v.x * 0.5 + 0.5) * width), Math.round((-v.y * 0.5 + 0.5) * height)];
+      });
     },
     info() {
       return { calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, mindScale, gameSize, poses, followed: followed.map((t) => [t.anchor.x, t.anchor.z, t.walking]), villagers: world.villagerCheck() };

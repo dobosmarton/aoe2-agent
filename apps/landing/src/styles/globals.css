@@ -1660,28 +1660,33 @@
   font-size: 11.5px;
 }
 
-/* Act: the chosen action on its way to the game. */
-.wt3d-packet {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 3px 9px 3px 7px;
-  border: 1px solid rgb(110 255 170 / 0.55);
-  border-radius: 999px;
-  background: rgb(3 14 10 / 0.88);
-  box-shadow: 0 0 22px -4px rgb(80 255 150 / 0.55);
-  color: #d8ffe8;
-  font-size: 12px;
-}
-
-.wt3d-packet span {
-  padding: 0 5px;
-  border-radius: 999px;
-  background: rgb(110 255 170 / 0.2);
-  color: #8dffb9;
-  font-size: 10px;
+/* Act: the rails' names, and the first key presses landing on the glass. */
+.wt3d-rail {
+  font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  color: #8fb8ea;
+}
+
+.wt3d-keycap {
+  display: grid;
+  place-items: center;
+  min-width: 2.2rem;
+  height: 2.2rem;
+  border: 1px solid rgb(124 196 255 / 0.8);
+  border-bottom-width: 3px;
+  border-radius: 0.35rem;
+  background: rgb(2 6 16 / 0.88);
+  box-shadow: 0 0 24px -6px rgb(59 130 246 / 0.7);
+  font-size: 14px;
+  color: #e6f0ff;
+  transition: translate 90ms, border-bottom-width 90ms;
+}
+
+.wt3d-keycap.is-down {
+  border-bottom-width: 1px;
+  translate: 0 2px;
+  background: rgb(37 99 235 / 0.35);
 }
 
 /* Detect: the name of each plate in the detector stack. */

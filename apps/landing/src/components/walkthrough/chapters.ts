@@ -85,7 +85,7 @@ export const CHAPTERS: Chapter[] = [
     title: "Place the house",
     body: `Under the input lock the actor checks the choice against the newest frame, selects a builder and presses <kbd>q</kbd> <kbd>q</kbd>. With the house on the cursor it hovers candidate spots and reads the game's own placement preview, which turns red where the ground is taken. It clicks the first clear spot and presses <kbd>h</kbd>.`,
     doc: { slug: "agent/actions-and-execution", hash: "building-placement", label: "Building placement" },
-    length: 2.2,
+    length: 2.5,
   },
   {
     id: "verify",

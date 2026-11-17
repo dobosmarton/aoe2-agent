@@ -1,9 +1,10 @@
 import * as THREE from "three";
 
 import type { Board } from "./board";
-import type { Labels } from "./labels";
 import { fatSegments, lineMaterial } from "./lines";
-import { createPacket } from "./packet";
+import { createAction } from "./action";
+import { RING_X } from "./flow";
+import { el, type Labels } from "./labels";
 import { createPublish } from "./publish";
 import { createStack } from "./stack";
 import type { SceneState } from "./timeline";
@@ -165,15 +166,23 @@ export function createMind(data: TurnData, board: Board, frameTexture: THREE.Tex
   const rail = fatSegments(railPoints, railMaterial);
   group.add(rail);
 
-  // ---- Action pulse: from the policy ring back through the pane ------------------------
-  const pulseCurve = new THREE.CatmullRomCurve3([
-    MIND.decision.clone().add(new THREE.Vector3(-3.6, 0, 0)),
-    new THREE.Vector3(MIND.plate.x, 7, 9),
-    new THREE.Vector3(14, 5, 6),
-    new THREE.Vector3(0, 0, 0.4),
+  const railLabel = labels.add(el("wt3d-rail", "FramePipe →"), {
+    at: (out) => group.localToWorld(railCurve.getPointAt(0.5, out)),
+    offset: [0, -12],
+    align: [0.5, 1],
+  });
+
+  // ---- The action: from the policy ring back to the glass, under the pipeline ---------
+  const actionCurve = new THREE.CatmullRomCurve3([
+    MIND.decision.clone().add(new THREE.Vector3(RING_X.policy, -1.55, 0)),
+    MIND.decision.clone().add(new THREE.Vector3(RING_X.policy - 4, -6.2, 5)),
+    new THREE.Vector3(MIND.plate.x - 4, -6.8, 7),
+    new THREE.Vector3(MIND.slab.x - 8, -6.4, 6),
+    new THREE.Vector3(5, -3.2, 2.5),
+    new THREE.Vector3(0, 0, 0.35),
   ]);
-  const packet = createPacket(pulseCurve, labels, (local, out) => group.localToWorld(out.copy(local)));
-  group.add(packet.group);
+  const action = createAction(actionCurve, labels, mono, (local, out) => group.localToWorld(out.copy(local)));
+  group.add(action.group);
 
   const atmosphere = createAtmosphere();
   group.add(atmosphere.group);
@@ -199,16 +208,11 @@ export function createMind(data: TurnData, board: Board, frameTexture: THREE.Tex
     railMaterial.opacity = S.mind.rail * 0.9;
     railMaterial.dashOffset = -time * 1.2;
 
-    packet.update(S.mind.pulse, time, pointScale);
+    railLabel.opacity = S.mind.rail * S.action.on;
+    action.update(S.action, time);
 
     atmosphere.update(S.mind.space, time, pointScale);
   }
 
-  /** The action packet's position in world coordinates. */
-  function packetHead(p: number, out: THREE.Vector3) {
-    pulseCurve.getPointAt(THREE.MathUtils.clamp(p, 0, 0.999), out);
-    return group.localToWorld(out);
-  }
-
-  return { group, update, railCurve, plate: publish.plate, packetHead };
+  return { group, update, railCurve, plate: publish.plate };
 }
