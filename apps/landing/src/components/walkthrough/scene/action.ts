@@ -73,11 +73,16 @@ export function createAction(curve: THREE.Curve<THREE.Vector3>, labels: Labels, 
   card.mesh.renderOrder = 9;
   group.add(card.mesh);
 
-  // Where the rail meets the glass, the first two key presses land.
+  // Where the rail meets the glass, the first two key presses land, with what each one
+  // does in the game: with a villager selected, q opens the economic build menu and the
+  // second q picks the house.
   const landing = samples[SEGMENTS]!.clone();
-  const keycaps = [-1, 1].map((side) =>
-    labels.add(el("wt3d-keycap", "q"), { at: (out) => toWorld(landing, out), offset: [side * 22, 0], align: [0.5, 0.5] }),
+  const keysElement = el(
+    "wt3d-keyseq",
+    `<span class="wt3d-keyseq-step"><kbd>q</kbd>build menu</span><span class="wt3d-keyseq-arrow">→</span><span class="wt3d-keyseq-step"><kbd>q</kbd>house</span>`,
   );
+  const steps = [...keysElement.querySelectorAll<HTMLElement>(".wt3d-keyseq-step")];
+  const keys = labels.add(keysElement, { at: (out) => toWorld(landing, out), align: [0.5, 0.5] });
   const railLabel = labels.add(el("wt3d-rail", "← input"), {
     at: (out) => toWorld(curve.getPointAt(0.42, out), out),
     offset: [0, 12],
@@ -104,12 +109,10 @@ export function createAction(curve: THREE.Curve<THREE.Vector3>, labels: Labels, 
     card.uniforms.uGlow.value = 1 + 0.5 * (1 - THREE.MathUtils.smoothstep(t, 0, 0.15));
     card.mesh.visible = s.on > 0.002 && arrive < 0.999;
 
-    keycaps.forEach((k, i) => {
-      const pop = THREE.MathUtils.clamp(s.keys * 2 - i * 0.5, 0, 1);
-      k.opacity = pop;
-      k.shift[1] = (1 - pop) * 8;
-      k.element.classList.toggle("is-down", pop > 0.6);
-    });
+    // The chip appears, then each key goes down in turn.
+    keys.opacity = Math.min(1, s.keys * 3);
+    keys.shift[1] = (1 - Math.min(1, s.keys * 2)) * 8;
+    steps.forEach((step, i) => step.classList.toggle("is-down", s.keys > 0.45 + i * 0.35));
   }
 
   return { group, update };

@@ -140,7 +140,7 @@ export function buildTimeline(S: SceneState, P: Poses): gsap.core.Timeline {
   to(S.action, 7.05, 0.14, { travel: 1, ease: "none" });
   cam(7.14, 0.07, "game");
   to(S.pane, 7.18, 0.06, { impact: 1, ease: "power2.out" });
-  to(S.action, 7.185, 0.03, { keys: 1, ease: ENTER });
+  to(S.action, 7.18, 0.05, { keys: 1, ease: "none" });
   to(S.act, 7.19, 0.02, { on: 1 });
   to(S.act, 7.19, 0.04, { keys: 2, ease: "steps(2)" });
   to(S.decide, 7.18, 0.04, { on: 0 });
@@ -150,9 +150,9 @@ export function buildTimeline(S: SceneState, P: Poses): gsap.core.Timeline {
   to(S.slab, 7.18, 0.04, { on: 0 });
   to(S.mind, 7.19, 0.06, { space: 0 });
   to(S.world, 7.21, 0.12, { dim: 0 });
-  to(S.action, 7.23, 0.03, { keys: 0, on: 0 });
-  to(S.pane, 7.25, 0.025, { on: 0 });
-  cam(7.23, 0.18, "house", "power3.out");
+  to(S.action, 7.245, 0.02, { keys: 0, on: 0 });
+  to(S.pane, 7.26, 0.025, { on: 0 });
+  cam(7.24, 0.18, "house", "power3.out");
   to(S.world, 7.42, 0.04, { ghost: 1 });
   to(S.world, 7.42, 0.08, { cursor: 1, ease: "power2.out" });
   to(S.world, 7.54, 0.08, { cursor: 2, ease: "power2.inOut" });
