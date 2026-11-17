@@ -29,12 +29,28 @@ export function createOverlays(data: TurnData, board: Board, decision: THREE.Gro
   const conf = (e: TurnEntity) => (e.conf == null ? "" : e.conf.toFixed(2));
 
   // ---- Detect: class labels on a few boxes, and the count --------------------------------
+  // Each class is labelled on a detection that stands clear of boxes of other classes:
+  // a stone pile at the edge of a forest shares the forest's colour, and a label there
+  // would seem to name the trees.
+  const gap = (a: TurnEntity, b: TurnEntity) => {
+    const dx = Math.max(0, Math.max(a.x, b.x) - Math.min(a.x + a.w, b.x + b.w));
+    const dy = Math.max(0, Math.max(a.y, b.y) - Math.min(a.y + a.h, b.y + b.h));
+    return Math.hypot(dx, dy * (data.frame.height / data.frame.width));
+  };
+  const clearance = (e: TurnEntity) => Math.min(1, ...data.entities.filter((o) => o.cls !== e.cls).map((o) => gap(e, o)));
   const used = new Set<string>();
+  const chosen: TurnEntity[] = [];
   // Phones show the first few only (`is-minor` hides the rest there).
   const entityLabels = LABEL_CLASSES.flatMap((cls, i) => {
-    const entity = data.entities.find((e) => e.cls === cls && !used.has(e.id));
+    const candidates = data.entities.filter((e) => e.cls === cls && !used.has(e.id));
+    // The most confident of those clear of other classes and of the labels already
+    // placed; the clearest if none is.
+    const apart = (e: TurnEntity) => chosen.every((c) => gap(e, c) > 0.06);
+    const score = (e: TurnEntity) => (clearance(e) > 0.006 && apart(e) ? 1 + (e.conf ?? 0) : clearance(e));
+    const entity = candidates.sort((a, b) => score(b) - score(a))[0];
     if (!entity) return [];
     used.add(entity.id);
+    chosen.push(entity);
     const label = labels.add(el(`wt3d-det wt3d-cat-${entity.cat}${i >= 5 ? " is-minor" : ""}`, `${entity.cls.replace(/_/g, " ")} <b>${conf(entity)}</b>`), {
       at: (out) => board.group.localToWorld(board.entityTop(entity, out)),
       offset: [0, -1],
