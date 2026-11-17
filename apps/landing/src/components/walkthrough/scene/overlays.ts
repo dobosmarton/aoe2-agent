@@ -60,6 +60,7 @@ export function createOverlays(data: TurnData, board: Board, decision: THREE.Gro
   });
   const counterValue = el("wt3d-count", `<b>0</b><span>boxes · 65 classes</span>`);
   const counterNumber = counterValue.querySelector("b")!;
+  let counted = -1;
   const counter = labels.add(counterValue, {
     at: (out) => board.group.localToWorld(out.set(-board.W / 2, board.H / 2, 0)),
     offset: [0, -10],
@@ -76,6 +77,7 @@ export function createOverlays(data: TurnData, board: Board, decision: THREE.Gro
       at: (out) => board.hud.localToWorld(out.copy(centre)),
       offset: [0, -8],
       align: [0.5, 1],
+      keepInView: 4,
     });
     const target = Number(reading);
     return [{ label, value, reading: String(reading), target: Number.isFinite(target) ? target : null, shown: "" }];
@@ -89,7 +91,7 @@ export function createOverlays(data: TurnData, board: Board, decision: THREE.Gro
         `wt3d-role${i === 2 ? " is-idle" : ""}`,
         `<p class="wt3d-role-name">${role.role}</p><p class="wt3d-role-model">${role.model}</p><p class="wt3d-role-when">${role.when}</p>`,
       ),
-      { at: (out) => decision.localToWorld(out.set(roleX[i]!, 1.3, 0)), offset: [0, -6], align: [0.5, 1] },
+      { at: (out) => decision.localToWorld(out.set(roleX[i]!, 1.3, 0)), offset: [0, -6], align: [0.5, 1], keepInView: 4 },
     ),
   );
   const goals = labels.add(
@@ -97,15 +99,18 @@ export function createOverlays(data: TurnData, board: Board, decision: THREE.Gro
       "wt3d-card wt3d-goals",
       `<p class="wt3d-card-title">Strategist goals</p><ol><li>Keep housing ahead of population</li><li>Feudal buildings for Castle Age</li></ol>`,
     ),
-    { at: (out) => decision.localToWorld(out.set(RING_X.strategist + 0.4, -1.45, 0)), offset: [0, 8], align: [0, 0] },
+    { at: (out) => decision.localToWorld(out.set(RING_X.strategist + 0.4, -1.45, 0)), offset: [0, 8], align: [0, 0], keepInView: 8 },
   );
+  // The catalog hangs under the policy ring as a list spaced in pixels, so its rows
+  // never overlap whatever the zoom.
   const catalog = CATALOG.map((item, i) => {
     const element = el(`wt3d-action${item.ok ? "" : " is-out"}`, `<code>${item.id}</code><span>${item.why}</span>`);
-    const home = new THREE.Vector3(RING_X.policy - 1.4, -1.9 - i * 0.6, 0);
+    const home = new THREE.Vector3(RING_X.policy - 1.4, -1.9, 0);
     const pos = home.clone();
     const label = labels.add(element, { at: (out) => decision.localToWorld(out.copy(pos)), align: [0.5, 0.5] });
-    return { element, label, home, pos, ok: item.ok, pick: item.id === "build_house" };
+    return { element, label, home, pos, row: i, ok: item.ok, pick: item.id === "build_house" };
   });
+  const ringSeat = new THREE.Vector3(RING_X.policy, -1.55, 0);
 
   // ---- Act: the cursor, the footprint, the click; Verify: the ledger --------------------
   const cursorElement = el("wt3d-cursor", `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3l14 8-6.5 1.5L10 19z" /></svg>`);
@@ -154,8 +159,9 @@ export function createOverlays(data: TurnData, board: Board, decision: THREE.Gro
     offset: [56, -40],
     align: [0, 1],
     leader: true,
+    keepInView: 8,
   });
-  const ledgerRows = [...ledgerElement.querySelectorAll<HTMLElement>("li")];
+  const ledgerRows = [...ledgerElement.querySelectorAll<HTMLElement>("li")].map((row) => ({ row, state: "" }));
 
   const path = anchors.cursorPath;
   /** Point on the cursor path: 0 is the start, 1 to 3 the hovered spots. */
@@ -167,18 +173,28 @@ export function createOverlays(data: TurnData, board: Board, decision: THREE.Gro
     return out.lerpVectors(path[k]!, path[k + 1]!, f * f * (3 - 2 * f));
   }
 
+  // Narrow views: the HUD chips alternate between two rows, the ledger sits above the
+  // house instead of beside it.
+  let narrow = false;
+  function setNarrow(on: boolean) {
+    narrow = on;
+    ledger.options.offset = on ? [0, -64] : [56, -40];
+    ledger.options.align = on ? [0.5, 1] : [0, 1];
+  }
+
   function update(S: SceneState) {
     // Detect: labels arrive with their boxes; Track hands over to the village.
     for (const { label } of entityLabels) label.opacity = S.boxes.labels * S.boxes.alpha * (1 - S.boxes.track);
     const count = board.landedCount();
-    counterNumber.textContent = String(count);
+    if (count !== counted) counterNumber.textContent = String((counted = count));
     counter.opacity = S.stack.on * (count > 0 ? 1 : 0);
 
     // HUD: chips lift in a row, then each value counts up.
     chips.forEach((chip, i) => {
       const t = THREE.MathUtils.clamp(S.hud.values * 1.8 - i * 0.14, 0, 1);
       chip.label.opacity = Math.min(1, t * 3) * (1 - S.sheets.lift * 2);
-      chip.label.shift[1] = (1 - ease(t * 2)) * 10;
+      const row = narrow && i % 2 === 1 ? -((chip.label.size?.[1] ?? 24) + 4) : 0;
+      chip.label.shift[1] = (1 - ease(t * 2)) * 10 + row;
       const text = chip.target == null ? (t > 0.5 ? chip.reading : "·") : String(Math.round(chip.target * ease(t)));
       if (text !== chip.shown) {
         chip.value.textContent = text;
@@ -188,6 +204,7 @@ export function createOverlays(data: TurnData, board: Board, decision: THREE.Gro
 
     // Decide.
     const on = S.decide.on;
+    const pickOf = (c: (typeof catalog)[number]) => (c.pick ? ease(S.decide.pick) : 0);
     // The roles' names step back while the action returns to the game.
     const away = 1 - S.action.on;
     roles.forEach((role, i) => (role.opacity = THREE.MathUtils.clamp(on * 1.5 - i * 0.2, 0, 1) * (i === 2 ? 0.6 : 1) * away));
@@ -200,10 +217,11 @@ export function createOverlays(data: TurnData, board: Board, decision: THREE.Gro
       const handover = c.pick ? 1 - S.action.on : 1;
       c.label.opacity = on * (c.pick ? Math.max(appear, S.decide.pick) : appear) * (1 - out * 0.6) * dim * handover;
       c.label.shift[0] = (1 - ease(appear)) * -16 + ease(out) * 28;
+      c.label.shift[1] = c.row * ((catalog[0]!.label.size?.[1] ?? 26) + 4) * (1 - pickOf(c));
       c.element.classList.toggle("is-filtered", out > 0.5);
       // The pick rises into the policy ring.
-      const pick = c.pick ? ease(S.decide.pick) : 0;
-      c.pos.copy(c.home).lerp(new THREE.Vector3(RING_X.policy, -1.55, 0), pick);
+      const pick = pickOf(c);
+      c.pos.copy(c.home).lerp(ringSeat, pick);
       c.element.classList.toggle("is-chosen", c.pick && S.decide.pick > 0.4);
     }
 
@@ -228,12 +246,15 @@ export function createOverlays(data: TurnData, board: Board, decision: THREE.Gro
     // Verify.
     ledger.opacity = S.verify.on;
     ledger.shift[1] = (1 - ease(S.verify.on)) * 10;
-    ledgerRows.forEach((row, i) => {
-      row.classList.toggle("is-done", S.verify.status >= i + 1.5);
-      row.classList.toggle("is-current", S.verify.status >= i + 0.5 && S.verify.status < i + 1.5);
-      row.style.opacity = S.verify.status >= i + 0.5 ? "1" : "0.3";
+    ledgerRows.forEach((r, i) => {
+      const state = S.verify.status >= i + 1.5 ? "done" : S.verify.status >= i + 0.5 ? "current" : "";
+      if (state === r.state) return;
+      r.state = state;
+      r.row.classList.toggle("is-done", state === "done");
+      r.row.classList.toggle("is-current", state === "current");
+      r.row.style.opacity = state ? "1" : "0.3";
     });
   }
 
-  return { update, cursorAt };
+  return { update, cursorAt, setNarrow };
 }

@@ -2,7 +2,7 @@
  * Render the home page walkthrough at each chapter and save the frames.
  *
  *   bun run capture:walkthrough            # stills for static mode and the poster
- *   bun run capture:walkthrough -- --review # views at desktop and phone size
+ *   bun run capture:walkthrough -- --review # views at desktop, tablet and phone sizes
  *   bun run capture:walkthrough -- --review --static # the reduced-motion fallback, full page
  *
  * Stills go to public/walkthrough/stills/<chapter>.jpg (plus hero.jpg, the poster, and
@@ -79,14 +79,28 @@ async function stills() {
   await browser.close();
 }
 
+// Review sizes. Phones and tablets are emulated as such (mobile viewport, touch), so
+// anything that widens the page shows up as it would on the device.
+const REVIEW_SIZES = [
+  ["desktop", { width: 1440, height: 900 }, false],
+  ["tablet", { width: 768, height: 1024 }, true],
+  ["phone", { width: 390, height: 844 }, true],
+  ["phone-small", { width: 360, height: 640 }, true],
+  ["phone-landscape", { width: 844, height: 390 }, true],
+] as const;
+
 async function review() {
   await mkdir(REVIEW_DIR, { recursive: true });
   const browser = await chromium.launch({ args: GPU_ARGS });
-  for (const [name, viewport] of [
-    ["desktop", { width: 1440, height: 900 }],
-    ["phone", { width: 390, height: 844 }],
-  ] as const) {
-    const page = await browser.newPage({ viewport, deviceScaleFactor: 1, reducedMotion: STATIC ? "reduce" : "no-preference" });
+  const overflow: string[] = [];
+  for (const [name, viewport, mobile] of REVIEW_SIZES) {
+    const page = await browser.newPage({
+      viewport,
+      deviceScaleFactor: mobile ? 2 : 1,
+      isMobile: mobile,
+      hasTouch: mobile,
+      reducedMotion: STATIC ? "reduce" : "no-preference",
+    });
     const errors: string[] = [];
     page.on("console", (m) => (m.type() === "error" || m.type() === "warning") && errors.push(m.text()));
     page.on("pageerror", (e) => errors.push(String(e)));
@@ -103,6 +117,8 @@ async function review() {
         await page.screenshot({ path: resolve(REVIEW_DIR, `${name}-static-${k}.jpg`), type: "jpeg", quality: 60, fullPage: true, clip });
       }
       console.log(`${name}: mode=${mode}, stills loaded ${loaded}, ${errors.length} console errors/warnings`);
+      const staticWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+      if (staticWidth > viewport.width) overflow.push(`${name}: page is ${staticWidth}px wide in a ${viewport.width}px viewport`);
       await page.close();
       continue;
     }
@@ -112,11 +128,17 @@ async function review() {
       await seek(page, p);
       await page.screenshot({ path: resolve(REVIEW_DIR, `${name}-${p.toFixed(2)}.jpg`), type: "jpeg", quality: 70 });
     }
+    const width = await page.evaluate(() => document.documentElement.scrollWidth);
+    if (width > viewport.width) overflow.push(`${name}: page is ${width}px wide in a ${viewport.width}px viewport`);
     console.log(`${name}: ${errors.length} console errors/warnings`);
     for (const e of errors.slice(0, 10)) console.log("   ", e.slice(0, 200));
     await page.close();
   }
   await browser.close();
+  if (overflow.length) {
+    for (const o of overflow) console.error(`  ✗ ${o}`);
+    process.exit(1);
+  }
 }
 
 await (REVIEW ? review() : stills());

@@ -33,8 +33,9 @@ export function createTracking(tracked: Tracked[], ids: number[], labels: Labels
     trail.geometry.dispose();
     trail.geometry = geometry;
     group.add(trail);
-    const label = labels.add(el("wt3d-tag", `track_${ids[i % ids.length]}`), {
-      at: (out) => out.copy(t.anchor).add(new THREE.Vector3(0, BOX_H + 0.05, 0)),
+    // Small screens show the first five IDs only, so the crowd by the Town Center stays legible.
+    const label = labels.add(el(`wt3d-tag${i >= 5 ? " is-minor" : ""}`, `track_${ids[i % ids.length]}`), {
+      at: (out) => out.copy(t.anchor).setY(t.anchor.y + BOX_H + 0.05),
       offset: [0, -4],
       align: [0.5, 1],
     });

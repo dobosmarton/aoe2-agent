@@ -97,7 +97,7 @@ const footerLink = "text-foreground underline decoration-foreground/20 underline
         {reading && <span aria-hidden="true" class="header-progress" />}
         <div class="mx-auto flex items-center gap-4 px-4" style={`max-width: ${headerMax}`}>
           <Wordmark />
-          <nav class="ml-auto hidden items-center gap-1 text-sm font-medium md:flex" aria-label="Main">
+          <nav class="ml-auto hidden items-center gap-1 text-sm font-medium lg:flex" aria-label="Main">
             {
               NAV_LINKS.map((link) => (
                 <a
@@ -117,7 +117,7 @@ const footerLink = "text-foreground underline decoration-foreground/20 underline
               GitHub
             </a>
           </nav>
-          <div class="ml-auto flex items-center gap-2 md:ml-0">
+          <div class="ml-auto flex items-center gap-2 lg:ml-0">
             <button
               id="open-search"
               type="button"

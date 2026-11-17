@@ -214,5 +214,5 @@ export function createMind(data: TurnData, board: Board, frameTexture: THREE.Tex
     atmosphere.update(S.mind.space, time, pointScale);
   }
 
-  return { group, update, railCurve, plate: publish.plate };
+  return { group, update, railCurve, plate: publish.plate, actionAt: action.cardAt };
 }

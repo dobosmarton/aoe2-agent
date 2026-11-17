@@ -155,31 +155,41 @@ const pad = (n: number) => String(n).padStart(2, "0");
   };
 
   // The safe area: the part of the stage the chapter caption does not cover, where the
-  // scene frames its subject. Beside the caption on wide screens, above it on phones.
+  // scene frames its subject. Beside the caption on wide screens and phones on their
+  // side, above it on phones and tablets held upright (the same rule as the CSS).
+  const SIDE_BY_SIDE = "(width >= 64rem), (orientation: landscape) and (width >= 40rem)";
+  const heroInner = root?.querySelector<HTMLElement>(".wt-hero-inner");
+  const heroArticle = articles[0];
   const safeArea = () => {
     const width = stage?.clientWidth ?? window.innerWidth;
     const height = stage?.clientHeight ?? window.innerHeight;
     const top = 72;
-    if (window.matchMedia("(width >= 48rem)").matches) {
+    if (window.matchMedia(SIDE_BY_SIDE).matches) {
       const right = Math.max(0, ...cards.map((c) => (c ? c.getBoundingClientRect().right : 0)));
-      return { left: Math.min(width * 0.5, right + 24), top, right: width, bottom: height };
+      const safe = { left: Math.min(width * 0.5, right + 24), top, right: width, bottom: height };
+      return { safe, hero: safe, stacked: false };
     }
+    // Stacked: under the header and the chapter ticks, above the tallest caption.
     const tallest = Math.max(0, ...cards.map((c) => c?.offsetHeight ?? 0));
-    return { left: 0, top, right: width, bottom: Math.max(height * 0.45, height - tallest - 20) };
+    const safe = { left: 0, top: top + 22, right: width, bottom: Math.max(height * 0.45, height - tallest - 20) };
+    // The hero frames the village above its text, letting it run behind the headline.
+    const textTop = heroInner && heroArticle ? heroInner.getBoundingClientRect().top - heroArticle.getBoundingClientRect().top : height * 0.5;
+    const hero = { left: 0, top, right: width, bottom: Math.min(height, Math.max(top + height * 0.35, textTop + 110)) };
+    return { safe, hero, stacked: true };
   };
   const applySafe = () => {
-    const safe = safeArea();
+    const { safe, hero, stacked } = safeArea();
     const width = stage?.clientWidth ?? window.innerWidth;
     const height = stage?.clientHeight ?? window.innerHeight;
-    const cx = (safe.left + safe.right) / 2;
-    const cy = (safe.top + safe.bottom) / 2;
-    stage?.style.setProperty("--wt-cx", `${cx}px`);
+    stage?.style.setProperty("--wt-cx", `${(safe.left + safe.right) / 2}px`);
     stage?.style.setProperty("--wt-safe-bottom", `${safe.bottom}px`);
     // The poster is the hero still, framed on the whole view; place and scale it the
     // way the scene frames its first shot, so the crossfade does not jump.
-    const fit = Math.max(height / (safe.bottom - safe.top), (1.3 * height) / (safe.right - safe.left));
+    const cx = (hero.left + hero.right) / 2;
+    const cy = (hero.top + hero.bottom) / 2;
+    const fit = Math.max(height / (hero.bottom - hero.top), (1.3 * height) / (hero.right - hero.left));
     stage?.style.setProperty("--wt-poster", `translate(${cx - width / 2}px, ${cy - height / 2}px) scale(${1 / fit})`);
-    scene?.setSafe(safe);
+    scene?.setSafe(safe, { hero, stacked });
   };
 
   // The site header sits over the dark stage at the top of the page: give it the dark
@@ -220,9 +230,33 @@ const pad = (n: number) => String(n).padStart(2, "0");
     root?.toggleAttribute("data-past-hero", p > 0.85 && p < bounds.length - 0.02);
   };
 
+  // Lenis animates the wheel in its own frame loop. Run that loop only while it has
+  // something to animate (a wheel or an anchor click starts it), not on every frame of
+  // the page's life.
+  let pumpId = 0;
+  let pumpTime = 1000;
+  let pumpLast = 0;
+  let pumpUntil = 0;
+  const pump = (now: number) => {
+    pumpId = 0;
+    if (!lenis) return;
+    // Lenis's own clock only advances while it runs, so a restart never jumps.
+    pumpTime += Math.min(now - (pumpLast || now), 34);
+    pumpLast = now;
+    lenis.raf(pumpTime);
+    if (lenis.isScrolling === "smooth" || now < pumpUntil) pumpId = requestAnimationFrame(pump);
+    else pumpLast = 0;
+  };
+  const startPump = () => {
+    pumpUntil = performance.now() + 300;
+    if (!pumpId && lenis) pumpId = requestAnimationFrame(pump);
+  };
+
   const toStatic = () => {
     if (!root) return;
     root.dataset.mode = "static";
+    cancelAnimationFrame(pumpId);
+    pumpId = 0;
     lenis?.destroy();
     lenis = null;
     for (const card of cards) {
@@ -239,7 +273,8 @@ const pad = (n: number) => String(n).padStart(2, "0");
 
   if (root && stage && view && root.dataset.mode === "scene") {
     // Smooth wheel scrolling while the scene runs; touch keeps the native feel.
-    lenis = new Lenis({ autoRaf: true, anchors: true, lerp: 0.1 });
+    lenis = new Lenis({ autoRaf: false, anchors: true, lerp: 0.1 });
+    for (const type of ["wheel", "click"]) window.addEventListener(type, startPump, { passive: true, capture: true });
     measure();
     onScroll();
     applySafe();

@@ -194,7 +194,10 @@ export function createSpriteLayer(atlas: THREE.Texture, meta: SpriteMeta, worldP
   }
 
   const view = new THREE.Vector3();
+  // Sort entries, reused from frame to frame.
+  const pool: { h: SpriteHandle; d: number }[] = [];
   const order: { h: SpriteHandle; d: number }[] = [];
+  const byDepth = (a: { d: number }, b: { d: number }) => a.d - b.d;
 
   /** Writes the visible sprites, farthest first, into the instance buffers. */
   function update(camera: THREE.Camera, light: number) {
@@ -203,9 +206,12 @@ export function createSpriteLayer(atlas: THREE.Texture, meta: SpriteMeta, worldP
     for (const h of handles) {
       if (!h.visible || h.alpha <= 0.001) continue;
       view.copy(h.anchor).applyMatrix4(camera.matrixWorldInverse);
-      order.push({ h, d: view.z });
+      const entry = (pool[order.length] ??= { h, d: 0 });
+      entry.h = h;
+      entry.d = view.z;
+      order.push(entry);
     }
-    order.sort((a, b) => a.d - b.d);
+    order.sort(byDepth);
     let n = 0;
     for (const { h } of order) {
       const list = frames(h.name);

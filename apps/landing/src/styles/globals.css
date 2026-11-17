@@ -123,6 +123,8 @@
   }
   body {
     min-height: 100vh;
+    /* Nothing may widen the page on a phone; clip (not hidden) keeps sticky working. */
+    overflow-x: clip;
     font-family: var(--font-sans);
     color: var(--color-foreground);
     /* Tailwind's slate-100 to white, and gray-900 to gray-800 in dark mode */
@@ -141,18 +143,6 @@
   - two soft glows, accent blue and violet, floating slowly
   - "+" ticks that blink on grid intersections, like detector hits
 */
-@property --spot-x {
-  syntax: "<length-percentage>";
-  inherits: false;
-  initial-value: 10vw;
-}
-
-@property --spot-y {
-  syntax: "<length-percentage>";
-  inherits: false;
-  initial-value: 0vh;
-}
-
 .site-bg {
   --site-bg-cell: 64px;
   --site-bg-line: hsl(var(--foreground) / 0.045);
@@ -189,7 +179,7 @@
 }
 
 .site-bg-grid,
-.site-bg-spot {
+.site-bg-spot-grid {
   position: absolute;
   background-size: var(--site-bg-cell) var(--site-bg-cell);
 }
@@ -202,36 +192,59 @@
   mask-image: linear-gradient(to bottom, black 10%, transparent 80%);
 }
 
+/* The spotlight moves over the page while the lit grid inside it moves back by the
+   same amount, so its lines stay on the page grid. Both are transforms, which the
+   compositor animates without restyling or repainting the page each frame. */
 .site-bg-spot {
+  position: absolute;
   top: 0;
   left: 0;
   width: 36rem;
   height: 36rem;
+  overflow: hidden;
+  mask-image: radial-gradient(closest-side, black 15%, transparent);
+  mask-repeat: no-repeat;
+  animation: site-bg-sweep 34s ease-in-out infinite alternate;
+}
+
+.site-bg-spot-grid {
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
   background-image:
     linear-gradient(to right, var(--site-bg-lit) 1px, transparent 1px),
     linear-gradient(to bottom, var(--site-bg-lit) 1px, transparent 1px);
-  background-position: calc(var(--spot-x) * -1) calc(var(--spot-y) * -1);
-  transform: translate(var(--spot-x), var(--spot-y));
-  mask-image: radial-gradient(closest-side, black 15%, transparent);
-  animation: site-bg-sweep 34s ease-in-out infinite alternate;
+  animation: site-bg-sweep-back 34s ease-in-out infinite alternate;
 }
 
 @keyframes site-bg-sweep {
   0% {
-    --spot-x: 4vw;
-    --spot-y: -4vh;
+    transform: translate(4vw, -4vh);
   }
   30% {
-    --spot-x: 58vw;
-    --spot-y: 2vh;
+    transform: translate(58vw, 2vh);
   }
   60% {
-    --spot-x: 34vw;
-    --spot-y: 30vh;
+    transform: translate(34vw, 30vh);
   }
   100% {
-    --spot-x: 70vw;
-    --spot-y: 16vh;
+    transform: translate(70vw, 16vh);
+  }
+}
+
+@keyframes site-bg-sweep-back {
+  0% {
+    transform: translate(-4vw, 4vh);
+  }
+  30% {
+    transform: translate(-58vw, -2vh);
+  }
+  60% {
+    transform: translate(-34vw, -30vh);
+  }
+  100% {
+    transform: translate(-70vw, -16vh);
   }
 }
 
@@ -1088,7 +1101,7 @@
   background: linear-gradient(to top, rgb(2 5 12 / 0.92), rgb(2 5 12 / 0.4) 38%, transparent 58%);
 }
 
-@media (width >= 48rem) {
+@media (width >= 64rem), (orientation: landscape) and (width >= 40rem) {
   .wt-shade {
     background:
       linear-gradient(90deg, rgb(2 5 12 / 0.88), rgb(2 5 12 / 0.45) 32%, transparent 55%),
@@ -1113,7 +1126,7 @@
   top: calc(var(--wt-safe-bottom, 100%) - 3.25rem);
 }
 
-@media (width >= 48rem) {
+@media (width >= 64rem), (orientation: landscape) and (width >= 40rem) {
   .wt-stamp,
   .wt-keys {
     top: auto;
@@ -1192,7 +1205,7 @@
   opacity: 1;
 }
 
-@media (width >= 48rem) {
+@media (width >= 64rem), (orientation: landscape) and (width >= 40rem) {
   .wt-progress {
     display: block;
   }
@@ -1267,7 +1280,7 @@
   padding-bottom: 14svh;
 }
 
-@media (width >= 48rem) {
+@media (width >= 64rem), (orientation: landscape) and (width >= 40rem) {
   .wt-hero {
     align-items: center;
     padding-bottom: 0;
@@ -1410,7 +1423,7 @@
   box-shadow: 0 24px 60px -24px rgb(0 0 0 / 0.8);
 }
 
-@media (width >= 48rem) {
+@media (width >= 64rem), (orientation: landscape) and (width >= 40rem) {
   .wt-chapter {
     justify-content: flex-start;
   }
@@ -1484,6 +1497,8 @@
    chapter articles are then only scroll length, so clicks pass through to the stage. */
 .wt[data-mode="scene"] .wt-chapters {
   pointer-events: none;
+  /* Keeps the stage pinned until the last chapter's caption has gone. */
+  padding-bottom: 50svh;
 }
 
 .wt[data-mode="scene"] .wt-hero-inner {
@@ -1505,7 +1520,7 @@
   visibility: hidden;
 }
 
-@media (width >= 48rem) {
+@media (width >= 64rem), (orientation: landscape) and (width >= 40rem) {
   .wt[data-mode="scene"] .wt-card {
     top: 50%;
     bottom: auto;
@@ -1513,6 +1528,135 @@
     left: max(1rem, calc((100vw - 72rem) / 2 + 1rem));
     width: min(25rem, 34vw);
     translate: 0 calc(-50% + var(--wt-y, 0px));
+  }
+}
+
+/* Scene mode, stacked (phones, tablets in portrait): the caption sits under the scene,
+   no wider than a comfortable line, and the chapter ticks run under the header. */
+@media (width < 64rem) and (orientation: portrait), (width < 40rem) {
+  .wt[data-mode="scene"] .wt-card {
+    max-width: 34rem;
+    margin-inline: auto;
+  }
+
+  .wt[data-mode="scene"] .wt-progress {
+    display: block;
+    top: calc(4.6rem + env(safe-area-inset-top));
+    bottom: auto;
+    left: 50%;
+    translate: -50% 0;
+    width: min(34rem, 100% - 2rem);
+  }
+
+  .wt-progress :is(.wt-progress-name, .wt-note) {
+    display: none;
+  }
+
+  .wt-progress a {
+    height: 0.75rem;
+  }
+
+  .wt-progress a::before,
+  .wt-progress a::after {
+    inset: auto 0 0.25rem;
+  }
+
+  /* The hero's text sits over the village: darken behind it while the hero shows. */
+  .wt-shade::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      to top,
+      rgb(2 5 12 / 0.95),
+      rgb(2 5 12 / 0.84) 40%,
+      rgb(2 5 12 / 0.5) 60%,
+      transparent 76%
+    );
+    opacity: var(--wt-hero-o, 1);
+  }
+
+  /* Short phones: a tighter caption, so the scene keeps at least half the screen. */
+  @media (height < 44rem) {
+    .wt[data-mode="scene"] .wt-card {
+      padding: 0.8rem 0.95rem 0.75rem;
+    }
+
+    .wt-card h2 {
+      font-size: 1.15rem;
+    }
+
+    .wt-card p:not(.wt-card-kicker) {
+      font-size: 0.8125rem;
+      line-height: 1.45;
+    }
+
+    .wt-card-link {
+      margin-top: 0.55rem;
+    }
+  }
+}
+
+/* Scene mode, short landscape screens (phones on their side): a compact caption under
+   the header, the ticks at the bottom, and a smaller hero. */
+@media (orientation: landscape) and (width >= 40rem) and (height < 32rem) {
+  .wt[data-mode="scene"] .wt-card {
+    top: calc(4.5rem + env(safe-area-inset-top));
+    max-height: calc(100svh - 7.25rem);
+    overflow-y: auto;
+    padding: 0.75rem 0.9rem;
+    translate: 0 var(--wt-y, 0px);
+  }
+
+  .wt-card h2 {
+    font-size: 1.1rem;
+  }
+
+  .wt-card p:not(.wt-card-kicker) {
+    font-size: 0.8125rem;
+    line-height: 1.45;
+  }
+
+  .wt-card-link {
+    margin-top: 0.5rem;
+  }
+
+  .wt-progress {
+    bottom: 0.9rem;
+  }
+
+  .wt-progress :is(.wt-progress-name, .wt-note) {
+    display: none;
+  }
+
+  .wt-stamp,
+  .wt-keys {
+    bottom: 0.75rem;
+  }
+
+  .wt-hero {
+    align-items: flex-end;
+    padding-top: 4.5rem;
+    padding-bottom: 1.25rem;
+  }
+
+  .wt-hero h1 {
+    margin-top: 0.5rem;
+    font-size: 1.9rem;
+  }
+
+  .wt-lede {
+    margin-top: 0.6rem;
+    font-size: 0.95rem;
+    line-height: 1.45;
+  }
+
+  .wt-ctas {
+    margin-top: 1rem;
+  }
+
+  .wt-scroll-hint {
+    display: none;
   }
 }
 
@@ -1877,8 +2021,9 @@
   scale: 0.82;
 }
 
-/* Phones: fewer and smaller labels, so the small view stays readable. */
-@media (width < 48rem) {
+/* Stacked layouts and short landscape screens: fewer and smaller labels, so the small
+   view stays readable. */
+@media (width < 64rem) and (orientation: portrait), (width < 40rem), (height < 32rem) {
   .wt3d.is-minor,
   .wt3d-layer i,
   .wt3d-role-when,

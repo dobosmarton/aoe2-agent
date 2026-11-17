@@ -82,7 +82,7 @@ export function createAction(curve: THREE.Curve<THREE.Vector3>, labels: Labels, 
     `<span class="wt3d-keyseq-step"><kbd>q</kbd>build menu</span><span class="wt3d-keyseq-arrow">→</span><span class="wt3d-keyseq-step"><kbd>q</kbd>house</span>`,
   );
   const steps = [...keysElement.querySelectorAll<HTMLElement>(".wt3d-keyseq-step")];
-  const keys = labels.add(keysElement, { at: (out) => toWorld(landing, out), align: [0.5, 0.5] });
+  const keys = labels.add(keysElement, { at: (out) => toWorld(landing, out), align: [0.5, 0.5], keepInView: 8 });
   const railLabel = labels.add(el("wt3d-rail", "← input"), {
     at: (out) => toWorld(curve.getPointAt(0.42, out), out),
     offset: [0, 12],
@@ -90,6 +90,8 @@ export function createAction(curve: THREE.Curve<THREE.Vector3>, labels: Labels, 
   });
 
   const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+  /** Where the card is on its rail at `travel` (local coordinates). */
+  const cardAt = (travel: number, out: THREE.Vector3) => curve.getPointAt(Math.min(0.999, ease(THREE.MathUtils.clamp(travel, 0, 1))), out);
 
   /** `on` shows the card, `rail` draws the rail in, `travel` carries the card, `keys` lands the presses. */
   function update(s: { on: number; rail: number; travel: number; keys: number }, time: number) {
@@ -100,7 +102,7 @@ export function createAction(curve: THREE.Curve<THREE.Vector3>, labels: Labels, 
     railLabel.opacity = THREE.MathUtils.smoothstep(s.rail, 0.5, 1) * (1 - THREE.MathUtils.smoothstep(s.travel, 0.7, 0.95));
 
     const t = ease(THREE.MathUtils.clamp(s.travel, 0, 1));
-    curve.getPointAt(Math.min(0.999, t), card.mesh.position);
+    cardAt(s.travel, card.mesh.position);
     // It leaves the ring at the tile's size, grows a little so it reads in the wide
     // shot, and presses flat onto the glass over the last stretch.
     const arrive = THREE.MathUtils.smoothstep(t, 0.9, 1);
@@ -115,5 +117,5 @@ export function createAction(curve: THREE.Curve<THREE.Vector3>, labels: Labels, 
     steps.forEach((step, i) => step.classList.toggle("is-down", s.keys > 0.45 + i * 0.35));
   }
 
-  return { group, update };
+  return { group, update, cardAt };
 }
