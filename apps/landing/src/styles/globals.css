@@ -1056,16 +1056,11 @@
   inset: 0;
 }
 
-.wt-canvas,
-.wt-css3d {
+.wt-canvas {
   position: absolute !important;
   inset: 0;
   width: 100% !important;
   height: 100% !important;
-}
-
-.wt-css3d {
-  pointer-events: none;
 }
 
 .wt-poster {
@@ -1572,30 +1567,51 @@
   }
 }
 
-/* Text placed in the 3D scene (scene/overlays.ts). */
-.wt3d-label,
-.wt3d-chip,
-.wt3d-card,
-.wt3d-role,
-.wt3d-action {
+/* Text placed in the 3D scene: screen-space labels (scene/labels.ts) that follow points
+   in the scene, on whole pixels at a fixed size. */
+.wt-labels {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.wt-leaders {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  stroke-width: 1;
+}
+
+.wt3d {
+  position: absolute;
+  top: 0;
+  left: 0;
+  visibility: hidden;
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   color: #e6edf7;
   white-space: nowrap;
-  will-change: opacity;
+  will-change: transform, opacity;
 }
 
-.wt3d-label {
+/* Detect: a class label on top of its box, in the box's colour. */
+.wt3d-det {
   --c: #ff4f6a;
-  padding: 2px 7px;
-  border: 1px solid color-mix(in oklab, var(--c) 70%, transparent);
-  border-radius: 3px;
-  background: rgb(2 5 12 / 0.82);
-  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 2px 2px 2px 0;
+  background: color-mix(in oklab, var(--c) 82%, black);
+  color: #04070f;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
-.wt3d-label b {
+.wt3d-det b {
+  margin-left: 4px;
   font-weight: 500;
-  color: var(--c);
+  opacity: 0.75;
 }
 
 .wt3d-cat-resource {
@@ -1611,69 +1627,93 @@
   --c: #b36bff;
 }
 
-.wt3d-label-track,
-.wt3d-label.is-track .wt3d-label-det {
-  display: none;
+.wt3d-count {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  color: #9fb6d8;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
-.wt3d-label.is-track {
-  --c: #7cc4ff;
+.wt3d-count b {
+  min-width: 2ch;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: #e6f0ff;
+  text-align: right;
 }
 
-.wt3d-label.is-track .wt3d-label-track {
-  display: inline;
-  color: #7cc4ff;
+/* Track: the ID over each villager's box. */
+.wt3d-tag {
+  padding: 1px 6px;
+  border: 1px solid rgb(124 196 255 / 0.7);
+  border-radius: 3px;
+  background: rgb(2 6 16 / 0.85);
+  color: #a8d8ff;
+  font-size: 11.5px;
 }
 
+/* Detect: the name of each plate in the detector stack. */
+.wt3d-layer {
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  color: #9fb6d8;
+}
+
+.wt3d-layer i {
+  font-style: normal;
+}
+
+.wt3d-layer span {
+  margin-right: 6px;
+  color: #e6f0ff;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* Read the HUD: one chip per field. */
 .wt3d-chip {
   display: grid;
   justify-items: center;
-  padding: 3px 9px;
-  border: 1px solid rgb(255 215 0 / 0.65);
-  border-radius: 3px;
-  background: rgb(2 5 12 / 0.85);
-  font-size: 11px;
-  line-height: 1.25;
+  min-width: 4.6rem;
+  padding: 4px 10px 5px;
+  border: 1px solid rgb(255 215 0 / 0.6);
+  border-radius: 4px;
+  background: rgb(4 8 18 / 0.9);
+  line-height: 1.2;
 }
 
 .wt3d-chip span {
   color: rgb(255 215 0 / 0.85);
   text-transform: uppercase;
-  font-size: 9px;
-  letter-spacing: 0.08em;
+  font-size: 10px;
+  letter-spacing: 0.1em;
 }
 
 .wt3d-chip b {
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 600;
 }
 
 .wt3d-card {
-  min-width: 15rem;
   padding: 10px 14px 12px;
   border: 1px solid rgb(124 196 255 / 0.4);
   border-radius: 6px;
-  background: rgb(4 9 20 / 0.88);
-  box-shadow: 0 0 40px -8px rgb(59 130 246 / 0.5);
-  font-size: 12px;
+  background: rgb(4 9 20 / 0.92);
+  box-shadow: 0 12px 40px -12px rgb(0 0 0 / 0.8), 0 0 32px -10px rgb(59 130 246 / 0.45);
+  font-size: 12.5px;
+  line-height: 1.5;
 }
 
 .wt3d-card-title {
   margin-bottom: 6px;
   color: #7cc4ff;
-  font-size: 10px;
+  font-size: 10.5px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-}
-
-.wt3d-card dl {
-  display: grid;
-  grid-template-columns: auto auto;
-  gap: 2px 14px;
-}
-
-.wt3d-card dt {
-  color: #8a9ab3;
 }
 
 .wt3d-card ol {
@@ -1685,20 +1725,21 @@
 .wt3d-goals ol {
   list-style: decimal inside;
   white-space: normal;
-  max-width: 15rem;
+  max-width: 13rem;
 }
 
+/* Decide: the three roles. */
 .wt3d-role {
   display: grid;
   justify-items: center;
   text-align: center;
-  font-size: 11px;
-  line-height: 1.35;
+  font-size: 11.5px;
+  line-height: 1.4;
 }
 
 .wt3d-role-name {
   font-family: var(--font-heading);
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 700;
 }
 
@@ -1707,60 +1748,41 @@
 }
 
 .wt3d-role-when {
-  max-width: 12rem;
+  max-width: 11rem;
   white-space: normal;
   color: #8a9ab3;
-}
-
-.wt3d-gate-label {
-  display: flex;
-  gap: 8px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  color: #9fb6d8;
-  white-space: nowrap;
-  transition: color 200ms;
-}
-
-.wt3d-gate-label span {
-  color: #5b7bb0;
-}
-
-.wt3d-gate-label.is-active {
-  color: #e6f0ff;
-}
-
-.wt3d-gate-label.is-active span {
-  color: #7cc4ff;
 }
 
 .wt3d-role.is-idle .wt3d-role-model {
   color: #8a9ab3;
 }
 
+/* Decide: the action catalog. */
 .wt3d-action {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
-  width: 15rem;
-  padding: 5px 9px;
-  border: 1px solid rgb(124 196 255 / 0.35);
+  gap: 14px;
+  width: 16.5rem;
+  padding: 6px 10px;
+  border: 1px solid rgb(124 196 255 / 0.32);
   border-radius: 4px;
-  background: rgb(4 9 20 / 0.85);
-  font-size: 12px;
-  transition: border-color 200ms, background-color 200ms;
+  background: rgb(4 9 20 / 0.9);
+  font-size: 12.5px;
+  transition:
+    border-color 200ms,
+    background-color 200ms,
+    box-shadow 200ms;
 }
 
 .wt3d-action span {
   color: #8a9ab3;
-  font-size: 10.5px;
+  font-size: 11px;
 }
 
 .wt3d-action.is-filtered {
-  border-color: rgb(255 79 106 / 0.4);
+  border-color: rgb(255 79 106 / 0.45);
   text-decoration: line-through;
-  text-decoration-color: rgb(255 79 106 / 0.8);
+  text-decoration-color: rgb(255 79 106 / 0.85);
 }
 
 .wt3d-action.is-filtered span {
@@ -1770,29 +1792,88 @@
 
 .wt3d-action.is-chosen {
   border-color: #7cc4ff;
-  background: rgb(37 99 235 / 0.35);
-  box-shadow: 0 0 24px rgb(59 130 246 / 0.7);
+  background: rgb(37 99 235 / 0.38);
+  box-shadow: 0 0 28px rgb(59 130 246 / 0.65);
 }
 
+/* Act: the game's cursor; its tip sits on the point it hovers. */
 .wt3d-cursor svg {
-  width: 30px;
-  height: 30px;
-  translate: 15px 15px;
+  display: block;
+  width: 28px;
+  height: 28px;
   fill: #fff;
   stroke: #02050c;
   stroke-width: 1.5;
   filter: drop-shadow(0 2px 4px rgb(0 0 0 / 0.6));
   transition: scale 120ms;
+  transform-origin: 4px 3px;
 }
 
 .wt3d-cursor.is-click svg {
   scale: 0.82;
 }
 
+/* Phones: fewer and smaller labels, so the small view stays readable. */
+@media (width < 48rem) {
+  .wt3d.is-minor,
+  .wt3d-layer i,
+  .wt3d-role-when,
+  .wt3d-goals {
+    display: none;
+  }
+
+  .wt3d-det,
+  .wt3d-layer,
+  .wt3d-tag {
+    font-size: 10px;
+  }
+
+  .wt3d-role-name {
+    font-size: 13px;
+  }
+
+  .wt3d-role {
+    font-size: 10px;
+  }
+
+  .wt3d-action {
+    width: 10.5rem;
+    padding: 2px 6px;
+    font-size: 10px;
+    line-height: 1.25;
+  }
+
+  .wt3d-action span {
+    display: none;
+  }
+
+  .wt3d-count b {
+    font-size: 20px;
+  }
+
+  .wt3d-chip {
+    min-width: 0;
+    padding: 2px 5px;
+  }
+
+  .wt3d-chip span {
+    display: none;
+  }
+
+  .wt3d-chip b {
+    font-size: 12px;
+  }
+
+  .wt3d-count span {
+    display: none;
+  }
+}
+
+/* Verify: the action ledger. */
 .wt3d-ledger li {
   display: flex;
   justify-content: space-between;
-  gap: 14px;
+  gap: 16px;
   transition: opacity 200ms;
 }
 

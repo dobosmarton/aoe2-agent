@@ -1,8 +1,11 @@
 import * as THREE from "three";
 
+import { brackets, fatSegments, lineMaterial } from "./lines";
+
 // The glass pane between the world and the mind: everything the agent gets is this
-// flat picture. It first shows the game camera's render of the village, then fades to
-// the real recorded frame. Local units: the pane is 16 wide, centred on the origin,
+// flat picture. It first shows the game camera's render of the village, then the real
+// recorded frame wipes in row by row, like a capture. Viewfinder brackets close on it
+// as the shot is taken. Local units: the pane is 16 wide, centred on the origin,
 // facing +z (towards the mind and the viewer).
 
 const GLSL_COLOR = /* glsl */ `
@@ -24,6 +27,7 @@ export function createScreen(real: THREE.Texture, rendered: THREE.Texture, aspec
     uOpacity: { value: 0 },
     uFlash: { value: 0 },
     uTime: { value: 0 },
+    uSize: { value: new THREE.Vector2(PANE_W, PANE_H) },
   };
   const pane = new THREE.Mesh(
     new THREE.PlaneGeometry(PANE_W, PANE_H),
@@ -38,20 +42,31 @@ export function createScreen(real: THREE.Texture, rendered: THREE.Texture, aspec
       fragmentShader: /* glsl */ `
         uniform sampler2D uReal, uRendered;
         uniform float uMix, uOpacity, uFlash, uTime;
+        uniform vec2 uSize;
         varying vec2 vUv;
         void main() {
           vec3 a = texture2D(uRendered, vUv).rgb;
           vec3 b = texture2D(uReal, vUv).rgb;
           // The real frame wipes in from the top, row by row, like a capture.
-          float wipe = smoothstep(uMix * 1.2 - 0.1, uMix * 1.2 - 0.02, 1.0 - vUv.y);
+          float front = uMix * 1.1 - 0.05;
+          float wipe = smoothstep(front - 0.015, front, 1.0 - vUv.y);
           vec3 c = mix(b, a, wipe);
-          float edge = exp(-pow((1.0 - vUv.y - (uMix * 1.2 - 0.06)) * 60.0, 2.0)) * step(0.001, uMix) * step(uMix, 0.999);
-          c += vec3(0.4, 0.7, 1.6) * edge;
-          // Glass: a faint diagonal sheen.
-          float sheen = smoothstep(0.0, 0.02, 0.02 - abs(fract(vUv.x * 0.6 + vUv.y * 0.4 - uTime * 0.03) - 0.5) * 0.04);
-          c += vec3(0.08) * sheen;
-          c += vec3(0.7, 0.85, 1.0) * uFlash;
-          gl_FragColor = vec4(c, uOpacity);
+          float scan = exp(-pow((1.0 - vUv.y - front) * 90.0, 2.0)) * step(0.001, uMix) * step(uMix, 0.999);
+          c += vec3(0.35, 0.65, 1.5) * scan;
+          // Rounded glass: corner radius 0.35 units, a lit rim one pixel wide.
+          vec2 p = (vUv - 0.5) * uSize;
+          vec2 q = abs(p) - (uSize * 0.5 - 0.35);
+          float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - 0.35;
+          float px = fwidth(d);
+          float inside = 1.0 - smoothstep(-px, 0.0, d);
+          float rim = 1.0 - smoothstep(0.0, 1.5 * px, abs(d + px));
+          // A faint sheen drifting across the glass.
+          float band = abs(fract(vUv.x * 0.5 + vUv.y * 0.3 - uTime * 0.02) - 0.5);
+          c += vec3(0.05) * (1.0 - smoothstep(0.0, 0.03, band));
+          c = mix(c, vec3(1.0), uFlash);
+          c += vec3(0.5, 0.85, 1.9) * rim;
+          gl_FragColor = vec4(c, uOpacity * max(inside, rim));
+          if (gl_FragColor.a < 0.003) discard;
           ${GLSL_COLOR}
         }
       `,
@@ -60,35 +75,22 @@ export function createScreen(real: THREE.Texture, rendered: THREE.Texture, aspec
   pane.renderOrder = 5;
   group.add(pane);
 
-  // A thin dark bezel with glowing inner edge.
-  const bezel = new THREE.Group();
-  const bezelMaterial = new THREE.MeshStandardMaterial({ color: "#0d1526", roughness: 0.4, metalness: 0.6, transparent: true });
-  const glowMaterial = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.5, 0.9, 2.2), transparent: true, toneMapped: false });
-  const T = 0.22;
-  for (const [w, h, x, y] of [
-    [PANE_W + T * 2, T, 0, PANE_H / 2 + T / 2],
-    [PANE_W + T * 2, T, 0, -PANE_H / 2 - T / 2],
-    [T, PANE_H, -PANE_W / 2 - T / 2, 0],
-    [T, PANE_H, PANE_W / 2 + T / 2, 0],
-  ] as const) {
-    const bar = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.3), bezelMaterial);
-    bar.position.set(x, y, -0.1);
-    bezel.add(bar);
-    const glow = new THREE.Mesh(new THREE.BoxGeometry(Math.max(w - T * 1.4, T * 0.15), Math.max(h - T * 1.4, T * 0.15), 0.32), glowMaterial);
-    glow.scale.set(w > h ? 1 : 0.18, w > h ? 0.18 : 1, 1);
-    glow.position.set(x + (w > h ? 0 : x > 0 ? -T * 0.4 : T * 0.4), y + (w > h ? (y > 0 ? -T * 0.4 : T * 0.4) : 0), -0.1);
-    bezel.add(glow);
-  }
-  group.add(bezel);
+  // Viewfinder: corner brackets a little outside the pane, closing in on the shot.
+  const finderMaterial = lineMaterial({ color: new THREE.Color(0.7, 1.2, 2.4), width: 2, opacity: 0 });
+  const finder = fatSegments(brackets(PANE_W + 1.2, PANE_H + 1.2, 1.4, 0.05), finderMaterial);
+  group.add(finder);
 
-  function update(s: { on: number; mix: number; flash: number }, time: number) {
+  function update(s: { on: number; mix: number; flash: number; finder: number }, time: number) {
     uniforms.uOpacity.value = s.on;
     uniforms.uMix.value = s.mix;
-    uniforms.uFlash.value = s.flash;
+    // An exposure pulse, never a full white flash.
+    uniforms.uFlash.value = Math.min(0.16, s.flash * 0.16);
     uniforms.uTime.value = time;
-    group.visible = s.on > 0.002;
-    bezelMaterial.opacity = Math.min(1, s.on * 1.5);
-    glowMaterial.opacity = Math.min(1, s.on * 1.5);
+    group.visible = s.on > 0.002 || s.finder > 0.002;
+    const f = THREE.MathUtils.clamp(s.finder, 0, 1);
+    // In from 14% larger, settling as the shutter fires; then out with the glass.
+    finder.scale.setScalar(1.14 - 0.14 * (1 - Math.pow(1 - f, 3)));
+    finderMaterial.opacity = Math.min(f * 2, 1) * s.on;
   }
 
   return { group, update, width: PANE_W, height: PANE_H };

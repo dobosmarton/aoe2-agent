@@ -1,0 +1,84 @@
+import * as THREE from "three";
+import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
+import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
+import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
+
+// Anti-aliased lines with a width in CSS pixels (three's LineSegments2). Every
+// material is registered so one call keeps their resolution in step with the view.
+
+const materials = new Set<LineMaterial>();
+
+export function setLineResolution(width: number, height: number) {
+  for (const m of materials) m.resolution.set(width, height);
+}
+
+export type FatLineOptions = {
+  color: THREE.ColorRepresentation;
+  /** CSS pixels. */
+  width?: number;
+  opacity?: number;
+  dashed?: boolean;
+  dashSize?: number;
+  gapSize?: number;
+};
+
+export function lineMaterial({ color, width = 1.5, opacity = 1, dashed = false, dashSize = 0.3, gapSize = 0.2 }: FatLineOptions) {
+  const material = new LineMaterial({
+    color: color instanceof THREE.Color ? color.getHex() : new THREE.Color(color).getHex(),
+    linewidth: width,
+    transparent: true,
+    opacity,
+    dashed,
+    dashSize,
+    gapSize,
+    depthWrite: false,
+    toneMapped: false,
+  });
+  // Colours above 1 make a line bloom; LineMaterial stores colour as a uniform.
+  if (color instanceof THREE.Color) material.color.copy(color);
+  materials.add(material);
+  return material;
+}
+
+/** Segments as flat [ax, ay, az, bx, by, bz, ...]. */
+export function fatSegments(points: number[], options: FatLineOptions | LineMaterial) {
+  const geometry = new LineSegmentsGeometry();
+  geometry.setPositions(points);
+  const material = options instanceof LineMaterial ? options : lineMaterial(options);
+  const line = new LineSegments2(geometry, material);
+  if (material.dashed) line.computeLineDistances();
+  line.frustumCulled = false;
+  return line;
+}
+
+/** A closed polyline as segments. */
+export function loop(points: THREE.Vector3[]): number[] {
+  const out: number[] = [];
+  points.forEach((p, i) => {
+    const q = points[(i + 1) % points.length]!;
+    out.push(p.x, p.y, p.z, q.x, q.y, q.z);
+  });
+  return out;
+}
+
+/** An open polyline as segments. */
+export function path(points: THREE.Vector3[]): number[] {
+  const out: number[] = [];
+  for (let i = 0; i + 1 < points.length; i++) {
+    const p = points[i]!;
+    const q = points[i + 1]!;
+    out.push(p.x, p.y, p.z, q.x, q.y, q.z);
+  }
+  return out;
+}
+
+/** Corner brackets of a w x h rectangle centred on the origin in the XY plane. */
+export function brackets(w: number, h: number, arm: number, z = 0): number[] {
+  const out: number[] = [];
+  for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]] as const) {
+    const x = (sx * w) / 2;
+    const y = (sy * h) / 2;
+    out.push(x, y, z, x - sx * arm, y, z, x, y, z, x, y - sy * arm, z);
+  }
+  return out;
+}

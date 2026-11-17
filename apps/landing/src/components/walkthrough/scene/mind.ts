@@ -1,236 +1,221 @@
 import * as THREE from "three";
-import { CSS3DSprite } from "three/examples/jsm/renderers/CSS3DRenderer.js";
 
 import type { Board } from "./board";
+import type { Labels } from "./labels";
+import { fatSegments, lineMaterial } from "./lines";
+import { createPublish } from "./publish";
+import { createStack } from "./stack";
 import type { SceneState } from "./timeline";
+import type { TurnData } from "./types";
 
 // The mind: the agent's pipeline as objects in space, on the viewer's side of the
 // pane. Local units match the pane (16 wide); +x runs along the pipeline, +z towards
-// the viewer. The frame slab itself is the board (board.ts), placed here by the scene.
+// the viewer. The frame itself is the board (board.ts), placed here by the scene.
 
 export const MIND = {
   slabStart: new THREE.Vector3(0, 0, 0.15),
   slabPeel: new THREE.Vector3(0, 0, 3),
-  slab: new THREE.Vector3(30, 0, 3),
-  gate: 18,
-  crystal: new THREE.Vector3(43, 0, 5),
-  decision: new THREE.Vector3(58, 0, 5),
+  /** Where the frame stops: detection, the HUD, publishing. */
+  slab: new THREE.Vector3(24, 0, 3),
+  /** Where the Perception plate seals. */
+  plate: new THREE.Vector3(35.5, 2.2, 7),
+  decision: new THREE.Vector3(60, 0, 5),
 };
 
-const glowColor = (r: number, g: number, b: number) => new THREE.Color(r, g, b);
+/** Where the plate docks at the decision loops (left of the policy ring). */
+export const DOCK = MIND.decision.clone().add(new THREE.Vector3(-8.8, 0.3, 0));
 
-export function createMind(board: Board) {
+const GLSL_COLOR = /* glsl */ `
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+`;
+
+/** Drifting dust in the mind's space and a dotted floor below it, for depth. */
+function createAtmosphere() {
+  const group = new THREE.Group();
+  const COUNT = 420;
+  const dust = new Float32Array(COUNT * 3);
+  const seed = new Float32Array(COUNT);
+  for (let i = 0; i < COUNT; i++) {
+    const h = (k: number) => {
+      const s = Math.sin((i + 1) * 12.9898 + k * 78.233) * 43758.5453;
+      return s - Math.floor(s);
+    };
+    dust.set([-6 + h(1) * 80, -7 + h(2) * 15, -6 + h(3) * 20], i * 3);
+    seed[i] = h(4);
+  }
+  const dustGeometry = new THREE.BufferGeometry();
+  dustGeometry.setAttribute("position", new THREE.BufferAttribute(dust, 3));
+  dustGeometry.setAttribute("aSeed", new THREE.BufferAttribute(seed, 1));
+  const uniforms = { uTime: { value: 0 }, uOn: { value: 0 }, uScale: { value: 1 } };
+  const points = new THREE.Points(
+    dustGeometry,
+    new THREE.ShaderMaterial({
+      uniforms,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      vertexShader: /* glsl */ `
+        uniform float uTime, uScale;
+        attribute float aSeed;
+        varying float vA;
+        void main() {
+          vec3 p = position;
+          p.y += sin(uTime * 0.15 + aSeed * 40.0) * 0.6;
+          p.x += cos(uTime * 0.11 + aSeed * 23.0) * 0.5;
+          vec4 mv = modelViewMatrix * vec4(p, 1.0);
+          gl_PointSize = uScale * (1.5 + aSeed * 2.5) / -mv.z;
+          vA = 0.25 + 0.5 * aSeed;
+          gl_Position = projectionMatrix * mv;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform float uOn;
+        varying float vA;
+        void main() {
+          float d = length(gl_PointCoord - 0.5);
+          float a = smoothstep(0.5, 0.0, d) * vA * uOn;
+          gl_FragColor = vec4(vec3(0.5, 0.7, 1.2) * a, a);
+          ${GLSL_COLOR}
+        }
+      `,
+    }),
+  );
+  points.frustumCulled = false;
+  group.add(points);
+
+  // Floor: dots on a grid, fading away from the pipeline's axis.
+  const floor: number[] = [];
+  for (let x = -6; x <= 74; x += 1.25) for (let z = -8; z <= 16; z += 1.25) floor.push(x, -7, z);
+  const floorGeometry = new THREE.BufferGeometry();
+  floorGeometry.setAttribute("position", new THREE.Float32BufferAttribute(floor, 3));
+  const floorUniforms = { uOn: { value: 0 }, uScale: { value: 1 } };
+  const floorPoints = new THREE.Points(
+    floorGeometry,
+    new THREE.ShaderMaterial({
+      uniforms: floorUniforms,
+      transparent: true,
+      depthWrite: false,
+      vertexShader: /* glsl */ `
+        uniform float uScale;
+        varying float vA;
+        void main() {
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          gl_PointSize = max(1.0, uScale * 1.6 / -mv.z);
+          vA = 1.0 - smoothstep(4.0, 12.0, abs(position.z - 4.0));
+          gl_Position = projectionMatrix * mv;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform float uOn;
+        varying float vA;
+        void main() {
+          float d = length(gl_PointCoord - 0.5);
+          float a = smoothstep(0.5, 0.2, d) * vA * uOn * 0.22;
+          gl_FragColor = vec4(vec3(0.45, 0.6, 1.0), a);
+          ${GLSL_COLOR}
+        }
+      `,
+    }),
+  );
+  floorPoints.frustumCulled = false;
+  group.add(floorPoints);
+
+  return {
+    group,
+    update(on: number, time: number, scale: number) {
+      group.visible = on > 0.002;
+      uniforms.uTime.value = time;
+      uniforms.uOn.value = on;
+      uniforms.uScale.value = scale;
+      floorUniforms.uOn.value = on;
+      floorUniforms.uScale.value = scale;
+    },
+  };
+}
+
+export function createMind(data: TurnData, board: Board, frameTexture: THREE.Texture, labels: Labels, mono: string) {
   const group = new THREE.Group();
   group.name = "mind";
 
-  // ---- Detector gate -------------------------------------------------------------------
-  // The network as five hairline frames the slab slides through: the letterboxed
-  // input, three feature maps (strides 8, 16, 32: each grid coarser than the last) and
-  // the head. Corner brackets, ruler ticks and dashed rails between the frames; a frame
-  // lights up and runs a scan line while the slab passes it.
-  const GATE_H = 10.4;
-  const GATE_D = 7.2;
-  const GATE_STEP = 1.25;
-  const LAYERS = [
-    { label: "letterbox · 736 × 1280", cells: 18 },
-    { label: "stride 8 · 92 × 160", cells: 13 },
-    { label: "stride 16 · 46 × 80", cells: 9 },
-    { label: "stride 32 · 23 × 40", cells: 5 },
-    { label: "head · 65 classes · NMS 0.5", cells: 0 },
-  ];
-  const gateX = (i: number) => MIND.gate - 2.5 + i * GATE_STEP;
-  const gate = new THREE.Group();
-  const lineColor = glowColor(0.55, 0.85, 1.6);
-  const segments = (points: number[]) => {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.Float32BufferAttribute(points, 3));
-    return g;
-  };
-  const layers = LAYERS.map((layer, i) => {
-    const x = gateX(i);
-    const y0 = -GATE_H / 2;
-    const y1 = GATE_H / 2;
-    const z0 = MIND.slab.z - GATE_D / 2;
-    const z1 = MIND.slab.z + GATE_D / 2;
-    const frame: number[] = [];
-    const seg = (ya: number, za: number, yb: number, zb: number) => frame.push(x, ya, za, x, yb, zb);
-    // Outline, then corner brackets drawn just outside it.
-    seg(y0, z0, y1, z0);
-    seg(y1, z0, y1, z1);
-    seg(y1, z1, y0, z1);
-    seg(y0, z1, y0, z0);
-    const b = 0.6;
-    const o = 0.18;
-    for (const [cy, cz, sy, sz] of [[y0, z0, 1, 1], [y0, z1, 1, -1], [y1, z0, -1, 1], [y1, z1, -1, -1]] as const) {
-      seg(cy - sy * o, cz - sz * o, cy - sy * o + sy * b, cz - sz * o);
-      seg(cy - sy * o, cz - sz * o, cy - sy * o, cz - sz * o + sz * b);
-    }
-    // A ruler on every edge, ticks pointing out of the frame: evenly spaced so the
-    // first and last land on the corners, every third one longer.
-    const ticks = (length: number) => Math.max(2, Math.round(length / 0.6));
-    const tick = (k: number) => (k % 3 === 0 ? 0.32 : 0.18);
-    for (let k = 0, n = ticks(GATE_D); k <= n; k++) {
-      const z = z0 + (k / n) * GATE_D;
-      seg(y1 + 0.08, z, y1 + 0.08 + tick(k), z);
-      seg(y0 - 0.08, z, y0 - 0.08 - tick(k), z);
-    }
-    for (let k = 0, n = ticks(GATE_H); k <= n; k++) {
-      const y = y0 + (k / n) * GATE_H;
-      seg(y, z0 - 0.08, y, z0 - 0.08 - tick(k));
-      seg(y, z1 + 0.08, y, z1 + 0.08 + tick(k));
-    }
-    const frameMaterial = new THREE.LineBasicMaterial({ color: lineColor, transparent: true, opacity: 0, toneMapped: false });
-    const outline = new THREE.LineSegments(segments(frame), frameMaterial);
+  // ---- Detector stack ------------------------------------------------------------------
+  const stack = createStack(data, frameTexture, labels, MIND.slab, board.W, board.H);
+  group.add(stack.group);
 
-    // The feature map: a grid, coarser through the network.
-    const grid: number[] = [];
-    if (layer.cells > 0) {
-      const rows = layer.cells;
-      const cols = Math.max(2, Math.round((layer.cells * GATE_D) / GATE_H));
-      for (let r = 1; r < rows; r++) {
-        const y = y0 + (r / rows) * GATE_H;
-        grid.push(x, y, z0, x, y, z1);
-      }
-      for (let c = 1; c < cols; c++) {
-        const z = z0 + (c / cols) * GATE_D;
-        grid.push(x, y0, z, x, y1, z);
-      }
-    } else {
-      // The head: a column of class slots across the frame instead of a grid.
-      const slots = 13;
-      for (let k = 0; k < slots; k++) {
-        const ya = y0 + 0.5 + k * ((GATE_H - 1) / slots);
-        const yb = ya + ((GATE_H - 1) / slots) * 0.62;
-        for (const y of [ya, yb]) grid.push(x, y, z0 + 0.45, x, y, z1 - 0.45);
-        grid.push(x, ya, z0 + 0.45, x, yb, z0 + 0.45, x, ya, z1 - 0.45, x, yb, z1 - 0.45);
-      }
-    }
-    const gridMaterial = new THREE.LineBasicMaterial({ color: lineColor, transparent: true, opacity: 0, toneMapped: false });
-    const lattice = new THREE.LineSegments(segments(grid), gridMaterial);
-
-    // A scan line that sweeps the frame while the slab is inside it.
-    const scanMaterial = new THREE.MeshBasicMaterial({ color: glowColor(0.8, 1.6, 3.2), transparent: true, opacity: 0, toneMapped: false, side: THREE.DoubleSide });
-    const scan = new THREE.Mesh(new THREE.PlaneGeometry(GATE_D, 0.05), scanMaterial);
-    scan.rotation.y = Math.PI / 2;
-    scan.position.set(x, 0, MIND.slab.z);
-
-    const label = document.createElement("div");
-    label.className = "wt3d-gate-label";
-    label.innerHTML = `<span>L${i + 1}</span>${layer.label}`;
-    const tag = new CSS3DSprite(label);
-    // Labels step up through the network, so neighbours never overlap.
-    tag.scale.setScalar(0.026);
-    tag.position.set(x, y1 + 0.9 + i * 0.7, z1 - 0.4);
-
-    gate.add(outline, lattice, scan, tag);
-    return { x, frameMaterial, gridMaterial, scanMaterial, scan, label };
+  // ---- Publishing: the sheets and the Perception plate ----------------------------------
+  const publish = createPublish(data, mono, {
+    W: board.W,
+    H: board.H,
+    hudCentre: board.hud.position.clone(),
+    hudSize: board.hudSize,
   });
-  // Dashed rails from the first frame's corners to the last one's.
-  const rails: number[] = [];
-  for (const [y, z] of [[-GATE_H / 2, -GATE_D / 2], [-GATE_H / 2, GATE_D / 2], [GATE_H / 2, -GATE_D / 2], [GATE_H / 2, GATE_D / 2]] as const) {
-    rails.push(gateX(0) - 0.8, y, MIND.slab.z + z, gateX(LAYERS.length - 1) + 0.8, y, MIND.slab.z + z);
-  }
-  const railGeometry = segments(rails);
-  const railLines = new THREE.LineSegments(
-    railGeometry,
-    new THREE.LineDashedMaterial({ color: lineColor, dashSize: 0.18, gapSize: 0.14, transparent: true, opacity: 0, toneMapped: false }),
-  );
-  railLines.computeLineDistances();
-  gate.add(railLines);
-  group.add(gate);
+  group.add(publish.group);
 
-  // ---- Perception crystal and the FramePipe rail -------------------------------------
-  const crystal = new THREE.Group();
-  const crystalMaterial = new THREE.MeshStandardMaterial({
-    color: "#1e3a8a",
-    emissive: new THREE.Color("#3b82f6"),
-    emissiveIntensity: 1.4,
-    roughness: 0.15,
-    metalness: 0.2,
-    transparent: true,
-    opacity: 0,
-    flatShading: true,
-  });
-  const core = new THREE.Mesh(new THREE.OctahedronGeometry(1.3, 0), crystalMaterial);
-  const cage = new THREE.LineSegments(
-    new THREE.EdgesGeometry(new THREE.IcosahedronGeometry(2.1, 0)),
-    new THREE.LineBasicMaterial({ color: glowColor(0.6, 1.3, 3), transparent: true, opacity: 0, toneMapped: false }),
-  );
-  crystal.add(core, cage);
-  crystal.position.copy(MIND.crystal);
-  group.add(crystal);
-
+  // ---- FramePipe rail: from the plate to the decision loops, dashes flowing along -----
   const railCurve = new THREE.CatmullRomCurve3([
-    MIND.slab.clone().add(new THREE.Vector3(board.W / 2 + 0.5, 0, 0)),
-    MIND.crystal.clone(),
-    MIND.decision.clone().add(new THREE.Vector3(-8, 0, 0)),
+    MIND.plate.clone(),
+    MIND.plate.clone().lerp(DOCK, 0.5).add(new THREE.Vector3(0, 0.8, 0.6)),
+    DOCK.clone(),
   ]);
-  const railMaterial = new THREE.MeshBasicMaterial({ color: glowColor(0.35, 0.8, 2), transparent: true, opacity: 0, toneMapped: false });
-  const rail = new THREE.Mesh(new THREE.TubeGeometry(railCurve, 64, 0.06, 6), railMaterial);
+  const railPoints: number[] = [];
+  const samples = railCurve.getSpacedPoints(60);
+  for (let i = 0; i + 1 < samples.length; i++) railPoints.push(...samples[i]!.toArray(), ...samples[i + 1]!.toArray());
+  const railMaterial = lineMaterial({ color: new THREE.Color(0.45, 0.95, 2.2), width: 2, opacity: 0, dashed: true, dashSize: 0.5, gapSize: 0.32 });
+  const rail = fatSegments(railPoints, railMaterial);
   group.add(rail);
 
-  // ---- Action pulse: from the policy ring back to the pane ---------------------------
+  // ---- Action pulse: from the policy ring back through the pane ------------------------
   const pulseCurve = new THREE.CatmullRomCurve3([
-    MIND.decision.clone().add(new THREE.Vector3(-3, 0, 0)),
-    new THREE.Vector3(MIND.crystal.x, 6, 9),
+    MIND.decision.clone().add(new THREE.Vector3(-3.6, 0, 0)),
+    new THREE.Vector3(MIND.plate.x, 7, 9),
     new THREE.Vector3(14, 5, 6),
     new THREE.Vector3(0, 0, 0.4),
   ]);
   const pulse = new THREE.Mesh(
-    new THREE.SphereGeometry(0.45, 20, 14),
-    new THREE.MeshBasicMaterial({ color: glowColor(1.2, 2.6, 1.4), transparent: true, toneMapped: false }),
+    new THREE.SphereGeometry(0.4, 20, 14),
+    new THREE.MeshBasicMaterial({ color: new THREE.Color(1.2, 2.6, 1.4), transparent: true, toneMapped: false }),
   );
-  const trailGeometry = new THREE.TubeGeometry(pulseCurve, 120, 0.1, 6);
-  const trailMaterial = new THREE.MeshBasicMaterial({ color: glowColor(0.6, 2, 1), transparent: true, opacity: 0, toneMapped: false });
-  const trail = new THREE.Mesh(trailGeometry, trailMaterial);
+  const trailSamples = pulseCurve.getSpacedPoints(160);
+  const trailPoints: number[] = [];
+  for (let i = 0; i + 1 < trailSamples.length; i++) trailPoints.push(...trailSamples[i]!.toArray(), ...trailSamples[i + 1]!.toArray());
+  const trailMaterial = lineMaterial({ color: new THREE.Color(0.6, 2.2, 1.1), width: 3, opacity: 0 });
+  const trail = fatSegments(trailPoints, trailMaterial);
   group.add(pulse, trail);
-  const trailIndexCount = trailGeometry.index!.count;
+
+  const atmosphere = createAtmosphere();
+  group.add(atmosphere.group);
 
   const tmp = new THREE.Vector3();
+  const boardCentre = new THREE.Vector3();
 
-  function update(S: SceneState, time: number) {
-    // Slab path: pane -> peel -> through the gate -> detection station.
-    const peel = S.slab.peel;
-    const travel = S.slab.travel;
-    tmp.lerpVectors(MIND.slabStart, MIND.slabPeel, peel);
-    tmp.lerp(MIND.slab, travel);
+  function update(S: SceneState, time: number, pointScale: number) {
+    // Frame path: pane -> peel -> the station.
+    tmp.lerpVectors(MIND.slabStart, MIND.slabPeel, S.slab.peel);
+    tmp.lerp(MIND.slab, S.slab.travel);
     board.group.position.copy(tmp);
     board.group.visible = S.slab.on > 0.01;
+    boardCentre.copy(tmp);
 
-    // A frame lights up while the slab is inside it and scans it top to bottom.
-    gate.visible = S.mind.gate > 0.01;
-    const front = tmp.x + board.W / 2;
-    const back = tmp.x - board.W / 2;
-    layers.forEach((layer, i) => {
-      const inside = front > layer.x && back < layer.x;
-      const through = THREE.MathUtils.clamp((front - layer.x) / board.W, 0, 1);
-      const active = inside ? 1 : 0;
-      const g = S.mind.gate;
-      layer.frameMaterial.opacity = g * (0.45 + 0.55 * active);
-      layer.gridMaterial.opacity = g * (0.1 + 0.4 * active + 0.04 * Math.sin(time * 2 + i));
-      layer.scanMaterial.opacity = g * active * 0.9;
-      layer.scan.position.y = (0.5 - through) * GATE_H;
-      layer.label.style.opacity = String(g * (0.55 + 0.45 * active));
-      layer.label.classList.toggle("is-active", inside);
-    });
-    (railLines.material as THREE.LineDashedMaterial).opacity = S.mind.gate * 0.35;
-
-    crystal.visible = S.card.on > 0.01;
-    crystalMaterial.opacity = S.card.on * 0.9;
-    (cage.material as THREE.LineBasicMaterial).opacity = S.card.on;
-    crystal.rotation.set(time * 0.3, time * 0.5, 0);
-    crystal.scale.setScalar(0.6 + 0.4 * S.card.on);
+    stack.update(S.stack.on, S.stack.pulse);
+    publish.update(
+      { lift: S.sheets.lift, seal: S.sheets.seal, travel: S.card.travel, on: S.card.on },
+      { board: boardCentre, plate: MIND.plate, rail: railCurve },
+    );
 
     rail.visible = S.mind.rail > 0.01;
-    railMaterial.opacity = S.mind.rail * (0.7 + 0.3 * Math.sin(time * 4));
+    railMaterial.opacity = S.mind.rail * 0.9;
+    railMaterial.dashOffset = -time * 1.2;
 
     const p = S.mind.pulse;
     pulse.visible = p > 0.001 && p < 0.999;
     pulseCurve.getPointAt(Math.min(0.999, p), pulse.position);
+    // The trail draws itself behind the pulse, then fades.
     trail.visible = p > 0.001;
-    trailMaterial.opacity = (1 - Math.max(0, p - 0.85) / 0.15) * 0.8;
-    trailGeometry.setDrawRange(0, Math.floor(trailIndexCount * p / 6) * 6);
+    trail.geometry.instanceCount = Math.floor((trailSamples.length - 1) * p);
+    trailMaterial.opacity = (1 - THREE.MathUtils.smoothstep(p, 0.85, 1)) * 0.9;
+
+    atmosphere.update(S.mind.space, time, pointScale);
   }
 
-  return { group, update, railCurve };
+  return { group, update, railCurve, plate: publish.plate };
 }

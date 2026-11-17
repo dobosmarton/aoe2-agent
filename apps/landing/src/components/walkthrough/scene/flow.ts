@@ -1,6 +1,7 @@
 import * as THREE from "three";
 
 import type { Board } from "./board";
+import { fatSegments } from "./lines";
 import type { SceneState } from "./timeline";
 import type { TurnData } from "./types";
 
@@ -9,8 +10,8 @@ const GLSL_COLOR = /* glsl */ `
   #include <colorspace_fragment>
 `;
 
-// Publish chapter: sparks leave every detection and every HUD field and gather in the
-// frozen Perception frame above the board.
+// Publish chapter: a light accent under the sheets. Sparks leave every detection and
+// every HUD field and gather where the Perception plate seals.
 export function createFlow(data: TurnData, board: Board, cardPosition: THREE.Vector3) {
   const sources: THREE.Vector3[] = [];
   const tmp = new THREE.Vector3();
@@ -22,7 +23,7 @@ export function createFlow(data: TurnData, board: Board, cardPosition: THREE.Vec
     sources.push(center.clone().add(board.hud.position));
   }
 
-  const perSource = 5;
+  const perSource = 2;
   const count = sources.length * perSource;
   const aStart = new Float32Array(count * 3);
   const aSeed = new Float32Array(count * 2);
@@ -91,47 +92,87 @@ export function createFlow(data: TurnData, board: Board, cardPosition: THREE.Vec
   return { object: points, update };
 }
 
-// Decide chapter: three rings for the three roles. Each spins at its own rate: the
-// policy on every frame, the strategist on a slow clock, the executor idle.
-export const RING_X = { policy: -2.8, strategist: 0.9, executor: 4.1 };
+// Decide chapter: three rings for the three roles. A comet runs round each one at the
+// rate its role thinks: the policy on every frame, the strategist on a slow clock, the
+// executor idle until an alarm. Ticks mark the ring like a dial.
+export const RING_X = { policy: -3.6, strategist: 1.3, executor: 6.0 };
 
 export function createRings() {
   const group = new THREE.Group();
   const specs = [
-    { x: RING_X.policy, color: new THREE.Color(0.6, 1.6, 3.2), speed: 2.6 },
-    { x: RING_X.strategist, color: new THREE.Color(2.6, 1.6, 0.5), speed: 0.35 },
-    { x: RING_X.executor, color: new THREE.Color(0.5, 0.55, 0.7), speed: 0 },
+    { x: RING_X.policy, color: new THREE.Color(0.55, 1.35, 3.0), speed: 2.4, ticks: 36 },
+    { x: RING_X.strategist, color: new THREE.Color(2.6, 1.55, 0.45), speed: 0.3, ticks: 12 },
+    { x: RING_X.executor, color: new THREE.Color(0.5, 0.56, 0.7), speed: 0, ticks: 12 },
   ];
-  const rings = specs.map((spec) => {
+  const rings = specs.map((spec, i) => {
     const ring = new THREE.Group();
-    const baseMaterial = new THREE.MeshBasicMaterial({ color: spec.color, transparent: true, opacity: 0, toneMapped: false });
-    const base = new THREE.Mesh(new THREE.TorusGeometry(1, 0.012, 8, 128), baseMaterial);
-    const arcMaterial = new THREE.MeshBasicMaterial({
-      color: spec.color.clone().multiplyScalar(1.6),
-      transparent: true,
-      opacity: 0,
-      toneMapped: false,
-    });
-    const arc = new THREE.Mesh(new THREE.TorusGeometry(1, 0.035, 8, 64, Math.PI * 0.55), arcMaterial);
-    const dot = new THREE.Mesh(new THREE.SphereGeometry(0.075, 16, 12), arcMaterial);
-    dot.position.set(1, 0, 0);
-    arc.add(dot);
-    ring.add(base, arc);
     ring.position.x = spec.x;
+    // The track: a fine circle, and ticks just outside it.
+    const circle: number[] = [];
+    const N = 128;
+    for (let k = 0; k < N; k++) {
+      const a = (k / N) * Math.PI * 2;
+      const b = ((k + 1) / N) * Math.PI * 2;
+      circle.push(Math.cos(a), Math.sin(a), 0, Math.cos(b), Math.sin(b), 0);
+    }
+    const track = fatSegments(circle, { color: spec.color.clone().multiplyScalar(0.55), width: 1.25, opacity: 0 });
+    const ticks: number[] = [];
+    for (let k = 0; k < spec.ticks; k++) {
+      const a = (k / spec.ticks) * Math.PI * 2;
+      const long = k % (spec.ticks / 4) === 0;
+      const r0 = 1.1;
+      const r1 = long ? 1.24 : 1.16;
+      ticks.push(Math.cos(a) * r0, Math.sin(a) * r0, 0, Math.cos(a) * r1, Math.sin(a) * r1, 0);
+    }
+    const dial = fatSegments(ticks, { color: spec.color.clone().multiplyScalar(0.7), width: 1.25, opacity: 0 });
+    // The comet: an arc that brightens towards its head, and the head itself.
+    const arcMaterial = new THREE.ShaderMaterial({
+      uniforms: { uColor: { value: spec.color }, uOpacity: { value: 0 } },
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform vec3 uColor;
+        uniform float uOpacity;
+        varying vec2 vUv;
+        void main() {
+          float tail = pow(vUv.x, 2.2);
+          gl_FragColor = vec4(uColor * (0.4 + 1.2 * tail), tail * uOpacity);
+        }
+      `,
+    });
+    const arc = new THREE.Mesh(new THREE.TorusGeometry(1, 0.04, 8, 96, Math.PI * (i === 0 ? 0.9 : 0.6)), arcMaterial);
+    const headMaterial = new THREE.MeshBasicMaterial({ color: spec.color.clone().multiplyScalar(1.4), transparent: true, opacity: 0, toneMapped: false });
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.075, 16, 12), headMaterial);
+    const spin = new THREE.Group();
+    head.position.set(Math.cos(Math.PI * (i === 0 ? 0.9 : 0.6)), Math.sin(Math.PI * (i === 0 ? 0.9 : 0.6)), 0);
+    spin.add(arc, head);
+    ring.add(track, dial, spin);
     group.add(ring);
-    return { ring, arc, baseMaterial, arcMaterial, speed: spec.speed };
+    return { ring, spin, track, dial, arcMaterial, headMaterial, speed: spec.speed, idle: spec.speed === 0 };
   });
 
+  let last = 0;
   function update(S: SceneState, time: number) {
+    const dt = Math.min(0.1, Math.max(0, time - last));
+    last = time;
     const on = S.decide.on;
     group.visible = on > 0.001;
-    group.scale.setScalar(0.7 + 0.3 * on);
     rings.forEach((r, i) => {
-      r.arc.rotation.z = -time * r.speed;
-      // The policy ring flares as it commits to a choice.
-      const flare = i === 0 ? 1 + S.decide.pick * 0.6 * (1 - S.decide.pick) * 4 : 1;
-      r.baseMaterial.opacity = on * (i === 2 ? 0.35 : 0.7);
-      r.arcMaterial.opacity = on * (i === 2 ? 0.25 : 1) * Math.min(flare, 2);
+      const appear = THREE.MathUtils.clamp(on * 1.5 - i * 0.2, 0, 1);
+      r.ring.scale.setScalar(0.85 + 0.15 * appear);
+      // The policy speeds up and flares as it commits to a choice.
+      const flare = i === 0 ? 1 + 1.5 * S.decide.pick * (1 - S.decide.pick) * 4 : 1;
+      r.spin.rotation.z -= dt * r.speed * flare;
+      const strength = r.idle ? 0.35 : 1;
+      r.track.material.opacity = appear * (r.idle ? 0.35 : 0.8);
+      r.dial.material.opacity = appear * (r.idle ? 0.3 : 0.65);
+      r.arcMaterial.uniforms.uOpacity.value = appear * strength * (r.idle ? 0.4 : Math.min(1.6, flare));
+      r.headMaterial.opacity = appear * strength;
     });
   }
 

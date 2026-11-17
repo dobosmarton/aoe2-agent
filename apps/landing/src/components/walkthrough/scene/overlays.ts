@@ -1,221 +1,219 @@
 import * as THREE from "three";
-import { CSS3DSprite } from "three/examples/jsm/renderers/CSS3DRenderer.js";
 
 import { CATALOG, ROLES } from "../chapters";
 import type { Board } from "./board";
 import { RING_X } from "./flow";
+import { el, type Labels } from "./labels";
+import { fatSegments, lineMaterial, loop } from "./lines";
 import type { SceneState } from "./timeline";
 import type { TurnData, TurnEntity } from "./types";
 
-// Text in the 3D scene is real DOM (CSS3DRenderer), so it keeps the site's type and
-// stays sharp. Every element faces the camera. Styles: `.wt3d-*` in globals.css.
+// Everything written in the scene (screen-space labels, labels.ts) and the marks the
+// Act chapter draws on the ground: the house's footprint and the click.
 
-const PX = 0.015; // board units per CSS pixel
-
-function el(className: string, html: string): HTMLDivElement {
-  const div = document.createElement("div");
-  div.className = className;
-  div.innerHTML = html;
-  return div;
-}
-
-function sprite(element: HTMLElement, scale = PX): CSS3DSprite {
-  const s = new CSS3DSprite(element);
-  s.scale.setScalar(scale);
-  return s;
-}
-
-const shown = new WeakMap<HTMLElement, number>();
-function fade(element: HTMLElement, opacity: number) {
-  const value = Math.round(opacity * 100) / 100;
-  if (shown.get(element) === value) return;
-  shown.set(element, value);
-  element.style.opacity = String(value);
-  element.style.visibility = value <= 0 ? "hidden" : "visible";
-}
-
-// Labelled entities: one or two of each kind, so the labels spread over the board.
-const LABEL_CLASSES = ["town_center", "mill", "house", "farm", "tree", "gold_mine", "stone_mine", "deer", "villager", "villager", "villager"];
-// Track IDs are illustrative: no recorded run stores them.
-const TRACK_IDS = [3, 12, 7, 19, 28, 34, 55, 63, 41, 90, 17];
+// Labelled entities: one or two of each kind, so the labels spread over the frame.
+const LABEL_CLASSES = ["town_center", "mill", "house", "farm", "tree", "gold_mine", "stone_mine", "deer", "villager", "villager"];
 
 type Anchors = {
-  /** Scene root, for the elements that live in world coordinates. */
+  /** Scene root, for the marks that live in world coordinates. */
   root: THREE.Object3D;
-  /** World units per mind unit. */
-  mindScale: number;
-  cardStart: THREE.Vector3;
-  cardEnd: THREE.Vector3;
   /** Cursor path in the world: a start point, then the three hovered spots. */
   cursorPath: THREE.Vector3[];
   ledgerAt: THREE.Vector3;
+  green: THREE.Vector3;
 };
 
-export function createOverlays(data: TurnData, board: Board, decision: THREE.Group, anchors: Anchors) {
+const ease = (t: number) => 1 - Math.pow(1 - THREE.MathUtils.clamp(t, 0, 1), 3);
+
+export function createOverlays(data: TurnData, board: Board, decision: THREE.Group, labels: Labels, anchors: Anchors) {
   const conf = (e: TurnEntity) => (e.conf == null ? "" : e.conf.toFixed(2));
 
-  // ---- Entity labels (Detect, Track) -------------------------------------------------
+  // ---- Detect: class labels on a few boxes, and the count --------------------------------
   const used = new Set<string>();
-  const labelled: { entity: TurnEntity; element: HTMLDivElement; sprite: CSS3DSprite; unit: boolean }[] = [];
-  LABEL_CLASSES.forEach((cls, i) => {
+  // Phones show the first few only (`is-minor` hides the rest there).
+  const entityLabels = LABEL_CLASSES.flatMap((cls, i) => {
     const entity = data.entities.find((e) => e.cls === cls && !used.has(e.id));
-    if (!entity) return;
+    if (!entity) return [];
     used.add(entity.id);
-    const element = el(
-      `wt3d-label wt3d-cat-${entity.cat}`,
-      `<span class="wt3d-label-det">${entity.cls.replace(/_/g, " ")} <b>${conf(entity)}</b></span>` +
-        `<span class="wt3d-label-track">track_${TRACK_IDS[i]}</span>`,
-    );
-    const s = sprite(element);
-    board.group.add(s);
-    labelled.push({ entity, element, sprite: s, unit: entity.cat === "unit" });
+    const label = labels.add(el(`wt3d-det wt3d-cat-${entity.cat}${i >= 5 ? " is-minor" : ""}`, `${entity.cls.replace(/_/g, " ")} <b>${conf(entity)}</b>`), {
+      at: (out) => board.group.localToWorld(board.entityTop(entity, out)),
+      offset: [0, -1],
+      align: [0, 1],
+    });
+    return [{ entity, label }];
+  });
+  const counterValue = el("wt3d-count", `<b>0</b><span>boxes · 65 classes</span>`);
+  const counterNumber = counterValue.querySelector("b")!;
+  const counter = labels.add(counterValue, {
+    at: (out) => board.group.localToWorld(out.set(-board.W / 2, board.H / 2, 0)),
+    offset: [0, -10],
+    align: [0, 1],
   });
 
-  // ---- HUD values (Read the HUD) -----------------------------------------------------
-  const hudValues: HTMLDivElement[] = [];
-  for (const [name, center] of Object.entries(board.fieldCenters)) {
-    const value = data.hud.readings[name];
-    if (value == null) continue;
-    const element = el("wt3d-chip", `<span>${name}</span><b>${value}</b>`);
-    const s = sprite(element, PX * 0.75);
-    s.position.copy(center).add(new THREE.Vector3(0, 0.45, 0.15));
-    board.hud.add(s);
-    hudValues.push(element);
-  }
+  // ---- Read the HUD: one chip per field, its value ticking up -----------------------------
+  const chips = Object.entries(board.fieldCenters).flatMap(([name, centre]) => {
+    const reading = data.hud.readings[name];
+    if (reading == null) return [];
+    const element = el("wt3d-chip", `<span>${name}</span><b>0</b>`);
+    const value = element.querySelector("b")!;
+    const label = labels.add(element, {
+      at: (out) => board.hud.localToWorld(out.copy(centre)),
+      offset: [0, -8],
+      align: [0.5, 1],
+    });
+    const target = Number(reading);
+    return [{ label, value, reading: String(reading), target: Number.isFinite(target) ? target : null, shown: "" }];
+  });
 
-  // ---- Perception card (Publish, Decide) ---------------------------------------------
-  const r = data.hud.readings;
-  const card = el(
-    "wt3d-card wt3d-perception",
-    `<p class="wt3d-card-title">[ Perception ]</p>
-     <dl>
-       <dt>entities</dt><dd>${data.entities.length} tracked boxes</dd>
-       <dt>hud</dt><dd>W ${r.wood} · F ${r.food} · G ${r.gold} · S ${r.stone}</dd>
-       <dt>population</dt><dd>${r.population} · ${r.age}</dd>
-       <dt>spatial_valid</dt><dd>true</dd>
-       <dt>alarm</dt><dd>false</dd>
-     </dl>`,
-  );
-  const cardSprite = sprite(card, PX * 1.35 * anchors.mindScale);
-  anchors.root.add(cardSprite);
-
-  // ---- Decision loops (Decide) -------------------------------------------------------
+  // ---- Decide: the three roles, the strategist's goals, the catalog ----------------------
   const roleX = [RING_X.policy, RING_X.strategist, RING_X.executor];
-  const roles = ROLES.map((role, i) => {
-    const element = el(
-      `wt3d-role${i === 2 ? " is-idle" : ""}`,
-      `<p class="wt3d-role-name">${role.role}</p><p class="wt3d-role-model">${role.model}</p><p class="wt3d-role-when">${role.when}</p>`,
-    );
-    const s = sprite(element);
-    s.position.set(roleX[i]!, 1.75, 0);
-    decision.add(s);
-    return element;
-  });
-  const goals = el(
-    "wt3d-card wt3d-goals",
-    `<p class="wt3d-card-title">[ Strategist goals ]</p>
-     <ol><li>Keep housing ahead of population</li><li>Feudal buildings for Castle Age</li></ol>`,
+  const roles = ROLES.map((role, i) =>
+    labels.add(
+      el(
+        `wt3d-role${i === 2 ? " is-idle" : ""}`,
+        `<p class="wt3d-role-name">${role.role}</p><p class="wt3d-role-model">${role.model}</p><p class="wt3d-role-when">${role.when}</p>`,
+      ),
+      { at: (out) => decision.localToWorld(out.set(roleX[i]!, 1.3, 0)), offset: [0, -6], align: [0.5, 1] },
+    ),
   );
-  const goalsSprite = sprite(goals);
-  goalsSprite.position.set(RING_X.strategist + 0.5, -2.2, 0);
-  decision.add(goalsSprite);
-
+  const goals = labels.add(
+    el(
+      "wt3d-card wt3d-goals",
+      `<p class="wt3d-card-title">Strategist goals</p><ol><li>Keep housing ahead of population</li><li>Feudal buildings for Castle Age</li></ol>`,
+    ),
+    { at: (out) => decision.localToWorld(out.set(RING_X.strategist + 0.4, -1.45, 0)), offset: [0, 8], align: [0, 0] },
+  );
   const catalog = CATALOG.map((item, i) => {
-    const element = el(
-      `wt3d-action${item.ok ? "" : " is-out"}${item.id === "build_house" ? " is-pick" : ""}`,
-      `<code>${item.id}</code><span>${item.why}</span>`,
-    );
-    const s = sprite(element, PX);
-    s.position.set(RING_X.policy, -1.6 - i * 0.6, 0);
-    decision.add(s);
-    return { element, sprite: s, home: s.position.clone(), ok: item.ok, pick: item.id === "build_house" };
+    const element = el(`wt3d-action${item.ok ? "" : " is-out"}`, `<code>${item.id}</code><span>${item.why}</span>`);
+    const home = new THREE.Vector3(RING_X.policy - 1.4, -1.9 - i * 0.6, 0);
+    const pos = home.clone();
+    const label = labels.add(element, { at: (out) => decision.localToWorld(out.copy(pos)), align: [0.5, 0.5] });
+    return { element, label, home, pos, ok: item.ok, pick: item.id === "build_house" };
   });
 
-  // ---- Act: cursor, and Verify: ledger ------------------------------------------------
-  const cursor = el(
-    "wt3d-cursor",
-    `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3l14 8-6.5 1.5L10 19z" /></svg>`,
-  );
-  const cursorSprite = sprite(cursor, PX * 0.9);
-  anchors.root.add(cursorSprite);
-  const path = anchors.cursorPath;
+  // ---- Act: the cursor, the footprint, the click; Verify: the ledger --------------------
+  const cursorElement = el("wt3d-cursor", `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3l14 8-6.5 1.5L10 19z" /></svg>`);
+  const cursorPoint = new THREE.Vector3();
+  const cursor = labels.add(cursorElement, { at: (out) => out.copy(cursorPoint), offset: [-4, -3], align: [0, 0] });
 
-  const wood = Number(r.wood);
-  const [popNow, popCap] = String(r.population).split("/");
-  const ledger = el(
+  const marks = new THREE.Group();
+  anchors.root.add(marks);
+  // The 2 x 2 tile footprint of a house, on the ground under the cursor.
+  const footprintMaterial = lineMaterial({ color: new THREE.Color(2.2, 0.5, 0.45), width: 2, opacity: 0 });
+  const footprint = fatSegments(
+    loop([new THREE.Vector3(-1, 0.04, -1), new THREE.Vector3(1, 0.04, -1), new THREE.Vector3(1, 0.04, 1), new THREE.Vector3(-1, 0.04, 1)]),
+    footprintMaterial,
+  );
+  const footprintFill = new THREE.Mesh(
+    new THREE.PlaneGeometry(2, 2).rotateX(-Math.PI / 2).translate(0, 0.03, 0),
+    new THREE.MeshBasicMaterial({ color: "#ff5a4a", transparent: true, opacity: 0, depthWrite: false }),
+  );
+  marks.add(footprint, footprintFill);
+  // The click: a ring spreading on the ground.
+  const ring: number[] = [];
+  for (let k = 0; k < 64; k++) {
+    const a = (k / 64) * Math.PI * 2;
+    const b = ((k + 1) / 64) * Math.PI * 2;
+    ring.push(Math.cos(a), 0.05, Math.sin(a), Math.cos(b), 0.05, Math.sin(b));
+  }
+  const rippleMaterial = lineMaterial({ color: new THREE.Color(0.8, 2.4, 1.2), width: 2.5, opacity: 0 });
+  const ripple = fatSegments(ring, rippleMaterial);
+  ripple.position.copy(anchors.green);
+  marks.add(ripple);
+
+  const wood = Number(data.hud.readings.wood);
+  const [popNow, popCap] = String(data.hud.readings.population).split("/");
+  const ledgerElement = el(
     "wt3d-card wt3d-ledger",
-    `<p class="wt3d-card-title">[ Action ledger ]</p>
+    `<p class="wt3d-card-title">Action ledger</p>
      <p class="wt3d-ledger-op"><code>build_house</code></p>
      <ol>
-       <li data-status="1"><b>pending</b><span>wood ${wood} at the click</span></li>
-       <li data-status="2"><b>purchased</b><span>wood ${wood - 25}, 25 spent</span></li>
-       <li data-status="3"><b>confirmed</b><span>population ${popNow}/${popCap} → ${popNow}/${Number(popCap) + 5}</span></li>
+       <li><b>pending</b><span>wood ${wood} at the click</span></li>
+       <li><b>purchased</b><span>wood ${wood - 25}, 25 spent</span></li>
+       <li><b>confirmed</b><span>population ${popNow}/${popCap} → ${popNow}/${Number(popCap) + 5}</span></li>
      </ol>`,
   );
-  const ledgerSprite = sprite(ledger, PX * 0.75);
-  ledgerSprite.position.copy(anchors.ledgerAt);
-  anchors.root.add(ledgerSprite);
-  const ledgerRows = [...ledger.querySelectorAll<HTMLElement>("[data-status]")];
+  const ledger = labels.add(ledgerElement, {
+    at: (out) => out.copy(anchors.ledgerAt),
+    offset: [56, -40],
+    align: [0, 1],
+    leader: true,
+  });
+  const ledgerRows = [...ledgerElement.querySelectorAll<HTMLElement>("li")];
 
-  const tmp = new THREE.Vector3();
-
-  function update(S: SceneState) {
-    // Labels follow the tops of their volumes.
-    const labelsOn = S.boxes.labels * S.boxes.alpha;
-    const track = S.boxes.track > 0.5;
-    for (const item of labelled) {
-      board.entityTop(item.entity, item.sprite.position);
-      item.sprite.position.z += 0.25;
-      item.element.classList.toggle("is-track", track);
-      const focus = track ? (item.unit ? 1 : 0.18) : 1;
-      fade(item.element, labelsOn * focus);
-    }
-
-    hudValues.forEach((h, i) => fade(h, THREE.MathUtils.clamp(S.hud.values * 1.6 - i * 0.12, 0, 1)));
-
-    // The card rises with the stream, then travels to the policy ring.
-    const e = S.card.travel;
-    const eased = e * e * (3 - 2 * e);
-    cardSprite.position.lerpVectors(anchors.cardStart, anchors.cardEnd, eased);
-    cardSprite.scale.setScalar(PX * anchors.mindScale * (1.35 - 0.4 * eased));
-    fade(card, S.card.on);
-
-    const on = S.decide.on;
-    roles.forEach((role, i) => fade(role, on * (i === 2 ? 0.55 : 1)));
-    fade(goals, on * THREE.MathUtils.clamp(S.decide.catalog * 1.5, 0, 1));
-    catalog.forEach((c, i) => {
-      const appear = THREE.MathUtils.clamp(S.decide.catalog * 2 - i * 0.12, 0, 1);
-      const out = !c.ok ? S.decide.filter : 0;
-      const dim = c.pick ? 1 : 1 - S.decide.pick * 0.45;
-      fade(c.element, on * appear * (1 - out * 0.65) * dim);
-      c.element.classList.toggle("is-filtered", out > 0.5);
-      c.element.classList.toggle("is-chosen", c.pick && S.decide.pick > 0.5);
-      tmp.copy(c.home);
-      tmp.y += (1 - appear) * 0.6;
-      if (c.pick) tmp.z += S.decide.pick * 0.6;
-      c.sprite.position.copy(tmp);
-    });
-
-    // Cursor along its path of hovers.
-    cursorAt(S.world.cursor, cursorSprite.position);
-    cursorSprite.position.y += 1.2;
-    fade(cursor, S.act.on);
-    cursor.classList.toggle("is-click", S.act.click > 0.05 && S.act.click < 0.95);
-
-    fade(ledger, S.verify.on);
-    ledgerRows.forEach((row, i) => {
-      row.classList.toggle("is-done", S.verify.status >= i + 1.5);
-      row.classList.toggle("is-current", S.verify.status >= i + 0.5 && S.verify.status < i + 1.5);
-      fade(row, S.verify.status >= i + 0.5 ? 1 : 0.25);
-    });
-  }
-
+  const path = anchors.cursorPath;
   /** Point on the cursor path: 0 is the start, 1 to 3 the hovered spots. */
   function cursorAt(t: number, out: THREE.Vector3) {
     const c = THREE.MathUtils.clamp(t, 0, 3);
     const k = Math.min(2, Math.floor(c));
-    return out.lerpVectors(path[k]!, path[k + 1]!, c - k);
+    const f = c - k;
+    // Ease into each spot, so the cursor settles where it reads the preview.
+    return out.lerpVectors(path[k]!, path[k + 1]!, f * f * (3 - 2 * f));
   }
 
-  return { card: cardSprite, update, cursorAt };
+  function update(S: SceneState) {
+    // Detect: labels arrive with their boxes; Track hands over to the village.
+    for (const { label } of entityLabels) label.opacity = S.boxes.labels * S.boxes.alpha * (1 - S.boxes.track);
+    const count = board.landedCount();
+    counterNumber.textContent = String(count);
+    counter.opacity = S.stack.on * (count > 0 ? 1 : 0);
+
+    // HUD: chips lift in a row, then each value counts up.
+    chips.forEach((chip, i) => {
+      const t = THREE.MathUtils.clamp(S.hud.values * 1.8 - i * 0.14, 0, 1);
+      chip.label.opacity = Math.min(1, t * 3) * (1 - S.sheets.lift * 2);
+      chip.label.shift[1] = (1 - ease(t * 2)) * 10;
+      const text = chip.target == null ? (t > 0.5 ? chip.reading : "·") : String(Math.round(chip.target * ease(t)));
+      if (text !== chip.shown) {
+        chip.value.textContent = text;
+        chip.shown = text;
+      }
+    });
+
+    // Decide.
+    const on = S.decide.on;
+    roles.forEach((role, i) => (role.opacity = THREE.MathUtils.clamp(on * 1.5 - i * 0.2, 0, 1) * (i === 2 ? 0.6 : 1)));
+    goals.opacity = on * THREE.MathUtils.clamp(S.decide.catalog * 1.5 - 0.3, 0, 1);
+    for (const [i, c] of catalog.entries()) {
+      const appear = THREE.MathUtils.clamp(S.decide.catalog * 2.2 - i * 0.14, 0, 1);
+      const out = !c.ok ? THREE.MathUtils.clamp(S.decide.filter * 1.6 - i * 0.08, 0, 1) : 0;
+      const dim = c.pick ? 1 : 1 - S.decide.pick * 0.55;
+      c.label.opacity = on * appear * (1 - out * 0.6) * dim;
+      c.label.shift[0] = (1 - ease(appear)) * -16 + ease(out) * 28;
+      c.element.classList.toggle("is-filtered", out > 0.5);
+      // The pick rises into the policy ring.
+      const pick = c.pick ? ease(S.decide.pick) : 0;
+      c.pos.copy(c.home).lerp(new THREE.Vector3(RING_X.policy, -1.55, 0), pick);
+      c.element.classList.toggle("is-chosen", c.pick && S.decide.pick > 0.4);
+    }
+
+    // Act.
+    cursorAt(S.world.cursor, cursorPoint);
+    cursor.opacity = S.act.on * Math.min(1, S.world.cursor * 4);
+    cursorElement.classList.toggle("is-click", S.act.click > 0.05 && S.act.click < 0.95);
+    const ghost = S.world.ghost;
+    footprint.position.copy(cursorPoint).setY(0);
+    footprintFill.position.copy(footprint.position);
+    const ok = S.world.cursor > 2.5;
+    footprintMaterial.color.setRGB(ok ? 0.5 : 2.2, ok ? 2.2 : 0.5, ok ? 0.8 : 0.45);
+    (footprintFill.material as THREE.MeshBasicMaterial).color.set(ok ? "#5cff8a" : "#ff5a4a");
+    footprintMaterial.opacity = ghost;
+    (footprintFill.material as THREE.MeshBasicMaterial).opacity = ghost * 0.18;
+    footprint.visible = footprintFill.visible = ghost > 0.01;
+    const click = S.act.click;
+    ripple.visible = click > 0.01 && click < 0.99;
+    ripple.scale.setScalar(0.6 + 2.2 * ease(click));
+    rippleMaterial.opacity = 1 - click;
+
+    // Verify.
+    ledger.opacity = S.verify.on;
+    ledger.shift[1] = (1 - ease(S.verify.on)) * 10;
+    ledgerRows.forEach((row, i) => {
+      row.classList.toggle("is-done", S.verify.status >= i + 1.5);
+      row.classList.toggle("is-current", S.verify.status >= i + 0.5 && S.verify.status < i + 1.5);
+      row.style.opacity = S.verify.status >= i + 0.5 ? "1" : "0.3";
+    });
+  }
+
+  return { update, cursorAt };
 }

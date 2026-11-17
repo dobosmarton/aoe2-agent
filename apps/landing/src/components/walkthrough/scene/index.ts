@@ -1,11 +1,12 @@
 import * as THREE from "three";
-import { CSS3DRenderer } from "three/examples/jsm/renderers/CSS3DRenderer.js";
 
 import turn from "../turn-data.json";
 import { createBoard } from "./board";
 import { createFlow, createRings } from "./flow";
 import { buildLayout } from "./layout";
-import { createMind, MIND } from "./mind";
+import { createLabels } from "./labels";
+import { setLineResolution } from "./lines";
+import { createMind, DOCK, MIND } from "./mind";
 import { createOverlays } from "./overlays";
 import { createPost } from "./post";
 import { applyPose, type CameraPose } from "./rig";
@@ -28,7 +29,7 @@ export type SceneHandle = {
 };
 
 type MountOptions = {
-  /** Holds the WebGL canvas and the CSS3D layer; sized by CSS. */
+  /** Holds the WebGL canvas and the label layer; sized by CSS. */
   view: HTMLElement;
   /** Receives `--wt-*` custom properties and state attributes for 2D overlays. */
   stage: HTMLElement;
@@ -88,6 +89,9 @@ async function loadJson<T>(url: string): Promise<T> {
 
 export async function mountScene({ view, stage, assets }: MountOptions): Promise<SceneHandle> {
   const data = turn as TurnData;
+  // Canvas text in the scene uses the site's mono face; wait for it.
+  await document.fonts?.ready;
+  const mono = getComputedStyle(stage).getPropertyValue("--font-mono").trim() || "ui-monospace, monospace";
   const small = window.matchMedia("(max-width: 767px)").matches;
   const art = `${assets}/aoe2`;
   const [meta, atlas, grass, patchy, dirt, forest, farm, visibility, frameTexture, hudTexture] = await Promise.all([
@@ -113,9 +117,7 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
   }
   renderer.domElement.className = "wt-canvas";
   view.append(renderer.domElement);
-  const cssRenderer = new CSS3DRenderer();
-  cssRenderer.domElement.className = "wt-css3d";
-  view.append(cssRenderer.domElement);
+  const labels = createLabels(view);
 
   const scene = new THREE.Scene();
   scene.background = createBackdrop();
@@ -163,18 +165,15 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
   // ---- The mind --------------------------------------------------------------------------
   const board = createBoard(data, frameTexture, hudTexture);
   mindRoot.add(board.group);
-  const mind = createMind(board);
+  const mind = createMind(data, board, frameTexture, labels, mono);
   mindRoot.add(mind.group);
-  const flow = createFlow(data, board, MIND.crystal.clone().sub(MIND.slab));
+  const flow = createFlow(data, board, MIND.plate.clone().sub(MIND.slab));
   board.group.add(flow.object);
   const decision = new THREE.Group();
   decision.position.copy(MIND.decision);
   mindRoot.add(decision);
   const rings = createRings();
   decision.add(rings.group);
-  const mindLight = new THREE.PointLight("#6aa2ff", 60, 0, 1.4);
-  mindLight.position.copy(MIND.crystal).add(new THREE.Vector3(0, 6, 8));
-  mindRoot.add(mindLight);
 
   mindRoot.updateMatrixWorld(true);
   const toWorld = (v: THREE.Vector3) => mindRoot.localToWorld(v.clone());
@@ -183,13 +182,11 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
   const spotsCentre = layout.spots.reduce((a, s) => ({ x: a.x + s.x / 3, z: a.z + s.z / 3 }), { x: 0, z: 0 });
   const spotsReach = Math.max(...layout.spots.map((s) => Math.hypot(s.x - spotsCentre.x, s.z - spotsCentre.z)));
   const spotPoint = (s: { x: number; z: number }) => new THREE.Vector3(s.x, 0, s.z);
-  const overlays = createOverlays(data, board, decision, {
+  const overlays = createOverlays(data, board, decision, labels, {
     root: scene,
-    mindScale,
-    cardStart: toWorld(MIND.crystal.clone().add(new THREE.Vector3(0, 3.2, 1))),
-    cardEnd: toWorld(MIND.decision.clone().add(new THREE.Vector3(-6.3, 0, 0))),
     cursorPath: [spotPoint({ x: green.x + 3, z: green.z + 3 }), ...layout.spots.map(spotPoint)],
-    ledgerAt: new THREE.Vector3(green.x, 3.4, green.z),
+    ledgerAt: new THREE.Vector3(green.x, 1.6, green.z),
+    green: spotPoint(green),
   });
 
   // ---- Tracking in the village: the walking villagers nearest the Town Center ----------
@@ -199,7 +196,7 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
   const byDistance = [...world.tracked].sort((a, b) => near(a) - near(b));
   const walkers = byDistance.filter((t) => t.route > 2 && near(t) < 11).slice(0, 6);
   const followed = [...walkers, ...byDistance.filter((t) => !walkers.includes(t))].slice(0, 9);
-  const tracking = createTracking(followed, [41, 7, 63, 12, 28, 55, 3, 90, 34]);
+  const tracking = createTracking(followed, [41, 7, 63, 12, 28, 55, 3, 90, 34], labels);
   const trackCentre = followed.reduce((c, t) => ({ x: c.x + t.anchor.x / followed.length, z: c.z + t.anchor.z / followed.length }), { x: 0, z: 0 });
   const spread = Math.max(...followed.map((t) => Math.hypot(t.anchor.x - trackCentre.x, t.anchor.z - trackCentre.z)));
   const trackSize = THREE.MathUtils.clamp(spread * 0.8, 5.5, 9);
@@ -216,11 +213,15 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
     // A little wider than the frame, so the glass shows with the village around it.
     game: { tx: 0, ty: 0, tz: 0, az: GAME_AZ, el: GAME_EL, size: gameSize * 1.75, fov: GAME_FOV },
     capture: inMind(new THREE.Vector3(3, 0, 1), 20, -4, 8.5),
-    detect: inMind(new THREE.Vector3(MIND.gate + 7, 1, 2), 28, -8, 10.5),
+    // The frame and the detector's plates beside it, seen from the front left.
+    detect: inMind(MIND.slab.clone().add(new THREE.Vector3(3.5, 2.4, -2)), 22, -5, 9.2),
     track: { tx: trackCentre.x, ty: 0.3, tz: trackCentre.z, az: 50, el: 33, size: trackSize, fov: 26 },
-    hud: inMind(new THREE.Vector3(hudLocal.x + 4.5, hudLocal.y - 1.2, hudLocal.z + 2), 10, 6, 4.8),
-    publish: inMind(new THREE.Vector3(MIND.crystal.x - 3, 0, 3), 22, -6, 9.5),
-    decide: inMind(MIND.decision.clone().add(new THREE.Vector3(-0.9, -0.8, 0)), 0, 0, 7.6),
+    hud: inMind(new THREE.Vector3(hudLocal.x + 1.2, hudLocal.y - 1.4, hudLocal.z + 2), 10, 6, 5.2),
+    // The frame and the plate the sheets seal into.
+    publish: inMind(MIND.slab.clone().lerp(MIND.plate, 0.55).add(new THREE.Vector3(0, 0.5, 1)), 16, -5, 8.5),
+    decide: inMind(MIND.decision.clone().add(new THREE.Vector3(-1.2, -1.5, 0)), 4, 0, 7),
+    // Wide over the mind, as the pulse heads back to the glass.
+    pulse: inMind(new THREE.Vector3(28, 2, 4), 8, 6, 17),
     house: { tx: spotsCentre.x, ty: 0.6, tz: spotsCentre.z, az: 48, el: 31, size: Math.max(6, spotsReach * 1.3), fov: 26 },
     verify: { tx: green.x, ty: 1, tz: green.z, az: 52, el: 32, size: 6.5, fov: 26 },
   };
@@ -255,7 +256,7 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
     const dpr = Math.min(window.devicePixelRatio, maxDpr);
     renderer.setPixelRatio(dpr);
     renderer.setSize(width, height, false);
-    cssRenderer.setSize(width, height);
+    setLineResolution(width, height);
     post.setSize(width, height);
     frameSafe();
     pointScale = ((height * dpr) / 2 / Math.tan(THREE.MathUtils.degToRad(15))) * 0.012 * mindScale;
@@ -333,11 +334,11 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
     tracking.update(S.world.track, time);
     screen.update(S.pane, time);
     board.update(S, time);
-    mind.update(S, time);
+    mind.update(S, time, pointScale / mindScale);
     flow.update(S, pointScale);
     rings.update(S, time);
     overlays.update(S);
-    mindRoot.visible = S.pane.on > 0.002 || S.slab.on > 0.01 || S.card.on > 0.01 || S.decide.on > 0.01 || S.mind.pulse > 0.001;
+    mindRoot.visible = S.pane.on > 0.002 || S.slab.on > 0.01 || S.card.on > 0.01 || S.decide.on > 0.01 || S.mind.pulse > 0.001 || S.mind.space > 0.01;
 
     stage.style.setProperty("--wt-stamp", String(S.stamp.on));
     stage.style.setProperty("--wt-input", String(S.act.on));
@@ -359,7 +360,7 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
     post.setMiniature((1 - dim) * THREE.MathUtils.smoothstep(pose.fov, 12, 24) * wide);
     post.setBloom(0.55 + 0.75 * dim);
     post.render(delta);
-    cssRenderer.render(scene, camera);
+    labels.update(camera, width, height);
   };
 
   const tick = () => {
@@ -421,7 +422,7 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
       post.dispose();
       renderer.dispose();
       renderer.domElement.remove();
-      cssRenderer.domElement.remove();
+      labels.dispose();
     },
   };
 }
