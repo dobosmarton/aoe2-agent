@@ -28,31 +28,33 @@ const pad = (n: number) => String(n).padStart(2, "0");
     <div class="wt-shade" aria-hidden="true"></div>
 
     <div class="wt-hud" aria-hidden="true">
-      <p class="wt-stage-label">[ One agent turn · recorded game, Feudal Age ]</p>
       <p class="wt-stamp">capture 3024 × 1672 · every 0.1 s · same bytes for detector and OCR</p>
       <ol class="wt-keys">
         {KEYS.map((key, i) => <li data-key={i}>{key.length === 1 ? <kbd>{key}</kbd> : <span>{key}</span>}</li>)}
       </ol>
-      <p class="wt-note">
-        The village is one recorded frame rebuilt with the game's own sprites, laid out from its detections. Frame,
-        boxes and HUD values are real; track IDs, goals and placement spots are illustrative.
-      </p>
     </div>
 
-    <nav class="wt-rail" aria-label="Walkthrough chapters">
-      <span class="wt-rail-track" aria-hidden="true"><span class="wt-rail-fill" data-wt-fill></span></span>
+    <nav class="wt-progress" aria-label="Walkthrough chapters">
       <ol>
         {
           CHAPTERS.map((c, i) => (
             <li>
-              <a href={`#wt-${c.id}`} data-wt-rail={i + 1}>
-                <span class="wt-rail-num">{pad(i + 1)}</span>
-                <span class="wt-rail-name">{c.name}</span>
+              <a href={`#wt-${c.id}`} data-wt-rail={i + 1} title={c.name}>
+                <span class="sr-only">
+                  {pad(i + 1)} {c.name}
+                </span>
               </a>
             </li>
           ))
         }
       </ol>
+      <p class="wt-progress-name" aria-hidden="true">
+        <span data-wt-num>01</span> / {pad(CHAPTERS.length)} · <span data-wt-name>{CHAPTERS[0]!.name}</span>
+      </p>
+      <p class="wt-note">
+        One recorded frame, rebuilt with the game's own sprites. Frame, boxes and HUD values are real; track IDs, goals
+        and placement spots are illustrative.
+      </p>
     </nav>
   </div>
 
@@ -115,14 +117,20 @@ const pad = (n: number) => String(n).padStart(2, "0");
 </script>
 
 <script>
+  import Lenis from "lenis";
+  import "lenis/dist/lenis.css";
+
   import type { SceneHandle } from "./scene";
 
   const root = document.getElementById("walkthrough");
   const stage = root?.querySelector<HTMLElement>("[data-wt-stage]");
   const view = root?.querySelector<HTMLElement>("[data-wt-view]");
   const articles = [...(root?.querySelectorAll<HTMLElement>("[data-wt-chapter]") ?? [])];
+  const cards = articles.map((a) => a.querySelector<HTMLElement>(".wt-card"));
   const railLinks = [...(root?.querySelectorAll<HTMLAnchorElement>("[data-wt-rail]") ?? [])];
-  const fill = root?.querySelector<HTMLElement>("[data-wt-fill]");
+  const progressNum = root?.querySelector<HTMLElement>("[data-wt-num]");
+  const progressName = root?.querySelector<HTMLElement>("[data-wt-name]");
+  const names = railLinks.map((a) => a.title);
 
   // Scroll position in timeline units: chapter i covers [i, i + 1) while its article
   // passes the middle of the viewport.
@@ -141,6 +149,30 @@ const pad = (n: number) => String(n).padStart(2, "0");
     }
     return 0;
   };
+  const smooth = (a: number, b: number, x: number) => {
+    const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+    return t * t * (3 - 2 * t);
+  };
+
+  // The safe area: the part of the stage the chapter caption does not cover, where the
+  // scene frames its subject. Beside the caption on wide screens, above it on phones.
+  const safeArea = () => {
+    const width = stage?.clientWidth ?? window.innerWidth;
+    const height = stage?.clientHeight ?? window.innerHeight;
+    const top = 72;
+    if (window.matchMedia("(width >= 48rem)").matches) {
+      const right = Math.max(0, ...cards.map((c) => (c ? c.getBoundingClientRect().right : 0)));
+      return { left: Math.min(width * 0.5, right + 24), top, right: width, bottom: height };
+    }
+    const tallest = Math.max(0, ...cards.map((c) => c?.offsetHeight ?? 0));
+    return { left: 0, top, right: width, bottom: Math.max(height * 0.45, height - tallest - 20) };
+  };
+  const applySafe = () => {
+    const safe = safeArea();
+    stage?.style.setProperty("--wt-cx", `${(safe.left + safe.right) / 2}px`);
+    stage?.style.setProperty("--wt-safe-bottom", `${safe.bottom}px`);
+    scene?.setSafe(safe);
+  };
 
   // The site header sits over the dark stage at the top of the page: give it the dark
   // tokens while it does, in either theme.
@@ -148,6 +180,7 @@ const pad = (n: number) => String(n).padStart(2, "0");
   const syncHeader = () => header?.classList.toggle("dark", (root?.getBoundingClientRect().bottom ?? 0) > 72);
 
   let scene: SceneHandle | null = null;
+  let lenis: Lenis | null = null;
   let last = -1;
   const onScroll = () => {
     syncHeader();
@@ -155,18 +188,40 @@ const pad = (n: number) => String(n).padStart(2, "0");
     if (Math.abs(p - last) < 0.0005) return;
     last = p;
     scene?.setProgress(p);
-    const active = Math.floor(p);
+    // One caption at a time: each fades and rises in at the start of its chapter and
+    // out at the end, so two never show together.
+    cards.forEach((card, i) => {
+      if (!card || i === 0) return;
+      const enter = smooth(i, i + 0.07, p);
+      const leave = 1 - smooth(i + 0.93, i + 1, p);
+      const o = Math.min(enter, leave);
+      card.style.setProperty("--wt-o", o.toFixed(3));
+      card.style.setProperty("--wt-y", `${enter < 1 ? (1 - enter) * 14 : -(1 - leave) * 14}px`);
+      card.style.visibility = o > 0.001 ? "visible" : "hidden";
+      card.inert = o < 0.5;
+    });
+    root?.style.setProperty("--wt-hero-o", (1 - smooth(0.62, 0.92, p)).toFixed(3));
+    const active = Math.min(names.length, Math.max(1, Math.floor(p)));
     railLinks.forEach((link, i) => {
       if (i + 1 === active) link.setAttribute("aria-current", "step");
       else link.removeAttribute("aria-current");
+      link.style.setProperty("--wt-fill", String(Math.min(1, Math.max(0, p - (i + 1)))));
     });
-    if (fill) fill.style.transform = `scaleY(${Math.min(1, Math.max(0, (p - 1) / (bounds.length - 1)))})`;
-    root?.toggleAttribute("data-past-hero", p > 0.85);
+    if (progressNum) progressNum.textContent = String(active).padStart(2, "0");
+    if (progressName) progressName.textContent = names[active - 1] ?? "";
+    root?.toggleAttribute("data-past-hero", p > 0.85 && p < bounds.length - 0.02);
   };
 
   const toStatic = () => {
     if (!root) return;
     root.dataset.mode = "static";
+    lenis?.destroy();
+    lenis = null;
+    for (const card of cards) {
+      if (!card) continue;
+      card.style.removeProperty("visibility");
+      card.inert = false;
+    }
     scene?.dispose();
     scene = null;
   };
@@ -175,15 +230,21 @@ const pad = (n: number) => String(n).padStart(2, "0");
   window.addEventListener("scroll", syncHeader, { passive: true });
 
   if (root && stage && view && root.dataset.mode === "scene") {
+    // Smooth wheel scrolling while the scene runs; touch keeps the native feel.
+    lenis = new Lenis({ autoRaf: true, anchors: true, lerp: 0.1 });
     measure();
     onScroll();
+    applySafe();
     window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("resize", () => {
       measure();
+      applySafe();
       onScroll();
     });
     new ResizeObserver(() => {
       measure();
+      applySafe();
+      last = -1;
       onScroll();
     }).observe(root);
 
@@ -193,6 +254,7 @@ const pad = (n: number) => String(n).padStart(2, "0");
         .then(({ mountScene }) => mountScene({ view, stage, assets: "/walkthrough" }))
         .then((handle) => {
           scene = handle;
+          applySafe();
           last = -1;
           onScroll();
           root.dataset.ready = "";

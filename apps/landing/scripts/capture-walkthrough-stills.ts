@@ -58,11 +58,12 @@ async function stills() {
   const browser = await chromium.launch({ args: GPU_ARGS });
   const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
   await open(page);
-  // Stills show the scene alone, centred: no text, rail, shade or header.
+  // Stills show the scene alone, centred: no text, progress, shade or header.
   await page.addStyleTag({
-    content: `.wt { --wt-sx: 0px !important; --wt-sy: 0px !important; }
-      .wt-chapters > * { visibility: hidden; } .wt-shade, .wt-rail, .wt-note, .wt-stage-label, [data-site-header] { display: none !important; }`,
+    content: `.wt-chapters > *, .wt-chapters .wt-card { visibility: hidden !important; }
+      .wt-shade, .wt-progress, [data-site-header] { display: none !important; }`,
   });
+  await page.evaluate(() => (document.querySelector("[data-wt-stage]") as HTMLElement & { wtDebug: { setCentred(on: boolean): void } }).wtDebug.setCentred(true));
   const stage = page.locator("[data-wt-stage]");
   for (const [i, id] of CHAPTERS.entries()) {
     await seek(page, i === 0 ? 0.5 : i + 0.88);

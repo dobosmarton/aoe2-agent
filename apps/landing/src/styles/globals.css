@@ -1031,21 +1031,12 @@
   it in scene mode, a full-height banner over stacked stills in static mode.
 */
 .wt {
-  --wt-sx: 0px;
-  --wt-sy: 21svh;
   --wt-ink: #02050c;
   position: relative;
   isolation: isolate;
   margin-top: -5rem;
   background: var(--wt-ink);
   color: hsl(var(--foreground));
-}
-
-@media (width >= 48rem) {
-  .wt {
-    --wt-sx: 15vw;
-    --wt-sy: 0px;
-  }
 }
 
 .wt-stage {
@@ -1062,10 +1053,7 @@
 
 .wt-view {
   position: absolute;
-  top: calc(-2 * var(--wt-sy));
-  left: 0;
-  width: calc(100% + 2 * var(--wt-sx));
-  height: calc(100% + 2 * var(--wt-sy));
+  inset: 0;
 }
 
 .wt-canvas,
@@ -1087,11 +1075,6 @@
   height: 100%;
   object-fit: cover;
   transition: opacity 700ms ease;
-}
-
-/* The poster is the hero still, centred; shift it to where the scene draws the frame. */
-.wt[data-mode="scene"] .wt-poster {
-  translate: var(--wt-sx) calc(-1 * var(--wt-sy));
 }
 
 .wt[data-ready] .wt-poster {
@@ -1124,38 +1107,31 @@
   color: hsl(var(--muted-foreground));
 }
 
-.wt-stage-label {
-  position: absolute;
-  top: 5.5rem;
-  right: 1.25rem;
-  text-transform: uppercase;
-  opacity: 0;
-  transition: opacity 400ms;
-}
-
 .wt-stamp,
 .wt-keys {
   position: absolute;
-  left: calc(50% + var(--wt-sx));
-  top: 5rem;
+  left: var(--wt-cx, 50%);
+  top: calc(var(--wt-safe-bottom, 100%) - 3.25rem);
 }
 
 @media (width >= 48rem) {
   .wt-stamp,
   .wt-keys {
     top: auto;
-    bottom: 1.5rem;
+    bottom: 1.75rem;
   }
 }
 
 .wt-stamp {
   translate: -50% 0;
+  width: max-content;
+  max-width: calc(100vw - 2rem);
+  text-align: center;
   padding: 0.35rem 0.7rem;
   border: 1px solid hsl(var(--accent-foreground) / 0.45);
   border-radius: 0.25rem;
   background: rgb(2 5 12 / 0.7);
   color: hsl(var(--accent-foreground));
-  white-space: nowrap;
   opacity: var(--wt-stamp, 0);
 }
 
@@ -1198,102 +1174,82 @@
   background: hsl(var(--accent-foreground) / 0.18);
 }
 
-.wt-note {
+/* Chapter progress: eight ticks, the current chapter, and what is real. */
+.wt-progress {
   position: absolute;
-  top: 7rem;
-  right: 1.25rem;
-  max-width: 21rem;
-  text-align: right;
-  line-height: 1.5;
-  letter-spacing: 0.02em;
-  opacity: 0;
-  transition: opacity 400ms;
-}
-
-.wt[data-past-hero] :is(.wt-stage-label, .wt-note) {
-  opacity: 0.85;
-}
-
-@media (width < 48rem) {
-  .wt-note,
-  .wt-stage-label {
-    display: none;
-  }
-}
-
-/* Chapter rail: desktop only. */
-.wt-rail {
-  position: absolute;
-  top: 50%;
-  right: 1.25rem;
-  translate: 0 -50%;
+  left: max(1rem, calc((100vw - 72rem) / 2 + 1rem));
+  bottom: 1.75rem;
   display: none;
+  width: min(25rem, 34vw);
   font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.06em;
-  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
   opacity: 0;
   transition: opacity 400ms;
 }
 
-.wt[data-past-hero] .wt-rail {
+.wt[data-past-hero] .wt-progress {
   opacity: 1;
 }
 
-@media (width >= 64rem) {
-  .wt-rail {
-    display: flex;
-    gap: 0.9rem;
+@media (width >= 48rem) {
+  .wt-progress {
+    display: block;
   }
 }
 
-.wt-rail ol {
-  list-style: none;
-  display: grid;
-  gap: 0.15rem;
-}
-
-.wt-rail ol {
-  padding: 0.35rem;
-  border-radius: 0.4rem;
-  background: rgb(2 5 12 / 0.6);
-  backdrop-filter: blur(6px);
-}
-
-.wt-rail a {
+.wt-progress ol {
   display: flex;
-  gap: 0.6rem;
-  padding: 0.3rem 0.4rem;
-  border-radius: 0.25rem;
-  color: hsl(var(--muted-foreground) / 0.75);
-  transition: color 200ms;
+  gap: 0.3rem;
+  list-style: none;
 }
 
-.wt-rail a:hover,
-.wt-rail a:focus-visible {
-  color: hsl(var(--foreground));
+.wt-progress li {
+  flex: 1;
 }
 
-.wt-rail a[aria-current] {
-  color: hsl(var(--accent-foreground));
+.wt-progress a {
+  position: relative;
+  display: block;
+  height: 1.25rem;
 }
 
-.wt-rail-num {
+.wt-progress a::before,
+.wt-progress a::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0.5rem;
+  height: 2px;
+  border-radius: 1px;
+  background: hsl(var(--foreground) / 0.16);
+}
+
+.wt-progress a::after {
+  transform-origin: left;
+  transform: scaleX(var(--wt-fill, 0));
+  background: hsl(var(--accent-foreground));
+}
+
+.wt-progress a:hover::before,
+.wt-progress a:focus-visible::before {
+  background: hsl(var(--foreground) / 0.4);
+}
+
+.wt-progress-name {
+  margin-top: 0.15rem;
+  text-transform: uppercase;
+  color: hsl(var(--foreground) / 0.85);
   font-variant-numeric: tabular-nums;
 }
 
-.wt-rail-track {
-  position: relative;
-  width: 1px;
-  background: hsl(var(--foreground) / 0.12);
-}
-
-.wt-rail-fill {
-  position: absolute;
-  inset: 0;
-  transform-origin: top;
-  transform: scaleY(0);
-  background: hsl(var(--accent-foreground));
+.wt-note {
+  margin-top: 0.6rem;
+  max-width: 24rem;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+  font-size: 10.5px;
+  color: hsl(var(--muted-foreground) / 0.8);
 }
 
 /* Chapters scroll over the pinned stage. */
@@ -1328,6 +1284,11 @@
 
 .wt-hero-inner > * {
   max-width: 36rem;
+}
+
+.wt[data-mode="scene"] .wt-hero-inner,
+.wt[data-mode="scene"] .wt-scroll-hint {
+  opacity: var(--wt-hero-o, 1);
 }
 
 .wt-kicker,
@@ -1519,12 +1480,49 @@
   display: none;
 }
 
+/* Scene mode: one caption at a time, pinned beside the scene (below it on phones). The
+   scroll script sets --wt-o and --wt-y per caption from the scroll position. The
+   chapter articles are then only scroll length, so clicks pass through to the stage. */
+.wt[data-mode="scene"] .wt-chapters {
+  pointer-events: none;
+}
+
+.wt[data-mode="scene"] .wt-hero-inner {
+  pointer-events: auto;
+}
+
+.wt[data-mode="scene"] .wt-card {
+  pointer-events: auto;
+  position: fixed;
+  z-index: 2;
+  top: auto;
+  bottom: calc(0.75rem + env(safe-area-inset-bottom));
+  left: 0.75rem;
+  right: 0.75rem;
+  width: auto;
+  margin: 0;
+  opacity: var(--wt-o, 0);
+  translate: 0 var(--wt-y, 0px);
+  visibility: hidden;
+}
+
+@media (width >= 48rem) {
+  .wt[data-mode="scene"] .wt-card {
+    top: 50%;
+    bottom: auto;
+    right: auto;
+    left: max(1rem, calc((100vw - 72rem) / 2 + 1rem));
+    width: min(25rem, 34vw);
+    translate: 0 calc(-50% + var(--wt-y, 0px));
+  }
+}
+
 /* Static mode: banner, then each chapter as a still beside its text. */
 .wt[data-mode="static"] .wt-stage {
   position: relative;
 }
 
-.wt[data-mode="static"] :is(.wt-view, .wt-hud, .wt-rail) {
+.wt[data-mode="static"] :is(.wt-view, .wt-hud, .wt-progress) {
   display: none;
 }
 

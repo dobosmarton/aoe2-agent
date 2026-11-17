@@ -16,9 +16,14 @@ import { buildTimeline, createState, TIMELINE_LENGTH, type Poses } from "./timel
 import type { TurnData } from "./types";
 import { createWorld } from "./world";
 
+/** Part of the view, in CSS pixels from its top-left, that no caption covers. */
+export type SafeArea = { left: number; top: number; right: number; bottom: number };
+
 export type SceneHandle = {
   /** Scroll position in timeline units: chapter index plus the fraction read. */
   setProgress(p: number): void;
+  /** Where to frame each shot's subject. */
+  setSafe(area: SafeArea): void;
   dispose(): void;
 };
 
@@ -33,7 +38,7 @@ type MountOptions = {
 
 type DebugStage = HTMLElement & {
   wtProgress?: number;
-  wtDebug?: { setPose(pose: Partial<CameraPose> | null): void; info(): unknown };
+  wtDebug?: { setPose(pose: Partial<CameraPose> | null): void; setCentred(on: boolean): void; info(): unknown };
 };
 
 // The game camera: 45 degrees round, 30 degrees up, so tiles draw as 2:1 diamonds.
@@ -42,6 +47,9 @@ const GAME_EL = 30;
 const GAME_FOV = 8;
 // Distance from the village centre to the glass pane, along the game camera's axis.
 const PANE_DISTANCE = 45;
+// A pose's `size` is the half-height of a subject this much wider than tall; the
+// camera fits that box into the safe area.
+const SUBJECT_ASPECT = 1.3;
 
 function loadTexture(url: string): Promise<THREE.Texture> {
   return new Promise((resolve, reject) => new THREE.TextureLoader().load(url, resolve, undefined, reject));
@@ -198,21 +206,31 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
   const post = createPost(renderer, scene, camera, small);
 
   // ---- Layout ----------------------------------------------------------------------------
+  // Each shot's subject is framed in the safe area: the camera's principal point moves
+  // to the safe area's centre (a view offset), and `fit` scales the view so the subject
+  // box fits inside it.
   let width = 1;
   let height = 1;
   let fit = 1;
   let pointScale = 1;
+  let safe: SafeArea | null = null;
+  let centred = false;
+  const frameSafe = () => {
+    const s = !centred && safe ? safe : { left: 0, top: 0, right: width, bottom: height };
+    const sw = Math.max(1, s.right - s.left);
+    const sh = Math.max(1, s.bottom - s.top);
+    fit = Math.max(height / sh, (SUBJECT_ASPECT * height) / sw);
+    camera.setViewOffset(width, height, width / 2 - (s.left + s.right) / 2, height / 2 - (s.top + s.bottom) / 2, width, height);
+  };
   const resize = () => {
     width = Math.max(1, view.clientWidth);
     height = Math.max(1, view.clientHeight);
-    // Ambient occlusion, shadows and three post passes run per pixel: 1.5 is the cap.
     const dpr = Math.min(window.devicePixelRatio, 1.5);
     renderer.setPixelRatio(dpr);
     renderer.setSize(width, height, false);
     cssRenderer.setSize(width, height);
     post.setSize(width, height);
-    // Narrow (portrait) views need a taller framing to keep the same width in view.
-    fit = Math.max(1, 1.6 / (width / height));
+    frameSafe();
     pointScale = ((height * dpr) / 2 / Math.tan(THREE.MathUtils.degToRad(15))) * 0.012 * mindScale;
   };
   resize();
@@ -242,7 +260,9 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
     timer.update();
     const time = timer.getElapsed();
     const delta = timer.getDelta();
-    current = current < 0 ? target : current + (target - current) * 0.09;
+    // Lenis already smooths the wheel; this light damping only removes steps from
+    // keyboard and scrollbar jumps. Frame-rate independent.
+    current = current < 0 ? target : THREE.MathUtils.damp(current, target, 9, Math.min(delta, 0.1));
     if (Math.abs(target - current) < 0.0005) current = target;
     timeline.seek(Math.min(TIMELINE_LENGTH, Math.max(0, current)), false);
     (stage as DebugStage).wtProgress = current;
@@ -328,6 +348,10 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
     setPose(p) {
       debugPose = p;
     },
+    setCentred(on) {
+      centred = on;
+      frameSafe();
+    },
     info() {
       return { calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, mindScale, gameSize, poses, followed: followed.map((t) => [t.anchor.x, t.anchor.z, t.walking]), villagers: world.villagerCheck() };
     },
@@ -339,6 +363,10 @@ export async function mountScene({ view, stage, assets }: MountOptions): Promise
   return {
     setProgress(p) {
       target = p;
+    },
+    setSafe(area) {
+      safe = area;
+      frameSafe();
     },
     dispose() {
       stop();
