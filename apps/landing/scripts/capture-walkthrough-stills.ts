@@ -6,7 +6,7 @@
  *   bun run capture:walkthrough -- --review --static # the reduced-motion fallback, full page
  *
  * Stills go to public/walkthrough/stills/<chapter>.jpg (plus hero.jpg, the poster, and
- * public/og-image.png). Review shots go to the directory in WT_REVIEW_DIR (default
+ * public/og-image.jpg). Review shots go to the directory in WT_REVIEW_DIR (default
  * tmp/walkthrough-review). Needs the site served at WT_BASE (default
  * http://localhost:4321, e.g. `bun run preview`) and Playwright Chromium.
  */
@@ -104,7 +104,7 @@ const isolateScene = async (page: Page): Promise<void> => {
 const captureOgImage = async (page: Page): Promise<void> => {
   await page.setViewportSize(OG_IMAGE_VIEWPORT);
   await seek(page, HERO_PROGRESS);
-  await page.locator("[data-wt-stage]").screenshot({ path: resolve(LANDING, "public/og-image.png") });
+  await page.locator("[data-wt-stage]").screenshot({ path: resolve(LANDING, "public/og-image.jpg"), type: "jpeg", quality: 85 });
   await page.setViewportSize(STILL_VIEWPORT);
 };
 
