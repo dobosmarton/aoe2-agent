@@ -89,6 +89,7 @@ const runbooks = docs.filter((doc) => doc.id.startsWith("runbooks/")).sort((a, b
 
 const runbookTitle = (id: string): string => {
   const name = id.split("/").pop()?.replace(/\.md$/, "").replace(/^\d+-/, "").replace(/-/g, " ") ?? id;
+
   return name.charAt(0).toUpperCase() + name.slice(1);
 };
 

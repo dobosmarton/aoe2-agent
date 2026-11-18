@@ -5,6 +5,7 @@ import { type Board, createBoard } from "./board";
 import { createCanvas } from "./card";
 import { fadeWindow } from "./easing";
 import { createFlow, createRings, type Flow, type Rings } from "./flow";
+import { HERO_FADE_END, HERO_FADE_START, type SafeArea, subjectFit } from "./framing";
 import { buildLayout, type GroundPoint, type Layout } from "./layout";
 import { createLabels, type Labels } from "./labels";
 import { setLineResolution } from "./lines";
@@ -19,9 +20,6 @@ import { createTracking } from "./track";
 import type { TurnData } from "./types";
 import type { TrackedVillager, VillagerCheck } from "./villagers";
 import { createWorld, type World, type WorldTextures } from "./world";
-
-/** Part of the view, in CSS pixels from its top-left, that no caption covers. */
-export type SafeArea = { left: number; top: number; right: number; bottom: number };
 
 export type SceneHandle = {
   /** Scroll position in timeline units: chapter index plus the fraction read. */
@@ -41,6 +39,8 @@ type MountOptions = {
   stage: HTMLElement;
   /** Base URL of public/walkthrough. */
   assets: string;
+  /** Where the reader already is (timeline units); a reload mid-page starts there. */
+  progress: number;
 };
 
 type DebugInfo = {
@@ -78,9 +78,6 @@ const GAME_EL = 30;
 const GAME_FOV = 8;
 // Distance from the village centre to the glass pane, along the game camera's axis.
 const PANE_DISTANCE = 45;
-// A pose's `size` is the half-height of a subject this much wider than tall; the
-// camera fits that box into the safe area.
-const SUBJECT_ASPECT = 1.3;
 // Most pixels a frame renders (device pixels), about 2x of a 1440 x 900 window.
 const PIXEL_BUDGET = 5.2e6;
 // Pixel ratio phones always use, and that other screens fall back to when frames run long.
@@ -100,10 +97,6 @@ const INTRO = 1.8;
 // The hero drifts and follows the pointer up to chapter 1, and again from here on, as
 // the last chapter hands back to the hero shot.
 const HERO_RETURN = 8.8;
-// The hero's text fades over this stretch of the scroll (as in Walkthrough.astro), and
-// its framing hands over to the chapters' safe area with it.
-const HERO_FADE_START = 0.62;
-const HERO_FADE_END = 0.92;
 // The stacked layout frames the narrow shots, and so does a safe area narrower than
 // this many CSS px (phones on their side).
 const NARROW_WIDTH = 544;
@@ -160,21 +153,29 @@ type Render = (delta: number, active: boolean) => void;
 const createBackdrop = (): THREE.Texture => {
   const { w, h } = BACKDROP_SIZE;
   const [canvas, g] = createCanvas(w, h);
+
   g.fillStyle = "#03060e";
   g.fillRect(0, 0, w, h);
+
   const glow = g.createRadialGradient(300, 120, 10, 300, 130, 320);
+
   glow.addColorStop(0, "rgba(38, 70, 140, 0.55)");
   glow.addColorStop(0.45, "rgba(22, 40, 92, 0.32)");
   glow.addColorStop(1, "rgba(3, 6, 14, 0)");
   g.fillStyle = glow;
   g.fillRect(0, 0, w, h);
+
   const low = g.createRadialGradient(90, 300, 10, 90, 300, 260);
+
   low.addColorStop(0, "rgba(70, 30, 140, 0.16)");
   low.addColorStop(1, "rgba(3, 6, 14, 0)");
   g.fillStyle = low;
   g.fillRect(0, 0, w, h);
+
   const texture = new THREE.CanvasTexture(canvas);
+
   texture.colorSpace = THREE.SRGBColorSpace;
+
   return texture;
 };
 
@@ -186,9 +187,17 @@ const isSpriteMeta = (value: unknown): value is SpriteMeta =>
 
 const loadSpriteMeta = async (url: string): Promise<SpriteMeta> => {
   const response = await fetch(url);
-  if (!response.ok) throw new Error(`${url}: ${response.status}`);
+
+  if (!response.ok) {
+    throw new Error(`${url}: ${response.status}`);
+  }
+
   const meta: unknown = await response.json();
-  if (!isSpriteMeta(meta)) throw new Error(`${url}: not a sprite sheet description`);
+
+  if (!isSpriteMeta(meta)) {
+    throw new Error(`${url}: not a sprite sheet description`);
+  }
+
   return meta;
 };
 
@@ -206,6 +215,7 @@ const loadArt = async (assets: string, small: boolean): Promise<Art> => {
     loadTexture(`${assets}/frame-${small ? 1024 : 2048}.webp`),
     loadTexture(`${assets}/hud.webp`),
   ]);
+
   return { meta, world: { atlas, grass, patchy, dirt, forest, farm, visibility }, frame, hud };
 };
 
@@ -213,14 +223,18 @@ const loadArt = async (assets: string, small: boolean): Promise<Art> => {
 const createRenderer = (screenTextures: readonly THREE.Texture[]): THREE.WebGLRenderer => {
   // The default power preference lets dual-GPU laptops stay on the integrated GPU.
   const renderer = new THREE.WebGLRenderer({ antialias: false, stencil: false, depth: false });
+
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   // Count draw calls over the whole frame (shadow, scene and post passes), not per pass.
   renderer.info.autoReset = false;
+
   for (const texture of screenTextures) {
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
   }
+
   renderer.domElement.className = "wt-canvas";
+
   return renderer;
 };
 
@@ -228,6 +242,7 @@ const createRenderer = (screenTextures: readonly THREE.Texture[]): THREE.WebGLRe
 // and shadows. The lights only shape the mind's few lit materials.
 const addLights = (scene: THREE.Scene): void => {
   const rim = new THREE.DirectionalLight("#8fb4ff", 1.2);
+
   rim.position.set(-20, 30, 20);
   scene.add(new THREE.HemisphereLight("#e2eeff", "#1a2030", 1.2), rim);
 };
@@ -242,13 +257,16 @@ const createGameView = (frame: TurnData["frame"], tileWidth: number, small: bool
   const up = new THREE.Vector3().crossVectors(axis, right);
 
   const camera = new THREE.OrthographicCamera(-size * aspect, size * aspect, size, -size, 1, 400);
+
   camera.position.copy(axis).multiplyScalar(150);
   camera.lookAt(0, 0, 0);
+
   const targetWidth = small ? 768 : 1280;
   const target = new THREE.WebGLRenderTarget(targetWidth, Math.round(targetWidth / aspect), {
     colorSpace: THREE.SRGBColorSpace,
     samples: 4,
   });
+
   return { camera, target, size, aspect, axis, right, up };
 };
 
@@ -257,9 +275,11 @@ const createGameView = (frame: TurnData["frame"], tileWidth: number, small: bool
 const createMindRoot = (game: GameView, paneHeight: number): { root: THREE.Group; scale: number } => {
   const scale = (game.size - PANE_DISTANCE * Math.tan(THREE.MathUtils.degToRad(GAME_FOV / 2))) / (paneHeight / 2);
   const root = new THREE.Group();
+
   root.position.copy(game.axis).multiplyScalar(PANE_DISTANCE);
   root.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(game.right, game.up, game.axis));
   root.scale.setScalar(scale);
+
   return { root, scale };
 };
 
@@ -285,33 +305,47 @@ type SceneParts = {
 /** The village, the glass in front of it and the mind behind the glass. */
 const assembleScene = (data: TurnData, art: Art, labels: Labels, mono: string, small: boolean): SceneParts => {
   const scene = new THREE.Scene();
+
   scene.background = createBackdrop();
+
   const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 500);
 
   const layout = buildLayout(data);
   const world = createWorld(layout, art.world, art.meta);
+
   scene.add(world.group);
   addLights(scene);
 
   const game = createGameView(data.frame, layout.tw, small);
   const screen = createScreen(art.frame, game.target.texture, game.aspect);
   const { root: mindRoot, scale: mindScale } = createMindRoot(game, screen.height);
+
   scene.add(mindRoot);
   mindRoot.add(screen.group);
 
   const board = createBoard(data, art.frame, art.hud);
+
   mindRoot.add(board.group);
+
   const mind = createMind(data, board, art.frame, labels, mono);
+
   mindRoot.add(mind.group);
+
   const flow = createFlow(data, board, MIND.plate.clone().sub(MIND.slab));
+
   board.group.add(flow.object);
+
   const decision = new THREE.Group();
+
   decision.position.copy(MIND.decision);
   mindRoot.add(decision);
+
   const rings = createRings();
+
   decision.add(rings.group);
 
   mindRoot.updateMatrixWorld(true);
+
   return { scene, camera, layout, world, game, screen, mindRoot, mindScale, board, mind, flow, decision, rings };
 };
 
@@ -321,6 +355,7 @@ const pickFollowed = (tracked: readonly TrackedVillager[], tc: GroundPoint): Tra
   const near = (t: TrackedVillager): number => Math.hypot(t.anchor.x - tc.x, t.anchor.z - tc.z);
   const byDistance = [...tracked].sort((a, b) => near(a) - near(b));
   const walkers = byDistance.filter((t) => t.route > 2 && near(t) < 11).slice(0, MAX_WALKERS);
+
   return [...walkers, ...byDistance.filter((t) => !walkers.includes(t))].slice(0, TRACK_IDS.length);
 };
 
@@ -328,12 +363,14 @@ const pickFollowed = (tracked: readonly TrackedVillager[], tc: GroundPoint): Tra
 const spread = (points: readonly GroundPoint[]): { centre: GroundPoint; reach: number } => {
   const centre = points.reduce((c, p) => ({ x: c.x + p.x / points.length, z: c.z + p.z / points.length }), { x: 0, z: 0 });
   const reach = Math.max(...points.map((p) => Math.hypot(p.x - centre.x, p.z - centre.z)));
+
   return { centre, reach };
 };
 
 const createMindPoser = (toWorld: (local: THREE.Vector3) => THREE.Vector3, mindScale: number): MindPoser => {
   return (local, dAz, dEl, size, fov = 30) => {
     const t = toWorld(local);
+
     return { tx: t.x, ty: t.y, tz: t.z, az: GAME_AZ + dAz, el: GAME_EL + dEl, size: size * mindScale, fov };
   };
 };
@@ -351,6 +388,7 @@ type ShotSubjects = {
 
 const createWidePoses = ({ layout, game, board, inMind, track, spots }: ShotSubjects): Poses => {
   const hudLocal = board.hud.position.clone().add(MIND.slab);
+
   return {
     // World shots stay close to the game's own angle, where its sprites are drawn for.
     hero: { tx: layout.tc.x * 0.5 + 1.5, ty: 0, tz: layout.tc.z * 0.5 - 1.5, az: 45, el: 30, size: 9.5, fov: 28 },
@@ -376,6 +414,7 @@ const createWidePoses = ({ layout, game, board, inMind, track, spots }: ShotSubj
 // these shots are re-centred and widened so nothing runs off the sides.
 const createNarrowPoses = (wide: Poses, board: Board, inMind: MindPoser): Poses => {
   const hudLocal = board.hud.position.clone().add(MIND.slab);
+
   return {
     ...wide,
     capture: inMind(new THREE.Vector3(2.2, 0, 1), 20, -4, 9.6),
@@ -397,9 +436,9 @@ type Scrubber = {
   dispose: () => void;
 };
 
-const createScrubber = (state: SceneState, poses: Poses): Scrubber => {
+const createScrubber = (state: SceneState, poses: Poses, initial: number): Scrubber => {
   let timeline = buildTimeline(state, poses);
-  let target = 0;
+  let target = initial;
   let current = -1;
   let seeked = -1;
 
@@ -407,11 +446,16 @@ const createScrubber = (state: SceneState, poses: Poses): Scrubber => {
     // Lenis already smooths the wheel; this light damping only removes steps from
     // keyboard and scrollbar jumps. Frame-rate independent.
     current = current < 0 ? target : THREE.MathUtils.damp(current, target, 9, delta);
-    if (Math.abs(target - current) < SETTLED) current = target;
+
+    if (Math.abs(target - current) < SETTLED) {
+      current = target;
+    }
+
     if (current !== seeked) {
       timeline.seek(Math.min(TIMELINE_LENGTH, Math.max(0, current)), false);
       seeked = current;
     }
+
     return current;
   };
 
@@ -431,7 +475,9 @@ const createScrubber = (state: SceneState, poses: Poses): Scrubber => {
     advance,
     isSettling: () => current < 0 || Math.abs(target - current) > SETTLED,
     rebuild,
-    dispose: () => timeline.kill(),
+    dispose: () => {
+      timeline.kill();
+    },
   };
 };
 
@@ -471,11 +517,13 @@ const createFraming = (camera: THREE.PerspectiveCamera): Framing => {
       bottom: a.bottom + (b.bottom - a.bottom) * w,
     };
     const key = `${width} ${height} ${s.left.toFixed(1)} ${s.top.toFixed(1)} ${s.right.toFixed(1)} ${s.bottom.toFixed(1)}`;
-    if (key === framed) return;
+
+    if (key === framed) {
+      return;
+    }
+
     framed = key;
-    const safeWidth = Math.max(1, s.right - s.left);
-    const safeHeight = Math.max(1, s.bottom - s.top);
-    fit = Math.max(height / safeHeight, (SUBJECT_ASPECT * height) / safeWidth);
+    fit = subjectFit(height, s);
     camera.setViewOffset(width, height, width / 2 - (s.left + s.right) / 2, height / 2 - (s.top + s.bottom) / 2, width, height);
   };
 
@@ -522,9 +570,11 @@ const createViewport = ({ view, renderer, post, framing, small, mindScale }: Vie
   const resize = (): void => {
     size.width = Math.max(1, view.clientWidth);
     size.height = Math.max(1, view.clientHeight);
+
     const { width, height } = size;
     const budget = Math.max(1, Math.sqrt(PIXEL_BUDGET / (width * height)));
     const dpr = Math.min(window.devicePixelRatio, maxDpr, budget);
+
     renderer.setPixelRatio(dpr);
     renderer.setSize(width, height, false);
     setLineResolution(width, height);
@@ -535,8 +585,12 @@ const createViewport = ({ view, renderer, post, framing, small, mindScale }: Vie
 
   // A 2x frame costs about 1.8x as much as a 1.5x one.
   const noteFrameTime = (delta: number): void => {
-    if (maxDpr <= REDUCED_DPR) return;
+    if (maxDpr <= REDUCED_DPR) {
+      return;
+    }
+
     slowFrames = delta > SLOW_FRAME ? slowFrames + 1 : Math.max(0, slowFrames - 1);
+
     if (slowFrames > SLOW_FRAMES_BEFORE_FALLBACK) {
       maxDpr = REDUCED_DPR;
       resize();
@@ -549,17 +603,28 @@ const createViewport = ({ view, renderer, post, framing, small, mindScale }: Vie
 /** Tracks the pointer and wakes the loop on any input; returns the clean-up. */
 const listenToInput = (pointer: Pointer, wake: () => void): (() => void) => {
   const onPointer = (event: PointerEvent): void => {
-    pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
-    pointer.y = (event.clientY / window.innerHeight) * 2 - 1;
     // Only a mouse leans the camera; a touch is a scroll.
-    if (event.pointerType === "mouse") pointer.lastMouse = performance.now();
+    if (event.pointerType === "mouse") {
+      pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
+      pointer.y = (event.clientY / window.innerHeight) * 2 - 1;
+      pointer.lastMouse = performance.now();
+    }
+
     wake();
   };
+
   window.addEventListener("pointermove", onPointer, { passive: true });
-  for (const type of INPUTS) window.addEventListener(type, wake, { passive: true });
+
+  for (const type of INPUTS) {
+    window.addEventListener(type, wake, { passive: true });
+  }
+
   return () => {
     window.removeEventListener("pointermove", onPointer);
-    for (const type of INPUTS) window.removeEventListener(type, wake);
+
+    for (const type of INPUTS) {
+      window.removeEventListener(type, wake);
+    }
   };
 };
 
@@ -587,49 +652,77 @@ const createFrameLoop = (stage: HTMLElement, isActive: (now: number) => boolean,
   // `frame` and `schedule` call each other; `frame` only runs once `schedule` exists.
   const frame = (now: number): void => {
     rafId = 0;
-    if (!running) return;
+
+    if (!running) {
+      return;
+    }
+
     const active = isActive(now);
+
     // A few ms of slack, so a 60 fps target on a 120 Hz display draws every second refresh.
     if (lastFrame < 0 || now - lastFrame >= (active ? ACTIVE_INTERVAL : IDLE_INTERVAL) - 4) {
       const delta = lastFrame < 0 ? 1 / 60 : Math.min(0.1, (now - lastFrame) / 1000);
+
       lastFrame = now;
       render(delta, active);
     }
+
     schedule();
   };
+
   const schedule = (): void => {
-    if (!running || rafId || timeoutId) return;
-    const now = performance.now();
-    if (isActive(now)) {
-      rafId = requestAnimationFrame(frame);
+    if (!running || rafId || timeoutId) {
       return;
     }
+
+    const now = performance.now();
+
+    if (isActive(now)) {
+      rafId = requestAnimationFrame(frame);
+
+      return;
+    }
+
     // At rest: wait for input (wake).
-    if (now - lastInput > REST_AFTER) return;
+    if (now - lastInput > REST_AFTER) {
+      return;
+    }
+
     timeoutId = window.setTimeout(
       () => {
         timeoutId = 0;
-        if (running) rafId = requestAnimationFrame(frame);
+
+        if (running) {
+          rafId = requestAnimationFrame(frame);
+        }
       },
       Math.max(0, lastFrame + IDLE_INTERVAL - now - 6),
     );
   };
+
   const wake = (): void => {
     lastInput = performance.now();
+
     // Active input should not wait for an idle timer.
     if (timeoutId && isActive(lastInput)) {
       clearTimeout(timeoutId);
       timeoutId = 0;
     }
+
     schedule();
   };
+
   const start = (): void => {
-    if (running || !visible || document.hidden) return;
+    if (running || !visible || document.hidden) {
+      return;
+    }
+
     running = true;
     lastFrame = -1;
     lastInput = performance.now();
     schedule();
   };
+
   const stop = (): void => {
     running = false;
     cancelAnimationFrame(rafId);
@@ -637,13 +730,29 @@ const createFrameLoop = (stage: HTMLElement, isActive: (now: number) => boolean,
     rafId = timeoutId = 0;
   };
 
-  const intersection = new IntersectionObserver(([entry]) => {
+  // Entries queue in order: the last one is the stage's current state.
+  const intersection = new IntersectionObserver((entries) => {
+    const entry: IntersectionObserverEntry | undefined = entries.at(-1);
+
     visible = entry?.isIntersecting ?? true;
-    if (visible) start();
-    else stop();
+
+    if (visible) {
+      start();
+    } else {
+      stop();
+    }
   });
+
   intersection.observe(stage);
-  const onVisibility = (): void => (document.hidden ? stop() : start());
+
+  const onVisibility = (): void => {
+    if (document.hidden) {
+      stop();
+    } else {
+      start();
+    }
+  };
+
   document.addEventListener("visibilitychange", onVisibility);
 
   const dispose = (): void => {
@@ -665,10 +774,18 @@ const createActionFollow = (
 ): ((pose: CameraPose, action: SceneState["action"]) => void) => {
   const cardWorld = new THREE.Vector3();
   const follow: CameraPose = { ...start };
+
   return (pose, action) => {
-    if (action.on < 0.001) return;
+    if (action.on < 0.001) {
+      return;
+    }
+
     const weight = action.on * fadeWindow(action.travel, 0, 0.15, 0.8, 1);
-    if (weight < 0.001) return;
+
+    if (weight < 0.001) {
+      return;
+    }
+
     mindRoot.localToWorld(actionAt(action.travel, cardWorld));
     follow.tx = cardWorld.x;
     follow.ty = cardWorld.y;
@@ -677,7 +794,10 @@ const createActionFollow = (
     follow.el = GAME_EL + 4;
     follow.size = FOLLOW_SIZE * mindScale;
     follow.fov = 30;
-    for (const k of ["tx", "ty", "tz", "az", "el", "size", "fov"] as const) pose[k] += (follow[k] - pose[k]) * weight;
+
+    for (const k of ["tx", "ty", "tz", "az", "el", "size", "fov"] as const) {
+      pose[k] += (follow[k] - pose[k]) * weight;
+    }
   };
 };
 
@@ -712,7 +832,9 @@ const createCameraDirector = ({ camera, state, pointer, framing, size, small, st
   const animate = (time: number, hero: number, intro: number): void => {
     pose.az += hero * (Math.sin(time * 0.08) * 3 + pointer.sx * 3);
     pose.el += hero * pointer.sy * 1.5;
+
     const held = 1 - hero;
+
     pose.az += held * (Math.sin(time * 0.13) * 0.7 + pointer.sx * (small ? 0 : 1.1));
     pose.el += held * (Math.sin(time * 0.1 + 1.3) * 0.35 + pointer.sy * (small ? 0 : 0.5));
     pose.size *= 1 + hero * Math.sin(time * 0.11) * 0.03;
@@ -724,10 +846,16 @@ const createCameraDirector = ({ camera, state, pointer, framing, size, small, st
   const place = (time: number, delta: number, progress: number, intro: number): void => {
     // The hero's drift and pointer lean fade out by chapter 1.
     const hero = THREE.MathUtils.clamp(1 - progress, 0, 1) + THREE.MathUtils.clamp(progress - HERO_RETURN, 0, 1);
+
     pointer.sx = THREE.MathUtils.damp(pointer.sx, pointer.x, 3, delta);
     pointer.sy = THREE.MathUtils.damp(pointer.sy, pointer.y, 3, delta);
+
     Object.assign(pose, state.cam, debugPose ?? {});
-    if (!debugPose) animate(time, hero, intro);
+
+    if (!debugPose) {
+      animate(time, hero, intro);
+    }
+
     applyPose(camera, pose, size.width / size.height, framing.fit());
   };
 
@@ -744,14 +872,29 @@ const createCameraDirector = ({ camera, state, pointer, framing, size, small, st
 // The 2D overlays read these; write them only when they change.
 const createStageWriter = (stage: HTMLElement): ((state: SceneState) => void) => {
   const written = { stamp: "", input: "", step: "" };
+
   return (state) => {
     const stamp = state.stamp.on.toFixed(3);
-    if (stamp !== written.stamp) stage.style.setProperty("--wt-stamp", (written.stamp = stamp));
+
+    if (stamp !== written.stamp) {
+      written.stamp = stamp;
+      stage.style.setProperty("--wt-stamp", stamp);
+    }
+
     const input = state.act.on.toFixed(3);
-    if (input !== written.input) stage.style.setProperty("--wt-input", (written.input = input));
+
+    if (input !== written.input) {
+      written.input = input;
+      stage.style.setProperty("--wt-input", input);
+    }
+
     const { keys, click } = state.act;
     const step = String(keys >= 2.5 ? 5 : click > 0.05 ? 4 : state.world.cursor > 0.05 ? 3 : Math.round(keys));
-    if (step !== written.step) stage.dataset.step = written.step = step;
+
+    if (step !== written.step) {
+      written.step = step;
+      stage.dataset.step = step;
+    }
   };
 };
 
@@ -764,11 +907,15 @@ const createGlassRenderer = (
   mindRoot: THREE.Object3D,
 ): ((time: number, pane: SceneState["pane"]) => void) => {
   let liveAt = Number.NEGATIVE_INFINITY;
+
   return (time, pane) => {
     const due = pane.on > 0.002 && pane.mix < 0.999 && time - liveAt >= 1 / 31;
+
     if (due) {
       liveAt = time;
+
       const mindWasVisible = mindRoot.visible;
+
       mindRoot.visible = false;
       renderer.setRenderTarget(game.target);
       renderer.render(scene, game.camera);
@@ -782,11 +929,14 @@ const setPostEffects = (post: Post, pose: CameraPose, state: SceneState, mindVis
   const dim = state.world.dim;
   // The miniature look is for wide world shots; close-ups keep more in focus.
   const wide = 0.35 + 0.65 * THREE.MathUtils.smoothstep(pose.size, 5, 10);
+
   post.setMiniature((1 - dim) * THREE.MathUtils.smoothstep(pose.fov, 12, 24) * wide);
+
   // Only the mind and the marks drawn on the world (track boxes, the footprint, the
   // click) are bright enough to bloom; the world on its own never is.
   const click = state.act.click;
   const bright = mindVisible || state.world.track > 0.005 || state.world.ghost > 0.005 || (click > 0.005 && click < 0.995);
+
   post.setBloom(bright ? 0.55 + 0.75 * dim : 0);
 };
 
@@ -817,32 +967,44 @@ const createDebugHooks = ({ renderer, camera, size, inMind, toWorld, render, set
   projectMind: (points) =>
     points.map((p) => {
       const v = toWorld(new THREE.Vector3(p[0], p[1], p[2])).project(camera);
+
       return [Math.round((v.x * 0.5 + 0.5) * size.width), Math.round((-v.y * 0.5 + 0.5) * size.height)];
     }),
   bench: (frames) => {
     const gl = renderer.getContext();
     const pixel = new Uint8Array(4);
     const sync = (): void => gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+
     render(1 / 60, true);
     sync();
+
     const t0 = performance.now();
-    for (let i = 0; i < frames; i++) render(1 / 60, true);
+
+    for (let i = 0; i < frames; i++) {
+      render(1 / 60, true);
+    }
+
     sync();
+
     return (performance.now() - t0) / frames;
   },
   info,
 });
 
-export const mountScene = async ({ view, stage, assets }: MountOptions): Promise<SceneHandle> => {
+export const mountScene = async ({ view, stage, assets, progress }: MountOptions): Promise<SceneHandle> => {
   const data: TurnData = turn;
+
   // Canvas text in the scene uses the site's mono face; wait for it.
-  await document.fonts?.ready;
+  await document.fonts.ready;
+
   const mono = getComputedStyle(stage).getPropertyValue("--font-mono").trim() || "ui-monospace, monospace";
   const small = window.matchMedia(SMALL_SCREEN).matches;
   const art = await loadArt(assets, small);
 
   const renderer = createRenderer([art.frame, art.hud]);
+
   view.append(renderer.domElement);
+
   const labels = createLabels(view);
 
   const { scene, camera, layout, world, game, screen, mindRoot, mindScale, board, mind, flow, decision, rings } = assembleScene(
@@ -852,6 +1014,7 @@ export const mountScene = async ({ view, stage, assets }: MountOptions): Promise
     mono,
     small,
   );
+
   const toWorld = (local: THREE.Vector3): THREE.Vector3 => mindRoot.localToWorld(local.clone());
 
   const [, , green] = layout.spots;
@@ -864,13 +1027,11 @@ export const mountScene = async ({ view, stage, assets }: MountOptions): Promise
     green: groundPoint(green),
   });
 
-  // ---- Tracking in the village: the walking villagers nearest the Town Center ----------
   const followed = pickFollowed(world.tracked, layout.tc);
   const tracking = createTracking(followed, TRACK_IDS, labels);
   const trackSpread = spread(followed.map((t) => t.anchor));
   const trackSize = THREE.MathUtils.clamp(trackSpread.reach * 0.8, 5.5, 9);
 
-  // ---- Camera poses ----------------------------------------------------------------------
   const inMind = createMindPoser(toWorld, mindScale);
   const widePoses = createWidePoses({
     layout,
@@ -881,13 +1042,20 @@ export const mountScene = async ({ view, stage, assets }: MountOptions): Promise
     spots: { ...spots, green },
   });
   const narrowPoses = createNarrowPoses(widePoses, board, inMind);
+
   let narrow = false;
   let poses = widePoses;
   const state = createState(poses.hero);
+
   scene.add(tracking.group);
-  const scrubber = createScrubber(state, poses);
+
+  const scrubber = createScrubber(state, poses, progress);
+
   const setNarrow = (on: boolean): void => {
-    if (on === narrow) return;
+    if (on === narrow) {
+      return;
+    }
+
     narrow = on;
     poses = on ? narrowPoses : widePoses;
     overlays.setNarrow(on);
@@ -896,18 +1064,18 @@ export const mountScene = async ({ view, stage, assets }: MountOptions): Promise
 
   const post = createPost(renderer, scene, camera, small);
 
-  // ---- Layout ----------------------------------------------------------------------------
   const framing = createFraming(camera);
   const viewport = createViewport({ view, renderer, post, framing, small, mindScale });
   const { size } = viewport;
+
   viewport.resize();
 
-  // ---- Loop ------------------------------------------------------------------------------
   const debugStage: DebugStage = stage;
   const pointer: Pointer = { x: 0, y: 0, sx: 0, sy: 0, lastMouse: Number.NEGATIVE_INFINITY };
   let clock = 0;
   let frames = 0;
   const ghostAt = new THREE.Vector3();
+
   const followAction = createActionFollow(mind.actionAt, mindRoot, mindScale, widePoses.loop);
   const director = createCameraDirector({
     camera,
@@ -918,7 +1086,9 @@ export const mountScene = async ({ view, stage, assets }: MountOptions): Promise
     small,
     start: poses.hero,
     follow: (pose) => {
-      if (narrow) followAction(pose, state.action);
+      if (narrow) {
+        followAction(pose, state.action);
+      }
     },
   });
   const writeStage = createStageWriter(stage);
@@ -929,7 +1099,9 @@ export const mountScene = async ({ view, stage, assets }: MountOptions): Promise
 
   const updateParts = (time: number, intro: number): void => {
     const dim = state.world.dim;
+
     overlays.cursorAt(state.world.cursor, ghostAt);
+
     world.update(time, camera, {
       light: 1 - 0.78 * dim,
       open: intro,
@@ -939,6 +1111,7 @@ export const mountScene = async ({ view, stage, assets }: MountOptions): Promise
       ghostOk: state.world.cursor > 2.5,
       build: state.world.build,
     });
+
     tracking.update(state.world.track, time);
     screen.update(state.pane, time);
     board.update(state);
@@ -953,14 +1126,22 @@ export const mountScene = async ({ view, stage, assets }: MountOptions): Promise
     frames++;
     renderer.info.reset();
     clock += delta;
+
     const time = clock;
-    if (active) viewport.noteFrameTime(delta);
+
+    if (active) {
+      viewport.noteFrameTime(delta);
+    }
+
     const progress = scrubber.advance(delta);
+
     debugStage.wtProgress = progress;
     framing.setHeroWeight(1 - THREE.MathUtils.smoothstep(progress, HERO_FADE_START, HERO_FADE_END));
     framing.apply(size.width, size.height);
+
     // On load the map opens out of the dark and the camera settles (expo out, 1.8 s).
     const intro = 1 - Math.pow(2, -10 * Math.min(1, time / INTRO));
+
     director.place(time, delta, progress, intro);
     updateParts(time, intro);
     writeStage(state);
@@ -975,7 +1156,9 @@ export const mountScene = async ({ view, stage, assets }: MountOptions): Promise
     viewport.resize();
     loop.wake();
   });
+
   resizeObserver.observe(view);
+
   const stopListening = listenToInput(pointer, loop.wake);
 
   debugStage.wtDebug = createDebugHooks({

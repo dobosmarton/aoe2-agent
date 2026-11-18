@@ -57,6 +57,7 @@ const SHOTS: Shot[] = [
 export const ArenaScreenshots = (): React.ReactElement => {
   const [openIndex, setOpenIndex] = React.useState<number | null>(null);
   const open = openIndex === null ? null : SHOTS[openIndex];
+
   return (
     // Radix needed the grid inside Dialog.Root; react-aria's ModalOverlay is
     // self-contained, so the trigger grid and the modal are plain siblings.
@@ -150,6 +151,7 @@ type ScreenshotPlaceholderProps = {
 
 const ScreenshotPlaceholder = ({ src, panel, large = false }: ScreenshotPlaceholderProps): React.ReactElement => {
   const [errored, setErrored] = React.useState(false);
+
   if (errored) {
     return (
       <div
@@ -159,6 +161,7 @@ const ScreenshotPlaceholder = ({ src, panel, large = false }: ScreenshotPlacehol
       </div>
     );
   }
+
   return (
     <img
       src={src}

@@ -43,49 +43,58 @@ export type PublishAnchors = {
 export type Publish = {
   group: THREE.Group;
   update: (s: PublishState, at: PublishAnchors) => void;
-  plate: THREE.Mesh;
 };
 
 type FlyingSheet = Sheet & { from: THREE.Vector3; targetScale: number };
 
 const drawBoxSheet = (entities: readonly TurnEntity[], w: number, h: number): HTMLCanvasElement => {
   const [c, g] = createCanvas(w, h);
+
   g.lineWidth = 3;
+
   for (const e of entities) {
     g.strokeStyle = categoryColor(e.cat);
     g.strokeRect(e.x * w, e.y * h, e.w * w, e.h * h);
   }
+
   return c;
 };
 
 const drawTrackSheet = (units: readonly TurnEntity[], w: number, h: number, mono: string): HTMLCanvasElement => {
   const [c, g] = createCanvas(w, h);
+
   g.font = `600 15px ${mono}`;
   g.textBaseline = "middle";
+
   units.forEach((e, i) => {
     const id = String(3 + ((i * 37) % 97));
     const x = (e.x + e.w / 2) * w;
     const y = e.y * h - 4;
     const tagW = g.measureText(id).width + 10;
+
     g.fillStyle = "rgba(4, 10, 24, 0.85)";
     roundRectPath(g, x - tagW / 2, y - 10, tagW, 20, 4);
     g.fill();
     g.strokeStyle = ACCENT;
     g.lineWidth = 1.5;
     g.stroke();
+
     g.fillStyle = ACCENT;
     g.textAlign = "center";
     g.fillText(id, x, y + 1);
   });
+
   return c;
 };
 
 const drawHudSheet = (values: readonly (string | number)[], w: number, h: number, mono: string): HTMLCanvasElement => {
   const [c, g] = createCanvas(w, h);
+
   g.font = `700 ${Math.round(h * 0.42)}px ${mono}`;
   g.textBaseline = "middle";
   g.fillStyle = GOLD;
   values.forEach((v, i) => g.fillText(String(v), 20 + i * (w / values.length), h / 2));
+
   return c;
 };
 
@@ -94,12 +103,14 @@ const drawPlate = (data: TurnData, units: readonly TurnEntity[], board: PublishB
   const r = data.hud.readings;
   const captureId = Number(data.frame.run.split("_").pop()) || 1;
   const [c, g] = createCanvas(PW, PH);
+
   g.fillStyle = "rgba(5, 10, 24, 0.94)";
   roundRectPath(g, 4, 4, PW - 8, PH - 8, 28);
   g.fill();
   g.strokeStyle = "rgba(124, 196, 255, 0.9)";
   g.lineWidth = 3;
   g.stroke();
+
   g.textBaseline = "alphabetic";
   g.font = `600 30px ${mono}`;
   g.fillStyle = ACCENT;
@@ -109,19 +120,23 @@ const drawPlate = (data: TurnData, units: readonly TurnEntity[], board: PublishB
   g.textAlign = "right";
   g.fillText(`capture ${captureId} · frozen`, PW - 48, 76);
   g.textAlign = "left";
+
   // The box layout, as a small map.
   const mx = 48;
   const my = 112;
   const mw = 520;
   const mh = Math.round((mw * board.H) / board.W);
+
   g.fillStyle = "rgba(12, 22, 44, 1)";
   roundRectPath(g, mx, my, mw, mh, 10);
   g.fill();
   g.lineWidth = 2;
+
   for (const e of data.entities) {
     g.strokeStyle = categoryColor(e.cat);
     g.strokeRect(mx + e.x * mw, my + e.y * mh, Math.max(3, e.w * mw), Math.max(3, e.h * mh));
   }
+
   // The readings.
   const rows: [string, string][] = [
     ["entities", `${data.entities.length} boxes`],
@@ -133,20 +148,25 @@ const drawPlate = (data: TurnData, units: readonly TurnEntity[], board: PublishB
     ["age", String(r.age)],
     ["alarm", "none"],
   ];
+
   rows.forEach(([k, v], i) => {
     const y = my + 30 + i * 46;
+
     g.font = `400 26px ${mono}`;
     g.fillStyle = MUTED;
     g.fillText(k, 620, y);
+
     g.font = `600 28px ${mono}`;
     g.fillStyle = INK;
     g.textAlign = "right";
     g.fillText(v, PW - 48, y);
     g.textAlign = "left";
   });
+
   g.font = `400 24px ${mono}`;
   g.fillStyle = MUTED;
   g.fillText("FramePipe → act loop · deliberate loop", 48, PH - 52);
+
   return c;
 };
 
@@ -155,7 +175,6 @@ export const createPublish = (data: TurnData, mono: string, board: PublishBoard)
   const r = data.hud.readings;
   const units = data.entities.filter((e) => e.cat === "unit");
 
-  // ---- The three sheets -------------------------------------------------------------------
   const sheetH = Math.round((SHEET_PX * board.H) / board.W);
   const hudH = Math.round((SHEET_PX * board.hudSize.y) / board.hudSize.x);
   const frameScale = (PLATE_W * 0.45) / board.W;
@@ -180,10 +199,13 @@ export const createPublish = (data: TurnData, mono: string, board: PublishBoard)
       targetScale: (PLATE_W * 0.4) / board.hudSize.x,
     },
   ];
-  for (const s of sheets) group.add(s.mesh);
 
-  // ---- The Perception plate ----------------------------------------------------------------
+  for (const s of sheets) {
+    group.add(s.mesh);
+  }
+
   const plate = createSheet(canvasTexture(drawPlate(data, units, board, mono)), PLATE_W, (PLATE_W * PLATE_PX.h) / PLATE_PX.w);
+
   plate.mesh.renderOrder = 8;
   group.add(plate.mesh);
 
@@ -193,12 +215,19 @@ export const createPublish = (data: TurnData, mono: string, board: PublishBoard)
   const updateSheet = (sheet: FlyingSheet, i: number, s: PublishState, at: PublishAnchors): void => {
     const t = THREE.MathUtils.clamp(s.lift * 1.5 - i * SHEET_STAGGER, 0, 1);
     const e = easeInOutCubic(t);
+
     start.copy(sheet.from).add(at.board);
     // Lift straight off the frame, then fly to the plate.
     lifted.copy(start).setZ(start.z + LIFT + i * LIFT_STEP);
+
     const p = sheet.mesh.position;
-    if (e < 0.3) p.lerpVectors(start, lifted, e / 0.3);
-    else p.lerpVectors(lifted, at.plate, (e - 0.3) / 0.7);
+
+    if (e < 0.3) {
+      p.lerpVectors(start, lifted, e / 0.3);
+    } else {
+      p.lerpVectors(lifted, at.plate, (e - 0.3) / 0.7);
+    }
+
     sheet.mesh.scale.setScalar(THREE.MathUtils.lerp(1, sheet.targetScale, Math.max(0, (e - 0.25) / 0.75)));
     sheet.uniforms.uOpacity.value = s.on * THREE.MathUtils.smoothstep(t, 0, 0.12) * (1 - THREE.MathUtils.smoothstep(t, 0.82, 1));
     sheet.uniforms.uGlow.value = 1.2 + 0.6 * Math.sin(t * Math.PI);
@@ -207,8 +236,13 @@ export const createPublish = (data: TurnData, mono: string, board: PublishBoard)
   const updatePlate = (s: PublishState, at: PublishAnchors): void => {
     const seal = THREE.MathUtils.clamp(s.seal, 0, 1);
     const travel = easeInOutCubic(s.travel);
-    if (travel > 0) at.rail.getPointAt(travel, plate.mesh.position);
-    else plate.mesh.position.copy(at.plate);
+
+    if (travel > 0) {
+      at.rail.getPointAt(travel, plate.mesh.position);
+    } else {
+      plate.mesh.position.copy(at.plate);
+    }
+
     plate.mesh.scale.setScalar((0.82 + 0.18 * easeOutBack(seal)) * (1 - 0.3 * travel));
     plate.uniforms.uOpacity.value = s.on * THREE.MathUtils.smoothstep(seal, 0, 0.4);
     // A flash on the rim as it seals.
@@ -222,5 +256,5 @@ export const createPublish = (data: TurnData, mono: string, board: PublishBoard)
     updatePlate(s, at);
   };
 
-  return { group, update, plate: plate.mesh };
+  return { group, update };
 };

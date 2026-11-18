@@ -1,9 +1,9 @@
 import * as THREE from "three";
 import type { LineSegments2 } from "three/addons/lines/LineSegments2.js";
 
-import { createFlatBoxes } from "./boxes";
+import { createFlatBoxes, LAND_DELAY_SPAN, LAND_DURATION } from "./boxes";
 import { fatSegments, loop } from "./lines";
-import { GLSL_OUTPUT_COLOR } from "./shaders";
+import { GLSL_OUTPUT_COLOR, GLSL_UV_VERTEX } from "./shaders";
 import type { SceneState } from "./timeline";
 import type { TurnData, TurnEntity } from "./types";
 
@@ -29,11 +29,6 @@ export const categoryColor = (category: string): string => CATEGORY_COLOR.get(ca
 
 // HUD strip crop of scripts/build_walkthrough_data.py, in frame pixels.
 const HUD_STRIP = { x0: 0, y0: 0, x1: 1400, y1: 92 };
-
-// Each box starts landing at `delay * LAND_DELAY_SPAN` of the landing progress and takes
-// LAND_DURATION of it, as in the boxes' vertex shader.
-const LAND_DELAY_SPAN = 0.7;
-const LAND_DURATION = 0.3;
 
 export type Board = {
   group: THREE.Group;
@@ -101,10 +96,7 @@ const createFramePlane = (
     new THREE.PlaneGeometry(size.x, size.y),
     new THREE.ShaderMaterial({
       uniforms,
-      vertexShader: /* glsl */ `
-        varying vec2 vUv;
-        void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
-      `,
+      vertexShader: GLSL_UV_VERTEX,
       fragmentShader: /* glsl */ `
         uniform sampler2D uMap;
         uniform float uScan, uScanOn, uDim, uFlash, uGrid, uHudHole;
@@ -137,6 +129,7 @@ const createFramePlane = (
       `,
     }),
   );
+
   return { mesh, uniforms };
 };
 
@@ -150,20 +143,26 @@ const createHudLayer = (data: TurnData, hudTexture: THREE.Texture, toBoard: ToBo
   );
   const group = new THREE.Group();
   const material = new THREE.MeshBasicMaterial({ map: hudTexture, transparent: true, opacity: 0 });
+
   group.add(new THREE.Mesh(new THREE.PlaneGeometry(hudW, hudH), material));
 
   const fieldCenters: Record<string, THREE.Vector3> = {};
   const fieldPoints: number[] = [];
+
   for (const [name, rect] of Object.entries(data.hud.fields)) {
     const [x0 = 0, y0 = 0, x1 = 0, y1 = 0] = rect;
     const a = toBoard(x0, y0).sub(hudBase);
     const b = toBoard(x1, y1).sub(hudBase);
+
     fieldPoints.push(...loop([a, new THREE.Vector2(b.x, a.y), b, new THREE.Vector2(a.x, b.y)].map((v) => new THREE.Vector3(v.x, v.y, 0.01))));
     fieldCenters[name] = new THREE.Vector3((a.x + b.x) / 2, Math.max(a.y, b.y), 0.05);
   }
+
   const fields = fatSegments(fieldPoints, { color: new THREE.Color(2.2, 1.75, 0.25), width: 1.75, opacity: 0 });
+
   group.add(fields);
   group.position.set(hudBase.x, hudBase.y, 0.02);
+
   return { group, material, fields, fieldCenters, size: new THREE.Vector2(hudW, hudH) };
 };
 
@@ -176,42 +175,52 @@ export const createBoard = (data: TurnData, frameTexture: THREE.Texture, hudText
   const toBoard: ToBoard = (nx, ny) => new THREE.Vector2((nx - 0.5) * W, (0.5 - ny) * H);
 
   const frame = createFramePlane(data, frameTexture, size);
+
   group.add(frame.mesh);
 
-  // ---- Detection boxes ----------------------------------------------------------------
-  // They land on the frame outwards from the Town Center, each with a small overshoot.
+  // Detection boxes land on the frame outwards from the Town Center, each with a small overshoot.
   const townCenter = data.entities.find((e) => e.cls === "town_center") ?? data.entities[0];
   const townCenterPoint = toBoard(townCenter.x + townCenter.w / 2, townCenter.y + townCenter.h / 2);
   const maxDist = Math.hypot(W, H) / 2;
+
   const delayOf = (e: TurnEntity, i: number): number => {
     const c = toBoard(e.x + e.w / 2, e.y + e.h / 2);
+
     return Math.min(1, (c.distanceTo(townCenterPoint) / maxDist) * 0.9 + (((i * 7919) % 97) / 97) * 0.1);
   };
+
+  const delays = new Map(data.entities.map((e, i) => [e, delayOf(e, i)]));
   const boxes = createFlatBoxes(
-    data.entities.map((e, i) => ({
+    data.entities.map((e) => ({
       x: e.x,
       y: e.y,
       w: e.w,
       h: e.h,
       color: new THREE.Color(categoryColor(e.cat)),
-      delay: delayOf(e, i),
+      delay: delays.get(e) ?? 0,
       unit: e.cat === "unit",
     })),
     size,
   );
+
   group.add(boxes.mesh);
+
   const landed = (e: TurnEntity): number => {
-    const progress = (boxes.uniforms.uLand.value - delayOf(e, data.entities.indexOf(e)) * LAND_DELAY_SPAN) / LAND_DURATION;
+    const progress = (boxes.uniforms.uLand.value - (delays.get(e) ?? 0) * LAND_DELAY_SPAN) / LAND_DURATION;
+
     return THREE.MathUtils.clamp(progress, 0, 1);
   };
+
   const landedCount = (): number => data.entities.filter((e) => landed(e) > 0.5).length;
 
   const entityTop = (e: TurnEntity, out: THREE.Vector3): THREE.Vector3 => {
     const c = toBoard(e.x, e.y);
+
     return out.set(c.x, c.y, 0.05 + (1 - landed(e)) * 0.5);
   };
 
   const hud = createHudLayer(data, hudTexture, toBoard, size);
+
   group.add(hud.group);
 
   const update = (S: SceneState): void => {
@@ -228,6 +237,7 @@ export const createBoard = (data: TurnData, frameTexture: THREE.Texture, hudText
     boxes.mesh.visible = S.boxes.alpha > 0.001 && S.boxes.rise > 0.001;
 
     const lift = S.hud.lift;
+
     hud.group.position.z = 0.02 + lift * 1.5;
     hud.group.scale.setScalar(1 + lift * 0.35);
     hud.material.opacity = Math.min(1, lift * 4);

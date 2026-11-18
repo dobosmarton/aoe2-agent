@@ -125,6 +125,7 @@ def _bc1(blocks: Blocks) -> Pixels:
     endpoints = blocks[:, :4].copy().view("<u2").astype(np.int32)
     colour0, colour1 = endpoints[:, 0], endpoints[:, 1]
     rgb0, rgb1 = _rgb565_to_rgb888(colour0), _rgb565_to_rgb888(colour1)
+
     # colour0 > colour1 selects four opaque colours; otherwise three and transparent.
     four_colours = (colour0 > colour1)[:, None]
     third = np.where(four_colours, (2 * rgb0 + rgb1) // 3, (rgb0 + rgb1) // 2)
@@ -132,8 +133,10 @@ def _bc1(blocks: Blocks) -> Pixels:
     palette = np.stack([rgb0, rgb1, third, fourth], axis=1)  # (n, 4, 3)
     alpha = np.full((len(blocks), 4), 255, dtype=np.int32)
     alpha[:, 3] = np.where(four_colours[:, 0], 255, 0)
+
     bits = blocks[:, 4:8].copy().view("<u4")[:, 0]
     indices = (bits[:, None] >> (np.arange(BLOCK_PIXELS) * 2)) & 3
+
     rgb_pixels = np.take_along_axis(palette, indices[:, :, None].repeat(3, 2), axis=1)
     alpha_pixels = np.take_along_axis(alpha, indices, axis=1)
     return np.concatenate([rgb_pixels, alpha_pixels[:, :, None]], axis=2).astype(np.uint8)
@@ -143,6 +146,7 @@ def _bc4(blocks: Blocks) -> Pixels:
     """(n, 8) BC4 blocks -> (n, 16) single channel."""
     value0 = blocks[:, 0].astype(np.int32)
     value1 = blocks[:, 1].astype(np.int32)
+
     # value0 > value1 selects eight interpolated levels; otherwise six plus 0 and 255.
     eight_levels = (value0 > value1)[:, None]
     level = np.arange(8)[None, :]
@@ -152,9 +156,11 @@ def _bc4(blocks: Blocks) -> Pixels:
     palette = np.where(eight_levels, interpolated8, interpolated6)
     palette[:, 0] = value0
     palette[:, 1] = value1
+
     bits = np.zeros(len(blocks), dtype=np.uint64)
     for byte in range(6):
         bits |= blocks[:, 2 + byte].astype(np.uint64) << np.uint64(8 * byte)
+
     shifts = np.arange(BLOCK_PIXELS, dtype=np.uint64) * np.uint64(3)
     indices = ((bits[:, None] >> shifts) & np.uint64(7)).astype(np.int64)
     return np.take_along_axis(palette, indices, axis=1).astype(np.uint8)
@@ -168,17 +174,21 @@ def _rebase(previous: Layer | None, bounds: _Bounds) -> Pixels | None:
     """The previous frame's layer moved into this layer's bounds (canvas coordinates)."""
     if previous is None:
         return None
+
     source = previous.pixels
     out = np.zeros((bounds.height, bounds.width, *source.shape[2:]), dtype=np.uint8)
+
     dx, dy = previous.x1 - bounds.x1, previous.y1 - bounds.y1
     source_x, source_y = max(0, -dx), max(0, -dy)
     target_x, target_y = max(0, dx), max(0, dy)
     overlap_w = min(source.shape[1] - source_x, bounds.width - target_x)
     overlap_h = min(source.shape[0] - source_y, bounds.height - target_y)
+
     if overlap_w > 0 and overlap_h > 0:
         out[target_y : target_y + overlap_h, target_x : target_x + overlap_w] = source[
             source_y : source_y + overlap_h, source_x : source_x + overlap_w
         ]
+
     return out
 
 
@@ -188,10 +198,12 @@ def _block_targets(commands: NDArray[np.uint8]) -> list[int]:
     runs: list[list[int]] = commands.tolist()
     targets: list[int] = []
     cursor = 0
+
     for skip, draw in runs:
         cursor += skip
         targets.extend(range(cursor, cursor + draw))
         cursor += draw
+
     return targets
 
 
@@ -201,6 +213,7 @@ def _draw(data: bytes, pos: int, bounds: _Bounds, codec: _Codec, base: Pixels | 
     pos += 2
     commands = np.frombuffer(data, dtype=np.uint8, count=count * 2, offset=pos).reshape(-1, 2)
     pos += count * 2
+
     drawn = int(commands[:, 1].sum())
     blocks = np.frombuffer(data, dtype=np.uint8, count=drawn * BLOCK_BYTES, offset=pos).reshape(
         -1, BLOCK_BYTES
@@ -215,6 +228,7 @@ def _draw(data: bytes, pos: int, bounds: _Bounds, codec: _Codec, base: Pixels | 
     image = np.zeros(image_shape, dtype=np.uint8)
     if base is not None:
         image[: bounds.height, : bounds.width] = base
+
     for block, target in zip(decoded, _block_targets(commands), strict=False):
         row, column = divmod(target, blocks_wide)
         if row >= blocks_high:
@@ -222,6 +236,7 @@ def _draw(data: bytes, pos: int, bounds: _Bounds, codec: _Codec, base: Pixels | 
         top, left = row * BLOCK_SIDE, column * BLOCK_SIDE
         tile = block.reshape(BLOCK_SIDE, BLOCK_SIDE, *codec.pixel_shape)
         image[top : top + BLOCK_SIDE, left : left + BLOCK_SIDE] = tile
+
     return image[: bounds.height, : bounds.width]
 
 
@@ -250,22 +265,28 @@ def _read_frame(data: bytes, pos: int, last: _LastLayers) -> tuple[Frame, int]:
         "<4H2BH", data, pos
     )
     pos += FRAME_HEADER_SIZE
+
     main: Layer | None = None
     shadow: Layer | None = None
     player: Layer | None = None
     main_bounds: _Bounds | None = None
+
     for bit in LAYER_BITS:
         if not flags & bit:
             continue
+
         (length,) = struct.unpack_from("<I", data, pos)
         start = pos + LENGTH_PREFIX_SIZE
+
         if bit == MAIN:
             main, main_bounds = _read_bounded_layer(data, start, last.main, BC1)
         elif bit == SHADOW:
             shadow, _ = _read_bounded_layer(data, start, last.shadow, BC4)
         elif bit == PLAYER and main_bounds is not None:
             player = _read_mask_layer(data, start, last.player, main_bounds)
+
         pos += _word_aligned(length)
+
     frame = Frame(
         canvas=(canvas_w, canvas_h),
         hotspot=(hotspot_x, hotspot_y),
@@ -286,13 +307,16 @@ def read_sld(path: Path) -> list[Frame]:
     signature, _version, num_frames = struct.unpack_from("<4sHH", data, 0)
     if signature != SIGNATURE:
         raise ValueError(f"{path.name}: not an SLD file")
+
     pos = FILE_HEADER_SIZE
     frames: list[Frame] = []
     last = _LastLayers()
+
     for _ in range(num_frames):
         frame, pos = _read_frame(data, pos, last)
         frames.append(frame)
         last = last.after(frame)
+
     return frames
 
 
@@ -300,11 +324,14 @@ def tint(frame: Frame, colour: tuple[int, int, int]) -> Pixels:
     """The main layer with the player-colour mask painted in `colour` (RGBA, uint8)."""
     if frame.main is None:
         raise ValueError("frame has no main layer to tint")
+
     rgba = frame.main.pixels.astype(np.float32)
+
     if frame.player is not None and frame.player.pixels.shape == rgba.shape[:2]:
         mask = frame.player.pixels.astype(np.float32)[:, :, None] / 255.0
         brightness = luminance(rgba[:, :, :3])[:, :, None] / 255.0
         shading = TINT_BASE + TINT_GAIN * brightness
         painted = np.clip(np.array(colour, np.float32)[None, None, :] * shading, 0, 255)
         rgba[:, :, :3] = rgba[:, :, :3] * (1 - mask) + painted * mask
+
     return rgba.astype(np.uint8)

@@ -34,6 +34,7 @@ export type SceneState = {
   /** `status`: ledger rows reached, 0..3. */
   verify: { on: number; status: number };
 };
+
 export const createState = (hero: CameraPose): SceneState => ({
   cam: { ...hero },
   world: { dim: 0, ghost: 0, build: 0, cursor: 0, track: 0 },
@@ -217,11 +218,14 @@ const verifyTweens = ({ state, to, cam }: Tweens): void => {
 
 export const buildTimeline = (state: SceneState, poses: Poses): gsap.core.Timeline => {
   const timeline = gsap.timeline({ paused: true, defaults: { ease: "power2.inOut" } });
+
   const to: Tweens["to"] = (target, at, duration, vars) => {
     timeline.to(target, { ...vars, duration }, at);
   };
+
   const cam: Tweens["cam"] = (at, duration, pose, ease = MOVE) => to(state.cam, at, duration, { ...poses[pose], ease });
   const tweens = { state, to, cam };
+
   captureTweens(tweens);
   detectTweens(tweens);
   trackTweens(tweens);
@@ -231,5 +235,6 @@ export const buildTimeline = (state: SceneState, poses: Poses): gsap.core.Timeli
   actTweens(tweens);
   verifyTweens(tweens);
   timeline.set({}, {}, TIMELINE_LENGTH);
+
   return timeline;
 };

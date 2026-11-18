@@ -8,6 +8,7 @@ const clamp01 = (t: number): number => THREE.MathUtils.clamp(t, 0, 1);
 /** Starts slow, speeds up, settles: camera moves and things that travel. */
 export const easeInOutCubic = (t: number): number => {
   const x = clamp01(t);
+
   return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
 };
 
@@ -17,6 +18,7 @@ export const easeOutCubic = (t: number): number => 1 - Math.pow(1 - clamp01(t), 
 /** Overshoots by about 10% and settles back: things that land. */
 export const easeOutBack = (t: number): number => {
   const x = clamp01(t) - 1;
+
   return 1 + 2.7 * x * x * x + 1.7 * x * x;
 };
 

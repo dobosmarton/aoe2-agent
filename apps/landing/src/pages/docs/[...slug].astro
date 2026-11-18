@@ -11,6 +11,7 @@ type DocPath = { params: { slug: string }; props: Props };
 
 export const getStaticPaths = async (): Promise<DocPath[]> => {
   const docs = await getCollection("docs");
+
   return docs.map((entry) => ({
     params: { slug: entry.id },
     props: { entry },

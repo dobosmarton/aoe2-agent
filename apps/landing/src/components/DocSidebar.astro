@@ -1,5 +1,6 @@
 ---
 import { SECTIONS } from "@/lib/taxonomy";
+import { BracketLabel } from "@/components/ui/frame";
 
 interface Props {
   /** Full slug of the currently rendered doc (e.g. "agent/overview"). */
@@ -56,12 +57,11 @@ const referenceGroups = [
     ],
   },
 ];
-const groupLabel = "mb-3 block font-mono text-[11px] tracking-wider text-muted-foreground uppercase";
 ---
 
 <nav class="space-y-8 text-sm" aria-label="Documentation navigation">
   <div>
-    <p class={groupLabel}><span aria-hidden="true">[ </span>Guide<span aria-hidden="true"> ]</span></p>
+    <BracketLabel className="mb-3 block">Guide</BracketLabel>
     <ol class="space-y-4">
       {
         SECTIONS.map((section) => (
@@ -97,7 +97,7 @@ const groupLabel = "mb-3 block font-mono text-[11px] tracking-wider text-muted-f
   {
     referenceGroups.map((group) => (
       <div>
-        <p class={groupLabel}><span aria-hidden="true">[ </span>{group.label}<span aria-hidden="true"> ]</span></p>
+        <BracketLabel className="mb-3 block">{group.label}</BracketLabel>
         <ul class="border-l border-foreground/10">
           {group.items.map((item) => (
             <li>

@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { categoryColor } from "./board";
 import { el, type Label, type Labels } from "./labels";
 import { fatSegments, lineMaterial } from "./lines";
-import { GLSL_OUTPUT_COLOR } from "./shaders";
+import { GLSL_OUTPUT_COLOR, GLSL_UV_VERTEX } from "./shaders";
 import type { TurnData } from "./types";
 
 // Detect: the detector as an exploded stack of glass plates beside the frame. Each
@@ -31,7 +31,7 @@ const PULSE_END = LAYERS.length;
 
 const PLATE_FRAGMENT = /* glsl */ `
   uniform sampler2D uMap, uHead;
-  uniform float uMode, uOn, uActive, uAspect;
+  uniform float uMode, uOn, uActive;
   uniform vec2 uGrid;
   varying vec2 vUv;
   float lum(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
@@ -93,7 +93,6 @@ type PlateUniforms = {
   uGrid: { value: THREE.Vector2 };
   uOn: { value: number };
   uActive: { value: number };
-  uAspect: { value: number };
 };
 
 type Plate = { mesh: THREE.Mesh; uniforms: PlateUniforms; w: number; h: number; label: Label };
@@ -108,16 +107,21 @@ export type Stack = {
 const createHeadTexture = (data: TurnData): THREE.DataTexture => {
   const [columns, rows] = LAYERS[LAYERS.length - 1].grid;
   const head = new Uint8Array(columns * rows * 4);
+
   for (const e of data.entities) {
     const cx = Math.min(columns - 1, Math.floor((e.x + e.w / 2) * columns));
     const cy = Math.min(rows - 1, Math.floor((1 - (e.y + e.h / 2)) * rows));
     const c = new THREE.Color(categoryColor(e.cat));
+
     head.set([c.r * 255, c.g * 255, c.b * 255, 255], (cy * columns + cx) * 4);
   }
+
   const texture = new THREE.DataTexture(head, columns, rows, THREE.RGBAFormat);
+
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.magFilter = texture.minFilter = THREE.NearestFilter;
   texture.needsUpdate = true;
+
   return texture;
 };
 
@@ -135,7 +139,6 @@ const createPlate = (layer: Layer, i: number, frame: THREE.Texture, headTexture:
     uGrid: { value: new THREE.Vector2(layer.grid[0], layer.grid[1]) },
     uOn: { value: 0 },
     uActive: { value: 0 },
-    uAspect: { value: w / h },
   };
   const mesh = new THREE.Mesh(
     new THREE.PlaneGeometry(w, h),
@@ -144,13 +147,11 @@ const createPlate = (layer: Layer, i: number, frame: THREE.Texture, headTexture:
       transparent: true,
       depthWrite: false,
       side: THREE.DoubleSide,
-      vertexShader: /* glsl */ `
-        varying vec2 vUv;
-        void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
-      `,
+      vertexShader: GLSL_UV_VERTEX,
       fragmentShader: PLATE_FRAGMENT,
     }),
   );
+
   mesh.position.copy(platePosition(i));
   mesh.renderOrder = 4;
 
@@ -159,6 +160,7 @@ const createPlate = (layer: Layer, i: number, frame: THREE.Texture, headTexture:
     offset: [-10, 0],
     align: [1, 0.5],
   });
+
   return { mesh, uniforms, w, h, label };
 };
 
@@ -167,45 +169,56 @@ const connectorSegments = (plates: readonly Plate[]): number[] => {
   const corner = (plate: Plate, sx: number, sy: number): THREE.Vector3 =>
     new THREE.Vector3((sx * plate.w) / 2, (sy * plate.h) / 2, 0).applyMatrix4(plate.mesh.matrix);
   const segments: number[] = [];
+
   for (let k = 0; k + 1 < plates.length; k++) {
     for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]] as const) {
       const a = corner(plates[k], sx, sy);
       const b = corner(plates[k + 1], sx, sy);
+
       segments.push(a.x, a.y, a.z, b.x, b.y, b.z);
     }
   }
+
   return segments;
 };
 
 export const createStack = (data: TurnData, frame: THREE.Texture, labels: Labels, origin: THREE.Vector3, boardW: number, boardH: number): Stack => {
   const group = new THREE.Group();
+
   group.position.copy(origin);
 
   const headTexture = createHeadTexture(data);
   const boardSize = new THREE.Vector2(boardW, boardH);
   const plates = LAYERS.map((layer, i) => {
     const plate = createPlate(layer, i, frame, headTexture, boardSize, labels);
+
     group.add(plate.mesh);
+
     return plate;
   });
 
   group.updateMatrixWorld(true);
+
   const connectorMaterial = lineMaterial({ color: new THREE.Color(0.45, 0.75, 1.6), width: 1, opacity: 0 });
+
   group.add(fatSegments(connectorSegments(plates), connectorMaterial));
 
   const update = (on: number, pulse: number): void => {
     group.visible = on > 0.002;
+
     plates.forEach((p, i) => {
       // Plates appear one after another, slightly staggered.
       const appear = THREE.MathUtils.clamp(on * 1.6 - i * 0.15, 0, 1);
       const passing = 1 - THREE.MathUtils.smoothstep(Math.abs(pulse - (i + 0.5)), 0, 1.1);
       const passed = pulse > i + 0.5;
       const done = passed ? 0.45 : 0;
+
       p.uniforms.uOn.value = appear;
       p.uniforms.uActive.value = Math.max(passing, done);
       p.mesh.scale.setScalar(0.92 + 0.08 * appear);
       p.label.opacity = appear * (0.55 + 0.45 * Math.max(passing, passed ? 1 : 0));
     });
+
     connectorMaterial.opacity = on * (0.25 + 0.35 * THREE.MathUtils.clamp(pulse / PULSE_END, 0, 1));
   };
 

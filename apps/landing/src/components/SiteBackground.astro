@@ -40,18 +40,30 @@ const { reading = false } = Astro.props;
   const pickIntersection = (): Point | undefined => {
     const columns = Math.floor(window.innerWidth / CELL);
     const rows = Math.floor((window.innerHeight * TICK_AREA) / CELL);
-    if (columns < 2 || rows < 2) return undefined;
+
+    if (columns < 2 || rows < 2) {
+      return undefined;
+    }
+
     const x = (1 + Math.floor(Math.random() * (columns - 1))) * CELL;
     const y = (1 + Math.floor(Math.random() * (rows - 1))) * CELL;
-    if (document.elementFromPoint(x, y)?.closest(CONTENT)) return undefined;
+
+    if (document.elementFromPoint(x, y)?.closest(CONTENT)) {
+      return undefined;
+    }
+
     return { x, y };
   };
 
   const addTick = (layer: HTMLElement, { x, y }: Point): void => {
     const ticks = layer.querySelectorAll(".site-bg-tick");
-    if (ticks.length >= MAX_TICKS) ticks[0]?.remove();
+
+    if (ticks.length >= MAX_TICKS) {
+      ticks[0]?.remove();
+    }
 
     const tick = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+
     tick.setAttribute("viewBox", "0 0 9 9");
     tick.setAttribute("class", "site-bg-tick");
     tick.style.transform = `translate(${x - TICK_HALF}px, ${y - TICK_HALF}px)`;
@@ -65,9 +77,15 @@ const { reading = false } = Astro.props;
 
   if (layer && !reduced) {
     window.setInterval(() => {
-      if (document.hidden) return;
+      if (document.hidden) {
+        return;
+      }
+
       const point = pickIntersection();
-      if (point) addTick(layer, point);
+
+      if (point) {
+        addTick(layer, point);
+      }
     }, TICK_EVERY_MS);
   }
 </script>

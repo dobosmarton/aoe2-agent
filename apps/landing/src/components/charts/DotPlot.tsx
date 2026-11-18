@@ -111,20 +111,31 @@ const LABEL_PLACEMENT: Record<LabelSide, LabelPlacement> = {
 
 // On narrow screens a left label moves above its dot, where it has room.
 const labelSideOf = (point: Point, compact: boolean): LabelSide => {
-  if (point.labelSide === "left") return compact ? "above" : "left";
+  if (point.labelSide === "left") {
+    return compact ? "above" : "left";
+  }
+
   return "right";
 };
 
 const useWidth = (): readonly [React.RefObject<HTMLDivElement | null>, number | null] => {
   const ref = React.useRef<HTMLDivElement>(null);
   const [width, setWidth] = React.useState<number | null>(null);
+
   React.useEffect(() => {
     const element = ref.current;
-    if (!element) return;
+
+    if (!element) {
+      return;
+    }
+
     const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
+
     observer.observe(element);
+
     return () => observer.disconnect();
   }, []);
+
   return [ref, width] as const;
 };
 
@@ -132,16 +143,23 @@ const useWidth = (): readonly [React.RefObject<HTMLDivElement | null>, number | 
 const wrapLabel = (label: string, width: number): string[] => {
   const maxChars = Math.max(MIN_LABEL_CHARS, Math.floor((width - LABEL_PADDING) / LABEL_CHAR_WIDTH));
   const lines: string[] = [];
+
   for (const word of label.split(" ")) {
-    const last = lines[lines.length - 1];
-    if (last !== undefined && `${last} ${word}`.length <= maxChars) lines[lines.length - 1] = `${last} ${word}`;
-    else lines.push(word);
+    const last = lines.at(-1);
+
+    if (last !== undefined && `${last} ${word}`.length <= maxChars) {
+      lines[lines.length - 1] = `${last} ${word}`;
+    } else {
+      lines.push(word);
+    }
   }
+
   return lines.slice(0, MAX_LABEL_LINES);
 };
 
 const formatTick = (value: number, panel: Panel): string => {
   const text = panel.decimals === undefined ? value.toLocaleString("en-US") : value.toFixed(panel.decimals);
+
   return panel.unit ? `${text} ${panel.unit}` : text;
 };
 
@@ -154,11 +172,13 @@ const rowPoints = (panel: Panel, row: string, seriesByKey: Map<string, Series>):
     .sort((a, b) => a.value - b.value)
     .map((point) => {
       const entry = seriesByKey.get(point.series);
+
       return { ...point, fill: fillOf(entry?.color ?? "neutral", point.shade ?? entry?.shade) };
     });
 
 const RowLabel = ({ row, x, y, width }: { row: string; x: number; y: number; width: number }): React.ReactElement => {
   const lines = wrapLabel(row, width);
+
   return (
     <text x={x} y={y} textAnchor="end" fontSize={13} style={{ fill: "hsl(var(--foreground))" }}>
       {lines.map((line, lineIndex) => (
@@ -182,6 +202,7 @@ type DotMarkProps = {
 const DotMark = ({ point, cx, cy, compact, onTip }: DotMarkProps): React.ReactElement => {
   const placement = LABEL_PLACEMENT[labelSideOf(point, compact)];
   const show = (): void => onTip({ x: cx, y: cy, text: point.tip });
+
   return (
     <g
       tabIndex={0}
@@ -272,8 +293,9 @@ const PanelChart = ({ panel, rows, series, width, labelWidth, rowHeight, onTip }
         ) : null}
         {rows.map((row, rowIndex) => {
           const points = rowPoints(panel, row, seriesByKey);
-          const first = points[0];
-          const last = points[points.length - 1];
+          const first = points.at(0);
+          const last = points.at(-1);
+
           return (
             <g key={row}>
               <RowLabel row={row} x={labelWidth - 10} y={y(rowIndex)} width={labelWidth} />
@@ -316,6 +338,7 @@ type LegendProps = Pick<DotPlotProps, "series" | "legendNote" | "shadeLegend">;
 const Legend = ({ series, legendNote, shadeLegend }: LegendProps): React.ReactElement => {
   // With one series the shades are that series' color; with several they are only a key, in gray.
   const shadeColor: SeriesColor = series.length === 1 ? series[0].color : "neutral";
+
   return (
     <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
       {series.length > 1
@@ -323,7 +346,7 @@ const Legend = ({ series, legendNote, shadeLegend }: LegendProps): React.ReactEl
             <LegendItem key={entry.key} fill={fillOf(entry.color, entry.shade)}>
               {entry.label}
             </LegendItem>
-          ))
+        ))
         : null}
       {shadeLegend ? (
         <>

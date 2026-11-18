@@ -1,6 +1,6 @@
 import * as THREE from "three";
 
-import { GLSL_OUTPUT_COLOR } from "./shaders";
+import { GLSL_OUTPUT_COLOR, GLSL_UV_VERTEX } from "./shaders";
 
 // Glass cards drawn on a 2D canvas and shown on a plane in the scene: the Perception
 // plate, the sheets that seal into it and the action card.
@@ -14,17 +14,25 @@ export type CanvasPair = readonly [HTMLCanvasElement, CanvasRenderingContext2D];
 
 export const createCanvas = (width: number, height: number): CanvasPair => {
   const c = document.createElement("canvas");
+
   c.width = width;
   c.height = height;
+
   const g = c.getContext("2d");
-  if (!g) throw new Error("2D canvas is not available");
+
+  if (!g) {
+    throw new Error("2D canvas is not available");
+  }
+
   return [c, g];
 };
 
 export const canvasTexture = (c: HTMLCanvasElement): THREE.CanvasTexture => {
   const t = new THREE.CanvasTexture(c);
+
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 8;
+
   return t;
 };
 
@@ -49,10 +57,7 @@ export const createSheet = (map: THREE.Texture, w: number, h: number): Sheet => 
       transparent: true,
       depthWrite: false,
       side: THREE.DoubleSide,
-      vertexShader: /* glsl */ `
-        varying vec2 vUv;
-        void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
-      `,
+      vertexShader: GLSL_UV_VERTEX,
       fragmentShader: /* glsl */ `
         uniform sampler2D uMap;
         uniform float uOpacity, uGlow;
@@ -66,6 +71,8 @@ export const createSheet = (map: THREE.Texture, w: number, h: number): Sheet => 
       `,
     }),
   );
+
   mesh.renderOrder = 7;
+
   return { mesh, uniforms };
 };

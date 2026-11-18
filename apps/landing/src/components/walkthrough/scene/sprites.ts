@@ -131,22 +131,31 @@ const prepareAtlas = (atlas: THREE.Texture): void => {
 /** A unit quad anchored at its bottom-left corner, instanced with per-sprite buffers. */
 const createSpriteGeometry = (capacity: number): SpriteAttributes => {
   const quad = new THREE.PlaneGeometry(1, 1);
+
   quad.translate(0.5, 0.5, 0);
+
   const geometry = new THREE.InstancedBufferGeometry();
+
   geometry.index = quad.index;
   geometry.setAttribute("position", quad.getAttribute("position"));
+
   const aAnchor = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3), 3);
   const aRect = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 4), 4);
   const aPivot = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 2), 2);
   const aTint = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 4), 4);
   const aReveal = new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1);
-  for (const a of [aAnchor, aRect, aPivot, aTint, aReveal]) a.setUsage(THREE.DynamicDrawUsage);
+
+  for (const a of [aAnchor, aRect, aPivot, aTint, aReveal]) {
+    a.setUsage(THREE.DynamicDrawUsage);
+  }
+
   geometry.setAttribute("aAnchor", aAnchor);
   geometry.setAttribute("aRect", aRect);
   geometry.setAttribute("aPivot", aPivot);
   geometry.setAttribute("aTint", aTint);
   geometry.setAttribute("aReveal", aReveal);
   geometry.instanceCount = 0;
+
   return { geometry, aAnchor, aRect, aPivot, aTint, aReveal };
 };
 
@@ -209,6 +218,7 @@ const createSpriteMaterial = (uniforms: SpriteUniforms): THREE.ShaderMaterial =>
 
 export const createSpriteLayer = (atlas: THREE.Texture, meta: SpriteMeta, worldPerPixel: number, fog: Fog, capacity = DEFAULT_CAPACITY): SpriteLayer => {
   prepareAtlas(atlas);
+
   const { geometry, aAnchor, aRect, aPivot, aTint, aReveal } = createSpriteGeometry(capacity);
   const uniforms: SpriteUniforms = {
     uAtlas: { value: atlas },
@@ -218,6 +228,7 @@ export const createSpriteLayer = (atlas: THREE.Texture, meta: SpriteMeta, worldP
     ...fogUniforms(fog),
   };
   const mesh = new THREE.Mesh(geometry, createSpriteMaterial(uniforms));
+
   mesh.frustumCulled = false;
   mesh.renderOrder = 1;
 
@@ -234,7 +245,11 @@ export const createSpriteLayer = (atlas: THREE.Texture, meta: SpriteMeta, worldP
       reveal: 1,
       visible: true,
     };
-    if (handles.length < capacity) handles.push(handle);
+
+    if (handles.length < capacity) {
+      handles.push(handle);
+    }
+
     return handle;
   };
 
@@ -245,25 +260,38 @@ export const createSpriteLayer = (atlas: THREE.Texture, meta: SpriteMeta, worldP
 
   const sortVisible = (camera: THREE.Camera): void => {
     order.length = 0;
+
     for (const handle of handles) {
-      if (!handle.visible || handle.alpha <= 0.001) continue;
+      if (!handle.visible || handle.alpha <= 0.001) {
+        continue;
+      }
+
       view.copy(handle.anchor).applyMatrix4(camera.matrixWorldInverse);
+
       const entry = (pool[order.length] ??= { handle, depth: 0 });
+
       entry.handle = handle;
       entry.depth = view.z;
       order.push(entry);
     }
+
     order.sort(byDepth);
   };
 
   const update = (camera: THREE.Camera, light: number): void => {
     uniforms.uLight.value = light;
     sortVisible(camera);
+
     let count = 0;
+
     for (const { handle } of order) {
       const list = frames(handle.name);
       const rect = list.at(Math.max(0, Math.floor(handle.frame)) % Math.max(1, list.length));
-      if (!rect) continue;
+
+      if (!rect) {
+        continue;
+      }
+
       aAnchor.setXYZ(count, handle.anchor.x, handle.anchor.y, handle.anchor.z);
       aRect.setXYZW(count, rect[0], rect[1], rect[2], rect[3]);
       aPivot.setXY(count, rect[4], rect[5]);
@@ -271,7 +299,9 @@ export const createSpriteLayer = (atlas: THREE.Texture, meta: SpriteMeta, worldP
       aReveal.setX(count, handle.reveal);
       count++;
     }
+
     geometry.instanceCount = count;
+
     for (const a of [aAnchor, aRect, aPivot, aTint, aReveal]) {
       a.clearUpdateRanges();
       a.addUpdateRange(0, count * a.itemSize);

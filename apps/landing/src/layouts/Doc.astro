@@ -72,13 +72,7 @@ const hasToc = toc.length > 1;
           <p
             class="mt-6 flex flex-wrap items-center gap-x-3 gap-y-1 border-y border-foreground/10 py-2.5 font-mono text-[11px] tracking-wider text-muted-foreground uppercase"
           >
-            {
-              part ? (
-                <span>{part.title}</span>
-              ) : (
-                <span>Reference</span>
-              )
-            }
+            <span>{part ? part.title : "Reference"}</span>
             <span aria-hidden="true">·</span>
             <span class="text-accent-foreground">{readMinutes} min read</span>
           </p>
@@ -184,23 +178,32 @@ const hasToc = toc.length > 1;
   <script>
     // Marks the section in view in the table of contents.
     const links = new Map<string, HTMLElement>();
+
     document.querySelectorAll<HTMLElement>("[data-toc-link]").forEach((link) => {
       links.set(link.dataset.tocLink ?? "", link);
     });
+
     if (links.size > 0) {
       const observer = new IntersectionObserver(
         (entries) => {
           for (const entry of entries) {
-            if (!entry.isIntersecting) continue;
+            if (!entry.isIntersecting) {
+              continue;
+            }
+
             links.forEach((link) => link.removeAttribute("aria-current"));
             links.get(entry.target.id)?.setAttribute("aria-current", "location");
           }
         },
         { rootMargin: "-30% 0px" },
       );
+
       links.forEach((_, id) => {
         const heading = document.getElementById(id);
-        if (heading) observer.observe(heading);
+
+        if (heading) {
+          observer.observe(heading);
+        }
       });
     }
   </script>

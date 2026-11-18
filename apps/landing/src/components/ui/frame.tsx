@@ -10,7 +10,6 @@ import { cn } from "@/lib/utils";
 const monoLabel = "font-mono text-[11px] tracking-wider text-muted-foreground uppercase";
 
 export const cellClass = "overflow-hidden rounded-lg border border-foreground/10 bg-card";
-export const cellHoverClass = "transition-shadow duration-300 hover:shadow-[0_12px_32px_-16px_rgb(0_0_0/0.25)]";
 
 type BracketLabelProps = { children: React.ReactNode; className?: string };
 

@@ -40,14 +40,18 @@ type SkippableEffect = { update: TiltShiftEffect["update"] };
 // runs but weighs that stale result by zero; the first frame it shows again recomputes it.
 const skipWhile = (effect: SkippableEffect, idle: () => boolean): void => {
   const update = effect.update.bind(effect);
+
   effect.update = (r, input, delta) => {
-    if (!idle()) update(r, input, delta);
+    if (!idle()) {
+      update(r, input, delta);
+    }
   };
 };
 
 /** `small`: phones, which skip the tilt-shift. */
 export const createPost = (renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, small: boolean): Post => {
   const composer = new EffectComposer(renderer, { frameBufferType: THREE.HalfFloatType });
+
   composer.addPass(new RenderPass(scene, camera));
 
   // A gentle miniature: only the top and bottom bands of a wide shot soften.
@@ -58,10 +62,15 @@ export const createPost = (renderer: THREE.WebGLRenderer, scene: THREE.Scene, ca
   const tone = new ToneMappingEffect({ mode: ToneMappingMode.NEUTRAL });
   // Fine grain against banding in the dark gradients.
   const grain = new NoiseEffect({ blendFunction: BlendFunction.OVERLAY, premultiply: false });
+
   grain.blendMode.opacity.value = 0.06;
+
   const effects = small ? [bloom, tone, vignette, grain] : [tiltShift, bloom, tone, vignette, grain];
+
   composer.addPass(new EffectPass(camera, ...effects));
+
   const smaa = new EffectPass(camera, new SMAAEffect({ preset: SMAAPreset.HIGH }));
+
   composer.addPass(smaa);
 
   skipWhile(tiltShift, () => tiltShift.blendMode.opacity.value < 0.002);
@@ -71,8 +80,11 @@ export const createPost = (renderer: THREE.WebGLRenderer, scene: THREE.Scene, ca
     setSize: (width, height) => {
       composer.setSize(width, height);
       smaa.enabled = renderer.getPixelRatio() < SMAA_BELOW_DPR;
+
       // The last enabled pass draws to the screen.
-      composer.passes.forEach((pass, i, all) => (pass.renderToScreen = all.slice(i + 1).every((p) => !p.enabled)));
+      composer.passes.forEach((pass, i, all) => {
+        pass.renderToScreen = all.slice(i + 1).every((p) => !p.enabled);
+      });
     },
     setMiniature: (amount) => {
       tiltShift.blendMode.opacity.value = amount;

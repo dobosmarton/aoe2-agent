@@ -2,7 +2,7 @@ import * as THREE from "three";
 
 import { easeOutCubic } from "./easing";
 import { brackets, fatSegments, lineMaterial } from "./lines";
-import { GLSL_OUTPUT_COLOR } from "./shaders";
+import { GLSL_OUTPUT_COLOR, GLSL_UV_VERTEX } from "./shaders";
 
 // The glass pane between the world and the mind: everything the agent gets is this
 // flat picture. It first shows the game camera's render of the village, then the real
@@ -11,6 +11,7 @@ import { GLSL_OUTPUT_COLOR } from "./shaders";
 // facing +z (towards the mind and the viewer).
 
 export const PANE_W = 16;
+
 /** Cap on the exposure pulse when the shot is taken: never a full white flash. */
 const MAX_FLASH = 0.16;
 
@@ -28,13 +29,13 @@ export type ScreenState = {
 export type Screen = {
   group: THREE.Group;
   update: (s: ScreenState, time: number) => void;
-  width: number;
   height: number;
 };
 
 export const createScreen = (real: THREE.Texture, rendered: THREE.Texture, aspect: number): Screen => {
   const paneH = PANE_W / aspect;
   const group = new THREE.Group();
+
   group.name = "screen";
 
   const uniforms = {
@@ -53,10 +54,7 @@ export const createScreen = (real: THREE.Texture, rendered: THREE.Texture, aspec
       uniforms,
       transparent: true,
       depthWrite: false,
-      vertexShader: /* glsl */ `
-        varying vec2 vUv;
-        void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
-      `,
+      vertexShader: GLSL_UV_VERTEX,
       fragmentShader: /* glsl */ `
         uniform sampler2D uReal, uRendered;
         uniform float uMix, uOpacity, uFlash, uImpact, uTime;
@@ -94,12 +92,14 @@ export const createScreen = (real: THREE.Texture, rendered: THREE.Texture, aspec
       `,
     }),
   );
+
   pane.renderOrder = 5;
   group.add(pane);
 
   // Viewfinder: corner brackets a little outside the pane, closing in on the shot.
   const finderMaterial = lineMaterial({ color: new THREE.Color(0.7, 1.2, 2.4), width: 2, opacity: 0 });
   const finder = fatSegments(brackets(PANE_W + 1.2, paneH + 1.2, 1.4, 0.05), finderMaterial);
+
   group.add(finder);
 
   const update = (s: ScreenState, time: number): void => {
@@ -109,11 +109,13 @@ export const createScreen = (real: THREE.Texture, rendered: THREE.Texture, aspec
     uniforms.uFlash.value = Math.min(MAX_FLASH, s.flash * MAX_FLASH);
     uniforms.uTime.value = time;
     group.visible = s.on > 0.002 || s.finder > 0.002;
+
     const finderProgress = THREE.MathUtils.clamp(s.finder, 0, 1);
+
     // In from 14% larger, settling as the shutter fires; then out with the glass.
     finder.scale.setScalar(1.14 - 0.14 * easeOutCubic(finderProgress));
     finderMaterial.opacity = Math.min(finderProgress * 2, 1) * s.on;
   };
 
-  return { group, update, width: PANE_W, height: paneH };
+  return { group, update, height: paneH };
 };

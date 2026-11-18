@@ -1,5 +1,5 @@
 import * as React from "react";
-import { SECTIONS, FLAT_PAGES, type Section } from "@/lib/taxonomy";
+import { SECTIONS, FLAT_PAGES, sectionFor, type Section } from "@/lib/taxonomy";
 import { cn } from "@/lib/utils";
 import { Corners } from "@/components/ui/frame";
 
@@ -15,8 +15,14 @@ const SECTION_CORNERS = ["top-1 left-1", "top-1 right-1", "bottom-2 left-1", "bo
 const pageIndexOf = (fullSlug: string): number => FLAT_PAGES.findIndex((page) => page.fullSlug === fullSlug);
 
 const chipStateClass = (isActive: boolean, isPast: boolean): string => {
-  if (isActive) return "bg-accent-foreground/15 text-accent-foreground";
-  if (isPast) return "text-foreground hover:text-accent-foreground";
+  if (isActive) {
+    return "bg-accent-foreground/15 text-accent-foreground";
+  }
+
+  if (isPast) {
+    return "text-foreground hover:text-accent-foreground";
+  }
+
   return "text-muted-foreground hover:text-accent-foreground";
 };
 
@@ -26,6 +32,7 @@ const centreInScroller = (item: HTMLElement, scroller: HTMLElement): void => {
   const itemRect = item.getBoundingClientRect();
   const scrollerRect = scroller.getBoundingClientRect();
   const itemLeftInContent = itemRect.left - scrollerRect.left + scroller.scrollLeft;
+
   scroller.scrollTo({ left: Math.max(0, itemLeftInContent - scroller.clientWidth / 2 + itemRect.width / 2) });
 };
 
@@ -37,7 +44,8 @@ type SectionItemProps = {
 };
 
 const SectionItem = ({ section, currentSlug, currentIndex, activeRef }: SectionItemProps): React.ReactElement => {
-  const isCurrentPart = section.pages.some((page) => `${section.id}/${page.slug}` === currentSlug);
+  const isCurrentPart = sectionFor(currentSlug)?.id === section.id;
+
   return (
     <li
       ref={isCurrentPart ? activeRef : undefined}
@@ -57,6 +65,7 @@ const SectionItem = ({ section, currentSlug, currentIndex, activeRef }: SectionI
           const slug = `${section.id}/${page.slug}`;
           const isActive = slug === currentSlug;
           const isPast = currentIndex >= 0 && pageIndexOf(slug) < currentIndex;
+
           return (
             <li key={page.slug}>
               <a
@@ -97,7 +106,10 @@ export const PhaseTimeline = ({ currentSlug }: PhaseTimelineProps): React.ReactE
   React.useEffect(() => {
     const item = activeRef.current;
     const scroller = scrollerRef.current;
-    if (item && scroller) centreInScroller(item, scroller);
+
+    if (item && scroller) {
+      centreInScroller(item, scroller);
+    }
   }, [currentSlug]);
 
   return (

@@ -73,7 +73,9 @@ BUILDING = frozenset(
 DEFENSE = frozenset({"gate", "wall", "tower", "wonder", "krepost"})
 
 # Regions with player names, in 3024x1672 pixels: the score panel and the owner
-# line of the selection panel.
+# line of the selection panel. Frames of any other size are refused, since the blur
+# would miss the names.
+FRAME_SIZE = (3024, 1672)
 PRIVATE_REGIONS = ((2400, 1200, 3024, 1395), (1090, 1418, 1345, 1460))
 PRIVATE_BLUR_RADIUS = 14
 HUD_STRIP = (0, 0, 1400, 92)
@@ -183,11 +185,13 @@ def detect(frame: Image.Image, model: Path) -> list[Detection]:
     from detection.inference.detector import EntityDetector
 
     detector = EntityDetector(model_path=str(model), use_sahi=False)
+
     detections: list[Detection] = []
     for entity in detector.detect(frame):
         x1, y1, x2, y2 = entity.bbox
         confidence = round(float(entity.confidence), CONFIDENCE_DIGITS)
         detections.append(Detection(cls=entity.class_name, conf=confidence, box=(x1, y1, x2, y2)))
+
     return detections
 
 
@@ -221,9 +225,11 @@ def read_hud(rgb: NDArray[np.uint8]) -> Hud:
     calibration = calibration_for(width, height)
     if calibration is None:
         raise SystemExit(f"no HUD calibration for {width}x{height}")
+
     hud = prepare_hud_pixels(rgb, (width, height))
     readings: dict[str, object] = dict(read_resource_bar_pixels(hud, calibration))
     readings["age"] = read_age_pixels(hud, calibration)
+
     rects: dict[str, tuple[int, int, int, int]] = calibration.field_rects()
     fields = {
         name: [
@@ -235,6 +241,7 @@ def read_hud(rgb: NDArray[np.uint8]) -> Hud:
         for name, (x0, y0, x1, y1) in rects.items()
         if name in HUD_FIELDS
     }
+
     return {"readings": _kept_readings(readings), "fields": fields}
 
 
@@ -247,18 +254,22 @@ def _kept_readings(readings: Mapping[str, object]) -> HudReadings:
 
 def redact(frame: Image.Image) -> Image.Image:
     out = frame.copy()
+
     for box in PRIVATE_REGIONS:
         region = out.crop(box).filter(ImageFilter.GaussianBlur(PRIVATE_BLUR_RADIUS))
         out.paste(region, box[:2])
+
     return out
 
 
 def save_images(frame: Image.Image) -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+
     w, h = frame.size
     for width in FRAME_WIDTHS:
         resized = frame.resize((width, round(h * width / w)), Image.Resampling.LANCZOS)
         resized.save(OUT_DIR / f"frame-{width}.webp", quality=82)
+
     frame.crop(HUD_STRIP).save(OUT_DIR / "hud.webp", quality=90)
 
 
@@ -267,6 +278,7 @@ def to_entities(detections: list[Detection], frame_size: tuple[int, int]) -> lis
     w, h = frame_size
     numbered: Counter[str] = Counter()
     entities: list[TurnEntity] = []
+
     for detection in sorted(detections, key=lambda d: (d.cls, -(d.conf or 0))):
         x1, y1, x2, y2 = detection.box
         entities.append(
@@ -282,6 +294,7 @@ def to_entities(detections: list[Detection], frame_size: tuple[int, int]) -> lis
             }
         )
         numbered[detection.cls] += 1
+
     return entities
 
 
@@ -293,12 +306,20 @@ def parse_options() -> Options:
     )
     parser.add_argument("--model", type=Path)
     args = parser.parse_args()
+
     return Options(frame=args.frame, labels=args.labels, model=args.model)
 
 
 def main() -> None:
     options = parse_options()
     frame = Image.open(options.frame).convert("RGB")
+
+    if frame.size != FRAME_SIZE:
+        raise SystemExit(
+            f"{options.frame} is {frame.width}x{frame.height}; the redaction regions only fit "
+            f"{FRAME_SIZE[0]}x{FRAME_SIZE[1]} frames"
+        )
+
     labels = load_labels(options.labels)
     model = options.model if options.model is not None and options.model.exists() else None
     source: Source = "detector" if model is not None else "reviewed"
@@ -315,9 +336,11 @@ def main() -> None:
         "entities": entities,
         "hud": read_hud(np.asarray(frame)),
     }
+
     OUT_JSON.parent.mkdir(parents=True, exist_ok=True)
     OUT_JSON.write_text(json.dumps(data, indent=1) + "\n")
     save_images(redact(frame))
+
     print(f"{source}: {len(entities)} boxes {dict(classes.most_common(6))}")
     print("hud:", data["hud"]["readings"])
 

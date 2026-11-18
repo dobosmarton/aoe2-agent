@@ -1,6 +1,6 @@
 import * as THREE from "three";
 
-import { createAction } from "./action";
+import { createAction, RAIL_FLOW, RAIL_LINE } from "./action";
 import type { Board } from "./board";
 import { RING_X } from "./flow";
 import { el, type Labels } from "./labels";
@@ -34,6 +34,7 @@ const RAIL_SEGMENTS = 60;
 /** A stable pseudo-random value in 0..1 for dust particle `i`, channel `k`. */
 const hash01 = (i: number, k: number): number => {
   const s = Math.sin((i + 1) * 12.9898 + k * 78.233) * 43758.5453;
+
   return s - Math.floor(s);
 };
 
@@ -55,13 +56,17 @@ export type Mind = {
 const createDust = (): { points: THREE.Points; uniforms: PointsUniforms & { uTime: { value: number } } } => {
   const dust = new Float32Array(DUST_COUNT * 3);
   const seed = new Float32Array(DUST_COUNT);
+
   for (let i = 0; i < DUST_COUNT; i++) {
     dust.set([-6 + hash01(i, 1) * 80, -7 + hash01(i, 2) * 15, -6 + hash01(i, 3) * 20], i * 3);
     seed[i] = hash01(i, 4);
   }
+
   const geometry = new THREE.BufferGeometry();
+
   geometry.setAttribute("position", new THREE.BufferAttribute(dust, 3));
   geometry.setAttribute("aSeed", new THREE.BufferAttribute(seed, 1));
+
   const uniforms = { uTime: { value: 0 }, uOn: { value: 0 }, uScale: { value: 1 } };
   const points = new THREE.Points(
     geometry,
@@ -96,16 +101,26 @@ const createDust = (): { points: THREE.Points; uniforms: PointsUniforms & { uTim
       `,
     }),
   );
+
   points.frustumCulled = false;
+
   return { points, uniforms };
 };
 
 /** A dotted floor below the pipeline, fading away from its axis. */
 const createFloor = (): { points: THREE.Points; uniforms: PointsUniforms } => {
   const floor: number[] = [];
-  for (let x = -6; x <= 74; x += 1.25) for (let z = -8; z <= 16; z += 1.25) floor.push(x, -7, z);
+
+  for (let x = -6; x <= 74; x += 1.25) {
+    for (let z = -8; z <= 16; z += 1.25) {
+      floor.push(x, -7, z);
+    }
+  }
+
   const geometry = new THREE.BufferGeometry();
+
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(floor, 3));
+
   const uniforms = { uOn: { value: 0 }, uScale: { value: 1 } };
   const points = new THREE.Points(
     geometry,
@@ -135,7 +150,9 @@ const createFloor = (): { points: THREE.Points; uniforms: PointsUniforms } => {
       `,
     }),
   );
+
   points.frustumCulled = false;
+
   return { points, uniforms };
 };
 
@@ -144,6 +161,7 @@ const createAtmosphere = (): Atmosphere => {
   const group = new THREE.Group();
   const dust = createDust();
   const floor = createFloor();
+
   group.add(dust.points, floor.points);
 
   const update = (on: number, time: number, scale: number): void => {
@@ -175,26 +193,28 @@ const actionCurve = (): THREE.CatmullRomCurve3 =>
 
 export const createMind = (data: TurnData, board: Board, frameTexture: THREE.Texture, labels: Labels, mono: string): Mind => {
   const group = new THREE.Group();
+
   group.name = "mind";
 
-  // ---- Detector stack ------------------------------------------------------------------
   const stack = createStack(data, frameTexture, labels, MIND.slab, board.W, board.H);
+
   group.add(stack.group);
 
-  // ---- Publishing: the sheets and the Perception plate ----------------------------------
   const publish = createPublish(data, mono, {
     W: board.W,
     H: board.H,
     hudCentre: board.hud.position.clone(),
     hudSize: board.hudSize,
   });
+
   group.add(publish.group);
 
-  // ---- FramePipe rail: from the plate to the decision loops, dashes flowing along -----
+  // The FramePipe rail, from the plate to the decision loops, its dashes flowing along.
   const railCurve = framePipeCurve();
   const railPoints = path(railCurve.getSpacedPoints(RAIL_SEGMENTS));
-  const railMaterial = lineMaterial({ color: new THREE.Color(0.45, 0.95, 2.2), width: 2, opacity: 0, dashed: true, dashSize: 0.5, gapSize: 0.32 });
+  const railMaterial = lineMaterial(RAIL_LINE);
   const rail = fatSegments(railPoints, railMaterial);
+
   group.add(rail);
 
   const railLabel = labels.add(el("wt3d-rail", "FramePipe →"), {
@@ -203,11 +223,12 @@ export const createMind = (data: TurnData, board: Board, frameTexture: THREE.Tex
     align: [0.5, 1],
   });
 
-  // ---- The action: from the policy ring back to the glass, under the pipeline ---------
   const action = createAction(actionCurve(), labels, mono, (local, out) => group.localToWorld(out.copy(local)));
+
   group.add(action.group);
 
   const atmosphere = createAtmosphere();
+
   group.add(atmosphere.group);
 
   const boardCentre = new THREE.Vector3();
@@ -220,6 +241,7 @@ export const createMind = (data: TurnData, board: Board, frameTexture: THREE.Tex
     board.group.visible = S.slab.on > 0.01;
 
     stack.update(S.stack.on, S.stack.pulse);
+
     publish.update(
       { lift: S.sheets.lift, seal: S.sheets.seal, travel: S.card.travel, on: S.card.on },
       { board: boardCentre, plate: MIND.plate, rail: railCurve },
@@ -227,7 +249,7 @@ export const createMind = (data: TurnData, board: Board, frameTexture: THREE.Tex
 
     rail.visible = S.mind.rail > 0.01;
     railMaterial.opacity = S.mind.rail * 0.9;
-    railMaterial.dashOffset = -time * 1.2;
+    railMaterial.dashOffset = -time * RAIL_FLOW;
 
     railLabel.opacity = S.mind.rail * S.action.on;
     action.update(S.action, time);

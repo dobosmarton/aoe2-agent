@@ -6,6 +6,7 @@
 import { Code } from "astro:components";
 import type { ComponentProps } from "astro/types";
 import Artifact from "./Artifact.astro";
+import { codeLinesMeta } from "@/lib/rehype-artifacts";
 
 type Props = {
   code: string;
@@ -15,10 +16,9 @@ type Props = {
 };
 
 const { code, lang, title, caption } = Astro.props;
-const lines = code.replace(/\n$/, "").split("\n").length;
 ---
 
-<Artifact label="Code" meta={lines === 1 ? "1 line" : `${lines} lines`} caption={caption}>
+<Artifact label="Code" meta={codeLinesMeta(code)} caption={caption}>
   <div class="code-cell">
     <div class="cell-header">
       <span class="bracket-label">{lang}</span>

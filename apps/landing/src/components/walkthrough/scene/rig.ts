@@ -25,13 +25,16 @@ export const applyPose = (camera: THREE.PerspectiveCamera, pose: CameraPose, asp
   const distance = size / Math.tan(THREE.MathUtils.degToRad(fov / 2));
   const az = THREE.MathUtils.degToRad(pose.az);
   const el = THREE.MathUtils.degToRad(pose.el);
+
   target.set(pose.tx, pose.ty, pose.tz);
+
   // Azimuth is measured from +x towards +z.
   camera.position.set(
     target.x + distance * Math.cos(el) * Math.cos(az),
     target.y + distance * Math.sin(el),
     target.z + distance * Math.cos(el) * Math.sin(az),
   );
+
   camera.fov = fov;
   camera.aspect = aspect;
   camera.near = Math.max(0.05, distance * 0.02);
@@ -40,5 +43,6 @@ export const applyPose = (camera: THREE.PerspectiveCamera, pose: CameraPose, asp
   camera.lookAt(target);
   camera.updateProjectionMatrix();
   camera.updateMatrixWorld();
+
   return distance;
 };
