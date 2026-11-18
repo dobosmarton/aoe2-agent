@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
+import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
 
 import { createBillboardBoxes } from "./boxes";
 import { el, type Label, type Labels } from "./labels";

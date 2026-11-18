@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
+import type { LineSegments2 } from "three/addons/lines/LineSegments2.js";
 
 import { createFlatBoxes } from "./boxes";
 import { fatSegments, loop } from "./lines";
