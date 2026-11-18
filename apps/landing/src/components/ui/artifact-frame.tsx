@@ -20,17 +20,15 @@ type ArtifactFrameProps = {
 // (the caption, or the label when there is none) and the meta, set in drawn [ ]
 // brackets that stretch to fit several lines. Styles live in styles/globals.css under
 // `.artifact`; lib/rehype-artifacts.ts writes the same markup for the docs.
-export function ArtifactFrame({ label, meta, caption, children, className }: ArtifactFrameProps) {
-  return (
-    <figure className={cn("artifact", className)}>
-      <div className="artifact-frame">
-        <Corners />
-        {children}
-      </div>
-      <figcaption className="artifact-caption">
-        {caption ?? label}
-        {meta && <span className="artifact-label-meta"> {meta}</span>}
-      </figcaption>
-    </figure>
-  );
-}
+export const ArtifactFrame = ({ label, meta, caption, children, className }: ArtifactFrameProps): React.ReactElement => (
+  <figure className={cn("artifact", className)}>
+    <div className="artifact-frame">
+      <Corners />
+      {children}
+    </div>
+    <figcaption className="artifact-caption">
+      {caption ?? label}
+      {meta && <span className="artifact-label-meta"> {meta}</span>}
+    </figcaption>
+  </figure>
+);

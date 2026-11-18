@@ -1,5 +1,7 @@
 import * as THREE from "three";
 
+import { GLSL_OUTPUT_COLOR } from "./shaders";
+
 // AoE2:DE sprites in the 3D scene. Each sprite is a quad that faces the camera,
 // standing on its ground anchor (the frame's hotspot), at the game's own scale: a
 // sprite pixel covers as much of the view as a screen pixel does in the game at the
@@ -21,12 +23,9 @@ export type SpriteHandle = {
   visible: boolean;
 };
 
-const GLSL_COLOR = /* glsl */ `
-  #include <tonemapping_fragment>
-  #include <colorspace_fragment>
-`;
+/** Most sprites one layer draws. */
+const DEFAULT_CAPACITY = 1200;
 
-/** The recorded frame's fog of war: lighting per ground point (see `fogUv`). */
 /** Shared ground uniforms: the recorded frame's fog of war, where the frame shows the
  * map, drifting cloud shadows and how far the map has opened (the hero intro). */
 export type Fog = {
@@ -39,7 +38,24 @@ export type Fog = {
   open: { value: number };
 };
 
-export const fogUniforms = (fog: Fog) => ({
+export type FogUniforms = {
+  uFog: { value: THREE.Texture };
+  uFrame: { value: THREE.Vector3 };
+  uPlay: { value: THREE.Vector2 };
+  uTime: { value: number };
+  uOpen: { value: number };
+};
+
+export type SpriteLayer = {
+  mesh: THREE.Mesh;
+  /** Places a sprite; past the layer's capacity the handle is returned but never drawn. */
+  add: (name: string, x: number, y: number, z: number, frame?: number) => SpriteHandle;
+  /** Writes the visible sprites, farthest first, into the instance buffers. */
+  update: (camera: THREE.Camera, light: number) => void;
+};
+
+/** `time` and `open` are shared by reference, so one write moves every ground material. */
+export const fogUniforms = (fog: Fog): FogUniforms => ({
   uFog: { value: fog.map },
   uFrame: { value: fog.frame },
   uPlay: { value: fog.play },
@@ -85,13 +101,35 @@ export const FOG_GLSL = /* glsl */ `
   }
 `;
 
-export function createSpriteLayer(atlas: THREE.Texture, meta: SpriteMeta, worldPerPixel: number, fog: Fog, capacity = 1200) {
+type SpriteAttributes = {
+  geometry: THREE.InstancedBufferGeometry;
+  aAnchor: THREE.InstancedBufferAttribute;
+  aRect: THREE.InstancedBufferAttribute;
+  aPivot: THREE.InstancedBufferAttribute;
+  aTint: THREE.InstancedBufferAttribute;
+  aReveal: THREE.InstancedBufferAttribute;
+};
+
+type SpriteUniforms = FogUniforms & {
+  uAtlas: { value: THREE.Texture };
+  uAtlasSize: { value: THREE.Vector2 };
+  uScale: { value: number };
+  uLight: { value: number };
+};
+
+/** A sprite queued for drawing, with its view depth; reused from frame to frame. */
+type DepthEntry = { handle: SpriteHandle; depth: number };
+
+const prepareAtlas = (atlas: THREE.Texture): void => {
   atlas.flipY = false;
   atlas.colorSpace = THREE.SRGBColorSpace;
   atlas.generateMipmaps = true;
   atlas.minFilter = THREE.LinearMipmapLinearFilter;
   atlas.needsUpdate = true;
+};
 
+/** A unit quad anchored at its bottom-left corner, instanced with per-sprite buffers. */
+const createSpriteGeometry = (capacity: number): SpriteAttributes => {
   const quad = new THREE.PlaneGeometry(1, 1);
   quad.translate(0.5, 0.5, 0);
   const geometry = new THREE.InstancedBufferGeometry();
@@ -109,15 +147,11 @@ export function createSpriteLayer(atlas: THREE.Texture, meta: SpriteMeta, worldP
   geometry.setAttribute("aTint", aTint);
   geometry.setAttribute("aReveal", aReveal);
   geometry.instanceCount = 0;
+  return { geometry, aAnchor, aRect, aPivot, aTint, aReveal };
+};
 
-  const uniforms = {
-    uAtlas: { value: atlas },
-    uAtlasSize: { value: new THREE.Vector2(meta.size[0], meta.size[1]) },
-    uScale: { value: worldPerPixel },
-    uLight: { value: 1 },
-    ...fogUniforms(fog),
-  };
-  const material = new THREE.ShaderMaterial({
+const createSpriteMaterial = (uniforms: SpriteUniforms): THREE.ShaderMaterial =>
+  new THREE.ShaderMaterial({
     uniforms,
     transparent: true,
     depthWrite: false,
@@ -168,18 +202,29 @@ export function createSpriteLayer(atlas: THREE.Texture, meta: SpriteMeta, worldP
         vec4 c = texture2D(uAtlas, vUv);
         if (c.a < 0.01 || vEdge < 0.01) discard;
         gl_FragColor = vec4(c.rgb * vTint.rgb * uLight * vFog, c.a * vTint.a * vEdge);
-        ${GLSL_COLOR}
+        ${GLSL_OUTPUT_COLOR}
       }
     `,
   });
-  const mesh = new THREE.Mesh(geometry, material);
+
+export const createSpriteLayer = (atlas: THREE.Texture, meta: SpriteMeta, worldPerPixel: number, fog: Fog, capacity = DEFAULT_CAPACITY): SpriteLayer => {
+  prepareAtlas(atlas);
+  const { geometry, aAnchor, aRect, aPivot, aTint, aReveal } = createSpriteGeometry(capacity);
+  const uniforms: SpriteUniforms = {
+    uAtlas: { value: atlas },
+    uAtlasSize: { value: new THREE.Vector2(meta.size[0], meta.size[1]) },
+    uScale: { value: worldPerPixel },
+    uLight: { value: 1 },
+    ...fogUniforms(fog),
+  };
+  const mesh = new THREE.Mesh(geometry, createSpriteMaterial(uniforms));
   mesh.frustumCulled = false;
   mesh.renderOrder = 1;
 
   const handles: SpriteHandle[] = [];
-  const frames = (name: string) => meta.sprites[name] ?? [];
+  const frames = (name: string): number[][] => meta.sprites[name] ?? [];
 
-  function add(name: string, x: number, y: number, z: number, frame = 0): SpriteHandle {
+  const add = (name: string, x: number, y: number, z: number, frame = 0): SpriteHandle => {
     const handle: SpriteHandle = {
       anchor: new THREE.Vector3(x, y, z),
       name,
@@ -191,46 +236,48 @@ export function createSpriteLayer(atlas: THREE.Texture, meta: SpriteMeta, worldP
     };
     if (handles.length < capacity) handles.push(handle);
     return handle;
-  }
+  };
 
   const view = new THREE.Vector3();
-  // Sort entries, reused from frame to frame.
-  const pool: { h: SpriteHandle; d: number }[] = [];
-  const order: { h: SpriteHandle; d: number }[] = [];
-  const byDepth = (a: { d: number }, b: { d: number }) => a.d - b.d;
+  const pool: DepthEntry[] = [];
+  const order: DepthEntry[] = [];
+  const byDepth = (a: DepthEntry, b: DepthEntry): number => a.depth - b.depth;
 
-  /** Writes the visible sprites, farthest first, into the instance buffers. */
-  function update(camera: THREE.Camera, light: number) {
-    uniforms.uLight.value = light;
+  const sortVisible = (camera: THREE.Camera): void => {
     order.length = 0;
-    for (const h of handles) {
-      if (!h.visible || h.alpha <= 0.001) continue;
-      view.copy(h.anchor).applyMatrix4(camera.matrixWorldInverse);
-      const entry = (pool[order.length] ??= { h, d: 0 });
-      entry.h = h;
-      entry.d = view.z;
+    for (const handle of handles) {
+      if (!handle.visible || handle.alpha <= 0.001) continue;
+      view.copy(handle.anchor).applyMatrix4(camera.matrixWorldInverse);
+      const entry = (pool[order.length] ??= { handle, depth: 0 });
+      entry.handle = handle;
+      entry.depth = view.z;
       order.push(entry);
     }
     order.sort(byDepth);
-    let n = 0;
-    for (const { h } of order) {
-      const list = frames(h.name);
-      const rect = list[Math.max(0, Math.floor(h.frame)) % Math.max(1, list.length)];
+  };
+
+  const update = (camera: THREE.Camera, light: number): void => {
+    uniforms.uLight.value = light;
+    sortVisible(camera);
+    let count = 0;
+    for (const { handle } of order) {
+      const list = frames(handle.name);
+      const rect = list.at(Math.max(0, Math.floor(handle.frame)) % Math.max(1, list.length));
       if (!rect) continue;
-      aAnchor.setXYZ(n, h.anchor.x, h.anchor.y, h.anchor.z);
-      aRect.setXYZW(n, rect[0]!, rect[1]!, rect[2]!, rect[3]!);
-      aPivot.setXY(n, rect[4]!, rect[5]!);
-      aTint.setXYZW(n, h.tint.r, h.tint.g, h.tint.b, h.alpha);
-      aReveal.setX(n, h.reveal);
-      n++;
+      aAnchor.setXYZ(count, handle.anchor.x, handle.anchor.y, handle.anchor.z);
+      aRect.setXYZW(count, rect[0], rect[1], rect[2], rect[3]);
+      aPivot.setXY(count, rect[4], rect[5]);
+      aTint.setXYZW(count, handle.tint.r, handle.tint.g, handle.tint.b, handle.alpha);
+      aReveal.setX(count, handle.reveal);
+      count++;
     }
-    geometry.instanceCount = n;
+    geometry.instanceCount = count;
     for (const a of [aAnchor, aRect, aPivot, aTint, aReveal]) {
       a.clearUpdateRanges();
-      a.addUpdateRange(0, n * a.itemSize);
+      a.addUpdateRange(0, count * a.itemSize);
       a.needsUpdate = true;
     }
-  }
+  };
 
-  return { mesh, add, update, frames, handles };
-}
+  return { mesh, add, update };
+};

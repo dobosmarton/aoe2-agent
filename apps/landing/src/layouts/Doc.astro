@@ -1,24 +1,24 @@
 ---
 import Site from "./Site.astro";
 import DocSidebar from "@/components/DocSidebar.astro";
-import PhaseTimeline from "@/components/figures/PhaseTimeline.tsx";
+import { PhaseTimeline } from "@/components/figures/PhaseTimeline.tsx";
 import { BracketLabel } from "@/components/ui/frame";
 import { sectionFor, prevPage, nextPage, getPage } from "@/lib/taxonomy";
 
-interface Heading {
+type Heading = {
   depth: number;
   slug: string;
   text: string;
-}
+};
 
-interface Props {
+type Props = {
   title: string;
   description?: string;
   /** Full slug like "agent/overview". Omit for pages outside the guide sections. */
   slug?: string;
   headings: Heading[];
   readMinutes: number;
-}
+};
 
 const { title, description, slug, headings, readMinutes } = Astro.props;
 

@@ -18,7 +18,18 @@ export type Chapter = {
   length: number;
 };
 
-const count = (cls: string) => (turn.classes as Record<string, number>)[cls] ?? 0;
+export type Role = { role: string; model: string; when: string; output: string };
+
+export type CatalogEntry = {
+  id: string;
+  /** Whether this frame allows the action. */
+  ok: boolean;
+  /** The reading that allows or rules it out. */
+  why: string;
+};
+
+const classCounts: Record<string, number> = turn.classes;
+const count = (cls: string): number => classCounts[cls] ?? 0;
 const hud = turn.hud.readings;
 
 export const TURN_FACTS = {
@@ -29,6 +40,9 @@ export const TURN_FACTS = {
   houses: count("house"),
   hud,
 };
+
+/** The input the picked action becomes, in the order the actor sends it. */
+export const ACTION_INPUT: readonly string[] = ["q", "q", "hover", "click", "h"];
 
 export const CHAPTERS: Chapter[] = [
   {
@@ -98,14 +112,14 @@ export const CHAPTERS: Chapter[] = [
 ];
 
 /** Roles shown in the Decide chapter (docs/agent/overview.md, "Roles"). */
-export const ROLES = [
+export const ROLES: Role[] = [
   { role: "TypeSafe policy", model: "jev-1.13.0", when: "Each frame, at most every 0.5 s", output: "One catalog action" },
   { role: "Strategist", model: "gpt-5.6-terra", when: "Every 25 s, at once on an age change or alarm", output: "Goals and allocation" },
   { role: "Executor", model: "gpt-5.6-luna", when: "Alarm, tactical handoff or recovery", output: "Guarded tool calls" },
 ];
 
 /** Catalog entries shown in the Decide chapter. Feasibility follows this frame's HUD. */
-export const CATALOG = [
+export const CATALOG: CatalogEntry[] = [
   { id: "build_house", ok: true, why: "wood 25" },
   { id: "queue_villager", ok: false, why: `population ${hud.population}` },
   { id: "assign_wood", ok: false, why: "no idle villager" },

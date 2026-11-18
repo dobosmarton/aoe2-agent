@@ -43,8 +43,54 @@ type Item = Label & {
 };
 
 const SVG = "http://www.w3.org/2000/svg";
+const DEFAULT_LEADER_COLOR = "rgb(124 196 255 / 0.7)";
 
-export function createLabels(container: HTMLElement) {
+export type Labels = {
+  add: (element: HTMLElement, options: LabelOptions) => Label;
+  /** Places every label for this camera and view size (CSS px). */
+  update: (camera: THREE.Camera, width: number, height: number) => void;
+  dispose: () => void;
+  /** Styles change label sizes (breakpoints, rotation): measure again after a resize. */
+  remeasure: () => void;
+  /** Labels kept in view also stay below this line (the site header), CSS px. */
+  setInsetTop: (px: number) => void;
+  layer: HTMLDivElement;
+};
+
+const hide = (item: Item): void => {
+  if (item.shown === 0) return;
+  item.element.style.visibility = "hidden";
+  if (item.line) item.line.style.visibility = "hidden";
+  item.shown = 0;
+};
+
+const show = (item: Item, opacity: number): void => {
+  if (opacity === item.shown) return;
+  item.element.style.opacity = String(opacity);
+  item.element.style.visibility = "visible";
+  if (item.line) {
+    item.line.style.opacity = String(opacity);
+    item.line.style.visibility = "visible";
+  }
+  item.shown = opacity;
+};
+
+/** Draws the leader from the anchor to the nearest point of the label's box. */
+const drawLeader = (line: SVGLineElement, item: Item, anchorX: number, anchorY: number, size: [number, number]): void => {
+  const x1 = anchorX.toFixed(1);
+  const y1 = anchorY.toFixed(1);
+  const x2 = THREE.MathUtils.clamp(anchorX, item.x, item.x + size[0]).toFixed(1);
+  const y2 = THREE.MathUtils.clamp(anchorY, item.y, item.y + size[1]).toFixed(1);
+  const key = `${x1} ${y1} ${x2} ${y2}`;
+  if (key === item.leaderKey) return;
+  line.setAttribute("x1", x1);
+  line.setAttribute("y1", y1);
+  line.setAttribute("x2", x2);
+  line.setAttribute("y2", y2);
+  item.leaderKey = key;
+};
+
+export const createLabels = (container: HTMLElement): Labels => {
   const layer = document.createElement("div");
   layer.className = "wt-labels";
   const svg = document.createElementNS(SVG, "svg");
@@ -55,13 +101,13 @@ export function createLabels(container: HTMLElement) {
   const items: Item[] = [];
   const point = new THREE.Vector3();
 
-  function add(element: HTMLElement, options: LabelOptions): Label {
+  const add = (element: HTMLElement, options: LabelOptions): Label => {
     element.classList.add("wt3d");
     layer.append(element);
     let line: SVGLineElement | null = null;
     if (options.leader) {
       line = document.createElementNS(SVG, "line");
-      line.setAttribute("stroke", options.leaderColor ?? "rgb(124 196 255 / 0.7)");
+      line.setAttribute("stroke", options.leaderColor ?? DEFAULT_LEADER_COLOR);
       svg.append(line);
     }
     const item: Item = {
@@ -78,21 +124,48 @@ export function createLabels(container: HTMLElement) {
     };
     items.push(item);
     return item;
-  }
+  };
 
   let viewW = 0;
   let viewH = 0;
-  // Labels kept in view also stay below this line (the site header).
   let insetTop = 0;
-  function setInsetTop(px: number) {
+  const setInsetTop = (px: number): void => {
     insetTop = px;
-  }
-  // Styles change label sizes (breakpoints, rotation): measure again after a resize.
-  function remeasure() {
+  };
+  const remeasure = (): void => {
     for (const item of items) item.size = null;
-  }
+  };
 
-  function update(camera: THREE.Camera, width: number, height: number) {
+  const place = (item: Item, opacity: number, camera: THREE.Camera, width: number, height: number): void => {
+    item.options.at(point);
+    point.project(camera);
+    if (point.z > 1 || point.z < -1) {
+      hide(item);
+      return;
+    }
+    // Measured once per resize (a hidden label still has its size).
+    const size = (item.size ??= [item.element.offsetWidth, item.element.offsetHeight]);
+    const anchorX = (point.x * 0.5 + 0.5) * width;
+    const anchorY = (-point.y * 0.5 + 0.5) * height;
+    const [offsetX, offsetY] = item.options.offset;
+    const [alignX, alignY] = item.options.align;
+    let x = Math.round(anchorX + offsetX + item.shift[0] - alignX * size[0]);
+    let y = Math.round(anchorY + offsetY + item.shift[1] - alignY * size[1]);
+    const margin = item.options.keepInView;
+    if (margin != null) {
+      x = Math.round(THREE.MathUtils.clamp(x, margin, Math.max(margin, width - margin - size[0])));
+      y = Math.round(THREE.MathUtils.clamp(y, insetTop + margin, Math.max(insetTop + margin, height - margin - size[1])));
+    }
+    if (x !== item.x || y !== item.y) {
+      item.element.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+      item.x = x;
+      item.y = y;
+    }
+    show(item, opacity);
+    if (item.line) drawLeader(item.line, item, anchorX, anchorY, size);
+  };
+
+  const update = (camera: THREE.Camera, width: number, height: number): void => {
     // Only touch the DOM when something changed: an unchanged frame writes nothing.
     if (width !== viewW || height !== viewH) {
       svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
@@ -101,81 +174,28 @@ export function createLabels(container: HTMLElement) {
       remeasure();
     }
     for (const item of items) {
-      const o = Math.round(THREE.MathUtils.clamp(item.opacity, 0, 1) * 100) / 100;
-      if (o <= 0) {
-        if (item.shown !== 0) {
-          item.element.style.visibility = "hidden";
-          if (item.line) item.line.style.visibility = "hidden";
-          item.shown = 0;
-        }
-        continue;
-      }
-      item.options.at(point);
-      point.project(camera);
-      if (point.z > 1 || point.z < -1) {
-        if (item.shown !== 0) {
-          item.element.style.visibility = "hidden";
-          if (item.line) item.line.style.visibility = "hidden";
-          item.shown = 0;
-        }
-        continue;
-      }
-      // Measured once per resize (a hidden label still has its size).
-      const size = (item.size ??= [item.element.offsetWidth, item.element.offsetHeight]);
-      const ax = (point.x * 0.5 + 0.5) * width;
-      const ay = (-point.y * 0.5 + 0.5) * height;
-      const [ox, oy] = item.options.offset;
-      const [alx, aly] = item.options.align;
-      let x = Math.round(ax + ox + item.shift[0] - alx * size[0]);
-      let y = Math.round(ay + oy + item.shift[1] - aly * size[1]);
-      const margin = item.options.keepInView;
-      if (margin != null) {
-        x = Math.round(THREE.MathUtils.clamp(x, margin, Math.max(margin, width - margin - size[0])));
-        y = Math.round(THREE.MathUtils.clamp(y, insetTop + margin, Math.max(insetTop + margin, height - margin - size[1])));
-      }
-      if (x !== item.x || y !== item.y) {
-        item.element.style.transform = `translate3d(${x}px, ${y}px, 0)`;
-        item.x = x;
-        item.y = y;
-      }
-      if (o !== item.shown) {
-        item.element.style.opacity = String(o);
-        item.element.style.visibility = "visible";
-        if (item.line) {
-          item.line.style.opacity = String(o);
-          item.line.style.visibility = "visible";
-        }
-        item.shown = o;
-      }
-      if (item.line) {
-        // From the anchor to the nearest point of the label's box.
-        const bx = THREE.MathUtils.clamp(ax, x, x + size[0]);
-        const by = THREE.MathUtils.clamp(ay, y, y + size[1]);
-        const key = `${ax.toFixed(1)} ${ay.toFixed(1)} ${bx.toFixed(1)} ${by.toFixed(1)}`;
-        if (key !== item.leaderKey) {
-          const [x1, y1, x2, y2] = key.split(" ");
-          item.line.setAttribute("x1", x1!);
-          item.line.setAttribute("y1", y1!);
-          item.line.setAttribute("x2", x2!);
-          item.line.setAttribute("y2", y2!);
-          item.leaderKey = key;
-        }
-      }
+      const opacity = Math.round(THREE.MathUtils.clamp(item.opacity, 0, 1) * 100) / 100;
+      if (opacity <= 0) hide(item);
+      else place(item, opacity, camera, width, height);
     }
-  }
+  };
 
-  function dispose() {
-    layer.remove();
-  }
+  const dispose = (): void => layer.remove();
 
   return { add, update, dispose, remeasure, setInsetTop, layer };
-}
+};
 
-export type Labels = ReturnType<typeof createLabels>;
-
-export function el(className: string, html: string): HTMLDivElement {
+/** A detached `<div>` with this class and (trusted) inner HTML, ready for `labels.add`. */
+export const el = (className: string, html: string): HTMLDivElement => {
   const div = document.createElement("div");
   div.className = className;
   div.innerHTML = html;
   return div;
-}
+};
+
+/** The first element under `parent` that matches `selector`; throws when there is none. */
+export const childOf = <T extends Element = HTMLElement>(parent: ParentNode, selector: string): T => {
+  const child = parent.querySelector<T>(selector);
+  if (!child) throw new Error(`No element matches ${selector}`);
+  return child;
+};

@@ -1,12 +1,12 @@
 ---
 // The detector frame (see `.artifact` in styles/globals.css) for Astro markup and for
 // React islands, which cannot sit inside the React <ArtifactFrame> as server children.
-interface Props {
+type Props = {
   label: string;
   meta?: string;
   caption?: string;
   class?: string;
-}
+};
 
 const { label, meta, caption, class: className } = Astro.props;
 const corners = ["tl", "tr", "bl", "br"];

@@ -1,6 +1,8 @@
 import * as THREE from "three";
 
+import { easeOutCubic } from "./easing";
 import { brackets, fatSegments, lineMaterial } from "./lines";
+import { GLSL_OUTPUT_COLOR } from "./shaders";
 
 // The glass pane between the world and the mind: everything the agent gets is this
 // flat picture. It first shows the game camera's render of the village, then the real
@@ -8,15 +10,30 @@ import { brackets, fatSegments, lineMaterial } from "./lines";
 // as the shot is taken. Local units: the pane is 16 wide, centred on the origin,
 // facing +z (towards the mind and the viewer).
 
-const GLSL_COLOR = /* glsl */ `
-  #include <tonemapping_fragment>
-  #include <colorspace_fragment>
-`;
-
 export const PANE_W = 16;
+/** Cap on the exposure pulse when the shot is taken: never a full white flash. */
+const MAX_FLASH = 0.16;
 
-export function createScreen(real: THREE.Texture, rendered: THREE.Texture, aspect: number) {
-  const PANE_H = PANE_W / aspect;
+export type ScreenState = {
+  on: number;
+  /** Wipes the real frame in over the rendered one. */
+  mix: number;
+  flash: number;
+  /** Closes the viewfinder brackets on the pane. */
+  finder: number;
+  /** The action arriving at the glass. */
+  impact: number;
+};
+
+export type Screen = {
+  group: THREE.Group;
+  update: (s: ScreenState, time: number) => void;
+  width: number;
+  height: number;
+};
+
+export const createScreen = (real: THREE.Texture, rendered: THREE.Texture, aspect: number): Screen => {
+  const paneH = PANE_W / aspect;
   const group = new THREE.Group();
   group.name = "screen";
 
@@ -28,10 +45,10 @@ export function createScreen(real: THREE.Texture, rendered: THREE.Texture, aspec
     uFlash: { value: 0 },
     uImpact: { value: 0 },
     uTime: { value: 0 },
-    uSize: { value: new THREE.Vector2(PANE_W, PANE_H) },
+    uSize: { value: new THREE.Vector2(PANE_W, paneH) },
   };
   const pane = new THREE.Mesh(
-    new THREE.PlaneGeometry(PANE_W, PANE_H),
+    new THREE.PlaneGeometry(PANE_W, paneH),
     new THREE.ShaderMaterial({
       uniforms,
       transparent: true,
@@ -72,7 +89,7 @@ export function createScreen(real: THREE.Texture, rendered: THREE.Texture, aspec
           c += vec3(0.5, 0.85, 1.9) * rim;
           gl_FragColor = vec4(c, uOpacity * max(inside, rim));
           if (gl_FragColor.a < 0.003) discard;
-          ${GLSL_COLOR}
+          ${GLSL_OUTPUT_COLOR}
         }
       `,
     }),
@@ -82,22 +99,21 @@ export function createScreen(real: THREE.Texture, rendered: THREE.Texture, aspec
 
   // Viewfinder: corner brackets a little outside the pane, closing in on the shot.
   const finderMaterial = lineMaterial({ color: new THREE.Color(0.7, 1.2, 2.4), width: 2, opacity: 0 });
-  const finder = fatSegments(brackets(PANE_W + 1.2, PANE_H + 1.2, 1.4, 0.05), finderMaterial);
+  const finder = fatSegments(brackets(PANE_W + 1.2, paneH + 1.2, 1.4, 0.05), finderMaterial);
   group.add(finder);
 
-  function update(s: { on: number; mix: number; flash: number; finder: number; impact: number }, time: number) {
+  const update = (s: ScreenState, time: number): void => {
     uniforms.uImpact.value = s.impact;
     uniforms.uOpacity.value = s.on;
     uniforms.uMix.value = s.mix;
-    // An exposure pulse, never a full white flash.
-    uniforms.uFlash.value = Math.min(0.16, s.flash * 0.16);
+    uniforms.uFlash.value = Math.min(MAX_FLASH, s.flash * MAX_FLASH);
     uniforms.uTime.value = time;
     group.visible = s.on > 0.002 || s.finder > 0.002;
-    const f = THREE.MathUtils.clamp(s.finder, 0, 1);
+    const finderProgress = THREE.MathUtils.clamp(s.finder, 0, 1);
     // In from 14% larger, settling as the shutter fires; then out with the glass.
-    finder.scale.setScalar(1.14 - 0.14 * (1 - Math.pow(1 - f, 3)));
-    finderMaterial.opacity = Math.min(f * 2, 1) * s.on;
-  }
+    finder.scale.setScalar(1.14 - 0.14 * easeOutCubic(finderProgress));
+    finderMaterial.opacity = Math.min(finderProgress * 2, 1) * s.on;
+  };
 
-  return { group, update, width: PANE_W, height: PANE_H };
-}
+  return { group, update, width: PANE_W, height: paneH };
+};

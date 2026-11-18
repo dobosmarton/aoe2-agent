@@ -10,10 +10,12 @@
  * tmp/walkthrough-review). Needs the site served at WT_BASE (default
  * http://localhost:4321, e.g. `bun run preview`) and Playwright Chromium.
  */
-import { chromium, type Page } from "playwright";
+import { chromium, type Browser, type Page } from "playwright";
 import { mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import type { DebugStage } from "../src/components/walkthrough/scene";
 
 const LANDING = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BASE = process.env.WT_BASE ?? "http://localhost:4321";
@@ -28,117 +30,180 @@ const GPU_ARGS =
     : ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"];
 const CHAPTERS = ["hero", "capture", "detect", "track", "hud", "publish", "decide", "act", "verify"];
 
-// Scrolls so the scene sits at timeline time `p`, then waits until it has caught up.
-async function seek(page: Page, p: number) {
-  await page.evaluate((p) => {
+const STILL_VIEWPORT = { width: 1600, height: 900 };
+const OG_IMAGE_VIEWPORT = { width: 1200, height: 630 };
+
+// Timeline points: the hero is taken halfway through its chapter, every other chapter
+// near its end, once its build has finished.
+const HERO_PROGRESS = 0.5;
+const STILL_CHAPTER_OFFSET = 0.88;
+const REVIEW_CHAPTER_OFFSET = 0.85;
+
+// How close the scene's progress must come to the target before a frame is taken, and
+// how long it then gets to settle.
+const PROGRESS_TOLERANCE = 0.003;
+const SETTLE_MS = 400;
+const SEEK_TIMEOUT_MS = 30_000;
+const READY_TIMEOUT_MS = 60_000;
+
+// Static review: time for the lazy stills to load, and how many viewport-high slices of
+// the page to save (each one 1.2 viewports below the last).
+const STATIC_IMAGE_WAIT_MS = 1500;
+const STATIC_SLICES = 4;
+const STATIC_SLICE_STRIDE = 1.2;
+const MAX_LOGGED_ERRORS = 10;
+
+// The debug hooks the walkthrough scene sets on its stage element.
+type Viewport = { width: number; height: number };
+
+type ReviewSize = { name: string; viewport: Viewport; mobile: boolean };
+
+const chapterPoint = (index: number, offset: number): number => (index === 0 ? HERO_PROGRESS : index + offset);
+
+// Scrolls so the scene sits at timeline time `progress`, then waits until it has caught up.
+// The callbacks run in the page, so they get their values as arguments.
+const seek = async (page: Page, progress: number): Promise<void> => {
+  await page.evaluate((target) => {
     const articles = [...document.querySelectorAll<HTMLElement>("[data-wt-chapter]")];
-    const i = Math.min(Math.floor(p), articles.length - 1);
-    const rect = articles[i]!.getBoundingClientRect();
+    const index = Math.min(Math.floor(target), articles.length - 1);
+    const article = articles[index];
+    if (!article) throw new Error("The walkthrough has no chapters to scroll to");
+    const rect = article.getBoundingClientRect();
     const top = rect.top + window.scrollY;
-    window.scrollTo({ top: top + (p - i) * rect.height - window.innerHeight / 2, behavior: "instant" });
-  }, p);
+    window.scrollTo({ top: top + (target - index) * rect.height - window.innerHeight / 2, behavior: "instant" });
+  }, progress);
   await page.waitForFunction(
-    (p) => {
-      const stage = document.querySelector("[data-wt-stage]") as (HTMLElement & { wtProgress?: number }) | null;
-      return stage?.wtProgress != null && Math.abs(stage.wtProgress - p) < 0.003;
+    ({ target, tolerance }) => {
+      const stage = document.querySelector<DebugStage>("[data-wt-stage]");
+      return stage?.wtProgress != null && Math.abs(stage.wtProgress - target) < tolerance;
     },
-    p,
-    { timeout: 30_000, polling: 100 },
+    { target: progress, tolerance: PROGRESS_TOLERANCE },
+    { timeout: SEEK_TIMEOUT_MS, polling: 100 },
   );
-  await page.waitForTimeout(400);
-}
+  await page.waitForTimeout(SETTLE_MS);
+};
 
-async function open(page: Page) {
+const open = async (page: Page): Promise<void> => {
   await page.goto(BASE, { waitUntil: "networkidle" });
-  await page.waitForSelector("#walkthrough[data-ready]", { timeout: 60_000 });
-}
+  await page.waitForSelector("#walkthrough[data-ready]", { timeout: READY_TIMEOUT_MS });
+};
 
-async function stills() {
-  await mkdir(STILLS_DIR, { recursive: true });
-  const browser = await chromium.launch({ args: GPU_ARGS });
-  const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
-  await open(page);
-  // Stills show the scene alone, centred: no text, progress, shade or header.
+// Stills show the scene alone, centred: no text, progress, shade or header.
+const isolateScene = async (page: Page): Promise<void> => {
   await page.addStyleTag({
     content: `.wt-chapters > *, .wt-chapters .wt-card { visibility: hidden !important; }
       .wt-shade, .wt-progress, [data-site-header] { display: none !important; }`,
   });
-  await page.evaluate(() => (document.querySelector("[data-wt-stage]") as HTMLElement & { wtDebug: { setCentred(on: boolean): void } }).wtDebug.setCentred(true));
+  await page.evaluate(() => {
+    const stage = document.querySelector<DebugStage>("[data-wt-stage]");
+    if (!stage?.wtDebug) throw new Error("The walkthrough stage has no debug hooks");
+    stage.wtDebug.setCentred(true);
+  });
+};
+
+const captureOgImage = async (page: Page): Promise<void> => {
+  await page.setViewportSize(OG_IMAGE_VIEWPORT);
+  await seek(page, HERO_PROGRESS);
+  await page.locator("[data-wt-stage]").screenshot({ path: resolve(LANDING, "public/og-image.png") });
+  await page.setViewportSize(STILL_VIEWPORT);
+};
+
+const stills = async (): Promise<void> => {
+  await mkdir(STILLS_DIR, { recursive: true });
+  const browser = await chromium.launch({ args: GPU_ARGS });
+  const page = await browser.newPage({ viewport: STILL_VIEWPORT });
+  await open(page);
+  await isolateScene(page);
   const stage = page.locator("[data-wt-stage]");
-  for (const [i, id] of CHAPTERS.entries()) {
-    await seek(page, i === 0 ? 0.5 : i + 0.88);
+  for (const [index, id] of CHAPTERS.entries()) {
+    await seek(page, chapterPoint(index, STILL_CHAPTER_OFFSET));
     await stage.screenshot({ path: resolve(STILLS_DIR, `${id}.jpg`), type: "jpeg", quality: 80 });
-    if (i === 0) {
-      await page.setViewportSize({ width: 1200, height: 630 });
-      await seek(page, 0.5);
-      await stage.screenshot({ path: resolve(LANDING, "public/og-image.png") });
-      await page.setViewportSize({ width: 1600, height: 900 });
-    }
+    if (index === 0) await captureOgImage(page);
     console.log(`  ✓ ${id}`);
   }
   await browser.close();
-}
+};
 
 // Review sizes. Phones and tablets are emulated as such (mobile viewport, touch), so
 // anything that widens the page shows up as it would on the device.
-const REVIEW_SIZES = [
-  ["desktop", { width: 1440, height: 900 }, false],
-  ["tablet", { width: 768, height: 1024 }, true],
-  ["phone", { width: 390, height: 844 }, true],
-  ["phone-small", { width: 360, height: 640 }, true],
-  ["phone-landscape", { width: 844, height: 390 }, true],
-] as const;
+const REVIEW_SIZES: readonly ReviewSize[] = [
+  { name: "desktop", viewport: { width: 1440, height: 900 }, mobile: false },
+  { name: "tablet", viewport: { width: 768, height: 1024 }, mobile: true },
+  { name: "phone", viewport: { width: 390, height: 844 }, mobile: true },
+  { name: "phone-small", viewport: { width: 360, height: 640 }, mobile: true },
+  { name: "phone-landscape", viewport: { width: 844, height: 390 }, mobile: true },
+];
 
-async function review() {
+const openReviewPage = async (browser: Browser, { viewport, mobile }: ReviewSize, errors: string[]): Promise<Page> => {
+  const page = await browser.newPage({
+    viewport,
+    deviceScaleFactor: mobile ? 2 : 1,
+    isMobile: mobile,
+    hasTouch: mobile,
+    reducedMotion: STATIC ? "reduce" : "no-preference",
+  });
+  page.on("console", (message) => {
+    if (message.type() === "error" || message.type() === "warning") errors.push(message.text());
+  });
+  page.on("pageerror", (error) => errors.push(String(error)));
+  return page;
+};
+
+// Returns a line describing the overflow when the page is wider than the viewport.
+const findOverflow = async (page: Page, name: string, viewport: Viewport): Promise<string | undefined> => {
+  const width = await page.evaluate(() => document.documentElement.scrollWidth);
+  return width > viewport.width ? `${name}: page is ${width}px wide in a ${viewport.width}px viewport` : undefined;
+};
+
+const reviewStatic = async (page: Page, { name, viewport }: ReviewSize, errors: string[]): Promise<string | undefined> => {
+  await page.goto(BASE, { waitUntil: "networkidle" });
+  const mode = await page.locator("#walkthrough").getAttribute("data-mode");
+  await page.evaluate(() =>
+    document.querySelectorAll("img[loading=lazy]").forEach((image) => image.setAttribute("loading", "eager")),
+  );
+  await page.waitForTimeout(STATIC_IMAGE_WAIT_MS);
+  const loaded = await page.evaluate(
+    () => [...document.querySelectorAll<HTMLImageElement>(".wt-still")].filter((image) => image.naturalWidth > 0).length,
+  );
+  for (let slice = 0; slice < STATIC_SLICES; slice++) {
+    const clip = { x: 0, y: slice * viewport.height * STATIC_SLICE_STRIDE, width: viewport.width, height: viewport.height };
+    await page.screenshot({ path: resolve(REVIEW_DIR, `${name}-static-${slice}.jpg`), type: "jpeg", quality: 60, fullPage: true, clip });
+  }
+  console.log(`${name}: mode=${mode}, stills loaded ${loaded}, ${errors.length} console errors/warnings`);
+  return findOverflow(page, name, viewport);
+};
+
+const reviewPoints = (): number[] =>
+  process.env.WT_POINTS?.split(",").map(Number) ?? CHAPTERS.map((_, index) => chapterPoint(index, REVIEW_CHAPTER_OFFSET));
+
+const reviewScroll = async (page: Page, { name, viewport }: ReviewSize, errors: string[]): Promise<string | undefined> => {
+  await open(page);
+  for (const point of reviewPoints()) {
+    await seek(page, point);
+    await page.screenshot({ path: resolve(REVIEW_DIR, `${name}-${point.toFixed(2)}.jpg`), type: "jpeg", quality: 70 });
+  }
+  const overflow = await findOverflow(page, name, viewport);
+  console.log(`${name}: ${errors.length} console errors/warnings`);
+  for (const error of errors.slice(0, MAX_LOGGED_ERRORS)) console.log("   ", error.slice(0, 200));
+  return overflow;
+};
+
+const review = async (): Promise<void> => {
   await mkdir(REVIEW_DIR, { recursive: true });
   const browser = await chromium.launch({ args: GPU_ARGS });
-  const overflow: string[] = [];
-  for (const [name, viewport, mobile] of REVIEW_SIZES) {
-    const page = await browser.newPage({
-      viewport,
-      deviceScaleFactor: mobile ? 2 : 1,
-      isMobile: mobile,
-      hasTouch: mobile,
-      reducedMotion: STATIC ? "reduce" : "no-preference",
-    });
+  const overflows: string[] = [];
+  for (const size of REVIEW_SIZES) {
     const errors: string[] = [];
-    page.on("console", (m) => (m.type() === "error" || m.type() === "warning") && errors.push(m.text()));
-    page.on("pageerror", (e) => errors.push(String(e)));
-    if (STATIC) {
-      await page.goto(BASE, { waitUntil: "networkidle" });
-      const mode = await page.locator("#walkthrough").getAttribute("data-mode");
-      await page.evaluate(() => document.querySelectorAll("img[loading=lazy]").forEach((i) => i.setAttribute("loading", "eager")));
-      await page.waitForTimeout(1500);
-      const loaded = await page.evaluate(() =>
-        [...document.querySelectorAll<HTMLImageElement>(".wt-still")].filter((i) => i.naturalWidth > 0).length,
-      );
-      for (const k of [0, 1, 2, 3]) {
-        const clip = { x: 0, y: k * viewport.height * 1.2, width: viewport.width, height: viewport.height };
-        await page.screenshot({ path: resolve(REVIEW_DIR, `${name}-static-${k}.jpg`), type: "jpeg", quality: 60, fullPage: true, clip });
-      }
-      console.log(`${name}: mode=${mode}, stills loaded ${loaded}, ${errors.length} console errors/warnings`);
-      const staticWidth = await page.evaluate(() => document.documentElement.scrollWidth);
-      if (staticWidth > viewport.width) overflow.push(`${name}: page is ${staticWidth}px wide in a ${viewport.width}px viewport`);
-      await page.close();
-      continue;
-    }
-    await open(page);
-    const points = process.env.WT_POINTS?.split(",").map(Number) ?? CHAPTERS.map((_, i) => (i === 0 ? 0.5 : i + 0.85));
-    for (const p of points) {
-      await seek(page, p);
-      await page.screenshot({ path: resolve(REVIEW_DIR, `${name}-${p.toFixed(2)}.jpg`), type: "jpeg", quality: 70 });
-    }
-    const width = await page.evaluate(() => document.documentElement.scrollWidth);
-    if (width > viewport.width) overflow.push(`${name}: page is ${width}px wide in a ${viewport.width}px viewport`);
-    console.log(`${name}: ${errors.length} console errors/warnings`);
-    for (const e of errors.slice(0, 10)) console.log("   ", e.slice(0, 200));
+    const page = await openReviewPage(browser, size, errors);
+    const overflow = STATIC ? await reviewStatic(page, size, errors) : await reviewScroll(page, size, errors);
+    if (overflow) overflows.push(overflow);
     await page.close();
   }
   await browser.close();
-  if (overflow.length) {
-    for (const o of overflow) console.error(`  ✗ ${o}`);
+  if (overflows.length > 0) {
+    for (const overflow of overflows) console.error(`  ✗ ${overflow}`);
     process.exit(1);
   }
-}
+};
 
 await (REVIEW ? review() : stills());

@@ -4,10 +4,10 @@
 // "+" ticks that blink on grid intersections like detector hits. Everything but the
 // ticks is CSS (`.site-bg` in styles/globals.css); the ticks need positions on the
 // grid, so a small script places them.
-interface Props {
+type Props = {
   /** Reading pages mask the grid out of the text column. */
   reading?: boolean;
-}
+};
 
 const { reading = false } = Astro.props;
 ---
@@ -30,6 +30,35 @@ const { reading = false } = Astro.props;
   const TICK_AREA = 0.7;
   // Ticks only land on empty background: never behind text, cards, frames or fields.
   const CONTENT = "h1, h2, h3, h4, p, a, li, button, input, pre, table, figure, img, nav, [data-detect]";
+  // Half the tick's 9-unit viewBox: the offset that centres it on an intersection.
+  const TICK_HALF = 4.5;
+
+  type Point = { x: number; y: number };
+
+  // A random grid intersection inside the tick area, or nothing when the viewport is
+  // too small or the point lies on content.
+  const pickIntersection = (): Point | undefined => {
+    const columns = Math.floor(window.innerWidth / CELL);
+    const rows = Math.floor((window.innerHeight * TICK_AREA) / CELL);
+    if (columns < 2 || rows < 2) return undefined;
+    const x = (1 + Math.floor(Math.random() * (columns - 1))) * CELL;
+    const y = (1 + Math.floor(Math.random() * (rows - 1))) * CELL;
+    if (document.elementFromPoint(x, y)?.closest(CONTENT)) return undefined;
+    return { x, y };
+  };
+
+  const addTick = (layer: HTMLElement, { x, y }: Point): void => {
+    const ticks = layer.querySelectorAll(".site-bg-tick");
+    if (ticks.length >= MAX_TICKS) ticks[0]?.remove();
+
+    const tick = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    tick.setAttribute("viewBox", "0 0 9 9");
+    tick.setAttribute("class", "site-bg-tick");
+    tick.style.transform = `translate(${x - TICK_HALF}px, ${y - TICK_HALF}px)`;
+    tick.innerHTML = '<path d="M4.5 0v9M0 4.5h9" stroke="currentColor" stroke-width="1" />';
+    layer.append(tick);
+    window.setTimeout(() => tick.remove(), TICK_LIFE_MS);
+  };
 
   const layer = document.querySelector<HTMLElement>("[data-site-bg-lines]");
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -37,23 +66,8 @@ const { reading = false } = Astro.props;
   if (layer && !reduced) {
     window.setInterval(() => {
       if (document.hidden) return;
-      const columns = Math.floor(window.innerWidth / CELL);
-      const rows = Math.floor((window.innerHeight * TICK_AREA) / CELL);
-      if (columns < 2 || rows < 2) return;
-      const x = (1 + Math.floor(Math.random() * (columns - 1))) * CELL;
-      const y = (1 + Math.floor(Math.random() * (rows - 1))) * CELL;
-      if (document.elementFromPoint(x, y)?.closest(CONTENT)) return;
-
-      const ticks = layer.querySelectorAll(".site-bg-tick");
-      if (ticks.length >= MAX_TICKS) ticks[0]?.remove();
-
-      const tick = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      tick.setAttribute("viewBox", "0 0 9 9");
-      tick.setAttribute("class", "site-bg-tick");
-      tick.style.transform = `translate(${x - 4.5}px, ${y - 4.5}px)`;
-      tick.innerHTML = '<path d="M4.5 0v9M0 4.5h9" stroke="currentColor" stroke-width="1" />';
-      layer.append(tick);
-      window.setTimeout(() => tick.remove(), TICK_LIFE_MS);
+      const point = pickIntersection();
+      if (point) addTick(layer, point);
     }, TICK_EVERY_MS);
   }
 </script>

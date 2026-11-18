@@ -24,7 +24,29 @@ import {
 // below 1.75x, where edges still step visibly.
 const SMAA_BELOW_DPR = 1.75;
 
-export function createPost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, small: boolean) {
+export type Post = {
+  setSize: (width: number, height: number) => void;
+  /** 0..1: how strongly the world reads as a miniature. */
+  setMiniature: (amount: number) => void;
+  /** Bloom strength; 0 when nothing in view is bright enough to bloom. */
+  setBloom: (amount: number) => void;
+  render: (delta: number) => void;
+  dispose: () => void;
+};
+
+type SkippableEffect = { update: TiltShiftEffect["update"] };
+
+// Skip an effect's own passes (its blur) while it contributes nothing. Its shader still
+// runs but weighs that stale result by zero; the first frame it shows again recomputes it.
+const skipWhile = (effect: SkippableEffect, idle: () => boolean): void => {
+  const update = effect.update.bind(effect);
+  effect.update = (r, input, delta) => {
+    if (!idle()) update(r, input, delta);
+  };
+};
+
+/** `small`: phones, which skip the tilt-shift. */
+export const createPost = (renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, small: boolean): Post => {
   const composer = new EffectComposer(renderer, { frameBufferType: THREE.HalfFloatType });
   composer.addPass(new RenderPass(scene, camera));
 
@@ -42,39 +64,23 @@ export function createPost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, ca
   const smaa = new EffectPass(camera, new SMAAEffect({ preset: SMAAPreset.HIGH }));
   composer.addPass(smaa);
 
-  // Skip an effect's own passes (its blur) while it contributes nothing. Its shader
-  // still runs but weighs that stale result by zero; the first frame it shows again
-  // recomputes it.
-  const skipWhile = (effect: { update: TiltShiftEffect["update"] }, idle: () => boolean) => {
-    const update = effect.update.bind(effect);
-    effect.update = (r, input, delta) => {
-      if (!idle()) update(r, input, delta);
-    };
-  };
   skipWhile(tiltShift, () => tiltShift.blendMode.opacity.value < 0.002);
   skipWhile(bloom, () => bloom.intensity < 0.002);
 
   return {
-    composer,
-    setSize(width: number, height: number) {
+    setSize: (width, height) => {
       composer.setSize(width, height);
       smaa.enabled = renderer.getPixelRatio() < SMAA_BELOW_DPR;
       // The last enabled pass draws to the screen.
       composer.passes.forEach((pass, i, all) => (pass.renderToScreen = all.slice(i + 1).every((p) => !p.enabled)));
     },
-    /** 0..1: how strongly the world reads as a miniature. */
-    setMiniature(amount: number) {
+    setMiniature: (amount) => {
       tiltShift.blendMode.opacity.value = amount;
     },
-    /** Bloom strength; 0 when nothing in view is bright enough to bloom. */
-    setBloom(amount: number) {
+    setBloom: (amount) => {
       bloom.intensity = amount;
     },
-    render(delta: number) {
-      composer.render(delta);
-    },
-    dispose() {
-      composer.dispose();
-    },
+    render: (delta) => composer.render(delta),
+    dispose: () => composer.dispose(),
   };
-}
+};

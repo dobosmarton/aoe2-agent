@@ -18,7 +18,8 @@ export type CameraPose = {
 
 const target = new THREE.Vector3();
 
-export function applyPose(camera: THREE.PerspectiveCamera, pose: CameraPose, aspect: number, fit: number) {
+/** Places `camera` for `pose`, its view scaled by `fit`; returns the camera's distance to the target. */
+export const applyPose = (camera: THREE.PerspectiveCamera, pose: CameraPose, aspect: number, fit: number): number => {
   const fov = THREE.MathUtils.clamp(pose.fov, 2, 90);
   const size = pose.size * fit;
   const distance = size / Math.tan(THREE.MathUtils.degToRad(fov / 2));
@@ -40,4 +41,4 @@ export function applyPose(camera: THREE.PerspectiveCamera, pose: CameraPose, asp
   camera.updateProjectionMatrix();
   camera.updateMatrixWorld();
   return distance;
-}
+};

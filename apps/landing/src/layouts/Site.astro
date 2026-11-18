@@ -8,7 +8,7 @@ import { BracketLabel, Corners } from "@/components/ui/frame";
 import Analytics from "@vercel/analytics/astro";
 import { FIRST_PAGE } from "@/lib/taxonomy";
 
-interface Props {
+type Props = {
   title?: string;
   description?: string;
   ogImage?: string;
@@ -16,7 +16,7 @@ interface Props {
   reading?: boolean;
   /** Width of the condensed header card; docs pages use the wider three-column grid. */
   headerMax?: string;
-}
+};
 
 const {
   title = "AoE2 LLM Arena: Documentation",
@@ -204,13 +204,16 @@ const footerLink = "text-foreground underline decoration-foreground/20 underline
       // The header condenses into a floating card once the page scrolls.
       const header = document.querySelector<HTMLElement>("[data-site-header]");
       const CONDENSE_AT = 8;
-      const update = () => header?.toggleAttribute("data-scrolled", window.scrollY > CONDENSE_AT);
+      const COPIED_RESET_MS = 1500;
+      const update = (): void => {
+        header?.toggleAttribute("data-scrolled", window.scrollY > CONDENSE_AT);
+      };
       update();
       window.addEventListener("scroll", update, { passive: true });
 
       // Copy buttons on code cells (lib/rehype-artifacts.ts, components/CodeFigure.astro).
       document.addEventListener("click", (event) => {
-        const button = (event.target as Element | null)?.closest<HTMLButtonElement>("[data-copy-code]");
+        const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("[data-copy-code]") : null;
         const code = button?.closest(".code-cell")?.querySelector("pre");
         if (!button || !code) return;
         void navigator.clipboard.writeText(code.innerText.replace(/\n$/, "")).then(() => {
@@ -219,7 +222,7 @@ const footerLink = "text-foreground underline decoration-foreground/20 underline
           window.setTimeout(() => {
             button.textContent = "Copy";
             button.removeAttribute("data-copied");
-          }, 1500);
+          }, COPIED_RESET_MS);
         });
       });
     </script>

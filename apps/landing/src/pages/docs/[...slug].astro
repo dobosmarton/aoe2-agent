@@ -3,17 +3,21 @@ import { getCollection, render, type CollectionEntry } from "astro:content";
 import Doc from "@/layouts/Doc.astro";
 import { isSectionPage } from "@/lib/taxonomy";
 
-export async function getStaticPaths() {
+type Props = {
+  entry: CollectionEntry<"docs">;
+};
+
+type DocPath = { params: { slug: string }; props: Props };
+
+export const getStaticPaths = async (): Promise<DocPath[]> => {
   const docs = await getCollection("docs");
   return docs.map((entry) => ({
     params: { slug: entry.id },
     props: { entry },
   }));
-}
+};
 
-interface Props {
-  entry: CollectionEntry<"docs">;
-}
+const WORDS_PER_MINUTE = 230;
 
 const { entry } = Astro.props;
 const { Content, headings } = await render(entry);
@@ -21,14 +25,14 @@ const { Content, headings } = await render(entry);
 // Title precedence: frontmatter > first H1 heading > slug.
 const title =
   entry.data.title ??
-  headings.find((h) => h.depth === 1)?.text ??
+  headings.find((heading) => heading.depth === 1)?.text ??
   entry.id.split("/").pop() ??
   "Documentation";
 const description = entry.data.description;
 
-// Reading time from the markdown source, at 230 words per minute.
+// Reading time from the markdown source.
 const words = (entry.body ?? "").split(/\s+/).filter(Boolean).length;
-const readMinutes = Math.max(1, Math.round(words / 230));
+const readMinutes = Math.max(1, Math.round(words / WORDS_PER_MINUTE));
 
 // Pages under a section directory (agent/, detection/, arena/, web/,
 // autoresearch/) get the sidebar, timeline and prev/next links.

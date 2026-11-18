@@ -1,14 +1,11 @@
 import * as THREE from "three";
 
+import { GLSL_OUTPUT_COLOR } from "./shaders";
+
 // Detection boxes drawn the way an overlay draws them: one quad per box, its outline
 // computed per pixel (crisp and anti-aliased at any zoom), heavier corner brackets and
 // a faint fill. Two placements share the fragment shader: flat on the frame (the board)
 // and facing the camera around a villager (tracking in the village).
-
-const GLSL_COLOR = /* glsl */ `
-  #include <tonemapping_fragment>
-  #include <colorspace_fragment>
-`;
 
 const BOX_FRAGMENT = /* glsl */ `
   uniform float uLine, uBracket, uFill;
@@ -28,17 +25,22 @@ const BOX_FRAGMENT = /* glsl */ `
     vec3 c = vColor * (1.0 + bracket * 0.6);
     gl_FragColor = vec4(c, a * vAlpha);
     if (gl_FragColor.a < 0.004) discard;
-    ${GLSL_COLOR}
+    ${GLSL_OUTPUT_COLOR}
   }
 `;
 
+/** Outline and corner-bracket widths in screen pixels; fill as an opacity. */
 export type BoxStyle = { line?: number; bracket?: number; fill?: number };
 
-function uniformsFor({ line = 1.25, bracket = 2.4, fill = 0.06 }: BoxStyle) {
-  return { uLine: { value: line }, uBracket: { value: bracket }, uFill: { value: fill } };
-}
+type StyleUniforms = { uLine: { value: number }; uBracket: { value: number }; uFill: { value: number } };
 
-function quadGeometry(count: number) {
+type BoxMesh = THREE.Mesh<THREE.InstancedBufferGeometry, THREE.ShaderMaterial>;
+
+const uniformsFor = ({ line = 1.25, bracket = 2.4, fill = 0.06 }: BoxStyle): StyleUniforms => {
+  return { uLine: { value: line }, uBracket: { value: bracket }, uFill: { value: fill } };
+};
+
+const quadGeometry = (count: number): THREE.InstancedBufferGeometry => {
   const quad = new THREE.PlaneGeometry(1, 1);
   const geometry = new THREE.InstancedBufferGeometry();
   geometry.index = quad.index;
@@ -46,7 +48,7 @@ function quadGeometry(count: number) {
   geometry.setAttribute("uv", quad.getAttribute("uv"));
   geometry.instanceCount = count;
   return geometry;
-}
+};
 
 export type FlatBox = {
   /** Normalised frame rect, top-left origin. */
@@ -60,11 +62,34 @@ export type FlatBox = {
   unit: boolean;
 };
 
+export type FlatBoxUniforms = StyleUniforms & {
+  /** The frame's size in board units. */
+  uSize: { value: THREE.Vector2 };
+  /** Landing progress 0..1. */
+  uLand: { value: number };
+  uAlpha: { value: number };
+  /** 1 keeps units at full strength and steps everything else back. */
+  uFocus: { value: number };
+  uGlow: { value: number };
+};
+
+export type FlatBoxes = { mesh: BoxMesh; uniforms: FlatBoxUniforms };
+
+export type BillboardBoxes = {
+  mesh: BoxMesh;
+  /** Starts a frame's worth of boxes. */
+  begin: () => void;
+  /** Adds a box; ignored past capacity or when nearly transparent. */
+  set: (centre: THREE.Vector3, w: number, h: number, color: THREE.Color, alpha: number) => void;
+  /** Uploads the boxes added since `begin`. */
+  end: () => void;
+};
+
 /**
  * Boxes lying on a frame of size `size` (board units) in its XY plane. They land: drop
  * from above with a small overshoot, staggered by `delay`.
  */
-export function createFlatBoxes(boxes: FlatBox[], size: THREE.Vector2, style: BoxStyle = {}) {
+export const createFlatBoxes = (boxes: readonly FlatBox[], size: THREE.Vector2, style: BoxStyle = {}): FlatBoxes => {
   const geometry = quadGeometry(boxes.length);
   const aRect = new Float32Array(boxes.length * 4);
   const aColor = new Float32Array(boxes.length * 3);
@@ -78,7 +103,7 @@ export function createFlatBoxes(boxes: FlatBox[], size: THREE.Vector2, style: Bo
   geometry.setAttribute("aColor", new THREE.InstancedBufferAttribute(aColor, 3));
   geometry.setAttribute("aMeta", new THREE.InstancedBufferAttribute(aMeta, 2));
 
-  const uniforms = {
+  const uniforms: FlatBoxUniforms = {
     ...uniformsFor(style),
     uSize: { value: size },
     uLand: { value: 0 },
@@ -125,13 +150,13 @@ export function createFlatBoxes(boxes: FlatBox[], size: THREE.Vector2, style: Bo
   mesh.frustumCulled = false;
   mesh.renderOrder = 3;
   return { mesh, uniforms };
-}
+};
 
 /**
  * Camera-facing boxes around points in the world, like a tracker's boxes on screen.
  * Instances are written each frame with `set`.
  */
-export function createBillboardBoxes(capacity: number, style: BoxStyle = {}) {
+export const createBillboardBoxes = (capacity: number, style: BoxStyle = {}): BillboardBoxes => {
   const geometry = quadGeometry(0);
   const aCentre = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3), 3);
   const aSize = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 2), 2);
@@ -168,26 +193,26 @@ export function createBillboardBoxes(capacity: number, style: BoxStyle = {}) {
   mesh.frustumCulled = false;
   mesh.renderOrder = 6;
 
-  let n = 0;
+  let count = 0;
   return {
     mesh,
-    begin() {
-      n = 0;
+    begin: (): void => {
+      count = 0;
     },
-    set(centre: THREE.Vector3, w: number, h: number, color: THREE.Color, alpha: number) {
-      if (n >= capacity || alpha <= 0.002) return;
-      aCentre.setXYZ(n, centre.x, centre.y, centre.z);
-      aSize.setXY(n, w, h);
-      aColor.setXYZW(n, color.r, color.g, color.b, alpha);
-      n++;
+    set: (centre: THREE.Vector3, w: number, h: number, color: THREE.Color, alpha: number): void => {
+      if (count >= capacity || alpha <= 0.002) return;
+      aCentre.setXYZ(count, centre.x, centre.y, centre.z);
+      aSize.setXY(count, w, h);
+      aColor.setXYZW(count, color.r, color.g, color.b, alpha);
+      count++;
     },
-    end() {
-      geometry.instanceCount = n;
+    end: (): void => {
+      geometry.instanceCount = count;
       for (const a of [aCentre, aSize, aColor]) {
         a.clearUpdateRanges();
-        a.addUpdateRange(0, n * a.itemSize);
+        a.addUpdateRange(0, count * a.itemSize);
         a.needsUpdate = true;
       }
     },
   };
-}
+};
