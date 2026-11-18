@@ -2,23 +2,41 @@
 import "../styles/globals.css";
 import Wordmark from "@/components/Wordmark.astro";
 import ThemeToggle from "@/components/ThemeToggle.astro";
+import SiteBackground from "@/components/SiteBackground.astro";
 import SearchPalette from "@/components/SearchPalette.tsx";
+import { BracketLabel, Corners } from "@/components/ui/frame";
 import Analytics from "@vercel/analytics/astro";
 import { FIRST_PAGE } from "@/lib/taxonomy";
 
-interface Props {
+type Props = {
   title?: string;
   description?: string;
   ogImage?: string;
-}
+  /** Docs pages: masks the backdrop grid out of the text and shows reading progress. */
+  reading?: boolean;
+  /** Width of the condensed header card; docs pages use the wider three-column grid. */
+  headerMax?: string;
+};
 
 const {
-  title = "AoE2 LLM Arena — Documentation",
+  title = "AoE2 LLM Arena: Documentation",
   description = "An agent that plays Age of Empires II: Definitive Edition from screen pixels, plus a detection model and server, a synthetic arena for comparing prompts and models, a web viewer for arena runs, and an autoresearch loop that scores real games.",
-  ogImage = "/og-image.png",
+  ogImage = "/og-image.jpg",
+  reading = false,
+  headerMax = "72rem",
 } = Astro.props;
 
 const canonical = new URL(Astro.url.pathname, Astro.site ?? Astro.url).toString();
+const year = new Date().getFullYear();
+
+const NAV_LINKS = [
+  { href: `/docs/${FIRST_PAGE.fullSlug}`, label: "Docs" },
+  { href: "/#packages", label: "Packages" },
+  { href: "/#runbooks", label: "Runbooks" },
+  { href: "/docs/glossary", label: "Glossary" },
+];
+const REPO = "https://github.com/dobosmarton/aoe2-agent";
+const footerLink = "text-foreground underline decoration-foreground/20 underline-offset-4 hover:decoration-foreground";
 ---
 
 <!doctype html>
@@ -30,6 +48,12 @@ const canonical = new URL(Astro.url.pathname, Astro.site ?? Astro.url).toString(
     <meta name="description" content={description} />
     <link rel="canonical" href={canonical} />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Karla:wght@400;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap"
+    />
     <meta property="og:type" content="website" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
@@ -45,8 +69,7 @@ const canonical = new URL(Astro.url.pathname, Astro.site ?? Astro.url).toString(
       (() => {
         try {
           const saved = localStorage.getItem("theme");
-          const prefersLight =
-            window.matchMedia("(prefers-color-scheme: light)").matches;
+          const prefersLight = window.matchMedia("(prefers-color-scheme: light)").matches;
           const useLight = saved ? saved === "light" : prefersLight;
           if (useLight) document.documentElement.classList.remove("dark");
           else document.documentElement.classList.add("dark");
@@ -56,77 +79,78 @@ const canonical = new URL(Astro.url.pathname, Astro.site ?? Astro.url).toString(
       })();
     </script>
   </head>
-  <body class="min-h-screen bg-background text-foreground">
-    <header class="sticky top-0 z-30 border-b bg-background/80 backdrop-blur">
-      <div class="mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-4">
-        <Wordmark />
-        <nav class="hidden items-center gap-1 text-sm md:flex">
-          <a
-            href={`/docs/${FIRST_PAGE.fullSlug}`}
-            class="rounded-md px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-          >
-            Docs
-          </a>
-          <a
-            href="/#packages"
-            class="rounded-md px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-          >
-            Packages
-          </a>
-          <a
-            href="/#runbooks"
-            class="rounded-md px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-          >
-            Runbooks
-          </a>
-          <a
-            href="/docs/glossary"
-            class="rounded-md px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-          >
-            Glossary
-          </a>
-          <a
-            href="https://github.com/dobosmarton/aoe2-agent"
-            target="_blank"
-            rel="noreferrer"
-            class="rounded-md px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-          >
-            GitHub
-          </a>
-        </nav>
-        <div class="flex items-center gap-2">
-          <button
-            id="open-search"
-            type="button"
-            class="inline-flex h-9 items-center gap-2 rounded-md border bg-background px-3 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-            aria-label="Search docs"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              aria-hidden="true"
+  <body class="text-foreground antialiased">
+    <a
+      class="absolute top-0 left-0 z-50 m-3 block -translate-y-96 overflow-hidden bg-background p-3 text-lg transition focus:translate-y-0"
+      href="#main-content"
+    >
+      Skip to content
+    </a>
+
+    {/* Open and borderless at the top of the page; a floating card with "+" corner
+        marks once the page scrolls (the script below sets data-scrolled). */}
+    <header class="site-header" data-site-header style={`--header-max: ${headerMax}`}>
+      <div class="site-header-bar">
+        <span aria-hidden="true" class="site-header-corners pointer-events-none absolute inset-0">
+          <Corners className="text-accent-foreground" />
+        </span>
+        {reading && <span aria-hidden="true" class="header-progress" />}
+        <div class="mx-auto flex items-center gap-4 px-4" style={`max-width: ${headerMax}`}>
+          <Wordmark />
+          <nav class="ml-auto hidden items-center gap-1 text-sm font-medium lg:flex" aria-label="Main">
+            {
+              NAV_LINKS.map((link) => (
+                <a
+                  href={link.href}
+                  class="rounded-md px-3 py-2 text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-accent-foreground"
+                >
+                  {link.label}
+                </a>
+              ))
+            }
+            <a
+              href={REPO}
+              target="_blank"
+              rel="noreferrer"
+              class="rounded-md px-3 py-2 text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-accent-foreground"
             >
-              <circle cx="11" cy="11" r="8"></circle>
-              <path d="m21 21-4.3-4.3"></path>
-            </svg>
-            <span class="hidden sm:inline">Search</span>
-            <kbd class="ml-2 hidden rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground sm:inline">
-              ⌘K
-            </kbd>
-          </button>
-          <ThemeToggle />
+              GitHub
+            </a>
+          </nav>
+          <div class="ml-auto flex items-center gap-2 lg:ml-0">
+            <button
+              id="open-search"
+              type="button"
+              class="inline-flex h-9 items-center gap-2 rounded-md border border-foreground/10 bg-card px-3 text-sm text-muted-foreground transition-colors hover:text-accent-foreground"
+              aria-label="Search docs"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="11" cy="11" r="8"></circle>
+                <path d="m21 21-4.3-4.3"></path>
+              </svg>
+              <span class="hidden sm:inline">Search</span>
+              <kbd class="ml-2 hidden font-mono text-[11px] tracking-wider text-muted-foreground sm:inline">⌘K</kbd>
+            </button>
+            <ThemeToggle />
+          </div>
         </div>
       </div>
     </header>
 
-    <slot />
+    <main id="main-content" class="pt-20">
+      <slot />
+    </main>
 
     <SearchPalette client:idle />
 
@@ -135,7 +159,7 @@ const canonical = new URL(Astro.url.pathname, Astro.site ?? Astro.url).toString(
         search reports the "not built yet" hint. Loaded inside an inline
         script tag (not a top-level dynamic import) so Vite's resolver
         never sees it. NB: do NOT spell the bare angle-bracket script
-        token in this comment — Vite's esbuild dep pre-scanner uses a
+        token in this comment: Vite's esbuild dep pre-scanner uses a
         naive HTML tokenizer that ignores JSX comments and will treat
         the rest of the comment as script body on cold start. */}
     <script is:inline>
@@ -147,21 +171,67 @@ const canonical = new URL(Astro.url.pathname, Astro.site ?? Astro.url).toString(
             window.dispatchEvent(new Event("pagefind:ready"));
           })
           .catch(() => {
-            // Pagefind not built (dev mode or pre-build) — leave undefined.
+            // Pagefind not built (dev mode or pre-build): leave undefined.
           });
       })();
     </script>
 
-    <footer class="mt-24 border-t">
-      <div class="mx-auto flex max-w-6xl flex-col items-start justify-between gap-2 px-4 py-8 text-sm text-muted-foreground md:flex-row md:items-center">
-        <p>AoE2 LLM Arena · Technical documentation</p>
-        <p>
-          Built with Astro · Source on
-          <a href="https://github.com/dobosmarton/aoe2-agent" class="underline hover:text-foreground">GitHub</a>
-        </p>
+    <footer class="mt-24 border-t border-foreground/10">
+      <div
+        class="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-8 md:flex-row md:items-center md:justify-between"
+      >
+        <div class="space-y-2">
+          <BracketLabel>&copy; {year} AoE2 LLM Arena</BracketLabel>
+          <p class="font-mono text-[11px] text-muted-foreground">
+            Source on <a href={REPO} target="_blank" rel="noreferrer" class={footerLink}>GitHub</a>
+            {" · "}Built with Astro
+          </p>
+        </div>
+        <p class="font-mono text-[11px] tracking-wider text-muted-foreground uppercase">Technical documentation</p>
       </div>
+      <p class="mx-auto max-w-6xl px-4 pb-8 font-mono text-[11px] leading-relaxed text-muted-foreground">
+        AoE2 LLM Arena was created under Microsoft's
+        <a href="https://www.xbox.com/en-US/developers/rules" target="_blank" rel="noreferrer" class={footerLink}
+          >"Game Content Usage Rules"</a
+        > using assets from Age of Empires II: Definitive Edition, and it is not endorsed by or affiliated with Microsoft.
+      </p>
     </footer>
 
+    <SiteBackground reading={reading} />
     <Analytics />
+
+    <script>
+      // The header condenses into a floating card once the page scrolls.
+      const header = document.querySelector<HTMLElement>("[data-site-header]");
+      const CONDENSE_AT = 8;
+      const COPIED_RESET_MS = 1500;
+
+      const update = (): void => {
+        header?.toggleAttribute("data-scrolled", window.scrollY > CONDENSE_AT);
+      };
+
+      update();
+      window.addEventListener("scroll", update, { passive: true });
+
+      // Copy buttons on code cells (lib/rehype-artifacts.ts, components/CodeFigure.astro).
+      document.addEventListener("click", (event) => {
+        const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("[data-copy-code]") : null;
+        const code = button?.closest(".code-cell")?.querySelector("pre");
+
+        if (!button || !code) {
+          return;
+        }
+
+        void navigator.clipboard.writeText(code.innerText.replace(/\n$/, "")).then(() => {
+          button.textContent = "Copied";
+          button.setAttribute("data-copied", "");
+
+          window.setTimeout(() => {
+            button.textContent = "Copy";
+            button.removeAttribute("data-copied");
+          }, COPIED_RESET_MS);
+        });
+      });
+    </script>
   </body>
 </html>

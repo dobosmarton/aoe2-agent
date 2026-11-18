@@ -1,0 +1,32 @@
+---
+// A highlighted code block in the blog's cell style: a mono header strip with the
+// language, an optional file title and a copy button, all inside the artifact frame.
+// The docs get the same markup from lib/rehype-artifacts.ts; the copy handler lives in
+// layouts/Site.astro.
+import { Code } from "astro:components";
+import type { ComponentProps } from "astro/types";
+import Artifact from "./Artifact.astro";
+import { codeLinesMeta } from "@/lib/rehype-artifacts";
+
+type Props = {
+  code: string;
+  lang: NonNullable<ComponentProps<typeof Code>["lang"]> & string;
+  title?: string;
+  caption?: string;
+};
+
+const { code, lang, title, caption } = Astro.props;
+---
+
+<Artifact label="Code" meta={codeLinesMeta(code)} caption={caption}>
+  <div class="code-cell">
+    <div class="cell-header">
+      <span class="bracket-label">{lang}</span>
+      <span class="cell-aside">
+        {title && <span class="truncate">{title}</span>}
+        <button type="button" class="code-copy" data-copy-code aria-label="Copy code">Copy</button>
+      </span>
+    </div>
+    <Code code={code} lang={lang} themes={{ light: "github-light", dark: "github-dark" }} wrap />
+  </div>
+</Artifact>

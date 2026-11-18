@@ -1,0 +1,420 @@
+---
+// The home page's opening: one real agent turn as a scroll-driven 3D scene. The stage
+// stays pinned while the chapter articles scroll over it; their scroll position drives
+// the scene (scene/timeline.ts). The articles are plain HTML, so the page reads the
+// same without JavaScript, with reduced motion or without WebGL: then the stage turns
+// into a banner and each chapter shows a still of its scene (data-mode="static").
+import { ArrowRight } from "lucide-react";
+
+import { FIRST_PAGE } from "@/lib/taxonomy";
+import { ACTION_INPUT, CHAPTERS } from "./chapters";
+
+const pad = (n: number): string => String(n).padStart(2, "0");
+---
+
+<section id="walkthrough" class="wt dark" data-mode="static" aria-labelledby="wt-title">
+  <div class="wt-stage" data-wt-stage>
+    <img
+      class="wt-poster"
+      src="/walkthrough/stills/hero.jpg"
+      alt=""
+      width="1600"
+      height="900"
+      fetchpriority="high"
+      decoding="async"
+    />
+    <div class="wt-view" data-wt-view aria-hidden="true"></div>
+    <div class="wt-shade" aria-hidden="true"></div>
+
+    <div class="wt-hud" aria-hidden="true">
+      <p class="wt-stamp">capture 3024 × 1672 · every 0.1 s · same bytes for detector and OCR</p>
+      <ol class="wt-keys">
+        {ACTION_INPUT.map((key, i) => <li data-key={i}>{key.length === 1 ? <kbd>{key}</kbd> : <span>{key}</span>}</li>)}
+      </ol>
+    </div>
+
+    <nav class="wt-progress" aria-label="Walkthrough chapters">
+      <ol>
+        {
+          CHAPTERS.map((c, i) => (
+            <li>
+              <a href={`#wt-${c.id}`} data-wt-rail={i + 1} title={c.name}>
+                <span class="sr-only">
+                  {pad(i + 1)} {c.name}
+                </span>
+              </a>
+            </li>
+          ))
+        }
+      </ol>
+      <p class="wt-progress-name" aria-hidden="true">
+        <span data-wt-num>01</span> / {pad(CHAPTERS.length)} · <span data-wt-name>{CHAPTERS[0].name}</span>
+      </p>
+      <p class="wt-note">
+        One recorded frame, rebuilt with the game's own sprites. Frame, boxes and HUD values are real; track IDs, goals
+        and placement spots are illustrative.
+      </p>
+    </nav>
+  </div>
+
+  <div class="wt-chapters">
+    <article class="wt-hero" data-wt-chapter="0">
+      <div class="wt-hero-inner">
+        <p class="wt-kicker">[ Gameplay agent · Synthetic arena ]</p>
+        <h1 id="wt-title">An AI agent that plays Age of Empires II from screen pixels.</h1>
+        <p class="wt-lede">
+          A detector and local OCR turn the screen into text, a policy model and two LLMs decide, and mouse and keyboard
+          input does the rest. Scroll to follow one turn from a recorded game.
+        </p>
+        <div class="wt-ctas">
+          <a href={`/docs/${FIRST_PAGE.fullSlug}`} class="wt-btn wt-btn-primary">
+            Start reading <ArrowRight className="h-4 w-4" />
+          </a>
+          <a href="#wt-capture" class="wt-btn">Follow one turn</a>
+        </div>
+      </div>
+      <p class="wt-scroll-hint" aria-hidden="true">Scroll</p>
+    </article>
+
+    {
+      CHAPTERS.map((c, i) => (
+        <article id={`wt-${c.id}`} class="wt-chapter" data-wt-chapter={i + 1} style={`--wt-len: ${c.length}`}>
+          <img
+            class="wt-still"
+            src={`/walkthrough/stills/${c.id}.jpg`}
+            alt=""
+            width="1600"
+            height="900"
+            loading="lazy"
+            decoding="async"
+          />
+          <div class="wt-card">
+            <p class="wt-card-kicker">
+              [ {pad(i + 1)} · {c.name} ]
+            </p>
+            <h2>{c.title}</h2>
+            <p set:html={c.body} />
+            <a href={`/docs/${c.doc.slug}${c.doc.hash ? `#${c.doc.hash}` : ""}`} class="wt-card-link">
+              {c.doc.label} <ArrowRight className="h-3.5 w-3.5" />
+            </a>
+          </div>
+        </article>
+      ))
+    }
+  </div>
+</section>
+
+{/* Decide the mode before first paint, so the stage does not jump from banner to pinned. */}
+<script is:inline>
+  (() => {
+    const root = document.getElementById("walkthrough");
+
+    if (!root) {
+      return;
+    }
+
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    if (!reduced && "WebGL2RenderingContext" in window) {
+      root.dataset.mode = "scene";
+    }
+
+    document.querySelector("[data-site-header]")?.classList.add("dark");
+  })();
+</script>
+
+<script>
+  import Lenis from "lenis";
+  import "lenis/dist/lenis.css";
+
+  import type { SceneHandle } from "./scene";
+  import { HERO_FADE_END, HERO_FADE_START, type SafeArea, subjectFit } from "./scene/framing";
+
+  /** The site header's height, CSS px. */
+  const HEADER_HEIGHT = 72;
+  /** Scroll changes smaller than this (timeline units) are not passed on. */
+  const MIN_PROGRESS_STEP = 0.0005;
+  /** Lenis's clock advances at most this much (ms) per frame, so a restart never jumps. */
+  const PUMP_MAX_STEP = 34;
+  /** How long (ms) the Lenis loop keeps running after a wheel or click, waiting for it to start scrolling. */
+  const PUMP_LINGER = 300;
+
+  type SafeLayout = { safe: SafeArea; hero: SafeArea; stacked: boolean };
+
+  const root = document.getElementById("walkthrough");
+  const stage = root?.querySelector<HTMLElement>("[data-wt-stage]");
+  const view = root?.querySelector<HTMLElement>("[data-wt-view]");
+  const articles = [...(root?.querySelectorAll<HTMLElement>("[data-wt-chapter]") ?? [])];
+  const cards = articles.map((a) => a.querySelector<HTMLElement>(".wt-card"));
+  const railLinks = [...(root?.querySelectorAll<HTMLAnchorElement>("[data-wt-rail]") ?? [])];
+  const progressNum = root?.querySelector<HTMLElement>("[data-wt-num]");
+  const progressName = root?.querySelector<HTMLElement>("[data-wt-name]");
+  const names = railLinks.map((a) => a.title);
+
+  // Scroll position in timeline units: chapter i covers [i, i + 1) while its article
+  // passes the middle of the viewport.
+  let bounds: { top: number; height: number }[] = [];
+
+  const measure = (): void => {
+    bounds = articles.map((a) => {
+      const rect = a.getBoundingClientRect();
+
+      return { top: rect.top + window.scrollY, height: rect.height };
+    });
+  };
+
+  const progress = (): number => {
+    const line = window.scrollY + window.innerHeight * 0.5;
+
+    for (let i = bounds.length - 1; i >= 0; i--) {
+      const b = bounds[i];
+
+      if (line >= b.top) {
+        return Math.min(i + (line - b.top) / b.height, bounds.length);
+      }
+    }
+
+    return 0;
+  };
+
+  // three.js stays out of this bundle, so this is a copy of its smoothstep.
+  const smoothstep = (min: number, max: number, x: number): number => {
+    const t = Math.min(1, Math.max(0, (x - min) / (max - min)));
+
+    return t * t * (3 - 2 * t);
+  };
+
+  // The safe area: the part of the stage the chapter caption does not cover, where the
+  // scene frames its subject. Beside the caption on wide screens and phones on their
+  // side, above it on phones and tablets held upright (the same rule as the CSS).
+  const SIDE_BY_SIDE = "(width >= 64rem), (orientation: landscape) and (width >= 40rem)";
+  const heroInner = root?.querySelector<HTMLElement>(".wt-hero-inner");
+  const heroArticle = articles.at(0);
+
+  const safeArea = (): SafeLayout => {
+    const width = stage?.clientWidth ?? window.innerWidth;
+    const height = stage?.clientHeight ?? window.innerHeight;
+    const top = HEADER_HEIGHT;
+
+    if (window.matchMedia(SIDE_BY_SIDE).matches) {
+      const right = Math.max(0, ...cards.map((c) => (c ? c.getBoundingClientRect().right : 0)));
+      const safe = { left: Math.min(width * 0.5, right + 24), top, right: width, bottom: height };
+
+      return { safe, hero: safe, stacked: false };
+    }
+
+    // Stacked: under the header and the chapter ticks, above the tallest caption.
+    const tallest = Math.max(0, ...cards.map((c) => c?.offsetHeight ?? 0));
+    const safe = { left: 0, top: top + 22, right: width, bottom: Math.max(height * 0.45, height - tallest - 20) };
+    // The hero frames the village above its text, letting it run behind the headline.
+    const textTop = heroInner && heroArticle ? heroInner.getBoundingClientRect().top - heroArticle.getBoundingClientRect().top : height * 0.5;
+    const hero = { left: 0, top, right: width, bottom: Math.min(height, Math.max(top + height * 0.35, textTop + 110)) };
+
+    return { safe, hero, stacked: true };
+  };
+
+  const applySafe = (): void => {
+    const { safe, hero, stacked } = safeArea();
+    const width = stage?.clientWidth ?? window.innerWidth;
+    const height = stage?.clientHeight ?? window.innerHeight;
+
+    stage?.style.setProperty("--wt-cx", `${(safe.left + safe.right) / 2}px`);
+    stage?.style.setProperty("--wt-safe-bottom", `${safe.bottom}px`);
+
+    // The poster is the hero still, framed on the whole view; place and scale it the
+    // way the scene frames its first shot, so the crossfade does not jump.
+    const cx = (hero.left + hero.right) / 2;
+    const cy = (hero.top + hero.bottom) / 2;
+    const fit = subjectFit(height, hero);
+
+    stage?.style.setProperty("--wt-poster", `translate(${cx - width / 2}px, ${cy - height / 2}px) scale(${1 / fit})`);
+    scene?.setSafe(safe, { hero, stacked });
+  };
+
+  // The site header sits over the dark stage at the top of the page: give it the dark
+  // tokens while it does, in either theme.
+  const header = document.querySelector<HTMLElement>("[data-site-header]");
+
+  const syncHeader = (): void => {
+    header?.classList.toggle("dark", (root?.getBoundingClientRect().bottom ?? 0) > HEADER_HEIGHT);
+  };
+
+  let scene: SceneHandle | null = null;
+  let lenis: Lenis | null = null;
+  let last = -1;
+
+  // One caption at a time: each fades and rises in at the start of its chapter and
+  // out at the end, so two never show together.
+  const fadeCaptions = (position: number): void => {
+    cards.forEach((card, i) => {
+      if (!card || i === 0) {
+        return;
+      }
+
+      const enter = smoothstep(i, i + 0.07, position);
+      const leave = 1 - smoothstep(i + 0.93, i + 1, position);
+      const opacity = Math.min(enter, leave);
+
+      card.style.setProperty("--wt-o", opacity.toFixed(3));
+      card.style.setProperty("--wt-y", `${enter < 1 ? (1 - enter) * 14 : -(1 - leave) * 14}px`);
+      card.style.visibility = opacity > 0.001 ? "visible" : "hidden";
+      card.inert = opacity < 0.5;
+    });
+  };
+
+  // The chapter rail: the current chapter, how far each is read, its number and name.
+  const syncRail = (position: number): void => {
+    const active = Math.min(names.length, Math.max(1, Math.floor(position)));
+
+    railLinks.forEach((link, i) => {
+      if (i + 1 === active) {
+        link.setAttribute("aria-current", "step");
+      } else {
+        link.removeAttribute("aria-current");
+      }
+
+      link.style.setProperty("--wt-fill", String(Math.min(1, Math.max(0, position - (i + 1)))));
+    });
+
+    if (progressNum) {
+      progressNum.textContent = String(active).padStart(2, "0");
+    }
+
+    if (progressName) {
+      progressName.textContent = names[active - 1] ?? "";
+    }
+  };
+
+  const onScroll = (): void => {
+    syncHeader();
+
+    // After a fallback to stills, the captions are plain text again.
+    if (root?.dataset.mode !== "scene") {
+      return;
+    }
+
+    const position = progress();
+
+    if (Math.abs(position - last) < MIN_PROGRESS_STEP) {
+      return;
+    }
+
+    last = position;
+    scene?.setProgress(position);
+    fadeCaptions(position);
+    root.style.setProperty("--wt-hero-o", (1 - smoothstep(HERO_FADE_START, HERO_FADE_END, position)).toFixed(3));
+    syncRail(position);
+    root.toggleAttribute("data-past-hero", position > 0.85 && position < bounds.length - 0.02);
+  };
+
+  // Lenis animates the wheel in its own frame loop. Run that loop only while it has
+  // something to animate (a wheel or an anchor click starts it), not on every frame of
+  // the page's life.
+  let pumpId = 0;
+  let pumpTime = 1000;
+  let pumpLast = 0;
+  let pumpUntil = 0;
+
+  const pump = (now: number): void => {
+    pumpId = 0;
+
+    if (!lenis) {
+      return;
+    }
+
+    // Lenis's own clock only advances while it runs, so a restart never jumps.
+    pumpTime += Math.min(now - (pumpLast || now), PUMP_MAX_STEP);
+    pumpLast = now;
+    lenis.raf(pumpTime);
+
+    if (lenis.isScrolling === "smooth" || now < pumpUntil) {
+      pumpId = requestAnimationFrame(pump);
+    } else {
+      pumpLast = 0;
+    }
+  };
+
+  const startPump = (): void => {
+    pumpUntil = performance.now() + PUMP_LINGER;
+
+    if (!pumpId && lenis) {
+      pumpId = requestAnimationFrame(pump);
+    }
+  };
+
+  const toStatic = (): void => {
+    if (!root) {
+      return;
+    }
+
+    root.dataset.mode = "static";
+    cancelAnimationFrame(pumpId);
+    pumpId = 0;
+    lenis?.destroy();
+    lenis = null;
+
+    for (const card of cards) {
+      if (!card) {
+        continue;
+      }
+
+      card.style.removeProperty("visibility");
+      card.inert = false;
+    }
+
+    scene?.dispose();
+    scene = null;
+  };
+
+  syncHeader();
+  window.addEventListener("scroll", syncHeader, { passive: true });
+
+  if (root && stage && view && root.dataset.mode === "scene") {
+    // Smooth wheel scrolling while the scene runs; touch keeps the native feel.
+    lenis = new Lenis({ autoRaf: false, anchors: true, lerp: 0.1 });
+
+    for (const type of ["wheel", "click"]) {
+      window.addEventListener(type, startPump, { passive: true, capture: true });
+    }
+
+    measure();
+    onScroll();
+    applySafe();
+    window.addEventListener("scroll", onScroll, { passive: true });
+
+    window.addEventListener("resize", () => {
+      measure();
+      applySafe();
+      onScroll();
+    });
+
+    new ResizeObserver(() => {
+      measure();
+      applySafe();
+      last = -1;
+      onScroll();
+    }).observe(root);
+
+    // three.js stays out of the initial bundle: load the scene once the page is idle.
+    const load = (): Promise<void> =>
+      import("./scene")
+        .then(({ mountScene }) => mountScene({ view, stage, assets: "/walkthrough", progress: progress() }))
+        .then((handle) => {
+          scene = handle;
+          applySafe();
+          last = -1;
+          onScroll();
+          root.dataset.ready = "";
+        })
+        .catch((error: unknown) => {
+          console.warn("walkthrough: falling back to stills", error);
+          toStatic();
+        });
+
+    if (typeof window.requestIdleCallback === "function") {
+      window.requestIdleCallback(() => void load(), { timeout: 1200 });
+    } else {
+      window.setTimeout(() => void load(), 300);
+    }
+  }
+</script>

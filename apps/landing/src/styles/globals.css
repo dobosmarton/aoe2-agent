@@ -1,80 +1,114 @@
-/* Tailwind 4 CSS-first config. Tokens mirror ui/src/index.css so the public
- * site and the internal observability UI stay visually coherent. */
+/* Tailwind 4 CSS-first config. The design follows the author's blog (the digital
+ * garden): slate surfaces, one accent blue, hairline cells with mono [ BRACKET ]
+ * labels, "+" registration marks, a serif reading face and a detector-style
+ * frame around every table, code block, diagram and image. */
 
 @import "tailwindcss";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.129 0.042 264.695);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.129 0.042 264.695);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.129 0.042 264.695);
-  --primary: oklch(0.208 0.042 265.755);
-  --primary-foreground: oklch(0.984 0.003 247.858);
-  --secondary: oklch(0.968 0.007 247.896);
-  --secondary-foreground: oklch(0.208 0.042 265.755);
-  --muted: oklch(0.968 0.007 247.896);
-  --muted-foreground: oklch(0.554 0.046 257.417);
-  --accent: oklch(0.968 0.007 247.896);
-  --accent-foreground: oklch(0.208 0.042 265.755);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.929 0.013 255.508);
-  --input: oklch(0.929 0.013 255.508);
-  --ring: oklch(0.704 0.04 256.788);
-  --radius: 0.625rem;
+  --background: 0 0% 100%;
+  --foreground: 222.2 84% 4.9%;
+  --muted: 210 40% 96.1%;
+  /* Darker than the blog's slate-500, for text over the glowing backdrop (about 6:1 on white) */
+  --muted-foreground: 215 19% 39%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222.2 84% 4.9%;
+  --card: 0 0% 100%;
+  --card-foreground: 222.2 84% 4.9%;
+  --border: 214.3 31.8% 91.4%;
+  --input: 214.3 31.8% 91.4%;
+  --primary: 222.2 47.4% 11.2%;
+  --primary-foreground: 210 40% 98%;
+  --secondary: 210 40% 96.1%;
+  --secondary-foreground: 222.2 47.4% 11.2%;
+  --accent: 210 40% 96.1%;
+  --accent-foreground: 223 94% 66%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 210 40% 98%;
+  --ring: 215 20.2% 65.1%;
+  --radius: 0.3rem;
+
+  /* Chart series (validated for CVD separation on the light surface) */
+  --chart-1: #2a78d6;
+  --chart-2: #eb6834;
+  /* Darker than the blog's #9aa0a6, so gray marks reach 3:1 on white */
+  --chart-neutral: #858b92;
+  --chart-link: #cbd5e1;
+  /* How much of the series color a "light" shade keeps (the rest is page background) */
+  --chart-light-mix: 40%;
 }
 
 .dark {
-  --background: oklch(0.129 0.042 264.695);
-  --foreground: oklch(0.984 0.003 247.858);
-  --card: oklch(0.208 0.042 265.755);
-  --card-foreground: oklch(0.984 0.003 247.858);
-  --popover: oklch(0.208 0.042 265.755);
-  --popover-foreground: oklch(0.984 0.003 247.858);
-  --primary: oklch(0.929 0.013 255.508);
-  --primary-foreground: oklch(0.208 0.042 265.755);
-  --secondary: oklch(0.279 0.041 260.031);
-  --secondary-foreground: oklch(0.984 0.003 247.858);
-  --muted: oklch(0.279 0.041 260.031);
-  --muted-foreground: oklch(0.704 0.04 256.788);
-  --accent: oklch(0.279 0.041 260.031);
-  --accent-foreground: oklch(0.984 0.003 247.858);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.551 0.027 264.364);
+  --background: 222.2 84% 4.9%;
+  --foreground: 210 40% 98%;
+  --muted: 217.2 32.6% 17.5%;
+  --muted-foreground: 215 20.2% 65.1%;
+  --popover: 222.2 84% 4.9%;
+  --popover-foreground: 210 40% 98%;
+  --card: 222.2 84% 4.9%;
+  --card-foreground: 210 40% 98%;
+  --border: 217.2 32.6% 17.5%;
+  --input: 217.2 32.6% 17.5%;
+  --primary: 210 40% 98%;
+  --primary-foreground: 222.2 47.4% 11.2%;
+  --secondary: 217.2 32.6% 17.5%;
+  --secondary-foreground: 210 40% 98%;
+  --accent: 217.2 32.6% 17.5%;
+  --accent-foreground: 223 94% 66%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 0 85.7% 97.3%;
+  --ring: 217.2 32.6% 17.5%;
+
+  /* Chart series, re-stepped and validated against the dark surface */
+  --chart-1: #3987e5;
+  --chart-2: #d95926;
+  --chart-neutral: #7d848b;
+  --chart-link: #334155;
+  --chart-light-mix: 58%;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
-    "Liberation Mono", monospace;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
+  --font-heading: "Karla", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
+  --font-serif: "Source Serif 4", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --animate-blink: blink 1.2s ease-in-out infinite;
+}
+
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 @layer base {
@@ -82,284 +116,2011 @@
     border-color: var(--color-border);
   }
   html {
-    background: var(--color-background);
-    color: var(--color-foreground);
     color-scheme: light dark;
+    /* Smooth anchor jumps that land below the fixed header. */
+    scroll-behavior: smooth;
+    scroll-padding-top: 6rem;
   }
   body {
+    min-height: 100vh;
+    /* Nothing may widen the page on a phone; clip (not hidden) keeps sticky working. */
+    overflow-x: clip;
     font-family: var(--font-sans);
+    color: var(--color-foreground);
+    /* Tailwind's slate-100 to white, and gray-900 to gray-800 in dark mode */
+    background: linear-gradient(to bottom, oklch(96.8% 0.007 247.896), #fff);
     -webkit-font-smoothing: antialiased;
   }
-  /* Smooth anchor jumps for in-page TOCs without snapping under the sticky header. */
-  html {
-    scroll-behavior: smooth;
-    scroll-padding-top: 4rem;
-  }
-  /* rehype-autolink-headings appends an empty anchor; only show it on hover. */
-  .heading-anchor {
-    margin-left: 0.5rem;
-    opacity: 0;
-    text-decoration: none;
-    color: var(--color-muted-foreground);
-    transition: opacity 120ms ease;
-  }
-  .heading-anchor::after {
-    content: "#";
-  }
-  h1:hover .heading-anchor,
-  h2:hover .heading-anchor,
-  h3:hover .heading-anchor,
-  h4:hover .heading-anchor,
-  .heading-anchor:focus {
-    opacity: 1;
+  .dark body {
+    background: linear-gradient(to bottom, oklch(21% 0.034 264.665), oklch(27.8% 0.033 256.848));
   }
 }
 
-/* Markdown styles, scoped to .prose-doc so we don't leak into the rest of
- * the site. Tailwind has @tailwindcss/typography but Tailwind 4 changed
- * its packaging; rolling our own keeps the dep list smaller and lets us
- * match shadcn tokens exactly. */
-.prose-doc {
-  max-width: 64ch;
-  font-size: 0.9375rem;
-  line-height: 1.7;
-  color: var(--color-foreground);
+/*
+  Site backdrop (components/SiteBackground.astro). A fixed layer behind all content:
+  - a hairline grid in 64px cells fading out down the page
+  - a spotlight that drifts across it and lights the grid lines in the accent color
+  - two soft glows, accent blue and violet, floating slowly
+  - "+" ticks that blink on grid intersections, like detector hits
+*/
+.site-bg {
+  --site-bg-cell: 64px;
+  --site-bg-line: hsl(var(--foreground) / 0.045);
+  --site-bg-lit: hsl(var(--accent-foreground) / 0.24);
+  --site-bg-glow: 0.16;
+  position: fixed;
+  inset: 0;
+  z-index: -10;
+  overflow: hidden;
+  pointer-events: none;
 }
-.prose-doc > * + * {
-  margin-top: 1.25em;
+
+.dark .site-bg {
+  --site-bg-line: hsl(var(--foreground) / 0.05);
+  --site-bg-lit: hsl(var(--accent-foreground) / 0.32);
+  --site-bg-glow: 0.2;
 }
-.prose-doc h1 {
-  margin-top: 0;
-  font-size: 2rem;
-  font-weight: 700;
-  line-height: 1.2;
-  letter-spacing: -0.02em;
+
+.site-bg-lines {
+  position: absolute;
+  inset: 0;
 }
-.prose-doc h2 {
-  margin-top: 2.5em;
-  font-size: 1.5rem;
-  font-weight: 600;
-  line-height: 1.3;
-  letter-spacing: -0.01em;
-  border-top: 1px solid var(--color-border);
-  padding-top: 1.25em;
+
+/* On reading pages the band that holds the sidebar, the article and its table of
+   contents is masked out, so no grid line runs under the text. */
+.site-bg-reading .site-bg-lines {
+  mask-image: linear-gradient(
+    to right,
+    black calc(50% - 45rem),
+    transparent calc(50% - 40rem),
+    transparent calc(50% + 40rem),
+    black calc(50% + 45rem)
+  );
 }
-.prose-doc h3 {
-  margin-top: 2em;
-  font-size: 1.125rem;
-  font-weight: 600;
+
+.site-bg-grid,
+.site-bg-spot-grid {
+  position: absolute;
+  background-size: var(--site-bg-cell) var(--site-bg-cell);
 }
-.prose-doc h4 {
-  margin-top: 1.75em;
-  font-size: 1rem;
-  font-weight: 600;
+
+.site-bg-grid {
+  inset: 0;
+  background-image:
+    linear-gradient(to right, var(--site-bg-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--site-bg-line) 1px, transparent 1px);
+  mask-image: linear-gradient(to bottom, black 10%, transparent 80%);
 }
-.prose-doc p {
-  margin: 0;
+
+/* The spotlight moves over the page while the lit grid inside it moves back by the
+   same amount, so its lines stay on the page grid. Both are transforms, which the
+   compositor animates without restyling or repainting the page each frame. */
+.site-bg-spot {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 36rem;
+  height: 36rem;
+  overflow: hidden;
+  mask-image: radial-gradient(closest-side, black 15%, transparent);
+  mask-repeat: no-repeat;
+  animation: site-bg-sweep 34s ease-in-out infinite alternate;
 }
-.prose-doc a {
-  color: var(--color-foreground);
-  text-decoration: underline;
-  text-decoration-color: color-mix(in oklab, var(--color-foreground) 30%, transparent);
-  text-underline-offset: 3px;
+
+.site-bg-spot-grid {
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-image:
+    linear-gradient(to right, var(--site-bg-lit) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--site-bg-lit) 1px, transparent 1px);
+  animation: site-bg-sweep-back 34s ease-in-out infinite alternate;
 }
-.prose-doc a:hover {
-  text-decoration-color: var(--color-foreground);
+
+@keyframes site-bg-sweep {
+  0% {
+    transform: translate(4vw, -4vh);
+  }
+  30% {
+    transform: translate(58vw, 2vh);
+  }
+  60% {
+    transform: translate(34vw, 30vh);
+  }
+  100% {
+    transform: translate(70vw, 16vh);
+  }
 }
-.prose-doc ul,
-.prose-doc ol {
-  padding-left: 1.5em;
+
+@keyframes site-bg-sweep-back {
+  0% {
+    transform: translate(-4vw, 4vh);
+  }
+  30% {
+    transform: translate(-58vw, -2vh);
+  }
+  60% {
+    transform: translate(-34vw, -30vh);
+  }
+  100% {
+    transform: translate(-70vw, -16vh);
+  }
 }
-.prose-doc ul { list-style: disc; }
-.prose-doc ol { list-style: decimal; }
-.prose-doc li + li { margin-top: 0.4em; }
-.prose-doc code {
-  background: var(--color-muted);
-  color: var(--color-foreground);
-  padding: 0.15em 0.4em;
-  border-radius: 0.25rem;
-  font-size: 0.85em;
-  font-family: var(--font-mono);
+
+.site-bg-glow {
+  position: absolute;
+  width: 70vmax;
+  height: 70vmax;
+  border-radius: 9999px;
+  opacity: var(--site-bg-glow);
 }
-.prose-doc pre {
-  margin: 1.25em 0;
-  border: 1px solid var(--color-border);
-  border-radius: 0.5rem;
-  padding: 1em;
-  overflow-x: auto;
-  font-size: 0.85rem;
-  line-height: 1.6;
+
+.site-bg-glow-a {
+  top: -38vmax;
+  left: -18vmax;
+  background: radial-gradient(closest-side, hsl(var(--accent-foreground)), transparent);
+  animation: site-bg-float-a 40s ease-in-out infinite alternate;
 }
-.prose-doc pre code {
-  background: transparent;
-  padding: 0;
-  font-size: inherit;
+
+.site-bg-glow-b {
+  top: -34vmax;
+  right: -24vmax;
+  background: radial-gradient(closest-side, hsl(262 83% 72%), transparent);
+  animation: site-bg-float-b 52s ease-in-out infinite alternate;
 }
-.prose-doc table {
+
+@keyframes site-bg-float-a {
+  to {
+    transform: translate(22vmax, 8vmax) scale(1.1);
+  }
+}
+
+@keyframes site-bg-float-b {
+  to {
+    transform: translate(-18vmax, 12vmax) scale(0.92);
+  }
+}
+
+.site-bg-tick {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 9px;
+  height: 9px;
+  color: hsl(var(--accent-foreground));
+  animation: site-bg-tick 2.6s ease-in-out both;
+}
+
+@keyframes site-bg-tick {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  20%,
+  70% {
+    opacity: 0.7;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .site-bg * {
+    animation: none;
+  }
+}
+
+/*
+  Header (layouts/Site.astro): open and borderless at the top of the page, then a
+  floating card with "+" corner marks once the page scrolls. A script sets
+  data-scrolled on the header.
+*/
+.site-header {
+  position: fixed;
+  inset-inline: 0;
+  top: 0;
+  z-index: 30;
+}
+
+.site-header-bar {
+  position: relative;
+  margin-inline: auto;
   width: 100%;
-  border-collapse: collapse;
-  font-size: 0.875rem;
-  margin: 1.25em 0;
+  max-width: 100%;
+  border: 1px solid transparent;
+  border-radius: 0;
+  padding-block: 0.75rem;
+  transition-property: width, max-width, margin, border-radius, padding, background-color, border-color, box-shadow;
+  transition-duration: 500ms;
+  transition-timing-function: cubic-bezier(0.2, 0.9, 0.3, 1);
 }
-.prose-doc th,
-.prose-doc td {
-  border: 1px solid var(--color-border);
-  padding: 0.5em 0.75em;
-  text-align: left;
+
+.site-header[data-scrolled] .site-header-bar {
+  margin-top: 0.5rem;
+  width: calc(100% - 1.5rem);
+  max-width: var(--header-max, 72rem);
+  border-color: hsl(var(--foreground) / 0.1);
+  border-radius: 0.5rem;
+  padding-block: 0.375rem;
+  background: hsl(var(--background) / 0.8);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 8px 30px -12px rgb(0 0 0 / 0.18);
 }
-.prose-doc th {
-  background: var(--color-muted);
-  font-weight: 600;
+
+.site-header-corners {
+  opacity: 0;
+  transition: opacity 500ms;
 }
-.prose-doc blockquote {
-  border-left: 3px solid var(--color-border);
-  padding-left: 1em;
-  color: var(--color-muted-foreground);
-  font-style: italic;
+
+.site-header[data-scrolled] .site-header-corners {
+  opacity: 1;
 }
-.prose-doc hr {
-  border: 0;
-  border-top: 1px solid var(--color-border);
+
+/* Reading progress along the bottom of the condensed header on docs pages, driven by
+   the page scroll itself (no JavaScript). Hidden where scroll-driven animations are
+   unsupported. */
+.header-progress {
+  display: none;
+}
+
+@supports (animation-timeline: scroll()) {
+  @media (width >= 40rem) {
+    .header-progress {
+      position: absolute;
+      right: 1rem;
+      bottom: -1px;
+      left: 1rem;
+      display: block;
+      height: 1px;
+      background: hsl(var(--accent-foreground));
+      transform-origin: left;
+      pointer-events: none;
+      animation: header-progress linear both;
+      animation-timeline: scroll(root block);
+    }
+  }
+}
+
+@keyframes header-progress {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* Mono [ BRACKET ] label, for markup that the rehype plugin and Astro components write.
+   React components use <BracketLabel> from components/ui/frame.tsx instead. */
+.bracket-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+}
+
+.bracket-label::before {
+  content: "[ ";
+}
+
+.bracket-label::after {
+  content: " ]";
+}
+
+/*
+  Artifacts (tables, code, charts, diagrams, images) sit inside a detector frame: a thin
+  outline with "+" corner marks around the artifact alone. Underneath sits the label
+  naming what it holds, then any caption. The frame turns blue on hover, as if the
+  detector locked on. Markup: components/ui/artifact-frame.tsx and lib/rehype-artifacts.ts.
+*/
+/* No bare `.artifact` margin rule: unlayered CSS beats Tailwind's space-y utilities. */
+.article .artifact {
   margin: 2em 0;
 }
-.prose-doc img,
-.prose-doc svg {
-  max-width: 100%;
-  height: auto;
-  display: block;
-  margin: 1.25em auto;
+
+:is(.article, body) .artifact-frame {
+  position: relative;
+  padding: 5px;
+  /* Opaque, so the backdrop grid and glow never show through a chart or figure. */
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--foreground) / 0.12);
+  border-radius: 0.375rem;
+  color: hsl(var(--foreground) / 0.3);
+  transition:
+    border-color 200ms,
+    color 200ms;
 }
-/* Mermaid SVGs rendered by rehype-mermaid get a card-style frame. */
-.prose-doc svg[id^="mermaid"] {
-  background: var(--color-card);
-  border: 1px solid var(--color-border);
+
+:is(.article, body) .artifact:hover .artifact-frame {
+  border-color: hsl(var(--accent-foreground) / 0.45);
+  color: hsl(var(--accent-foreground));
+}
+
+/* The framed artifact keeps its own look; the frame owns the spacing and the text color. */
+:is(.article, body) .artifact-frame > :not(svg) {
+  margin: 0;
+  color: var(--article-text, hsl(var(--foreground)));
+}
+
+.artifact-corner {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+}
+
+.artifact-corner-tl {
+  top: -4px;
+  left: -4px;
+}
+
+.artifact-corner-tr {
+  top: -4px;
+  right: -4px;
+}
+
+.artifact-corner-bl {
+  bottom: -4px;
+  left: -4px;
+}
+
+.artifact-corner-br {
+  right: -4px;
+  bottom: -4px;
+}
+
+/* Label and caption inside drawn brackets, so [ ] can span several lines */
+:is(.article, body) .artifact-caption {
+  position: relative;
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0.5rem 0 0;
+  padding: 0.35rem 0.8rem;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  line-height: 1.6;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-wrap: pretty;
+  color: var(--article-muted, hsl(var(--muted-foreground)));
+}
+
+:is(.article, body) .artifact-caption::before,
+:is(.article, body) .artifact-caption::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0.35rem;
+  border: 1px solid hsl(var(--foreground) / 0.35);
+  transition: border-color 200ms;
+}
+
+:is(.article, body) .artifact-caption::before {
+  left: 0;
+  border-right: 0;
+}
+
+:is(.article, body) .artifact-caption::after {
+  right: 0;
+  border-left: 0;
+}
+
+:is(.article, body) .artifact:hover .artifact-caption::before,
+:is(.article, body) .artifact:hover .artifact-caption::after {
+  border-color: hsl(var(--accent-foreground));
+}
+
+:is(.article, body) .artifact-label-meta {
+  color: hsl(var(--accent-foreground));
+}
+
+/*
+  Reading surfaces. `.article` is a docs page: the serif reading face, sizes in em so
+  they scale with the body size. `.artifacts` gives the landing page's framed tables
+  and code the same sizes and colors without the serif body.
+*/
+:is(.article, .artifacts) {
+  --article-ink: hsl(222 47% 11%);
+  --article-text: hsl(217 33% 17%);
+  --article-muted: hsl(215 16% 42%);
+  --article-rule: hsl(214 32% 89%);
+  --article-strong-rule: hsl(215 20% 72%);
+  --article-code-bg: hsl(213 27% 94%);
+  --article-link: hsl(221 83% 45%);
+  font-size: 1.0625rem;
+}
+
+.dark :is(.article, .artifacts) {
+  --article-ink: hsl(210 40% 98%);
+  --article-text: hsl(213 27% 84%);
+  --article-muted: hsl(215 20% 65%);
+  --article-rule: hsl(217 33% 20%);
+  --article-strong-rule: hsl(215 20% 40%);
+  --article-code-bg: hsl(217 33% 17%);
+  --article-link: hsl(213 94% 72%);
+}
+
+@media (width >= 40rem) {
+  :is(.article, .artifacts) {
+    font-size: 1.1875rem;
+  }
+}
+
+.article {
+  max-width: none;
+  font-family: var(--font-serif);
+  font-optical-sizing: auto;
+  line-height: 1.7;
+  color: var(--article-text);
+  font-kerning: normal;
+  text-rendering: optimizeLegibility;
+}
+
+.article p,
+.article li {
+  text-wrap: pretty;
+}
+
+.article p {
+  margin-block: 0 1.15em;
+}
+
+.article strong {
+  font-weight: 600;
+  color: var(--article-ink);
+}
+
+.article em {
+  font-style: italic;
+}
+
+/* Headings: the sans display face, generous space above, tight below */
+.article h1,
+.article h2,
+.article h3,
+.article h4 {
+  position: relative;
+  font-family: var(--font-heading);
+  font-weight: 700;
+  color: var(--article-ink);
+  letter-spacing: -0.012em;
+  text-wrap: balance;
+  scroll-margin-top: 6rem;
+}
+
+/* The page title: the page's own "#" heading */
+.article > h1:first-child {
+  margin: 0 0 0.9em;
+  font-size: 2.1rem;
+  line-height: 1.12;
+  letter-spacing: -0.02em;
+}
+
+@media (width >= 40rem) {
+  .article > h1:first-child {
+    font-size: 2.6rem;
+  }
+}
+
+.article h1 {
+  font-size: 1.65em;
+  line-height: 1.15;
+  margin: 2em 0 0.55em;
+}
+
+.article h2 {
+  font-size: 1.5em;
+  line-height: 1.2;
+  margin: 2.1em 0 0.55em;
+}
+
+.article h3 {
+  font-size: 1.2em;
+  line-height: 1.3;
+  margin: 1.8em 0 0.45em;
+}
+
+.article h4 {
+  font-size: 1em;
+  margin: 1.6em 0 0.4em;
+}
+
+/* rehype-autolink-headings appends an empty anchor; a "#" that hangs in the margin
+   on hover instead of pushing the heading text right. */
+.article .heading-anchor {
+  position: absolute;
+  top: 0;
+  right: 100%;
+  padding-right: 0.3em;
+  font-style: normal;
+  color: var(--article-muted);
+  text-decoration: none;
+  opacity: 0;
+  transition: opacity 150ms;
+}
+
+.article .heading-anchor::after {
+  content: "#";
+}
+
+.article :is(h1, h2, h3, h4):hover .heading-anchor,
+.article .heading-anchor:focus-visible {
+  opacity: 1;
+}
+
+/* Links */
+.article a:not(.heading-anchor) {
+  color: var(--article-link);
+  font-weight: inherit;
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+  text-decoration-color: color-mix(in oklab, currentColor 35%, transparent);
+  transition: text-decoration-color 150ms;
+}
+
+.article a:not(.heading-anchor):hover {
+  text-decoration-color: currentColor;
+}
+
+.article a:focus-visible {
+  outline: 2px solid var(--article-link);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Lists */
+.article :is(ul, ol) {
+  margin-block: 0 1.15em;
+  padding-left: 1.4em;
+}
+
+.article ul {
+  list-style: disc;
+}
+
+.article ol {
+  list-style: decimal;
+}
+
+.article li {
+  margin-block: 0.35em;
+  padding-left: 0.2em;
+}
+
+.article li > :is(ul, ol) {
+  margin-block: 0.35em 0;
+}
+
+.article :is(ul, ol) > li::marker {
+  color: var(--article-muted);
+}
+
+/* Inline code: a quiet chip in the mono face */
+:is(.article, .artifacts) :not(pre) > code {
+  font-family: var(--font-mono);
+  font-size: 0.84em;
+  font-weight: 500;
+  color: var(--article-ink);
+  background: var(--article-code-bg);
+  padding: 0.12em 0.38em;
+  border-radius: 0.3em;
+  overflow-wrap: break-word;
+}
+
+/*
+  Code blocks: a cell with a mono header strip (language, copy button), like the
+  tables. Shiki writes both themes as CSS variables; pick one per color scheme.
+*/
+:is(.article, .artifacts) .code-cell {
+  overflow: hidden;
+  border: 1px solid hsl(var(--foreground) / 0.1);
   border-radius: 0.5rem;
+  background: hsl(var(--card));
+}
+
+.cell-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.625rem 1rem;
+  border-bottom: 1px solid hsl(var(--foreground) / 0.1);
+  font-family: var(--font-sans);
+  line-height: 1.5;
+}
+
+.cell-aside {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+
+.code-copy {
+  display: inline-flex;
+  height: 1.5rem;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.375rem;
+  padding-inline: 0.375rem;
+  border-radius: 0.25rem;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  transition: color 150ms;
+}
+
+.code-copy:hover {
+  color: hsl(var(--accent-foreground));
+}
+
+.code-copy[data-copied] {
+  color: rgb(34 197 94);
+}
+
+:is(.article, .artifacts) pre {
+  font-family: var(--font-mono);
+  font-size: 0.78em;
+  line-height: 1.65;
+  border-radius: 0.6rem;
+  padding: 1.1em 1.25em;
+  margin: 1.6em 0;
+  overflow-x: auto;
+}
+
+:is(.article, .artifacts) .code-cell pre {
+  margin: 0;
+  border-radius: 0;
+  background-color: transparent !important;
+}
+
+.astro-code,
+.astro-code span {
+  color: var(--shiki-light, hsl(var(--foreground)));
+}
+
+.dark .astro-code,
+.dark .astro-code span {
+  color: var(--shiki-dark, hsl(var(--foreground))) !important;
+}
+
+.dark .astro-code {
+  background-color: var(--shiki-dark-bg) !important;
+}
+
+/* Diagrams that rehype-mermaid renders to inline SVG */
+:is(.article, .artifacts) .diagram-cell {
+  overflow-x: auto;
+  border: 1px solid hsl(var(--foreground) / 0.1);
+  border-radius: 0.5rem;
+  background: hsl(var(--card));
   padding: 1rem;
 }
 
-/* ============================================================
- * Educational admonitions.
- *
- *   .concept    — short "what is X" callout (~150 words).
- *   .deep-dive  — collapsible <details>/<summary> sidebar
- *                  for algorithm intuition (~400 words).
- *   .prereqs    — per-page on-ramp at the top of a page.
- *
- * Authored inline in markdown. Blank lines around the content
- * are required so the inner markdown is re-parsed by remark:
- *
- *   <aside class="concept" data-title="Prompt caching">
- *
- *   Body **markdown** here, including `code` and [links](...).
- *
- *   </aside>
- * ============================================================ */
-.prose-doc .concept,
-.prose-doc details.deep-dive,
-.prose-doc .prereqs {
-  margin: 1.5em 0;
+.diagram-cell svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin-inline: auto;
+}
+
+/*
+  Tables: a card with a mono header strip, hairline rows and column dividers.
+*/
+:is(.article, .artifacts) .table-scroll {
+  overflow-x: auto;
+  border: 1px solid hsl(var(--foreground) / 0.1);
+  border-radius: 0.375rem;
+  background: hsl(var(--card));
+}
+
+:is(.article, .artifacts) table {
+  margin: 0;
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-sans);
+  font-size: 0.8em;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
+
+:is(.article, .artifacts) thead {
+  border-bottom: 1px solid hsl(var(--foreground) / 0.1);
+}
+
+:is(.article, .artifacts) th {
+  font-family: var(--font-mono);
+  font-size: 0.72em;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--article-muted);
+  vertical-align: bottom;
+  white-space: nowrap;
+  padding: 0.85em 1.15em;
+}
+
+:is(.article, .artifacts) td {
+  vertical-align: top;
+  padding: 0.8em 1.15em;
+}
+
+:is(.article, .artifacts) :is(th, td):not([align]) {
+  text-align: left;
+}
+
+/* Column dividers, the same hairline as the row rules, so the cells read as a grid */
+:is(.article, .artifacts) :is(th, td) + :is(th, td) {
+  border-left: 1px solid hsl(var(--foreground) / 0.07);
+}
+
+:is(.article, .artifacts) tbody tr {
+  transition: background-color 150ms;
+}
+
+:is(.article, .artifacts) tbody tr + tr {
+  border-top: 1px solid hsl(var(--foreground) / 0.07);
+}
+
+/* Row hover: blue tint, edge and label. */
+:is(.article, .artifacts) tbody tr:hover {
+  background: hsl(var(--accent-foreground) / 0.06);
+}
+
+:is(.article, .artifacts) tbody tr:hover td:first-child {
+  color: hsl(var(--accent-foreground));
+  box-shadow: inset 2px 0 0 hsl(var(--accent-foreground));
+}
+
+:is(.article, .artifacts) td:first-child {
+  font-weight: 500;
+  color: var(--article-ink);
+}
+
+:is(.article, .artifacts) td strong {
+  font-weight: 650;
+  color: var(--article-ink);
+}
+
+/* Inside cells, code is plain mono text: chips make wrapped rows look bumpy */
+:is(.article, .artifacts) td code {
+  font-size: 0.94em;
+  font-weight: 450;
+  padding: 0;
+  background: none;
+  color: inherit;
+}
+
+/* Figures and images */
+.article figure {
+  margin: 2em 0;
+}
+
+.article img {
+  max-width: 100%;
+  height: auto;
   border-radius: 0.5rem;
-  font-size: 0.875rem;
+}
+
+/* Quotes and rules */
+.article blockquote {
+  margin: 1.6em 0;
+  padding-left: 1.1em;
+  border-left: 2px solid var(--article-strong-rule);
+  font-style: italic;
+  color: var(--article-muted);
+}
+
+.article hr {
+  margin: 3em 0;
+  border-color: var(--article-rule);
+}
+
+/*
+  Admonitions, authored inline in the markdown:
+
+    <aside class="concept" data-title="Prompt caching">   short "what is X" callout
+    <details class="deep-dive"><summary>...</summary>    collapsible sidebar
+    <aside class="prereqs">                              per-page on-ramp
+
+  Each is a cell with a mono [ BRACKET ] header strip, in the sans face.
+*/
+.article :is(.concept, details.deep-dive, .prereqs) {
+  margin: 1.8em 0;
+  overflow: hidden;
+  border: 1px solid hsl(var(--foreground) / 0.1);
+  border-radius: 0.5rem;
+  background: hsl(var(--card));
+  font-family: var(--font-sans);
+  font-size: 0.82em;
   line-height: 1.65;
 }
 
-.prose-doc .concept > * + *,
-.prose-doc details.deep-dive > * + *,
-.prose-doc .prereqs > * + * {
-  margin-top: 0.75em;
+.article :is(.concept, .prereqs) {
+  padding: 0 1.1em 0.9em;
 }
 
-/* === .concept ============================================== */
-.prose-doc .concept {
-  background: color-mix(in oklab, var(--color-primary) 5%, var(--color-background));
-  border: 1px solid color-mix(in oklab, var(--color-primary) 18%, var(--color-border));
-  border-left: 3px solid color-mix(in oklab, var(--color-primary) 55%, var(--color-border));
-  padding: 0.9em 1.1em;
+.article :is(.concept, details.deep-dive, .prereqs) > :last-child {
+  margin-bottom: 0;
 }
-.prose-doc .concept[data-title]::before {
-  content: "💡 " attr(data-title);
+
+.article :is(.concept, .prereqs)::before {
   display: block;
-  margin-bottom: 0.5em;
-  font-weight: 600;
-  font-size: 0.875rem;
-  color: var(--color-foreground);
-  letter-spacing: -0.005em;
+  margin: 0 -1.1em 0.9em;
+  padding: 0.625rem 1.1em;
+  border-bottom: 1px solid hsl(var(--foreground) / 0.1);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
 }
 
-/* === .deep-dive (collapsible) ============================== */
-.prose-doc details.deep-dive {
-  background: var(--color-card);
-  border: 1px solid var(--color-border);
-  padding: 0;
-  overflow: hidden;
+.article .concept {
+  border-left: 2px solid hsl(var(--accent-foreground) / 0.6);
 }
-.prose-doc details.deep-dive > summary {
-  list-style: none;
-  cursor: pointer;
-  padding: 0.85em 1.1em;
-  font-weight: 600;
-  color: var(--color-foreground);
-  user-select: none;
+
+.article .concept::before {
+  content: "[ Concept ]";
+}
+
+.article .concept[data-title]::before {
+  content: "[ " attr(data-title) " ]";
+}
+
+.article .prereqs {
+  border-style: dashed;
+  color: var(--article-muted);
+}
+
+.article .prereqs::before {
+  content: "[ Prerequisites ]";
+}
+
+.article details.deep-dive > summary {
   display: flex;
   align-items: center;
   gap: 0.6em;
-  background: color-mix(in oklab, var(--color-accent) 60%, var(--color-card));
-  transition: background 120ms ease;
+  padding: 0.625rem 1.1em;
+  list-style: none;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+  user-select: none;
+  transition: color 150ms;
 }
-.prose-doc details.deep-dive > summary::-webkit-details-marker {
+
+.article details.deep-dive > summary::-webkit-details-marker {
   display: none;
 }
-.prose-doc details.deep-dive > summary::before {
-  content: "▸";
-  font-size: 0.85rem;
-  color: var(--color-muted-foreground);
+
+.article details.deep-dive > summary::before {
+  content: "+";
+  font-size: 13px;
+  color: hsl(var(--accent-foreground));
   transition: transform 150ms ease;
-  display: inline-block;
-}
-.prose-doc details.deep-dive[open] > summary::before {
-  transform: rotate(90deg);
-}
-.prose-doc details.deep-dive > summary:hover {
-  background: var(--color-accent);
-}
-.prose-doc details.deep-dive > :not(summary) {
-  padding-left: 1.1em;
-  padding-right: 1.1em;
-}
-.prose-doc details.deep-dive > :not(summary):first-of-type {
-  padding-top: 1em;
-  margin-top: 0;
-}
-.prose-doc details.deep-dive > :not(summary):last-child {
-  padding-bottom: 1em;
 }
 
-/* === .prereqs ============================================== */
-.prose-doc .prereqs {
-  background: transparent;
-  border: 1px dashed var(--color-border);
-  padding: 0.75em 1em;
-  color: var(--color-muted-foreground);
-  font-size: 0.8125rem;
+.article details.deep-dive[open] > summary::before {
+  transform: rotate(45deg);
 }
-.prose-doc .prereqs::before {
-  content: "📚 Prerequisites";
+
+.article details.deep-dive > summary:hover {
+  color: hsl(var(--foreground));
+}
+
+.article details.deep-dive[open] > summary {
+  border-bottom: 1px solid hsl(var(--foreground) / 0.1);
+}
+
+.article details.deep-dive > :not(summary) {
+  padding-inline: 1.1em;
+}
+
+.article details.deep-dive > :not(summary):first-of-type {
+  padding-top: 0.9em;
+}
+
+.article details.deep-dive > :not(summary):last-child {
+  padding-bottom: 0.9em;
+}
+
+.article :is(.concept, details.deep-dive, .prereqs) code {
+  font-size: 0.82em;
+}
+
+/*
+  Home page walkthrough (components/walkthrough). The stage is a dark screen in both
+  themes (the section carries .dark): pinned while the chapter articles scroll over
+  it in scene mode, a full-height banner over stacked stills in static mode.
+*/
+.wt {
+  --wt-ink: #02050c;
+  position: relative;
+  isolation: isolate;
+  margin-top: -5rem;
+  background: var(--wt-ink);
+  color: hsl(var(--foreground));
+}
+
+.wt-stage {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  height: 100svh;
+  overflow: hidden;
+  background:
+    radial-gradient(90% 80% at 66% 42%, rgb(30 58 120 / 0.38), transparent 70%),
+    radial-gradient(60% 60% at 20% 90%, rgb(76 29 149 / 0.18), transparent 70%),
+    var(--wt-ink);
+}
+
+.wt-view {
+  position: absolute;
+  inset: 0;
+}
+
+.wt-canvas {
+  position: absolute !important;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.wt-poster {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: opacity 700ms ease;
+}
+
+.wt[data-mode="scene"] .wt-poster {
+  transform: var(--wt-poster, none);
+}
+
+.wt[data-ready] .wt-poster {
+  opacity: 0;
+}
+
+/* Keeps the chapter text readable over the scene. */
+.wt-shade {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(to top, rgb(2 5 12 / 0.92), rgb(2 5 12 / 0.4) 38%, transparent 58%);
+}
+
+@media (width >= 64rem), (orientation: landscape) and (width >= 40rem) {
+  .wt-shade {
+    background:
+      linear-gradient(90deg, rgb(2 5 12 / 0.88), rgb(2 5 12 / 0.45) 32%, transparent 55%),
+      linear-gradient(to top, rgb(2 5 12 / 0.6), transparent 22%);
+  }
+}
+
+.wt-hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: hsl(var(--muted-foreground));
+}
+
+.wt-stamp,
+.wt-keys {
+  position: absolute;
+  left: var(--wt-cx, 50%);
+  top: calc(var(--wt-safe-bottom, 100%) - 3.25rem);
+}
+
+@media (width >= 64rem), (orientation: landscape) and (width >= 40rem) {
+  .wt-stamp,
+  .wt-keys {
+    top: auto;
+    bottom: 1.75rem;
+  }
+}
+
+.wt-stamp {
+  translate: -50% 0;
+  width: max-content;
+  max-width: calc(100vw - 2rem);
+  text-align: center;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid hsl(var(--accent-foreground) / 0.45);
+  border-radius: 0.25rem;
+  background: rgb(2 5 12 / 0.7);
+  color: hsl(var(--accent-foreground));
+  opacity: var(--wt-stamp, 0);
+}
+
+.wt-keys {
+  translate: -50% 0;
+  display: flex;
+  gap: 0.4rem;
+  list-style: none;
+  opacity: var(--wt-input, 0);
+}
+
+.wt-keys li {
+  display: grid;
+  place-items: center;
+  min-width: 2.1rem;
+  height: 2.1rem;
+  padding-inline: 0.55rem;
+  border: 1px solid hsl(var(--foreground) / 0.18);
+  border-bottom-width: 3px;
+  border-radius: 0.35rem;
+  background: rgb(2 5 12 / 0.75);
+  color: hsl(var(--muted-foreground));
+  transition: all 160ms ease;
+}
+
+.wt-keys kbd {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.wt-stage[data-step="1"] .wt-keys li:nth-child(-n + 1),
+.wt-stage[data-step="2"] .wt-keys li:nth-child(-n + 2),
+.wt-stage[data-step="3"] .wt-keys li:nth-child(-n + 3),
+.wt-stage[data-step="4"] .wt-keys li:nth-child(-n + 4),
+.wt-stage[data-step="5"] .wt-keys li {
+  border-color: hsl(var(--accent-foreground) / 0.8);
+  border-bottom-width: 1px;
+  translate: 0 2px;
+  color: hsl(var(--foreground));
+  background: hsl(var(--accent-foreground) / 0.18);
+}
+
+/* Chapter progress: eight ticks, the current chapter, and what is real. */
+.wt-progress {
+  position: absolute;
+  left: max(1rem, calc((100vw - 72rem) / 2 + 1rem));
+  bottom: 1.75rem;
+  display: none;
+  width: min(25rem, 34vw);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: hsl(var(--muted-foreground));
+  opacity: 0;
+  transition: opacity 400ms;
+}
+
+.wt[data-past-hero] .wt-progress {
+  opacity: 1;
+}
+
+@media (width >= 64rem), (orientation: landscape) and (width >= 40rem) {
+  .wt-progress {
+    display: block;
+  }
+}
+
+.wt-progress ol {
+  display: flex;
+  gap: 0.3rem;
+  list-style: none;
+}
+
+.wt-progress li {
+  flex: 1;
+}
+
+.wt-progress a {
+  position: relative;
   display: block;
-  margin-bottom: 0.4em;
-  font-weight: 600;
-  font-size: 0.7rem;
+  height: 1.25rem;
+}
+
+.wt-progress a::before,
+.wt-progress a::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0.5rem;
+  height: 2px;
+  border-radius: 1px;
+  background: hsl(var(--foreground) / 0.16);
+}
+
+.wt-progress a::after {
+  transform-origin: left;
+  transform: scaleX(var(--wt-fill, 0));
+  background: hsl(var(--accent-foreground));
+}
+
+.wt-progress a:hover::before,
+.wt-progress a:focus-visible::before {
+  background: hsl(var(--foreground) / 0.4);
+}
+
+.wt-progress-name {
+  margin-top: 0.15rem;
+  text-transform: uppercase;
+  color: hsl(var(--foreground) / 0.85);
+  font-variant-numeric: tabular-nums;
+}
+
+.wt-note {
+  margin-top: 0.6rem;
+  max-width: 24rem;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+  font-size: 10.5px;
+  color: hsl(var(--muted-foreground) / 0.8);
+}
+
+/* Chapters scroll over the pinned stage. */
+.wt-chapters {
+  position: relative;
+  z-index: 1;
+  margin-top: -100vh;
+  margin-top: -100svh;
+}
+
+.wt-hero {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  min-height: 100svh;
+  padding-bottom: 14svh;
+}
+
+@media (width >= 64rem), (orientation: landscape) and (width >= 40rem) {
+  .wt-hero {
+    align-items: center;
+    padding-bottom: 0;
+  }
+}
+
+.wt-hero-inner {
+  width: 100%;
+  max-width: 72rem;
+  margin-inline: auto;
+  padding-inline: 1rem;
+}
+
+.wt-hero-inner > * {
+  max-width: 36rem;
+}
+
+.wt[data-mode="scene"] .wt-hero-inner,
+.wt[data-mode="scene"] .wt-scroll-hint {
+  opacity: var(--wt-hero-o, 1);
+}
+
+.wt-kicker,
+.wt-card-kicker {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: hsl(var(--accent-foreground));
+}
+
+.wt-hero h1 {
+  margin-top: 1rem;
+  font-family: var(--font-heading);
+  font-size: clamp(2.3rem, 5.2vw, 4rem);
+  font-weight: 700;
+  line-height: 1.04;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+  text-shadow: 0 2px 30px rgb(2 5 12 / 0.8);
+}
+
+.wt-lede {
+  margin-top: 1.25rem;
+  font-family: var(--font-heading);
+  font-size: 1.125rem;
+  line-height: 1.55;
+  color: hsl(var(--foreground) / 0.78);
+  text-shadow: 0 1px 16px rgb(2 5 12 / 0.9);
+}
+
+.wt-ctas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 2rem;
+}
+
+.wt-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 2.5rem;
+  padding-inline: 1.1rem;
+  border: 1px solid hsl(var(--foreground) / 0.18);
+  border-radius: 0.35rem;
+  background: rgb(2 5 12 / 0.55);
+  backdrop-filter: blur(8px);
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: border-color 200ms, background-color 200ms;
+}
+
+.wt-btn:hover {
+  border-color: hsl(var(--accent-foreground) / 0.6);
+}
+
+.wt-btn-primary {
+  border-color: transparent;
+  background: hsl(var(--foreground));
+  color: hsl(var(--background));
+}
+
+.wt-btn-primary:hover {
+  background: hsl(var(--foreground) / 0.85);
+}
+
+.wt-scroll-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 1.5rem;
+  translate: -50% 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+}
+
+.wt-scroll-hint::after {
+  content: "";
+  display: block;
+  width: 1px;
+  height: 2.25rem;
+  margin: 0.6rem auto 0;
+  background: linear-gradient(hsl(var(--accent-foreground)), transparent);
+  animation: wt-hint 1.8s ease-in-out infinite;
+  transform-origin: top;
+}
+
+@keyframes wt-hint {
+  0% {
+    transform: scaleY(0);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+  100% {
+    transform: scaleY(1);
+    opacity: 0;
+  }
+}
+
+.wt-chapter {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  height: calc(var(--wt-len, 1.4) * 100svh);
+}
+
+.wt-card {
+  position: sticky;
+  bottom: 1rem;
+  margin: 0 1rem 1rem;
+  padding: 1.1rem 1.2rem 1rem;
+  border: 1px solid hsl(var(--foreground) / 0.12);
+  border-radius: 0.5rem;
+  background: rgb(4 9 20 / 0.78);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 24px 60px -24px rgb(0 0 0 / 0.8);
+}
+
+@media (width >= 64rem), (orientation: landscape) and (width >= 40rem) {
+  .wt-chapter {
+    justify-content: flex-start;
+  }
+
+  .wt-card h2 {
+    font-size: 1.6rem;
+  }
+
+  .wt-card p:not(.wt-card-kicker) {
+    font-size: 0.9375rem;
+    line-height: 1.6;
+  }
+
+  .wt-card {
+    top: 30svh;
+    bottom: auto;
+    width: min(25rem, 38vw);
+    margin: 0 0 0 max(1rem, calc((100vw - 72rem) / 2 + 1rem));
+  }
+}
+
+.wt-card h2 {
+  margin-top: 0.4rem;
+  font-family: var(--font-heading);
+  font-size: 1.3rem;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+
+.wt-card p:not(.wt-card-kicker) {
+  margin-top: 0.5rem;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: hsl(var(--foreground) / 0.8);
+}
+
+.wt-card :is(code, kbd) {
+  padding: 0.05em 0.35em;
+  border: 1px solid hsl(var(--foreground) / 0.12);
+  border-radius: 0.25rem;
+  background: hsl(var(--foreground) / 0.06);
+  font-family: var(--font-mono);
+  font-size: 0.82em;
+  white-space: nowrap;
+}
+
+.wt-card-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.9rem;
+  font-family: var(--font-mono);
+  font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--color-foreground);
-}
-.prose-doc .prereqs a {
-  color: var(--color-foreground);
-  text-decoration-color: color-mix(in oklab, var(--color-foreground) 45%, transparent);
+  color: hsl(var(--accent-foreground));
 }
 
-/* Code spans inside admonitions are slightly smaller so they don't dominate. */
-.prose-doc .concept code,
-.prose-doc details.deep-dive code,
-.prose-doc .prereqs code {
-  font-size: 0.82em;
+.wt-card-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.wt-still {
+  display: none;
+}
+
+/* Scene mode: one caption at a time, pinned beside the scene (below it on phones). The
+   scroll script sets --wt-o and --wt-y per caption from the scroll position. The
+   chapter articles are then only scroll length, so clicks pass through to the stage. */
+.wt[data-mode="scene"] .wt-chapters {
+  pointer-events: none;
+  /* Keeps the stage pinned until the last chapter's caption has gone. */
+  padding-bottom: 50svh;
+}
+
+.wt[data-mode="scene"] .wt-hero-inner {
+  pointer-events: auto;
+}
+
+.wt[data-mode="scene"] .wt-card {
+  pointer-events: auto;
+  position: fixed;
+  z-index: 2;
+  top: auto;
+  bottom: calc(0.75rem + env(safe-area-inset-bottom));
+  left: 0.75rem;
+  right: 0.75rem;
+  width: auto;
+  margin: 0;
+  opacity: var(--wt-o, 0);
+  translate: 0 var(--wt-y, 0px);
+  visibility: hidden;
+}
+
+@media (width >= 64rem), (orientation: landscape) and (width >= 40rem) {
+  .wt[data-mode="scene"] .wt-card {
+    top: 50%;
+    bottom: auto;
+    right: auto;
+    left: max(1rem, calc((100vw - 72rem) / 2 + 1rem));
+    width: min(25rem, 34vw);
+    translate: 0 calc(-50% + var(--wt-y, 0px));
+  }
+}
+
+/* Scene mode, stacked (phones, tablets in portrait): the caption sits under the scene,
+   no wider than a comfortable line, and the chapter ticks run under the header. */
+@media (width < 64rem) and (orientation: portrait), (width < 40rem) {
+  .wt[data-mode="scene"] .wt-card {
+    max-width: 34rem;
+    margin-inline: auto;
+  }
+
+  .wt[data-mode="scene"] .wt-progress {
+    display: block;
+    top: calc(4.6rem + env(safe-area-inset-top));
+    bottom: auto;
+    left: 50%;
+    translate: -50% 0;
+    width: min(34rem, 100% - 2rem);
+  }
+
+  .wt-progress :is(.wt-progress-name, .wt-note) {
+    display: none;
+  }
+
+  .wt-progress a {
+    height: 0.75rem;
+  }
+
+  .wt-progress a::before,
+  .wt-progress a::after {
+    inset: auto 0 0.25rem;
+  }
+
+  /* The hero's text sits over the village: darken behind it while the hero shows. */
+  .wt-shade::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      to top,
+      rgb(2 5 12 / 0.95),
+      rgb(2 5 12 / 0.84) 40%,
+      rgb(2 5 12 / 0.5) 60%,
+      transparent 76%
+    );
+    opacity: var(--wt-hero-o, 1);
+  }
+
+  /* Short phones: a tighter caption, so the scene keeps at least half the screen. */
+  @media (height < 44rem) {
+    .wt[data-mode="scene"] .wt-card {
+      padding: 0.8rem 0.95rem 0.75rem;
+    }
+
+    .wt-card h2 {
+      font-size: 1.15rem;
+    }
+
+    .wt-card p:not(.wt-card-kicker) {
+      font-size: 0.8125rem;
+      line-height: 1.45;
+    }
+
+    .wt-card-link {
+      margin-top: 0.55rem;
+    }
+  }
+}
+
+/* Scene mode, short landscape screens (phones on their side): a compact caption under
+   the header, the ticks at the bottom, and a smaller hero. */
+@media (orientation: landscape) and (width >= 40rem) and (height < 32rem) {
+  .wt[data-mode="scene"] .wt-card {
+    top: calc(4.5rem + env(safe-area-inset-top));
+    max-height: calc(100svh - 7.25rem);
+    overflow-y: auto;
+    padding: 0.75rem 0.9rem;
+    translate: 0 var(--wt-y, 0px);
+  }
+
+  .wt-card h2 {
+    font-size: 1.1rem;
+  }
+
+  .wt-card p:not(.wt-card-kicker) {
+    font-size: 0.8125rem;
+    line-height: 1.45;
+  }
+
+  .wt-card-link {
+    margin-top: 0.5rem;
+  }
+
+  .wt-progress {
+    bottom: 0.9rem;
+  }
+
+  .wt-progress :is(.wt-progress-name, .wt-note) {
+    display: none;
+  }
+
+  .wt-stamp,
+  .wt-keys {
+    bottom: 0.75rem;
+  }
+
+  .wt-hero {
+    align-items: flex-end;
+    padding-top: 4.5rem;
+    padding-bottom: 1.25rem;
+  }
+
+  .wt-hero h1 {
+    margin-top: 0.5rem;
+    font-size: 1.9rem;
+  }
+
+  .wt-lede {
+    margin-top: 0.6rem;
+    font-size: 0.95rem;
+    line-height: 1.45;
+  }
+
+  .wt-ctas {
+    margin-top: 1rem;
+  }
+
+  .wt-scroll-hint {
+    display: none;
+  }
+}
+
+/* Static mode: banner, then each chapter as a still beside its text. */
+.wt[data-mode="static"] .wt-stage {
+  position: relative;
+}
+
+.wt[data-mode="static"] :is(.wt-view, .wt-hud, .wt-progress) {
+  display: none;
+}
+
+.wt[data-mode="static"] .wt-poster {
+  opacity: 0.45;
+}
+
+@media (width >= 48rem) {
+  .wt[data-mode="static"] .wt-poster {
+    opacity: 0.8;
+  }
+}
+
+.wt[data-mode="static"] .wt-chapters {
+  padding-bottom: 3rem;
+}
+
+.wt[data-mode="static"] .wt-chapter {
+  display: grid;
+  gap: 1rem;
+  height: auto;
+  max-width: 72rem;
+  margin-inline: auto;
+  padding: 2.5rem 1rem 0;
+}
+
+.wt[data-mode="static"] .wt-still {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid hsl(var(--foreground) / 0.1);
+  border-radius: 0.5rem;
+  background: #050a14;
+}
+
+.wt[data-mode="static"] .wt-card {
+  position: static;
+  width: auto;
+  margin: 0;
+}
+
+@media (width >= 48rem) {
+  .wt[data-mode="static"] .wt-chapter {
+    grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+    align-items: center;
+    gap: 2rem;
+  }
+}
+
+/* Text placed in the 3D scene: screen-space labels (scene/labels.ts) that follow points
+   in the scene, on whole pixels at a fixed size. */
+.wt-labels {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.wt-leaders {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  stroke-width: 1;
+}
+
+.wt3d {
+  position: absolute;
+  top: 0;
+  left: 0;
+  visibility: hidden;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: #e6edf7;
+  white-space: nowrap;
+  will-change: transform, opacity;
+}
+
+/* Detect: a class label on top of its box, in the box's colour. */
+.wt3d-det {
+  --c: #ff4f6a;
+  padding: 2px 6px;
+  border-radius: 2px 2px 2px 0;
+  background: color-mix(in oklab, var(--c) 82%, black);
+  color: #04070f;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.wt3d-det b {
+  margin-left: 4px;
+  font-weight: 500;
+  opacity: 0.75;
+}
+
+.wt3d-cat-resource {
+  --c: #3fd27a;
+}
+.wt3d-cat-animal {
+  --c: #ffae42;
+}
+.wt3d-cat-building {
+  --c: #5b8dff;
+}
+.wt3d-cat-defense {
+  --c: #b36bff;
+}
+
+.wt3d-count {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  color: #9fb6d8;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.wt3d-count b {
+  min-width: 2ch;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: #e6f0ff;
+  text-align: right;
+}
+
+/* Track: the ID over each villager's box. */
+.wt3d-tag {
+  padding: 1px 6px;
+  border: 1px solid rgb(124 196 255 / 0.7);
+  border-radius: 3px;
+  background: rgb(2 6 16 / 0.85);
+  color: #a8d8ff;
+  font-size: 11.5px;
+}
+
+/* Act: the rails' names, and the first key presses landing on the glass. */
+.wt3d-rail {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8fb8ea;
+}
+
+.wt3d-keyseq {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border: 1px solid rgb(124 196 255 / 0.55);
+  border-radius: 6px;
+  background: rgb(2 6 16 / 0.9);
+  box-shadow: 0 0 28px -8px rgb(59 130 246 / 0.7);
+  font-size: 12px;
+  color: #9fb6d8;
+}
+
+.wt3d-keyseq-step {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  transition: color 120ms;
+}
+
+.wt3d-keyseq kbd {
+  display: grid;
+  place-items: center;
+  min-width: 1.75rem;
+  height: 1.75rem;
+  border: 1px solid rgb(124 196 255 / 0.75);
+  border-bottom-width: 3px;
+  border-radius: 0.3rem;
+  background: rgb(4 10 24 / 0.95);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: #e6f0ff;
+  transition:
+    translate 90ms,
+    border-bottom-width 90ms,
+    background-color 90ms;
+}
+
+.wt3d-keyseq-step.is-down {
+  color: #e6f0ff;
+}
+
+.wt3d-keyseq-step.is-down kbd {
+  border-bottom-width: 1px;
+  translate: 0 2px;
+  background: rgb(37 99 235 / 0.4);
+}
+
+.wt3d-keyseq-arrow {
+  color: #5b7bb0;
+}
+
+/* Detect: the name of each plate in the detector stack. */
+.wt3d-layer {
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  color: #9fb6d8;
+}
+
+.wt3d-layer i {
+  font-style: normal;
+}
+
+.wt3d-layer span {
+  margin-right: 6px;
+  color: #e6f0ff;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* Read the HUD: one chip per field. */
+.wt3d-chip {
+  display: grid;
+  justify-items: center;
+  min-width: 4.6rem;
+  padding: 4px 10px 5px;
+  border: 1px solid rgb(255 215 0 / 0.6);
+  border-radius: 4px;
+  background: rgb(4 8 18 / 0.9);
+  line-height: 1.2;
+}
+
+.wt3d-chip span {
+  color: rgb(255 215 0 / 0.85);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+}
+
+.wt3d-chip b {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.wt3d-card {
+  padding: 10px 14px 12px;
+  border: 1px solid rgb(124 196 255 / 0.4);
+  border-radius: 6px;
+  background: rgb(4 9 20 / 0.92);
+  box-shadow: 0 12px 40px -12px rgb(0 0 0 / 0.8), 0 0 32px -10px rgb(59 130 246 / 0.45);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.wt3d-card-title {
+  margin-bottom: 6px;
+  color: #7cc4ff;
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.wt3d-card ol {
+  list-style: none;
+  display: grid;
+  gap: 4px;
+}
+
+.wt3d-goals ol {
+  list-style: decimal inside;
+  white-space: normal;
+  max-width: 13rem;
+}
+
+/* Decide: the three roles. */
+.wt3d-role {
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.wt3d-role-name {
+  font-family: var(--font-heading);
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.wt3d-role-model {
+  color: #7cc4ff;
+}
+
+.wt3d-role-when {
+  max-width: 11rem;
+  white-space: normal;
+  color: #8a9ab3;
+}
+
+.wt3d-role.is-idle .wt3d-role-model {
+  color: #8a9ab3;
+}
+
+/* Decide: the action catalog. */
+.wt3d-action {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  width: 16.5rem;
+  padding: 6px 10px;
+  border: 1px solid rgb(124 196 255 / 0.32);
+  border-radius: 4px;
+  background: rgb(4 9 20 / 0.9);
+  font-size: 12.5px;
+  transition:
+    border-color 200ms,
+    background-color 200ms,
+    box-shadow 200ms;
+}
+
+.wt3d-action span {
+  color: #8a9ab3;
+  font-size: 11px;
+}
+
+.wt3d-action.is-filtered {
+  border-color: rgb(255 79 106 / 0.45);
+  text-decoration: line-through;
+  text-decoration-color: rgb(255 79 106 / 0.85);
+}
+
+.wt3d-action.is-filtered span {
+  text-decoration: none;
+  color: #ff8a9b;
+}
+
+.wt3d-action.is-chosen {
+  border-color: #7cc4ff;
+  background: rgb(37 99 235 / 0.38);
+  box-shadow: 0 0 28px rgb(59 130 246 / 0.65);
+}
+
+/* Act: the game's cursor; its tip sits on the point it hovers. */
+.wt3d-cursor svg {
+  display: block;
+  width: 28px;
+  height: 28px;
+  fill: #fff;
+  stroke: #02050c;
+  stroke-width: 1.5;
+  filter: drop-shadow(0 2px 4px rgb(0 0 0 / 0.6));
+  transition: scale 120ms;
+  transform-origin: 4px 3px;
+}
+
+.wt3d-cursor.is-click svg {
+  scale: 0.82;
+}
+
+/* Stacked layouts and short landscape screens: fewer and smaller labels, so the small
+   view stays readable. */
+@media (width < 64rem) and (orientation: portrait), (width < 40rem), (height < 32rem) {
+  .wt3d.is-minor,
+  .wt3d-layer i,
+  .wt3d-role-when,
+  .wt3d-goals {
+    display: none;
+  }
+
+  .wt3d-det,
+  .wt3d-layer,
+  .wt3d-tag {
+    font-size: 10px;
+  }
+
+  .wt3d-role-name {
+    font-size: 13px;
+  }
+
+  .wt3d-role {
+    font-size: 10px;
+  }
+
+  .wt3d-action {
+    width: 10.5rem;
+    padding: 2px 6px;
+    font-size: 10px;
+    line-height: 1.25;
+  }
+
+  .wt3d-action span {
+    display: none;
+  }
+
+  .wt3d-count b {
+    font-size: 20px;
+  }
+
+  .wt3d-chip {
+    min-width: 0;
+    padding: 2px 5px;
+  }
+
+  .wt3d-chip span {
+    display: none;
+  }
+
+  .wt3d-chip b {
+    font-size: 12px;
+  }
+
+  .wt3d-count span {
+    display: none;
+  }
+}
+
+/* Verify: the action ledger. */
+.wt3d-ledger li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  transition: opacity 200ms;
+}
+
+.wt3d-ledger li b {
+  font-weight: 500;
+  color: #8a9ab3;
+}
+
+.wt3d-ledger li.is-current b {
+  color: #ffd166;
+}
+
+.wt3d-ledger li.is-done b {
+  color: #3fd27a;
+}
+
+.wt3d-ledger-op {
+  margin-bottom: 6px;
+}
+
+/* Lower home page sections fade up as they enter, where scroll-driven animations exist. */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .reveal {
+      animation: reveal-up linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 40%;
+    }
+  }
+}
+
+@keyframes reveal-up {
+  from {
+    opacity: 0;
+    translate: 0 2.5rem;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
 }

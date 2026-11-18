@@ -1,0 +1,2076 @@
+{
+ "frame": {
+  "width": 3024,
+  "height": 1672,
+  "run": "2026_08_21_2__20260821_190313_00100"
+ },
+ "source": "detector",
+ "model": "aoe2_yolo_v12_nms736",
+ "reviewed_boxes": 80,
+ "classes": {
+  "villager": 37,
+  "tree": 10,
+  "farm": 9,
+  "house": 6,
+  "gold_mine": 5,
+  "deer": 4,
+  "stone_mine": 4,
+  "boar": 2,
+  "lumber_camp": 1,
+  "mill": 1,
+  "mining_camp": 1,
+  "tower": 1,
+  "town_center": 1
+ },
+ "entities": [
+  {
+   "id": "boar_0",
+   "cls": "boar",
+   "cat": "animal",
+   "conf": 0.902,
+   "x": 0.14969,
+   "y": 0.20372,
+   "w": 0.01978,
+   "h": 0.02309
+  },
+  {
+   "id": "boar_1",
+   "cls": "boar",
+   "cat": "animal",
+   "conf": 0.879,
+   "x": 0.13638,
+   "y": 0.18612,
+   "w": 0.0159,
+   "h": 0.02672
+  },
+  {
+   "id": "deer_0",
+   "cls": "deer",
+   "cat": "animal",
+   "conf": 0.916,
+   "x": 0.06858,
+   "y": 0.11238,
+   "w": 0.01034,
+   "h": 0.01875
+  },
+  {
+   "id": "deer_1",
+   "cls": "deer",
+   "cat": "animal",
+   "conf": 0.899,
+   "x": 0.07903,
+   "y": 0.13476,
+   "w": 0.0116,
+   "h": 0.01983
+  },
+  {
+   "id": "deer_2",
+   "cls": "deer",
+   "cat": "animal",
+   "conf": 0.822,
+   "x": 0.05277,
+   "y": 0.14572,
+   "w": 0.01184,
+   "h": 0.02363
+  },
+  {
+   "id": "deer_3",
+   "cls": "deer",
+   "cat": "animal",
+   "conf": 0.61,
+   "x": 0.20104,
+   "y": 0.08772,
+   "w": 0.0103,
+   "h": 0.02994
+  },
+  {
+   "id": "farm_0",
+   "cls": "farm",
+   "cat": "building",
+   "conf": 0.94,
+   "x": 0.45093,
+   "y": 0.1183,
+   "w": 0.09667,
+   "h": 0.099
+  },
+  {
+   "id": "farm_1",
+   "cls": "farm",
+   "cat": "building",
+   "conf": 0.932,
+   "x": 0.27653,
+   "y": 0.41974,
+   "w": 0.09137,
+   "h": 0.09984
+  },
+  {
+   "id": "farm_2",
+   "cls": "farm",
+   "cat": "building",
+   "conf": 0.925,
+   "x": 0.3892,
+   "y": 0.5224,
+   "w": 0.08548,
+   "h": 0.09739
+  },
+  {
+   "id": "farm_3",
+   "cls": "farm",
+   "cat": "building",
+   "conf": 0.923,
+   "x": 0.46626,
+   "y": 0.24846,
+   "w": 0.08973,
+   "h": 0.1002
+  },
+  {
+   "id": "farm_4",
+   "cls": "farm",
+   "cat": "building",
+   "conf": 0.921,
+   "x": 0.35944,
+   "y": 0.40403,
+   "w": 0.08765,
+   "h": 0.10005
+  },
+  {
+   "id": "farm_5",
+   "cls": "farm",
+   "cat": "building",
+   "conf": 0.919,
+   "x": 0.32483,
+   "y": 0.20517,
+   "w": 0.08961,
+   "h": 0.09678
+  },
+  {
+   "id": "farm_6",
+   "cls": "farm",
+   "cat": "building",
+   "conf": 0.914,
+   "x": 0.62957,
+   "y": 0.42104,
+   "w": 0.08707,
+   "h": 0.09967
+  },
+  {
+   "id": "farm_7",
+   "cls": "farm",
+   "cat": "building",
+   "conf": 0.888,
+   "x": 0.61488,
+   "y": 0.56387,
+   "w": 0.07434,
+   "h": 0.08069
+  },
+  {
+   "id": "farm_8",
+   "cls": "farm",
+   "cat": "building",
+   "conf": 0.822,
+   "x": 0.51423,
+   "y": 0.34083,
+   "w": 0.09936,
+   "h": 0.11234
+  },
+  {
+   "id": "gold_mine_0",
+   "cls": "gold_mine",
+   "cat": "resource",
+   "conf": 0.874,
+   "x": 0.0,
+   "y": 0.60388,
+   "w": 0.03687,
+   "h": 0.04738
+  },
+  {
+   "id": "gold_mine_1",
+   "cls": "gold_mine",
+   "cat": "resource",
+   "conf": 0.831,
+   "x": 0.72207,
+   "y": 0.31163,
+   "w": 0.03401,
+   "h": 0.06019
+  },
+  {
+   "id": "gold_mine_2",
+   "cls": "gold_mine",
+   "cat": "resource",
+   "conf": 0.783,
+   "x": 0.76661,
+   "y": 0.34345,
+   "w": 0.0295,
+   "h": 0.03818
+  },
+  {
+   "id": "gold_mine_3",
+   "cls": "gold_mine",
+   "cat": "resource",
+   "conf": 0.768,
+   "x": 0.6924,
+   "y": 0.31079,
+   "w": 0.03619,
+   "h": 0.04405
+  },
+  {
+   "id": "gold_mine_4",
+   "cls": "gold_mine",
+   "cat": "resource",
+   "conf": 0.56,
+   "x": 0.74886,
+   "y": 0.32888,
+   "w": 0.02191,
+   "h": 0.03489
+  },
+  {
+   "id": "house_0",
+   "cls": "house",
+   "cat": "building",
+   "conf": 0.949,
+   "x": 0.59633,
+   "y": 0.16426,
+   "w": 0.05738,
+   "h": 0.098
+  },
+  {
+   "id": "house_1",
+   "cls": "house",
+   "cat": "building",
+   "conf": 0.944,
+   "x": 0.40169,
+   "y": 0.27994,
+   "w": 0.06874,
+   "h": 0.10499
+  },
+  {
+   "id": "house_2",
+   "cls": "house",
+   "cat": "building",
+   "conf": 0.944,
+   "x": 0.4648,
+   "y": 0.71424,
+   "w": 0.06493,
+   "h": 0.09594
+  },
+  {
+   "id": "house_3",
+   "cls": "house",
+   "cat": "building",
+   "conf": 0.914,
+   "x": 0.5818,
+   "y": 0.46906,
+   "w": 0.05628,
+   "h": 0.09176
+  },
+  {
+   "id": "house_4",
+   "cls": "house",
+   "cat": "building",
+   "conf": 0.913,
+   "x": 0.56094,
+   "y": 0.40012,
+   "w": 0.06619,
+   "h": 0.0955
+  },
+  {
+   "id": "house_5",
+   "cls": "house",
+   "cat": "building",
+   "conf": 0.878,
+   "x": 0.60003,
+   "y": 0.59978,
+   "w": 0.05737,
+   "h": 0.0955
+  },
+  {
+   "id": "lumber_camp_0",
+   "cls": "lumber_camp",
+   "cat": "building",
+   "conf": 0.912,
+   "x": 0.40638,
+   "y": 0.18224,
+   "w": 0.05733,
+   "h": 0.0864
+  },
+  {
+   "id": "mill_0",
+   "cls": "mill",
+   "cat": "building",
+   "conf": 0.901,
+   "x": 0.56098,
+   "y": 0.53447,
+   "w": 0.06189,
+   "h": 0.1427
+  },
+  {
+   "id": "mining_camp_0",
+   "cls": "mining_camp",
+   "cat": "building",
+   "conf": 0.913,
+   "x": 0.59836,
+   "y": 0.28033,
+   "w": 0.05832,
+   "h": 0.07257
+  },
+  {
+   "id": "stone_mine_0",
+   "cls": "stone_mine",
+   "cat": "resource",
+   "conf": 0.839,
+   "x": 0.78665,
+   "y": 0.19781,
+   "w": 0.02803,
+   "h": 0.0287
+  },
+  {
+   "id": "stone_mine_1",
+   "cls": "stone_mine",
+   "cat": "resource",
+   "conf": 0.836,
+   "x": 0.23728,
+   "y": 0.28363,
+   "w": 0.03473,
+   "h": 0.04389
+  },
+  {
+   "id": "stone_mine_2",
+   "cls": "stone_mine",
+   "cat": "resource",
+   "conf": 0.808,
+   "x": 0.2031,
+   "y": 0.29491,
+   "w": 0.02365,
+   "h": 0.03404
+  },
+  {
+   "id": "stone_mine_3",
+   "cls": "stone_mine",
+   "cat": "resource",
+   "conf": 0.701,
+   "x": 0.22229,
+   "y": 0.28347,
+   "w": 0.01989,
+   "h": 0.02584
+  },
+  {
+   "id": "tower_0",
+   "cls": "tower",
+   "cat": "defense",
+   "conf": 0.905,
+   "x": 0.5513,
+   "y": 0.26993,
+   "w": 0.02328,
+   "h": 0.07762
+  },
+  {
+   "id": "town_center_0",
+   "cls": "town_center",
+   "cat": "building",
+   "conf": 0.942,
+   "x": 0.43436,
+   "y": 0.37556,
+   "w": 0.13136,
+   "h": 0.18265
+  },
+  {
+   "id": "tree_0",
+   "cls": "tree",
+   "cat": "resource",
+   "conf": 0.938,
+   "x": 0.75099,
+   "y": 0.56824,
+   "w": 0.14295,
+   "h": 0.17488
+  },
+  {
+   "id": "tree_1",
+   "cls": "tree",
+   "cat": "resource",
+   "conf": 0.931,
+   "x": 0.47425,
+   "y": 0.84358,
+   "w": 0.1996,
+   "h": 0.15184
+  },
+  {
+   "id": "tree_2",
+   "cls": "tree",
+   "cat": "resource",
+   "conf": 0.926,
+   "x": 0.00581,
+   "y": 0.21746,
+   "w": 0.11361,
+   "h": 0.20706
+  },
+  {
+   "id": "tree_3",
+   "cls": "tree",
+   "cat": "resource",
+   "conf": 0.908,
+   "x": 0.66304,
+   "y": 0.66737,
+   "w": 0.14917,
+   "h": 0.24995
+  },
+  {
+   "id": "tree_4",
+   "cls": "tree",
+   "cat": "resource",
+   "conf": 0.906,
+   "x": 0.83479,
+   "y": 0.20187,
+   "w": 0.02632,
+   "h": 0.08449
+  },
+  {
+   "id": "tree_5",
+   "cls": "tree",
+   "cat": "resource",
+   "conf": 0.881,
+   "x": 0.92479,
+   "y": 0.27075,
+   "w": 0.07521,
+   "h": 0.23519
+  },
+  {
+   "id": "tree_6",
+   "cls": "tree",
+   "cat": "resource",
+   "conf": 0.832,
+   "x": 0.87186,
+   "y": 0.25626,
+   "w": 0.05376,
+   "h": 0.10161
+  },
+  {
+   "id": "tree_7",
+   "cls": "tree",
+   "cat": "resource",
+   "conf": 0.828,
+   "x": 0.07178,
+   "y": 0.2204,
+   "w": 0.04099,
+   "h": 0.10675
+  },
+  {
+   "id": "tree_8",
+   "cls": "tree",
+   "cat": "resource",
+   "conf": 0.701,
+   "x": 0.80082,
+   "y": 0.215,
+   "w": 0.03469,
+   "h": 0.08247
+  },
+  {
+   "id": "tree_9",
+   "cls": "tree",
+   "cat": "resource",
+   "conf": 0.584,
+   "x": 0.00011,
+   "y": 0.40951,
+   "w": 0.0583,
+   "h": 0.14919
+  },
+  {
+   "id": "villager_0",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.901,
+   "x": 0.50985,
+   "y": 0.27644,
+   "w": 0.01089,
+   "h": 0.02673
+  },
+  {
+   "id": "villager_1",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.877,
+   "x": 0.21664,
+   "y": 0.57094,
+   "w": 0.01015,
+   "h": 0.02606
+  },
+  {
+   "id": "villager_2",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.874,
+   "x": 0.31915,
+   "y": 0.45088,
+   "w": 0.00932,
+   "h": 0.02605
+  },
+  {
+   "id": "villager_3",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.869,
+   "x": 0.19634,
+   "y": 0.55011,
+   "w": 0.01046,
+   "h": 0.02534
+  },
+  {
+   "id": "villager_4",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.866,
+   "x": 0.18647,
+   "y": 0.26915,
+   "w": 0.01025,
+   "h": 0.02551
+  },
+  {
+   "id": "villager_5",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.859,
+   "x": 0.27208,
+   "y": 0.68662,
+   "w": 0.01057,
+   "h": 0.02944
+  },
+  {
+   "id": "villager_6",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.857,
+   "x": 0.36606,
+   "y": 0.06554,
+   "w": 0.00981,
+   "h": 0.02751
+  },
+  {
+   "id": "villager_7",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.852,
+   "x": 0.48122,
+   "y": 0.16276,
+   "w": 0.00869,
+   "h": 0.02239
+  },
+  {
+   "id": "villager_8",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.851,
+   "x": 0.56026,
+   "y": 0.34703,
+   "w": 0.00847,
+   "h": 0.02788
+  },
+  {
+   "id": "villager_9",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.846,
+   "x": 0.38411,
+   "y": 0.09498,
+   "w": 0.01014,
+   "h": 0.03058
+  },
+  {
+   "id": "villager_10",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.84,
+   "x": 0.66197,
+   "y": 0.32091,
+   "w": 0.00941,
+   "h": 0.02633
+  },
+  {
+   "id": "villager_11",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.839,
+   "x": 0.26729,
+   "y": 0.08038,
+   "w": 0.00903,
+   "h": 0.02803
+  },
+  {
+   "id": "villager_12",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.838,
+   "x": 0.68128,
+   "y": 0.30883,
+   "w": 0.01021,
+   "h": 0.02219
+  },
+  {
+   "id": "villager_13",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.838,
+   "x": 0.4165,
+   "y": 0.43552,
+   "w": 0.00794,
+   "h": 0.02225
+  },
+  {
+   "id": "villager_14",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.833,
+   "x": 0.40728,
+   "y": 0.1484,
+   "w": 0.0104,
+   "h": 0.02447
+  },
+  {
+   "id": "villager_15",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.824,
+   "x": 0.66519,
+   "y": 0.65903,
+   "w": 0.00861,
+   "h": 0.02542
+  },
+  {
+   "id": "villager_16",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.823,
+   "x": 0.62312,
+   "y": 0.5769,
+   "w": 0.00897,
+   "h": 0.02298
+  },
+  {
+   "id": "villager_17",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.812,
+   "x": 0.43527,
+   "y": 0.53843,
+   "w": 0.00864,
+   "h": 0.01979
+  },
+  {
+   "id": "villager_18",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.807,
+   "x": 0.46053,
+   "y": 0.55646,
+   "w": 0.01018,
+   "h": 0.02165
+  },
+  {
+   "id": "villager_19",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.803,
+   "x": 0.36882,
+   "y": 0.2081,
+   "w": 0.0093,
+   "h": 0.02581
+  },
+  {
+   "id": "villager_20",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.801,
+   "x": 0.6369,
+   "y": 0.53543,
+   "w": 0.0088,
+   "h": 0.0271
+  },
+  {
+   "id": "villager_21",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.789,
+   "x": 0.39673,
+   "y": 0.13374,
+   "w": 0.01005,
+   "h": 0.02531
+  },
+  {
+   "id": "villager_22",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.76,
+   "x": 0.76087,
+   "y": 0.35382,
+   "w": 0.00971,
+   "h": 0.02308
+  },
+  {
+   "id": "villager_23",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.744,
+   "x": 0.64268,
+   "y": 0.59065,
+   "w": 0.00812,
+   "h": 0.02223
+  },
+  {
+   "id": "villager_24",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.728,
+   "x": 0.65146,
+   "y": 0.6113,
+   "w": 0.00676,
+   "h": 0.01892
+  },
+  {
+   "id": "villager_25",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.712,
+   "x": 0.77595,
+   "y": 0.65169,
+   "w": 0.00892,
+   "h": 0.02728
+  },
+  {
+   "id": "villager_26",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.706,
+   "x": 0.76198,
+   "y": 0.67544,
+   "w": 0.01046,
+   "h": 0.02444
+  },
+  {
+   "id": "villager_27",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.677,
+   "x": 0.47604,
+   "y": 0.49605,
+   "w": 0.00994,
+   "h": 0.0236
+  },
+  {
+   "id": "villager_28",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.676,
+   "x": 0.53922,
+   "y": 0.4025,
+   "w": 0.0108,
+   "h": 0.01653
+  },
+  {
+   "id": "villager_29",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.67,
+   "x": 0.46673,
+   "y": 0.51078,
+   "w": 0.00825,
+   "h": 0.02095
+  },
+  {
+   "id": "villager_30",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.64,
+   "x": 0.29761,
+   "y": 0.05944,
+   "w": 0.00935,
+   "h": 0.02655
+  },
+  {
+   "id": "villager_31",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.639,
+   "x": 0.75417,
+   "y": 0.69329,
+   "w": 0.00966,
+   "h": 0.02687
+  },
+  {
+   "id": "villager_32",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.622,
+   "x": 0.75779,
+   "y": 0.7194,
+   "w": 0.00874,
+   "h": 0.02834
+  },
+  {
+   "id": "villager_33",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.538,
+   "x": 0.70594,
+   "y": 0.73249,
+   "w": 0.00935,
+   "h": 0.02904
+  },
+  {
+   "id": "villager_34",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.481,
+   "x": 0.22658,
+   "y": 0.30526,
+   "w": 0.0078,
+   "h": 0.0244
+  },
+  {
+   "id": "villager_35",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.438,
+   "x": 0.29351,
+   "y": 0.06195,
+   "w": 0.00886,
+   "h": 0.02659
+  },
+  {
+   "id": "villager_36",
+   "cls": "villager",
+   "cat": "unit",
+   "conf": 0.359,
+   "x": 0.76233,
+   "y": 0.70194,
+   "w": 0.00937,
+   "h": 0.02008
+  }
+ ],
+ "hud": {
+  "readings": {
+   "wood": 2249,
+   "food": 2610,
+   "gold": 910,
+   "stone": 295,
+   "population": "35/35",
+   "age": "Feudal Age",
+   "idle_count": 0,
+   "villagers": 34
+  },
+  "fields": {
+   "wood": [
+    0.02646,
+    0.01435,
+    0.05225,
+    0.04067
+   ],
+   "food": [
+    0.07804,
+    0.01435,
+    0.10384,
+    0.04067
+   ],
+   "gold": [
+    0.12831,
+    0.01435,
+    0.1541,
+    0.04067
+   ],
+   "stone": [
+    0.18056,
+    0.01435,
+    0.20635,
+    0.04067
+   ],
+   "population": [
+    0.23181,
+    0.01435,
+    0.26455,
+    0.04067
+   ],
+   "age": [
+    0.33069,
+    0.01077,
+    0.44974,
+    0.04426
+   ]
+  }
+ },
+ "world": {
+  "tile": 96,
+  "origin": [
+   1512,
+   836
+  ],
+  "items": [
+   {
+    "id": "gold_mine_0",
+    "sprite": "gold_0",
+    "x": 94,
+    "y": 1101,
+    "score": 0.935
+   },
+   {
+    "id": "gold_mine_1",
+    "sprite": "gold_1",
+    "x": 2232,
+    "y": 596,
+    "score": 0.996
+   },
+   {
+    "id": "gold_mine_2",
+    "sprite": "gold_1",
+    "x": 2328,
+    "y": 596,
+    "score": 0.975
+   },
+   {
+    "id": "gold_mine_3",
+    "sprite": "gold_0",
+    "x": 2136,
+    "y": 551,
+    "score": 0.948
+   },
+   {
+    "id": "gold_mine_4",
+    "sprite": "gold_3",
+    "x": 2280,
+    "y": 572,
+    "score": 0.99
+   },
+   {
+    "id": "house_0",
+    "sprite": "house_0",
+    "x": 1896,
+    "y": 404,
+    "score": 0.993
+   },
+   {
+    "id": "house_1",
+    "sprite": "house_2",
+    "x": 1320,
+    "y": 596,
+    "score": 0.992
+   },
+   {
+    "id": "house_2",
+    "sprite": "house_0",
+    "x": 1512,
+    "y": 1316,
+    "score": 0.994
+   },
+   {
+    "id": "house_3",
+    "sprite": "house_0",
+    "x": 1848,
+    "y": 908,
+    "score": 0.977
+   },
+   {
+    "id": "house_4",
+    "sprite": "house_2",
+    "x": 1800,
+    "y": 788,
+    "score": 0.972
+   },
+   {
+    "id": "house_5",
+    "sprite": "house_2",
+    "x": 1896,
+    "y": 1124,
+    "score": 0.993
+   },
+   {
+    "id": "lumber_camp_0",
+    "sprite": "lumber_camp",
+    "x": 1320,
+    "y": 404,
+    "score": 0.993
+   },
+   {
+    "id": "mill_0",
+    "sprite": "mill",
+    "x": 1800,
+    "y": 1076,
+    "score": 0.845
+   },
+   {
+    "id": "mining_camp_0",
+    "sprite": "mining_camp",
+    "x": 1896,
+    "y": 548,
+    "score": 0.994
+   },
+   {
+    "id": "stone_mine_0",
+    "sprite": "stone_0",
+    "x": 2424,
+    "y": 356,
+    "score": 0.997
+   },
+   {
+    "id": "stone_mine_1",
+    "sprite": "stone_3",
+    "x": 744,
+    "y": 524,
+    "score": 0.999
+   },
+   {
+    "id": "stone_mine_2",
+    "sprite": "stone_3",
+    "x": 637,
+    "y": 475,
+    "score": 0.933
+   },
+   {
+    "id": "tower_0",
+    "sprite": "outpost",
+    "x": 1704,
+    "y": 572,
+    "score": 0.994
+   },
+   {
+    "id": "town_center_0",
+    "sprite": "town_center",
+    "x": 1512,
+    "y": 836,
+    "score": 0.955
+   },
+   {
+    "id": "tree_0",
+    "sprite": "oak_10",
+    "x": 2280,
+    "y": 1244,
+    "score": 1.0
+   },
+   {
+    "id": "tree_0",
+    "sprite": "oak_9",
+    "x": 2328,
+    "y": 1220,
+    "score": 1.0
+   },
+   {
+    "id": "tree_0",
+    "sprite": "oak_8",
+    "x": 2376,
+    "y": 1196,
+    "score": 1.0
+   },
+   {
+    "id": "tree_0",
+    "sprite": "oak_5",
+    "x": 2376,
+    "y": 1244,
+    "score": 1.0
+   },
+   {
+    "id": "tree_0",
+    "sprite": "oak_5",
+    "x": 2424,
+    "y": 1076,
+    "score": 1.0
+   },
+   {
+    "id": "tree_0",
+    "sprite": "oak_11",
+    "x": 2424,
+    "y": 1124,
+    "score": 1.0
+   },
+   {
+    "id": "tree_0",
+    "sprite": "oak_9",
+    "x": 2424,
+    "y": 1172,
+    "score": 1.0
+   },
+   {
+    "id": "tree_0",
+    "sprite": "autumn_1",
+    "x": 2424,
+    "y": 1220,
+    "score": 1.0
+   },
+   {
+    "id": "tree_0",
+    "sprite": "oak_5",
+    "x": 2472,
+    "y": 1100,
+    "score": 1.0
+   },
+   {
+    "id": "tree_0",
+    "sprite": "oak_9",
+    "x": 2472,
+    "y": 1244,
+    "score": 1.0
+   },
+   {
+    "id": "tree_0",
+    "sprite": "oak_6",
+    "x": 2568,
+    "y": 1052,
+    "score": 1.0
+   },
+   {
+    "id": "tree_0",
+    "sprite": "autumn_1",
+    "x": 2568,
+    "y": 1100,
+    "score": 1.0
+   },
+   {
+    "id": "tree_0",
+    "sprite": "oak_3",
+    "x": 2568,
+    "y": 1244,
+    "score": 1.0
+   },
+   {
+    "id": "tree_0",
+    "sprite": "oak_8",
+    "x": 2616,
+    "y": 1172,
+    "score": 1.0
+   },
+   {
+    "id": "tree_0",
+    "sprite": "oak_5",
+    "x": 2616,
+    "y": 1220,
+    "score": 1.0
+   },
+   {
+    "id": "tree_0",
+    "sprite": "autumn_4",
+    "x": 2664,
+    "y": 1196,
+    "score": 1.0
+   },
+   {
+    "id": "tree_0",
+    "sprite": "oak_11",
+    "x": 2664,
+    "y": 1244,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_14",
+    "x": 24,
+    "y": 500,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_14",
+    "x": 24,
+    "y": 548,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_14",
+    "x": 24,
+    "y": 596,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_12",
+    "x": 24,
+    "y": 644,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_14",
+    "x": 24,
+    "y": 692,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_11",
+    "x": 72,
+    "y": 476,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_11",
+    "x": 72,
+    "y": 524,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_12",
+    "x": 72,
+    "y": 572,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_12",
+    "x": 72,
+    "y": 620,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_11",
+    "x": 72,
+    "y": 668,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_14",
+    "x": 72,
+    "y": 716,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_11",
+    "x": 120,
+    "y": 452,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_12",
+    "x": 120,
+    "y": 500,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_13",
+    "x": 120,
+    "y": 548,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_13",
+    "x": 120,
+    "y": 596,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_11",
+    "x": 120,
+    "y": 644,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_13",
+    "x": 120,
+    "y": 692,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_11",
+    "x": 168,
+    "y": 428,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_13",
+    "x": 168,
+    "y": 476,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_11",
+    "x": 168,
+    "y": 524,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_12",
+    "x": 168,
+    "y": 572,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_13",
+    "x": 168,
+    "y": 620,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_11",
+    "x": 168,
+    "y": 668,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_12",
+    "x": 168,
+    "y": 716,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_8",
+    "x": 216,
+    "y": 452,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_9",
+    "x": 216,
+    "y": 500,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_11",
+    "x": 216,
+    "y": 548,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_14",
+    "x": 216,
+    "y": 596,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_12",
+    "x": 216,
+    "y": 644,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_12",
+    "x": 216,
+    "y": 692,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_12",
+    "x": 264,
+    "y": 476,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_12",
+    "x": 264,
+    "y": 524,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_12",
+    "x": 264,
+    "y": 572,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_11",
+    "x": 264,
+    "y": 620,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_14",
+    "x": 312,
+    "y": 500,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_13",
+    "x": 312,
+    "y": 548,
+    "score": 1.0
+   },
+   {
+    "id": "tree_2",
+    "sprite": "pine_14",
+    "x": 312,
+    "y": 596,
+    "score": 1.0
+   },
+   {
+    "id": "tree_3",
+    "sprite": "oak_8",
+    "x": 2040,
+    "y": 1364,
+    "score": 1.0
+   },
+   {
+    "id": "tree_3",
+    "sprite": "oak_6",
+    "x": 2088,
+    "y": 1292,
+    "score": 1.0
+   },
+   {
+    "id": "tree_3",
+    "sprite": "oak_6",
+    "x": 2088,
+    "y": 1340,
+    "score": 1.0
+   },
+   {
+    "id": "tree_3",
+    "sprite": "oak_8",
+    "x": 2136,
+    "y": 1268,
+    "score": 1.0
+   },
+   {
+    "id": "tree_3",
+    "sprite": "oak_5",
+    "x": 2136,
+    "y": 1316,
+    "score": 1.0
+   },
+   {
+    "id": "tree_3",
+    "sprite": "autumn_3",
+    "x": 2136,
+    "y": 1364,
+    "score": 1.0
+   },
+   {
+    "id": "tree_3",
+    "sprite": "oak_10",
+    "x": 2232,
+    "y": 1268,
+    "score": 1.0
+   },
+   {
+    "id": "tree_3",
+    "sprite": "oak_3",
+    "x": 2232,
+    "y": 1316,
+    "score": 1.0
+   },
+   {
+    "id": "tree_3",
+    "sprite": "oak_7",
+    "x": 2232,
+    "y": 1364,
+    "score": 1.0
+   },
+   {
+    "id": "tree_3",
+    "sprite": "oak_8",
+    "x": 2280,
+    "y": 1244,
+    "score": 1.0
+   },
+   {
+    "id": "tree_3",
+    "sprite": "autumn_1",
+    "x": 2280,
+    "y": 1292,
+    "score": 1.0
+   },
+   {
+    "id": "tree_3",
+    "sprite": "oak_11",
+    "x": 2280,
+    "y": 1340,
+    "score": 1.0
+   },
+   {
+    "id": "tree_3",
+    "sprite": "oak_10",
+    "x": 2328,
+    "y": 1268,
+    "score": 1.0
+   },
+   {
+    "id": "tree_3",
+    "sprite": "autumn_3",
+    "x": 2328,
+    "y": 1316,
+    "score": 1.0
+   },
+   {
+    "id": "tree_3",
+    "sprite": "oak_8",
+    "x": 2328,
+    "y": 1364,
+    "score": 1.0
+   },
+   {
+    "id": "tree_3",
+    "sprite": "oak_3",
+    "x": 2376,
+    "y": 1244,
+    "score": 1.0
+   },
+   {
+    "id": "tree_3",
+    "sprite": "oak_5",
+    "x": 2376,
+    "y": 1292,
+    "score": 1.0
+   },
+   {
+    "id": "tree_3",
+    "sprite": "oak_7",
+    "x": 2376,
+    "y": 1340,
+    "score": 1.0
+   },
+   {
+    "id": "tree_3",
+    "sprite": "oak_11",
+    "x": 2424,
+    "y": 1172,
+    "score": 1.0
+   },
+   {
+    "id": "tree_3",
+    "sprite": "oak_9",
+    "x": 2424,
+    "y": 1268,
+    "score": 1.0
+   },
+   {
+    "id": "tree_3",
+    "sprite": "autumn_4",
+    "x": 2424,
+    "y": 1316,
+    "score": 1.0
+   },
+   {
+    "id": "tree_3",
+    "sprite": "oak_10",
+    "x": 2424,
+    "y": 1364,
+    "score": 1.0
+   },
+   {
+    "id": "tree_4",
+    "sprite": "pine_14",
+    "x": 2568,
+    "y": 380,
+    "score": 1.0
+   },
+   {
+    "id": "tree_4",
+    "sprite": "pine_13",
+    "x": 2568,
+    "y": 428,
+    "score": 1.0
+   },
+   {
+    "id": "tree_4",
+    "sprite": "pine_11",
+    "x": 2568,
+    "y": 476,
+    "score": 1.0
+   },
+   {
+    "id": "tree_5",
+    "sprite": "pine_11",
+    "x": 2808,
+    "y": 500,
+    "score": 1.0
+   },
+   {
+    "id": "tree_5",
+    "sprite": "pine_12",
+    "x": 2808,
+    "y": 548,
+    "score": 1.0
+   },
+   {
+    "id": "tree_5",
+    "sprite": "pine_13",
+    "x": 2808,
+    "y": 644,
+    "score": 1.0
+   },
+   {
+    "id": "tree_5",
+    "sprite": "pine_12",
+    "x": 2856,
+    "y": 524,
+    "score": 1.0
+   },
+   {
+    "id": "tree_5",
+    "sprite": "pine_11",
+    "x": 2856,
+    "y": 572,
+    "score": 1.0
+   },
+   {
+    "id": "tree_5",
+    "sprite": "pine_12",
+    "x": 2856,
+    "y": 620,
+    "score": 1.0
+   },
+   {
+    "id": "tree_5",
+    "sprite": "pine_13",
+    "x": 2856,
+    "y": 668,
+    "score": 1.0
+   },
+   {
+    "id": "tree_5",
+    "sprite": "pine_11",
+    "x": 2856,
+    "y": 716,
+    "score": 1.0
+   },
+   {
+    "id": "tree_5",
+    "sprite": "pine_14",
+    "x": 2904,
+    "y": 500,
+    "score": 1.0
+   },
+   {
+    "id": "tree_5",
+    "sprite": "pine_12",
+    "x": 2904,
+    "y": 548,
+    "score": 1.0
+   },
+   {
+    "id": "tree_5",
+    "sprite": "pine_11",
+    "x": 2904,
+    "y": 596,
+    "score": 1.0
+   },
+   {
+    "id": "tree_5",
+    "sprite": "pine_13",
+    "x": 2904,
+    "y": 644,
+    "score": 1.0
+   },
+   {
+    "id": "tree_5",
+    "sprite": "pine_11",
+    "x": 2904,
+    "y": 692,
+    "score": 1.0
+   },
+   {
+    "id": "tree_5",
+    "sprite": "pine_14",
+    "x": 2904,
+    "y": 740,
+    "score": 1.0
+   },
+   {
+    "id": "tree_5",
+    "sprite": "pine_14",
+    "x": 2904,
+    "y": 788,
+    "score": 1.0
+   },
+   {
+    "id": "tree_5",
+    "sprite": "pine_12",
+    "x": 2952,
+    "y": 524,
+    "score": 1.0
+   },
+   {
+    "id": "tree_5",
+    "sprite": "pine_9",
+    "x": 2952,
+    "y": 572,
+    "score": 1.0
+   },
+   {
+    "id": "tree_5",
+    "sprite": "pine_12",
+    "x": 2952,
+    "y": 620,
+    "score": 1.0
+   },
+   {
+    "id": "tree_5",
+    "sprite": "pine_12",
+    "x": 2952,
+    "y": 668,
+    "score": 1.0
+   },
+   {
+    "id": "tree_5",
+    "sprite": "pine_11",
+    "x": 2952,
+    "y": 716,
+    "score": 1.0
+   },
+   {
+    "id": "tree_5",
+    "sprite": "pine_12",
+    "x": 2952,
+    "y": 764,
+    "score": 1.0
+   },
+   {
+    "id": "tree_5",
+    "sprite": "pine_5",
+    "x": 2952,
+    "y": 812,
+    "score": 1.0
+   },
+   {
+    "id": "tree_5",
+    "sprite": "pine_14",
+    "x": 3000,
+    "y": 500,
+    "score": 1.0
+   },
+   {
+    "id": "tree_5",
+    "sprite": "pine_14",
+    "x": 3000,
+    "y": 548,
+    "score": 1.0
+   },
+   {
+    "id": "tree_5",
+    "sprite": "pine_5",
+    "x": 3000,
+    "y": 596,
+    "score": 1.0
+   },
+   {
+    "id": "tree_5",
+    "sprite": "pine_11",
+    "x": 3000,
+    "y": 644,
+    "score": 1.0
+   },
+   {
+    "id": "tree_5",
+    "sprite": "pine_13",
+    "x": 3000,
+    "y": 692,
+    "score": 1.0
+   },
+   {
+    "id": "tree_5",
+    "sprite": "pine_13",
+    "x": 3000,
+    "y": 740,
+    "score": 1.0
+   },
+   {
+    "id": "tree_5",
+    "sprite": "pine_11",
+    "x": 3000,
+    "y": 788,
+    "score": 1.0
+   },
+   {
+    "id": "tree_6",
+    "sprite": "pine_11",
+    "x": 2664,
+    "y": 476,
+    "score": 1.0
+   },
+   {
+    "id": "tree_6",
+    "sprite": "pine_11",
+    "x": 2664,
+    "y": 524,
+    "score": 1.0
+   },
+   {
+    "id": "tree_6",
+    "sprite": "pine_11",
+    "x": 2664,
+    "y": 572,
+    "score": 1.0
+   },
+   {
+    "id": "tree_6",
+    "sprite": "pine_12",
+    "x": 2712,
+    "y": 500,
+    "score": 1.0
+   },
+   {
+    "id": "tree_6",
+    "sprite": "pine_14",
+    "x": 2712,
+    "y": 548,
+    "score": 1.0
+   },
+   {
+    "id": "tree_6",
+    "sprite": "pine_12",
+    "x": 2712,
+    "y": 596,
+    "score": 1.0
+   },
+   {
+    "id": "tree_6",
+    "sprite": "pine_14",
+    "x": 2760,
+    "y": 476,
+    "score": 1.0
+   },
+   {
+    "id": "tree_6",
+    "sprite": "pine_11",
+    "x": 2760,
+    "y": 524,
+    "score": 1.0
+   },
+   {
+    "id": "tree_6",
+    "sprite": "pine_11",
+    "x": 2760,
+    "y": 572,
+    "score": 1.0
+   },
+   {
+    "id": "tree_7",
+    "sprite": "pine_14",
+    "x": 264,
+    "y": 524,
+    "score": 1.0
+   },
+   {
+    "id": "tree_7",
+    "sprite": "pine_12",
+    "x": 312,
+    "y": 500,
+    "score": 1.0
+   },
+   {
+    "id": "tree_8",
+    "sprite": "pine_12",
+    "x": 2472,
+    "y": 428,
+    "score": 1.0
+   },
+   {
+    "id": "tree_8",
+    "sprite": "pine_11",
+    "x": 2472,
+    "y": 476,
+    "score": 1.0
+   },
+   {
+    "id": "tree_8",
+    "sprite": "pine_12",
+    "x": 2520,
+    "y": 404,
+    "score": 1.0
+   },
+   {
+    "id": "tree_8",
+    "sprite": "pine_12",
+    "x": 2520,
+    "y": 452,
+    "score": 1.0
+   },
+   {
+    "id": "tree_8",
+    "sprite": "pine_14",
+    "x": 2520,
+    "y": 500,
+    "score": 1.0
+   },
+   {
+    "id": "tree_9",
+    "sprite": "pine_12",
+    "x": 24,
+    "y": 740,
+    "score": 1.0
+   },
+   {
+    "id": "tree_9",
+    "sprite": "pine_11",
+    "x": 24,
+    "y": 788,
+    "score": 1.0
+   },
+   {
+    "id": "tree_9",
+    "sprite": "pine_13",
+    "x": 24,
+    "y": 836,
+    "score": 1.0
+   },
+   {
+    "id": "tree_9",
+    "sprite": "pine_13",
+    "x": 24,
+    "y": 884,
+    "score": 1.0
+   },
+   {
+    "id": "tree_9",
+    "sprite": "pine_14",
+    "x": 72,
+    "y": 764,
+    "score": 1.0
+   },
+   {
+    "id": "tree_9",
+    "sprite": "pine_5",
+    "x": 72,
+    "y": 812,
+    "score": 1.0
+   },
+   {
+    "id": "tree_9",
+    "sprite": "pine_11",
+    "x": 72,
+    "y": 860,
+    "score": 1.0
+   },
+   {
+    "id": "tree_9",
+    "sprite": "pine_12",
+    "x": 72,
+    "y": 908,
+    "score": 1.0
+   },
+   {
+    "id": "tree_9",
+    "sprite": "pine_13",
+    "x": 120,
+    "y": 740,
+    "score": 1.0
+   },
+   {
+    "id": "tree_9",
+    "sprite": "pine_12",
+    "x": 120,
+    "y": 788,
+    "score": 1.0
+   },
+   {
+    "id": "tree_9",
+    "sprite": "pine_11",
+    "x": 120,
+    "y": 836,
+    "score": 1.0
+   },
+   {
+    "id": "tree_9",
+    "sprite": "pine_11",
+    "x": 120,
+    "y": 884,
+    "score": 1.0
+   },
+   {
+    "id": "tree_9",
+    "sprite": "pine_13",
+    "x": 120,
+    "y": 932,
+    "score": 1.0
+   },
+   {
+    "id": "tree_9",
+    "sprite": "pine_11",
+    "x": 168,
+    "y": 716,
+    "score": 1.0
+   },
+   {
+    "id": "farm_0",
+    "sprite": "farm",
+    "x": 1608,
+    "y": 476,
+    "score": 1.0
+   },
+   {
+    "id": "farm_1",
+    "sprite": "farm",
+    "x": 984,
+    "y": 788,
+    "score": 1.0
+   },
+   {
+    "id": "farm_2",
+    "sprite": "farm",
+    "x": 1224,
+    "y": 764,
+    "score": 1.0
+   },
+   {
+    "id": "farm_3",
+    "sprite": "farm",
+    "x": 1752,
+    "y": 644,
+    "score": 1.0
+   },
+   {
+    "id": "farm_4",
+    "sprite": "farm",
+    "x": 1320,
+    "y": 956,
+    "score": 1.0
+   },
+   {
+    "id": "farm_5",
+    "sprite": "farm",
+    "x": 1128,
+    "y": 428,
+    "score": 1.0
+   },
+   {
+    "id": "farm_6",
+    "sprite": "farm",
+    "x": 2040,
+    "y": 788,
+    "score": 1.0
+   },
+   {
+    "id": "farm_7",
+    "sprite": "farm",
+    "x": 1896,
+    "y": 1052,
+    "score": 1.0
+   },
+   {
+    "id": "farm_8",
+    "sprite": "farm",
+    "x": 1608,
+    "y": 716,
+    "score": 1.0
+   }
+  ],
+  "forests": [
+   [
+    590,
+    100,
+    1030,
+    140
+   ]
+  ]
+ }
+}

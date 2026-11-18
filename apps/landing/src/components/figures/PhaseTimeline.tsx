@@ -1,118 +1,143 @@
 import * as React from "react";
-import { SECTIONS, FLAT_PAGES, getPage } from "@/lib/taxonomy";
+import { SECTIONS, FLAT_PAGES, sectionFor, type Section } from "@/lib/taxonomy";
 import { cn } from "@/lib/utils";
+import { Corners } from "@/components/ui/frame";
 
-interface PhaseTimelineProps {
-  /** Highlighted page slug (full slug, e.g. "agent/overview"). */
-  currentSlug?: string;
-  /** Show the page count next to each section title. */
-  variant?: "compact" | "full";
-}
+type PhaseTimelineProps = {
+  /** Current page (full slug, e.g. "agent/overview"). */
+  currentSlug: string;
+};
 
-/**
- * Horizontal scroller showing the documentation sections as a progress
- * timeline. Used both on the landing page (`currentSlug` omitted, shows the
- * whole arc) and at the top of every section page (highlights the current
- * position).
- *
- * Designed as a React island because it owns hover state, and the scroll
- * container needs to keep the active page visible. Both are client-side
- * concerns.
- */
-export default function PhaseTimeline({
-  currentSlug,
-  variant = "compact",
-}: PhaseTimelineProps): React.ReactElement {
-  const currentIndex = currentSlug
-    ? FLAT_PAGES.findIndex((p) => p.fullSlug === currentSlug)
-    : -1;
-  const scrollerRef = React.useRef<HTMLDivElement>(null);
-  const activeRef = React.useRef<HTMLAnchorElement>(null);
+// "+" marks inside the corners of the current section, like the detector frames on the
+// rest of the site. Inset, so the scroll container does not clip them.
+const SECTION_CORNERS = ["top-1 left-1", "top-1 right-1", "bottom-2 left-1", "bottom-2 right-1"];
 
-  React.useEffect(() => {
-    const el = activeRef.current;
-    const parent = scrollerRef.current;
-    if (!el || !parent) return;
-    // Compute the active page's position relative to the scroller's
-    // scrollable content. Using getBoundingClientRect deltas + current
-    // scrollLeft is robust to nested layouts; el.offsetLeft is not (it's
-    // relative to the nearest positioned ancestor, which here is <body>).
-    const elRect = el.getBoundingClientRect();
-    const parentRect = parent.getBoundingClientRect();
-    const elLeftInContent = elRect.left - parentRect.left + parent.scrollLeft;
-    const targetLeft =
-      elLeftInContent - parent.clientWidth / 2 + elRect.width / 2;
-    // Clamp so we don't request a negative scroll (e.g. early pages
-    // already at the start). The browser handles overshoot fine, but a
-    // negative value is wasteful and shows up in animation frames.
-    parent.scrollTo({
-      left: Math.max(0, targetLeft),
-      behavior: "smooth",
-    });
-  }, [currentSlug]);
+const pageIndexOf = (fullSlug: string): number => FLAT_PAGES.findIndex((page) => page.fullSlug === fullSlug);
+
+const chipStateClass = (isActive: boolean, isPast: boolean): string => {
+  if (isActive) {
+    return "bg-accent-foreground/15 text-accent-foreground";
+  }
+
+  if (isPast) {
+    return "text-foreground hover:text-accent-foreground";
+  }
+
+  return "text-muted-foreground hover:text-accent-foreground";
+};
+
+// Centres the current section in the scroller. Bounding-rect deltas plus the current
+// scrollLeft are robust to nested layouts; offsetLeft is not.
+const centreInScroller = (item: HTMLElement, scroller: HTMLElement): void => {
+  const itemRect = item.getBoundingClientRect();
+  const scrollerRect = scroller.getBoundingClientRect();
+  const itemLeftInContent = itemRect.left - scrollerRect.left + scroller.scrollLeft;
+
+  scroller.scrollTo({ left: Math.max(0, itemLeftInContent - scroller.clientWidth / 2 + itemRect.width / 2) });
+};
+
+type SectionItemProps = {
+  section: Section;
+  currentSlug: string;
+  currentIndex: number;
+  activeRef: React.RefObject<HTMLLIElement | null>;
+};
+
+const SectionItem = ({ section, currentSlug, currentIndex, activeRef }: SectionItemProps): React.ReactElement => {
+  const isCurrentPart = sectionFor(currentSlug)?.id === section.id;
 
   return (
-    <nav
-      aria-label="Documentation timeline"
-      className="overflow-x-auto rounded-lg border bg-card"
-      ref={scrollerRef}
+    <li
+      ref={isCurrentPart ? activeRef : undefined}
+      className="relative border-r border-foreground/10 px-3.5 pt-2.5 pb-3 first:pl-5 last:border-r-0 last:pr-5"
     >
-      <ol className="flex min-w-max items-stretch">
-        {SECTIONS.map((section) => {
-          const isCurrentSection = getPage(currentSlug ?? "")?.section.id === section.id;
+      {isCurrentPart && <Corners positions={SECTION_CORNERS} className="text-accent-foreground" />}
+      <p
+        className={cn(
+          "font-mono text-[11px] tracking-wide whitespace-nowrap uppercase",
+          isCurrentPart ? "text-accent-foreground" : "text-muted-foreground",
+        )}
+      >
+        {section.title}
+      </p>
+      <ol className="mt-1.5 flex list-none items-center gap-0.5">
+        {section.pages.map((page, pageIndex) => {
+          const slug = `${section.id}/${page.slug}`;
+          const isActive = slug === currentSlug;
+          const isPast = currentIndex >= 0 && pageIndexOf(slug) < currentIndex;
+
           return (
-            <li
-              key={section.id}
-              className={cn(
-                "flex flex-col border-r border-border px-4 py-3 last:border-r-0",
-                isCurrentSection && "bg-accent/40",
-              )}
-            >
-              <div className="mb-2 flex items-baseline gap-2">
-                <span className="text-sm font-semibold whitespace-nowrap">
-                  {section.title}
-                </span>
-                {variant === "full" && (
-                  <span className="ml-auto text-xs text-muted-foreground">
-                    {section.pages.length} pages
-                  </span>
+            <li key={page.slug}>
+              <a
+                href={`/docs/${slug}`}
+                title={page.title}
+                aria-label={`${section.title}: ${page.title}`}
+                aria-current={isActive ? "page" : undefined}
+                className={cn(
+                  "block rounded px-1.5 py-0.5 font-mono text-xs tabular-nums transition-colors",
+                  chipStateClass(isActive, isPast),
                 )}
-              </div>
-              <ol className="flex items-center gap-1">
-                {section.pages.map((page, pageIdx) => {
-                  const slug = `${section.id}/${page.slug}`;
-                  const flatIdx = FLAT_PAGES.findIndex((p) => p.fullSlug === slug);
-                  const isActive = slug === currentSlug;
-                  const isPast = currentIndex >= 0 && flatIdx < currentIndex;
-                  return (
-                    <li key={page.slug}>
-                      <a
-                        ref={isActive ? activeRef : undefined}
-                        href={`/docs/${slug}`}
-                        title={page.title}
-                        aria-label={`${section.title}: ${page.title}`}
-                        className={cn(
-                          "flex h-6 min-w-6 items-center justify-center rounded-full border text-[10px] font-medium transition-colors",
-                          isActive &&
-                            "border-foreground bg-foreground text-background",
-                          !isActive &&
-                            isPast &&
-                            "border-foreground/40 bg-foreground/10 text-foreground",
-                          !isActive &&
-                            !isPast &&
-                            "border-border bg-background text-muted-foreground hover:border-foreground hover:text-foreground",
-                        )}
-                      >
-                        {pageIdx + 1}
-                      </a>
-                    </li>
-                  );
-                })}
-              </ol>
+              >
+                {String(pageIndex + 1).padStart(2, "0")}
+              </a>
             </li>
           );
         })}
       </ol>
+    </li>
+  );
+};
+
+/**
+ * The section strip at the top of every guide page: the five sections in one row,
+ * with numbered chips for their pages. The current section gets accent corner
+ * marks, the current page is the accent chip, and a thin line along the bottom
+ * shows how far through the guide the page is.
+ *
+ * A React island because the scroll container keeps the current section in view
+ * on narrow screens.
+ */
+export const PhaseTimeline = ({ currentSlug }: PhaseTimelineProps): React.ReactElement => {
+  const currentIndex = pageIndexOf(currentSlug);
+  const progress = currentIndex >= 0 ? ((currentIndex + 1) / FLAT_PAGES.length) * 100 : 0;
+  const scrollerRef = React.useRef<HTMLDivElement>(null);
+  const activeRef = React.useRef<HTMLLIElement>(null);
+
+  React.useEffect(() => {
+    const item = activeRef.current;
+    const scroller = scrollerRef.current;
+
+    if (item && scroller) {
+      centreInScroller(item, scroller);
+    }
+  }, [currentSlug]);
+
+  return (
+    <nav
+      aria-label="Guide sections and pages"
+      className="relative overflow-hidden rounded-lg border border-foreground/10 bg-card/70 backdrop-blur-sm"
+    >
+      {/* The edges fade out, so a strip wider than the page reads as scrollable. */}
+      <div
+        ref={scrollerRef}
+        className="overflow-x-auto [mask-image:linear-gradient(to_right,transparent,black_1.25rem,black_calc(100%-1.25rem),transparent)] [scrollbar-width:none]"
+      >
+        <ol className="flex min-w-max list-none">
+          {SECTIONS.map((section) => (
+            <SectionItem
+              key={section.id}
+              section={section}
+              currentSlug={currentSlug}
+              currentIndex={currentIndex}
+              activeRef={activeRef}
+            />
+          ))}
+        </ol>
+      </div>
+      {/* How far through the guide this page is. */}
+      <span aria-hidden className="absolute inset-x-0 bottom-0 h-0.5">
+        <span className="block h-0.5 bg-accent-foreground" style={{ width: `${progress}%` }} />
+      </span>
     </nav>
   );
-}
+};

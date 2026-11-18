@@ -1,20 +1,24 @@
 ---
 import { getCollection, render, type CollectionEntry } from "astro:content";
 import Doc from "@/layouts/Doc.astro";
-import Site from "@/layouts/Site.astro";
 import { isSectionPage } from "@/lib/taxonomy";
 
-export async function getStaticPaths() {
+type Props = {
+  entry: CollectionEntry<"docs">;
+};
+
+type DocPath = { params: { slug: string }; props: Props };
+
+export const getStaticPaths = async (): Promise<DocPath[]> => {
   const docs = await getCollection("docs");
+
   return docs.map((entry) => ({
     params: { slug: entry.id },
     props: { entry },
   }));
-}
+};
 
-interface Props {
-  entry: CollectionEntry<"docs">;
-}
+const WORDS_PER_MINUTE = 230;
 
 const { entry } = Astro.props;
 const { Content, headings } = await render(entry);
@@ -22,28 +26,26 @@ const { Content, headings } = await render(entry);
 // Title precedence: frontmatter > first H1 heading > slug.
 const title =
   entry.data.title ??
-  headings.find((h) => h.depth === 1)?.text ??
+  headings.find((heading) => heading.depth === 1)?.text ??
   entry.id.split("/").pop() ??
   "Documentation";
 const description = entry.data.description;
+
+// Reading time from the markdown source.
+const words = (entry.body ?? "").split(/\s+/).filter(Boolean).length;
+const readMinutes = Math.max(1, Math.round(words / WORDS_PER_MINUTE));
 
 // Pages under a section directory (agent/, detection/, arena/, web/,
 // autoresearch/) get the sidebar, timeline and prev/next links.
 const isGuidePage = isSectionPage(entry.id);
 ---
 
-{
-  isGuidePage ? (
-    <Doc title={title} description={description} slug={entry.id}>
-      <Content />
-    </Doc>
-  ) : (
-    <Site title={`${title} — AoE2 LLM Arena`} description={description}>
-      <div class="mx-auto max-w-3xl px-4 py-10">
-        <article data-pagefind-body class="prose-doc">
-          <Content />
-        </article>
-      </div>
-    </Site>
-  )
-}
+<Doc
+  title={title}
+  description={description}
+  slug={isGuidePage ? entry.id : undefined}
+  headings={headings}
+  readMinutes={readMinutes}
+>
+  <Content />
+</Doc>

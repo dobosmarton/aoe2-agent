@@ -1,111 +1,210 @@
 ---
 import Site from "./Site.astro";
 import DocSidebar from "@/components/DocSidebar.astro";
-import PhaseTimeline from "@/components/figures/PhaseTimeline.tsx";
+import { PhaseTimeline } from "@/components/figures/PhaseTimeline.tsx";
+import { BracketLabel } from "@/components/ui/frame";
 import { sectionFor, prevPage, nextPage, getPage } from "@/lib/taxonomy";
 
-interface Props {
+type Heading = {
+  depth: number;
+  slug: string;
+  text: string;
+};
+
+type Props = {
   title: string;
   description?: string;
-  /** Full slug like "agent/overview". */
-  slug: string;
-}
+  /** Full slug like "agent/overview". Omit for pages outside the guide sections. */
+  slug?: string;
+  headings: Heading[];
+  readMinutes: number;
+};
 
-const { title, description, slug } = Astro.props;
+const { title, description, slug, headings, readMinutes } = Astro.props;
 
-const section = sectionFor(slug);
-const prev = prevPage(slug);
-const next = nextPage(slug);
-const currentPage = getPage(slug);
+const part = slug ? sectionFor(slug) : undefined;
+const currentPage = slug ? getPage(slug) : undefined;
+const prev = slug ? prevPage(slug) : undefined;
+const next = slug ? nextPage(slug) : undefined;
+const toc = headings.filter((heading) => heading.depth === 2 || heading.depth === 3);
+const hasToc = toc.length > 1;
 ---
 
-<Site title={`${title} — AoE2 LLM Arena`} description={description}>
-  <div class="mx-auto grid max-w-7xl grid-cols-1 gap-8 px-4 py-6 lg:grid-cols-[16rem_minmax(0,1fr)] xl:grid-cols-[16rem_minmax(0,1fr)_14rem]">
-    <aside class="hidden lg:block">
-      <div class="sticky top-20 max-h-[calc(100vh-6rem)] overflow-y-auto pr-2">
-        <DocSidebar currentSlug={slug} />
+<Site title={`${title}: AoE2 LLM Arena`} description={description} reading headerMax="80rem">
+  {/* The section strip: where this page sits in the guide, across the page. */}
+  {
+    slug && currentPage && (
+      <div class="mx-auto max-w-7xl px-5 pt-4 sm:px-8">
+        <PhaseTimeline client:load currentSlug={slug} />
       </div>
-    </aside>
-
-    <main class="min-w-0">
-      {
-        section && currentPage && (
-          <div class="mb-6">
-            <PhaseTimeline client:visible currentSlug={slug} />
+    )
+  }
+  <div
+    class:list={[
+      "mx-auto grid max-w-7xl grid-cols-1 gap-10 px-5 pt-8 pb-10 sm:px-8",
+      part
+        ? "lg:grid-cols-[15rem_minmax(0,1fr)] xl:grid-cols-[15rem_minmax(0,1fr)_13rem]"
+        : "xl:grid-cols-[minmax(0,1fr)_13rem]",
+    ]}
+  >
+    {
+      part && (
+        <aside class="hidden lg:block">
+          <div class="sticky top-24 max-h-[calc(100vh-7rem)] overflow-y-auto pr-2">
+            <DocSidebar currentSlug={slug} />
           </div>
-        )
-      }
+        </aside>
+      )
+    }
 
-      <article
-        data-pagefind-body
-        class="prose-doc"
-      >
-        <slot />
-      </article>
+    <div class="min-w-0">
+      <div class="mx-auto max-w-[44rem]">
+        <header class="mb-8">
+          <a
+            href="/"
+            class="inline-flex items-center gap-1.5 font-mono text-[11px] tracking-wider text-muted-foreground uppercase transition-colors hover:text-foreground"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="m12 19-7-7 7-7M19 12H5"></path>
+            </svg>
+            All docs
+          </a>
+          <p
+            class="mt-6 flex flex-wrap items-center gap-x-3 gap-y-1 border-y border-foreground/10 py-2.5 font-mono text-[11px] tracking-wider text-muted-foreground uppercase"
+          >
+            <span>{part ? part.title : "Reference"}</span>
+            <span aria-hidden="true">·</span>
+            <span class="text-accent-foreground">{readMinutes} min read</span>
+          </p>
+        </header>
 
-      <nav class="mt-12 grid gap-3 border-t pt-6 sm:grid-cols-2" aria-label="Page navigation">
         {
-          prev ? (
-            <a
-              href={`/docs/${prev.fullSlug}`}
-              class="group rounded-lg border bg-card p-4 transition-colors hover:bg-accent"
-            >
-              <p class="text-xs text-muted-foreground">← Previous</p>
-              <p class="mt-1 font-medium group-hover:text-foreground">{prev.section.title}: {prev.page.title}</p>
-            </a>
-          ) : (
-            <span />
+          hasToc && (
+            <details class="group mb-10 border-y border-foreground/10 xl:hidden">
+              <summary class="flex cursor-pointer list-none items-center justify-between py-3 text-sm">
+                <BracketLabel>Contents</BracketLabel>
+                <span aria-hidden="true" class="font-mono text-accent-foreground transition-transform group-open:rotate-45">
+                  +
+                </span>
+              </summary>
+              <div class="pb-4">
+                <ol class="list-none space-y-0.5 border-l border-foreground/10 text-sm">
+                  {toc.map((heading) => (
+                    <li>
+                      <a
+                        href={`#${heading.slug}`}
+                        class:list={[
+                          "-ml-px block border-l-2 border-transparent py-1 pr-2 pl-3 leading-snug text-muted-foreground transition-colors hover:text-foreground",
+                          heading.depth === 3 && "pl-6",
+                        ]}
+                      >
+                        {heading.text}
+                      </a>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            </details>
           )
         }
+
+        <article data-pagefind-body class="article">
+          <slot />
+        </article>
+
         {
-          next && (
-            <a
-              href={`/docs/${next.fullSlug}`}
-              class="group rounded-lg border bg-card p-4 text-right transition-colors hover:bg-accent sm:col-start-2"
-            >
-              <p class="text-xs text-muted-foreground">Next →</p>
-              <p class="mt-1 font-medium group-hover:text-foreground">{next.section.title}: {next.page.title}</p>
-            </a>
+          (prev || next) && (
+            <nav class="mt-14 grid gap-3 border-t border-foreground/10 pt-6 sm:grid-cols-2" aria-label="Page navigation">
+              {prev ? (
+                <a
+                  href={`/docs/${prev.fullSlug}`}
+                  class="group rounded-lg border border-foreground/10 bg-card px-4 py-3 transition-colors hover:border-accent-foreground/40"
+                >
+                  <BracketLabel>← Previous</BracketLabel>
+                  <p class="mt-1.5 font-heading font-bold text-foreground group-hover:text-accent-foreground">
+                    {prev.section.title}: {prev.page.title}
+                  </p>
+                </a>
+              ) : (
+                <span />
+              )}
+              {next && (
+                <a
+                  href={`/docs/${next.fullSlug}`}
+                  class="group rounded-lg border border-foreground/10 bg-card px-4 py-3 text-right transition-colors hover:border-accent-foreground/40 sm:col-start-2"
+                >
+                  <BracketLabel>Next →</BracketLabel>
+                  <p class="mt-1.5 font-heading font-bold text-foreground group-hover:text-accent-foreground">
+                    {next.section.title}: {next.page.title}
+                  </p>
+                </a>
+              )}
+            </nav>
           )
         }
-      </nav>
-    </main>
-
-    <aside class="hidden xl:block">
-      <div class="sticky top-20 max-h-[calc(100vh-6rem)] overflow-y-auto pr-2">
-        <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          On this page
-        </p>
-        <div id="on-this-page" class="text-sm text-muted-foreground"></div>
       </div>
-    </aside>
+    </div>
+
+    {
+      hasToc && (
+        <aside class="hidden pt-[3.4rem] xl:block">
+          <div class="sticky top-28 max-h-[calc(100vh-8rem)] overflow-y-auto">
+            <BracketLabel className="mb-3 block">On this page</BracketLabel>
+            <nav aria-label="Table of contents">
+              <ol class="list-none space-y-0.5 border-l border-foreground/10 text-sm" data-toc>
+                {toc.map((heading) => (
+                  <li>
+                    <a
+                      href={`#${heading.slug}`}
+                      data-toc-link={heading.slug}
+                      class:list={[
+                        "-ml-px block border-l-2 border-transparent py-1 pr-2 pl-3 leading-snug text-muted-foreground transition-colors hover:text-foreground",
+                        "aria-[current=location]:border-accent-foreground aria-[current=location]:font-medium aria-[current=location]:text-foreground",
+                        heading.depth === 3 && "pl-6",
+                      ]}
+                    >
+                      {heading.text}
+                    </a>
+                  </li>
+                ))}
+              </ol>
+            </nav>
+          </div>
+        </aside>
+      )
+    }
   </div>
 
   <script>
-    // Build on-page TOC from rendered <h2>/<h3> at hydration time.
-    (() => {
-      const container = document.getElementById("on-this-page");
-      const article = document.querySelector("article.prose-doc");
-      if (!container || !article) return;
-      const headings = Array.from(
-        article.querySelectorAll<HTMLHeadingElement>("h2[id], h3[id]"),
+    // Marks the section in view in the table of contents.
+    const links = new Map<string, HTMLElement>();
+
+    document.querySelectorAll<HTMLElement>("[data-toc-link]").forEach((link) => {
+      links.set(link.dataset.tocLink ?? "", link);
+    });
+
+    if (links.size > 0) {
+      const observer = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (!entry.isIntersecting) {
+              continue;
+            }
+
+            links.forEach((link) => link.removeAttribute("aria-current"));
+            links.get(entry.target.id)?.setAttribute("aria-current", "location");
+          }
+        },
+        { rootMargin: "-30% 0px" },
       );
-      if (headings.length === 0) return;
-      const ul = document.createElement("ul");
-      ul.className = "space-y-1";
-      for (const h of headings) {
-        const li = document.createElement("li");
-        const a = document.createElement("a");
-        a.href = `#${h.id}`;
-        a.textContent = h.textContent ?? "";
-        a.className =
-          h.tagName === "H3"
-            ? "block pl-3 text-xs hover:text-foreground"
-            : "block hover:text-foreground";
-        li.appendChild(a);
-        ul.appendChild(li);
-      }
-      container.appendChild(ul);
-    })();
+
+      links.forEach((_, id) => {
+        const heading = document.getElementById(id);
+
+        if (heading) {
+          observer.observe(heading);
+        }
+      });
+    }
   </script>
 </Site>

@@ -1,331 +1,235 @@
 ---
 import Site from "@/layouts/Site.astro";
-import GameplayLoopDemo from "@/components/figures/GameplayLoopDemo.tsx";
-import PackageMap from "@/components/figures/PackageMap.tsx";
-import PhaseTimeline from "@/components/figures/PhaseTimeline.tsx";
-import ArenaScreenshots from "@/components/figures/ArenaScreenshots.tsx";
+import CodeFigure from "@/components/CodeFigure.astro";
+import { PackageMap } from "@/components/figures/PackageMap.tsx";
+import { ArenaScreenshots } from "@/components/figures/ArenaScreenshots.tsx";
+import Walkthrough from "@/components/walkthrough/Walkthrough.astro";
+import { DotPlot } from "@/components/charts/DotPlot.tsx";
+import { CellFooter, SectionLabel, cellClass } from "@/components/ui/frame";
 import { getCollection } from "astro:content";
-import { FIRST_PAGE, FLAT_PAGES, SECTIONS, getPage } from "@/lib/taxonomy";
-import {
-  ArrowRight,
-  BookOpen,
-  Boxes,
-  Brain,
-  Eye,
-  FileCode,
-  GitFork,
-  Network,
-  Rocket,
-  Workflow,
-} from "lucide-react";
+import { getPage } from "@/lib/taxonomy";
+import { ArrowRight } from "lucide-react";
 
-// Reading paths: curated, short routes through the docs so newcomers don't
-// have to read every section in order. Each path is a list of page slugs
-// from `taxonomy.ts` plus an optional one-line "why this page" note.
-// Titles are pulled from taxonomy so they stay in sync if a page is renamed.
-type ReadingPathPage = { slug: string; note?: string };
-type ReadingPath = {
-  title: string;
-  duration: string;
-  description: string;
-  icon: typeof Rocket;
-  pages: ReadingPathPage[];
-};
+// The page opens with one agent turn as a scroll-driven scene (Walkthrough), then the
+// detector's test results, reading paths, how to run it, the workspace and the arena UI.
 
-const READING_PATHS: ReadingPath[] = [
+// Reading paths: short routes through the docs for readers who do not want to read
+// every section in order. Page titles come from taxonomy.ts.
+const READING_PATHS = [
   {
     title: "15-minute tour",
-    duration: "~15 min",
-    description:
-      "Three pages that give you the whole system in one sitting: how the agent decides, what it sees, and how prompt and model variants are compared.",
-    icon: Rocket,
-    pages: [
-      { slug: "agent/overview", note: "the big picture" },
-      { slug: "detection/detector", note: "what the agent sees" },
-      { slug: "arena/overview", note: "how variants are compared" },
-    ],
+    description: "The whole system in one sitting: how the agent decides, what it sees, and how the arena compares variants.",
+    pages: ["agent/overview", "detection/detector", "arena/overview"],
   },
   {
     title: "LLM-agent design",
-    duration: "6 pages",
-    description:
-      "If you build LLM agents: a TypeSafe policy next to a strategist and an executor, guarded tools, prompt caching and context, and a prompt-evolution loop scored on real games.",
-    icon: Brain,
+    description: "The strategist, policy and executor split, the provider wires, prompts and context, and prompt evolution scored on real games.",
     pages: [
-      { slug: "agent/overview" },
-      { slug: "agent/decision-loops" },
-      { slug: "agent/llm-providers" },
-      { slug: "agent/prompts-and-context" },
-      { slug: "autoresearch/overview" },
-      { slug: "autoresearch/mutation-and-memory" },
+      "agent/overview",
+      "agent/decision-loops",
+      "agent/llm-providers",
+      "agent/prompts-and-context",
+      "autoresearch/overview",
+      "autoresearch/mutation-and-memory",
     ],
   },
   {
     title: "Computer vision",
-    duration: "5 pages",
-    description:
-      "If you train detectors or care about synthetic data: the YOLO26n detector and its 65-class taxonomy, serving and evaluation, training data, labeling, and sprite extraction.",
-    icon: Eye,
+    description: "The YOLO26n detector and its 65 classes, serving and evaluation, training data, labeling and sprite extraction.",
     pages: [
-      { slug: "detection/detector" },
-      { slug: "detection/serving-and-evaluation" },
-      { slug: "detection/training" },
-      { slug: "detection/labeling" },
-      { slug: "detection/sprite-extraction" },
+      "detection/detector",
+      "detection/serving-and-evaluation",
+      "detection/training",
+      "detection/labeling",
+      "detection/sprite-extraction",
     ],
   },
   {
-    title: "Arena infra",
-    duration: "7 pages",
-    description:
-      "If you build distributed or observability systems: event broker, DuckDB event log, Bradley-Terry ranking, the FastAPI and SSE backend, and the run viewer.",
-    icon: Network,
+    title: "Arena infrastructure",
+    description: "The event broker, the DuckDB event log, Bradley-Terry ranking, the world sim, the API and the run viewer.",
     pages: [
-      { slug: "arena/overview" },
-      { slug: "arena/event-broker" },
-      { slug: "arena/event-log-and-replay" },
-      { slug: "arena/ranking" },
-      { slug: "arena/world-sim" },
-      { slug: "web/architecture" },
-      { slug: "web/run-viewer" },
+      "arena/overview",
+      "arena/event-broker",
+      "arena/event-log-and-replay",
+      "arena/ranking",
+      "arena/world-sim",
+      "web/architecture",
+      "web/run-viewer",
     ],
   },
 ];
 
+const QUICK_START = `# Python workspace and the two frontend apps
+uv sync
+bun install
+
+# Detection server on the macOS host
+just server --model packages/detection/src/inference/models/aoe2_yolo_v12_nms736.onnx
+
+# The agent: stop after 20 perception frames
+just agent --iterations 20`;
+
+// Release v12 on the independent test set (packages/detection/registry/aoe2-entity-detector/
+// evaluation.json): the ten classes with the most labelled boxes.
+const DETECTOR_ROWS = [
+  { row: "tree (405)", precision: 0.978, recall: 0.877 },
+  { row: "villager (335)", precision: 0.854, recall: 0.8 },
+  { row: "house (101)", precision: 1.0, recall: 0.97 },
+  { row: "gold mine (71)", precision: 1.0, recall: 0.761 },
+  { row: "sheep (66)", precision: 0.929, recall: 0.591 },
+  { row: "deer (62)", precision: 0.857, recall: 0.581 },
+  { row: "boar (55)", precision: 0.898, recall: 0.964 },
+  { row: "stone mine (49)", precision: 0.971, recall: 0.673 },
+  { row: "berry bush (40)", precision: 0.938, recall: 0.75 },
+  { row: "town center (39)", precision: 1.0, recall: 1.0 },
+];
+
 const docs = await getCollection("docs");
+const runbooks = docs.filter((doc) => doc.id.startsWith("runbooks/")).sort((a, b) => a.id.localeCompare(b.id));
 
-// The "Runbooks" section on the home page surfaces /docs/runbooks/* as a flat list.
-const runbooks = docs
-  .filter((d) => d.id.startsWith("runbooks/"))
-  .sort((a, b) => a.id.localeCompare(b.id));
+const runbookTitle = (id: string): string => {
+  const name = id.split("/").pop()?.replace(/\.md$/, "").replace(/^\d+-/, "").replace(/-/g, " ") ?? id;
 
-function firstHeading(id: string): string {
-  // Astro renders entries with a `body` we could parse; for the landing page
-  // the filename is already a reasonable label without an extra fetch.
-  return id.split("/").pop()?.replace(/\.md$/, "").replace(/^\d+-/, "") ?? id;
-}
+  return name.charAt(0).toUpperCase() + name.slice(1);
+};
+
+const section = "mx-auto max-w-6xl px-4 pt-28";
+const sectionTitle = "mt-5 font-heading text-3xl font-bold tracking-tight text-balance sm:text-4xl";
+const sectionIntro = "mt-3 max-w-2xl text-muted-foreground";
+const accentLink =
+  "inline-flex items-center gap-2 py-2 text-sm text-accent-foreground underline-offset-4 hover:text-muted-foreground hover:underline";
 ---
 
 <Site>
-  {/* Hero */}
-  <section class="mx-auto max-w-6xl px-4 pb-8 pt-10 lg:pt-16">
-    <div class="mb-6 max-w-3xl">
-      <div class="mb-3 inline-flex items-center gap-2 rounded-full border bg-card px-3 py-1 text-xs text-muted-foreground">
-        <span class="h-1.5 w-1.5 rounded-full bg-green-500"></span>
-        Gameplay agent · Synthetic arena
-      </div>
-      <h1 class="text-balance text-4xl font-bold tracking-tight md:text-5xl">
-        An AI agent that plays Age of Empires II from screen pixels.
-      </h1>
-      <p class="mt-4 text-balance text-lg text-muted-foreground">
-        A YOLO detector and local OCR turn the screen into text. A TypeSafe policy picks routine actions, a strategist LLM sets goals,
-        and an executor LLM handles combat and recovery. A synthetic arena compares prompt and model variants in a simulated economy,
-        and an autoresearch loop scores real games. This site is the technical documentation.
-      </p>
-      <div class="mt-6 flex flex-wrap items-center gap-3">
-        <a
-          href={`/docs/${FIRST_PAGE.fullSlug}`}
-          class="inline-flex h-10 items-center gap-2 rounded-md bg-primary px-5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-        >
-          Start reading
-          <ArrowRight className="h-4 w-4" />
-        </a>
-        <a
-          href="#reading-paths"
-          class="inline-flex h-10 items-center gap-2 rounded-md border bg-background px-5 text-sm font-medium hover:bg-accent"
-        >
-          Pick a path
-        </a>
-        <a
-          href="#packages"
-          class="inline-flex h-10 items-center gap-2 rounded-md border bg-background px-5 text-sm font-medium hover:bg-accent"
-        >
-          Browse by package
-        </a>
-        <a
-          href="#runbooks"
-          class="inline-flex h-10 items-center gap-2 rounded-md border bg-background px-5 text-sm font-medium hover:bg-accent"
-        >
-          Runbooks
-        </a>
-      </div>
-    </div>
+  <Walkthrough />
 
+  <section id="detector" class={`${section} reveal`}>
+    <SectionLabel aside="40 test screenshots">What the agent sees</SectionLabel>
+    <h2 class={sectionTitle}>A small detector, tested on real screenshots</h2>
+    <p class={sectionIntro}>
+      The served YOLO26n model finds 65 classes. On 40 held-out screenshots with 1,248 labelled boxes it scores precision
+      0.930, recall 0.823 and F1 0.873.
+    </p>
     <div class="mt-8">
-      <GameplayLoopDemo client:load />
+      <DotPlot
+        client:visible
+        title="Precision and recall by class on the independent test set"
+        caption="The ten classes with the most test boxes, release v12. The vertical line is the overall F1."
+        labelWidth={120}
+        rows={DETECTOR_ROWS.map((entry) => entry.row)}
+        series={[
+          { key: "precision", label: "Precision", color: "primary" },
+          { key: "recall", label: "Recall", color: "secondary" },
+        ]}
+        panels={[
+          {
+            domain: [0.5, 1],
+            ticks: [0.5, 0.6, 0.7, 0.8, 0.9, 1],
+            decimals: 2,
+            axisLabel: "Share of boxes",
+            connect: true,
+            reference: { value: 0.873, label: "overall F1 0.873" },
+            points: DETECTOR_ROWS.flatMap((entry) => [
+              { row: entry.row, series: "precision", value: entry.precision, tip: `${entry.row}: precision ${entry.precision.toFixed(3)}` },
+              { row: entry.row, series: "recall", value: entry.recall, tip: `${entry.row}: recall ${entry.recall.toFixed(3)}` },
+            ]),
+          },
+        ]}
+      />
     </div>
+    <a href="/docs/detection/serving-and-evaluation" class={`mt-4 ${accentLink}`}>
+      Read about serving and evaluation <ArrowRight className="h-4 w-4" />
+    </a>
   </section>
 
-  {/* Three entry-path cards */}
-  <section class="mx-auto max-w-6xl px-4 py-10">
-    <div class="grid gap-4 md:grid-cols-3">
-      <a
-        href={`/docs/${FIRST_PAGE.fullSlug}`}
-        class="group rounded-xl border bg-card p-5 transition-colors hover:border-foreground"
-      >
-        <BookOpen className="h-5 w-5 text-muted-foreground" />
-        <h2 class="mt-3 font-semibold">Read the docs</h2>
-        <p class="mt-1 text-sm text-muted-foreground">
-          {SECTIONS.length} sections, {FLAT_PAGES.length} pages. Starts at the gameplay agent overview and ends at autoresearch.
-        </p>
-        <p class="mt-3 inline-flex items-center gap-1 text-sm font-medium">
-          Begin <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
-        </p>
-      </a>
-      <a
-        href="#packages"
-        class="group rounded-xl border bg-card p-5 transition-colors hover:border-foreground"
-      >
-        <Boxes className="h-5 w-5 text-muted-foreground" />
-        <h2 class="mt-3 font-semibold">Browse by package</h2>
-        <p class="mt-1 text-sm text-muted-foreground">
-          Nine Python packages in a uv workspace. Pick the one closest to what you want to change.
-        </p>
-        <p class="mt-3 inline-flex items-center gap-1 text-sm font-medium">
-          Package map <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
-        </p>
-      </a>
-      <a
-        href="#runbooks"
-        class="group rounded-xl border bg-card p-5 transition-colors hover:border-foreground"
-      >
-        <FileCode className="h-5 w-5 text-muted-foreground" />
-        <h2 class="mt-3 font-semibold">Runbooks</h2>
-        <p class="mt-1 text-sm text-muted-foreground">
-          Operational guides for when something is broken or needs to be restarted.
-        </p>
-        <p class="mt-3 inline-flex items-center gap-1 text-sm font-medium">
-          Open runbooks <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
-        </p>
-      </a>
-    </div>
-  </section>
-
-  {/* Reading paths: curated, shorter routes through the docs. */}
-  <section id="reading-paths" class="mx-auto max-w-6xl px-4 py-10">
-    <div class="mb-6">
-      <h2 class="text-2xl font-semibold tracking-tight">Pick a reading path</h2>
-      <p class="mt-1 max-w-2xl text-sm text-muted-foreground">
-        Short curated routes through the docs. Pick the one closest to what you want to learn, or scroll down for the full arc.
-      </p>
-    </div>
-    <div class="grid gap-4 md:grid-cols-2">
-      {READING_PATHS.map((path) => {
-        const Icon = path.icon;
-        return (
-          <div class="rounded-xl border bg-card p-5">
-            <div class="flex items-center gap-2">
-              <Icon className="h-4 w-4 text-muted-foreground" />
-              <h3 class="font-semibold">{path.title}</h3>
-              <span class="ml-auto text-xs text-muted-foreground">{path.duration}</span>
-            </div>
-            <p class="mt-2 text-sm text-muted-foreground">{path.description}</p>
-            <ol class="mt-4 space-y-0.5 text-sm">
-              {path.pages.map((c, i) => {
-                const flat = getPage(c.slug);
-                const title = flat ? `${flat.section.title}: ${flat.page.title}` : c.slug;
-                return (
-                  <li>
-                    <a
-                      href={`/docs/${c.slug}`}
-                      class="group flex items-baseline gap-2 rounded px-2 py-1 hover:bg-accent"
-                    >
-                      <span class="font-mono text-xs text-muted-foreground">{i + 1}.</span>
-                      <span class="flex-1 group-hover:text-foreground">{title}</span>
-                      {c.note && (
-                        <span class="hidden text-xs italic text-muted-foreground sm:inline">{c.note}</span>
-                      )}
-                    </a>
-                  </li>
-                );
-              })}
-            </ol>
-          </div>
-        );
-      })}
-    </div>
-  </section>
-
-  {/* Phase timeline */}
-  <section class="mx-auto max-w-6xl px-4 py-10">
-    <div class="mb-4 flex items-baseline justify-between gap-4">
-      <div>
-        <h2 class="text-2xl font-semibold tracking-tight">The documentation arc</h2>
-        <p class="mt-1 text-sm text-muted-foreground">
-          The sections in order. Pick a page to jump in.
-        </p>
-      </div>
-      <Workflow className="hidden h-5 w-5 text-muted-foreground md:block" />
-    </div>
-    <PhaseTimeline client:visible variant="full" />
-  </section>
-
-  {/* Package map */}
-  <section id="packages" class="mx-auto max-w-6xl px-4 py-10">
-    <div class="mb-6">
-      <h2 class="text-2xl font-semibold tracking-tight">Packages</h2>
-      <p class="mt-1 max-w-2xl text-sm text-muted-foreground">
-        Nine Python packages in one uv workspace. Most share types through
-        <code class="rounded bg-muted px-1 py-0.5 font-mono text-xs">core</code>. Hover a card to see what it depends on.
-      </p>
-    </div>
-    <PackageMap client:visible />
-  </section>
-
-  {/* Arena screenshots */}
-  <section class="mx-auto max-w-6xl px-4 py-10">
-    <div class="mb-6">
-      <h2 class="text-2xl font-semibold tracking-tight">See it in action</h2>
-      <p class="mt-1 max-w-2xl text-sm text-muted-foreground">
-        The arena run viewer shows a run's state and events turn by turn, and forks a run from any turn. Click any panel to expand.
-      </p>
-    </div>
-    <ArenaScreenshots client:visible />
-  </section>
-
-  {/* Runbooks */}
-  <section id="runbooks" class="mx-auto max-w-6xl px-4 py-10">
-    <div class="mb-6">
-      <h2 class="text-2xl font-semibold tracking-tight">Runbooks</h2>
-      <p class="mt-1 max-w-2xl text-sm text-muted-foreground">
-        Operational guides for the moments when something is broken or needs to be restarted.
-      </p>
-    </div>
-    {runbooks.length > 0 ? (
-      <ul class="max-w-2xl divide-y divide-border rounded-md border">
-        {runbooks.map((d) => (
-          <li>
+  <section id="reading-paths" class={`${section} reveal`}>
+    <SectionLabel aside="5 sections">Start reading</SectionLabel>
+    <h2 class={sectionTitle}>Pick a reading path</h2>
+    <p class={sectionIntro}>Short routes through the docs. Or start at the agent overview and read in order.</p>
+    <div class="mt-8 grid gap-4 sm:grid-cols-2">
+      {
+        READING_PATHS.map((path) => {
+          const first = getPage(path.pages[0]);
+          return (
             <a
-              href={`/docs/${d.id}`}
-              class="flex items-center gap-2 px-4 py-2.5 text-sm text-foreground hover:bg-accent hover:text-accent-foreground"
+              href={`/docs/${path.pages[0]}`}
+              class="group flex flex-col overflow-hidden rounded-lg border border-foreground/10 bg-card transition-[border-color,box-shadow] duration-200 hover:border-accent-foreground/50 hover:shadow-[0_12px_32px_-16px_rgb(0_0_0/0.25)]"
             >
-              <span class="inline-block h-1.5 w-1.5 rounded-full bg-orange-500" aria-hidden="true"></span>
-              {firstHeading(d.id)}
+              <div class="cell-header">
+                <span class="bracket-label">{path.pages.length} pages</span>
+                <ArrowRight className="h-3.5 w-3.5 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-accent-foreground" />
+              </div>
+              <div class="flex-1 px-4 py-4">
+                <h3 class="font-heading text-xl font-bold text-foreground group-hover:text-accent-foreground">
+                  {path.title}
+                </h3>
+                <p class="mt-1.5 text-sm leading-snug text-muted-foreground">{path.description}</p>
+              </div>
+              <CellFooter>Starts with {first?.section.title}: {first?.page.title}</CellFooter>
             </a>
-          </li>
-        ))}
-      </ul>
-    ) : (
-      <p class="text-sm text-muted-foreground">No runbooks yet.</p>
-    )}
+          );
+        })
+      }
+    </div>
   </section>
 
-  {/* Footer CTA */}
-  <section class="mx-auto max-w-6xl px-4 py-16">
-    <div class="rounded-xl border bg-card p-8 text-center">
-      <GitFork class="mx-auto h-6 w-6 text-muted-foreground" />
-      <h2 class="mt-3 text-2xl font-semibold tracking-tight">Ready to dig in?</h2>
-      <p class="mx-auto mt-2 max-w-xl text-sm text-muted-foreground">
-        The docs walk the full system end to end. Each page names the files it
-        describes, so you can read the code alongside the docs.
-      </p>
-      <a
-        href={`/docs/${FIRST_PAGE.fullSlug}`}
-        class="mt-5 inline-flex h-10 items-center gap-2 rounded-md bg-primary px-5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-      >
-        Start with the agent overview
-        <ArrowRight className="h-4 w-4" />
-      </a>
+  <section id="quick-start" class={`${section} reveal`}>
+    <SectionLabel aside="Repository root">Run it</SectionLabel>
+    <h2 class={sectionTitle}>Install, start, and fix</h2>
+    <p class={sectionIntro}>
+      The agent runs in a Windows VM that calls a detection server on the Mac host, or natively on macOS. The runbooks
+      cover what to do when something breaks.
+    </p>
+    <div class="mt-8 grid gap-10 lg:grid-cols-5 lg:gap-8">
+      <div class="artifacts min-w-0 lg:col-span-3">
+        <CodeFigure code={QUICK_START} lang="bash" />
+        <a href="/docs/runbooks/deployment" class={`mt-4 ${accentLink}`}>
+          Deployment runbook <ArrowRight className="h-4 w-4" />
+        </a>
+      </div>
+      <div id="runbooks" class="min-w-0 lg:col-span-2">
+        <div class={cellClass}>
+          <div class="cell-header">
+            <span class="bracket-label">Runbooks</span>
+            <span class="cell-aside">{runbooks.length} guides</span>
+          </div>
+          <ol class="list-none divide-y divide-foreground/[0.07]">
+            {
+              runbooks.map((runbook) => (
+                <li>
+                  <a
+                    href={`/docs/${runbook.id}`}
+                    class="group flex items-center gap-3 px-4 py-2.5 text-sm transition-colors hover:bg-accent-foreground/[0.06]"
+                  >
+                    <span class="flex-1 text-foreground group-hover:text-accent-foreground">{runbookTitle(runbook.id)}</span>
+                    <ArrowRight className="h-3.5 w-3.5 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+                  </a>
+                </li>
+              ))
+            }
+          </ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="packages" class={`${section} reveal`}>
+    <SectionLabel aside="uv workspace">The repository</SectionLabel>
+    <h2 class={sectionTitle}>Nine Python workspace members</h2>
+    <p class={sectionIntro}>
+      Members share types through <code class="font-mono text-[0.9em]">core</code>. Hover a cell to see what it depends on.
+    </p>
+    <div class="mt-8">
+      <PackageMap client:visible />
+    </div>
+  </section>
+
+  <section class={`${section} reveal`}>
+    <SectionLabel aside="Internal tool">The arena UI</SectionLabel>
+    <h2 class={sectionTitle}>Watch a run, turn by turn</h2>
+    <p class={sectionIntro}>The arena UI shows what the agent perceives, decides and does. Click a panel to expand it.</p>
+    <div class="mt-8">
+      <ArenaScreenshots client:visible />
     </div>
   </section>
 </Site>

@@ -7,7 +7,7 @@
 <button
   id="theme-toggle"
   type="button"
-  class="inline-flex h-9 w-9 items-center justify-center rounded-md border bg-background text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+  class="group inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-foreground/10 bg-card text-muted-foreground transition-colors hover:text-accent-foreground"
   aria-label="Toggle theme"
 >
   <svg
@@ -20,7 +20,7 @@
     stroke-width="2"
     stroke-linecap="round"
     stroke-linejoin="round"
-    class="hidden dark:block"
+    class="hidden duration-300 group-hover:rotate-180 dark:block"
     aria-hidden="true"
   >
     <circle cx="12" cy="12" r="4"></circle>
@@ -43,7 +43,7 @@
     stroke-width="2"
     stroke-linecap="round"
     stroke-linejoin="round"
-    class="block dark:hidden"
+    class="block duration-300 group-hover:rotate-[360deg] dark:hidden"
     aria-hidden="true"
   >
     <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
