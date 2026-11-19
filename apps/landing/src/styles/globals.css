@@ -1085,8 +1085,23 @@
   transition: opacity 700ms ease;
 }
 
+/* The poster stands in for the scene's first shot, which frames its subject by the
+   view's height: keep the whole 16:9 still at the stage's height (cropping it to a
+   portrait stage would leave a narrow strip), centred, then scale it to the shot.
+   It ends up smaller than the stage, so its edges fade into the backdrop, the way
+   the scene's map opens out of the dark. */
 .wt[data-mode="scene"] .wt-poster {
+  right: auto;
+  left: 50%;
+  width: auto;
+  max-width: none;
+  aspect-ratio: 16 / 9;
+  translate: -50% 0;
   transform: var(--wt-poster, none);
+  mask-image:
+    linear-gradient(to right, transparent, #000 16%, #000 84%, transparent),
+    linear-gradient(to bottom, transparent, #000 16%, #000 84%, transparent);
+  mask-composite: intersect;
 }
 
 .wt[data-ready] .wt-poster {
